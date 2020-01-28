@@ -1,0 +1,7 @@
+target/
+Cargo.lock
+
+# Prevent people from commiting sensitive files.
+crypto_data/
+src/ctap/key_material.rs
+

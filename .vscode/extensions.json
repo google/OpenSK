@@ -1,0 +1,6 @@
+{
+    "recommendations": [
+        "davidanson.vscode-markdownlint",
+        "rust-lang.rust"
+    ]
+}

@@ -1,0 +1,7 @@
+{
+  "editor.formatOnSave": true,
+  "rust-client.channel": "nightly",
+  // The toolchain is updated from time to time so let's make sure that RLS is updated too
+  "rust-client.updateOnStartup": true,
+  "rust.clippy_preference": "on"
+}

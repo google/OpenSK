@@ -1,0 +1,1009 @@
+diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
+index 5a9da538..75043d13 100644
+--- a/boards/nordic/nrf52840_dongle/src/main.rs
++++ b/boards/nordic/nrf52840_dongle/src/main.rs
+@@ -140,6 +140,7 @@ pub unsafe fn reset_handler() {
+         FAULT_RESPONSE,
+         nrf52840::uicr::Regulator0Output::V3_0,
+         false,
++        &Some(&nrf52840::usbd::USBD),
+         chip,
+     );
+ }
+diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
+index 0b19ea3f..bd71dfbe 100644
+--- a/boards/nordic/nrf52840dk/src/main.rs
++++ b/boards/nordic/nrf52840dk/src/main.rs
+@@ -252,6 +252,7 @@ pub unsafe fn reset_handler() {
+         FAULT_RESPONSE,
+         nrf52840::uicr::Regulator0Output::DEFAULT,
+         false,
++        &Some(&nrf52840::usbd::USBD),
+         chip,
+     );
+ }
+diff --git a/boards/nordic/nrf52dk/src/main.rs b/boards/nordic/nrf52dk/src/main.rs
+index b49518ff..39f996c4 100644
+--- a/boards/nordic/nrf52dk/src/main.rs
++++ b/boards/nordic/nrf52dk/src/main.rs
+@@ -209,6 +209,7 @@ pub unsafe fn reset_handler() {
+         FAULT_RESPONSE,
+         nrf52832::uicr::Regulator0Output::DEFAULT,
+         false,
++        &None,
+         chip,
+     );
+ }
+diff --git a/boards/nordic/nrf52dk_base/src/lib.rs b/boards/nordic/nrf52dk_base/src/lib.rs
+index 7e2a3298..d391e455 100644
+--- a/boards/nordic/nrf52dk_base/src/lib.rs
++++ b/boards/nordic/nrf52dk_base/src/lib.rs
+@@ -102,6 +102,13 @@ pub struct Platform {
+         'static,
+         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
+     >,
++    usb: Option<
++        &'static capsules::usb::usb_ctap::CtapUsbSyscallDriver<
++            'static,
++            'static,
++            nrf52::usbd::Usbd<'static>,
++        >,
++    >,
+     // The nRF52dk does not have the flash chip on it, so we make this optional.
+     nonvolatile_storage:
+         Option<&'static capsules::nonvolatile_storage_driver::NonvolatileStorage<'static>>,
+@@ -130,6 +137,9 @@ impl kernel::Platform for Platform {
+                 f(self.nonvolatile_storage.map_or(None, |nv| Some(nv)))
+             }
+             nrf52::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
++            capsules::usb::usb_ctap::DRIVER_NUM => {
++                f(self.usb.map(|ctap| ctap as &dyn kernel::Driver))
++            }
+             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
+             _ => f(None),
+         }
+@@ -157,6 +167,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+     app_fault_response: kernel::procs::FaultResponse,
+     reg_vout: Regulator0Output,
+     nfc_as_gpios: bool,
++    usb: &Option<&'static nrf52::usbd::Usbd<'static>>,
+     chip: &'static nrf52::chip::NRF52<I>,
+ ) {
+     // Make non-volatile memory writable and activate the reset button
+@@ -418,6 +429,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+         )
+     );
+ 
++    // Configure USB controller if supported
++    let usb_driver: Option<
++        &'static capsules::usb::usb_ctap::CtapUsbSyscallDriver<
++            'static,
++            'static,
++            nrf52::usbd::Usbd<'static>,
++        >,
++    > = usb.map(|driver| {
++        let usb_ctap = static_init!(
++            capsules::usb::usbc_ctap_hid::ClientCtapHID<
++                'static,
++                'static,
++                nrf52::usbd::Usbd<'static>,
++            >,
++            capsules::usb::usbc_ctap_hid::ClientCtapHID::new(driver)
++        );
++        driver.set_client(usb_ctap);
++
++        // Enable power events to be sent to USB controller
++        nrf52::power::POWER.set_usb_client(driver);
++        nrf52::power::POWER.enable_interrupts();
++
++        // Configure the USB userspace driver
++        let usb_driver = static_init!(
++            capsules::usb::usb_ctap::CtapUsbSyscallDriver<
++                'static,
++                'static,
++                nrf52::usbd::Usbd<'static>,
++            >,
++            capsules::usb::usb_ctap::CtapUsbSyscallDriver::new(
++                usb_ctap,
++                board_kernel.create_grant(&memory_allocation_capability)
++            )
++        );
++        usb_ctap.set_client(usb_driver);
++        usb_driver as &'static _
++    });
++
+     // Start all of the clocks. Low power operation will require a better
+     // approach than this.
+     nrf52::clock::CLOCK.low_stop();
+@@ -449,6 +498,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+         rng: rng,
+         temp: temp,
+         alarm: alarm,
++        usb: usb_driver,
+         nonvolatile_storage: nonvolatile_storage,
+         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
+         nvmc: nvmc,
+diff --git a/capsules/src/driver.rs b/capsules/src/driver.rs
+index 9305e6a7..40466f44 100644
+--- a/capsules/src/driver.rs
++++ b/capsules/src/driver.rs
+@@ -24,6 +24,7 @@ pub enum NUM {
+     Spi                   = 0x20001,
+     UsbUser               = 0x20005,
+     I2cMasterSlave        = 0x20006,
++    UsbCtap               = 0x20009,
+ 
+     // Radio
+     BleAdvertising        = 0x30000,
+diff --git a/capsules/src/usb/mod.rs b/capsules/src/usb/mod.rs
+index e5c8d6ad..7af3da2e 100644
+--- a/capsules/src/usb/mod.rs
++++ b/capsules/src/usb/mod.rs
+@@ -1,4 +1,6 @@
+ pub mod descriptors;
++pub mod usb_ctap;
+ pub mod usb_user;
+ pub mod usbc_client;
+ pub mod usbc_client_ctrl;
++pub mod usbc_ctap_hid;
+diff --git a/capsules/src/usb/usb_ctap.rs b/capsules/src/usb/usb_ctap.rs
+new file mode 100644
+index 00000000..da3d16d8
+--- /dev/null
++++ b/capsules/src/usb/usb_ctap.rs
+@@ -0,0 +1,355 @@
++use super::usbc_ctap_hid::ClientCtapHID;
++use kernel::hil;
++use kernel::hil::usb::Client;
++use kernel::{AppId, AppSlice, Callback, Driver, Grant, ReturnCode, Shared};
++
++/// Syscall number
++use crate::driver;
++pub const DRIVER_NUM: usize = driver::NUM::UsbCtap as usize;
++
++pub const CTAP_CMD_CHECK: usize = 0;
++pub const CTAP_CMD_CONNECT: usize = 1;
++pub const CTAP_CMD_TRANSMIT: usize = 2;
++pub const CTAP_CMD_RECEIVE: usize = 3;
++pub const CTAP_CMD_TRANSMIT_OR_RECEIVE: usize = 4;
++pub const CTAP_CMD_CANCEL: usize = 5;
++
++pub const CTAP_ALLOW_TRANSMIT: usize = 1;
++pub const CTAP_ALLOW_RECEIVE: usize = 2;
++pub const CTAP_ALLOW_TRANSMIT_OR_RECEIVE: usize = 3;
++
++pub const CTAP_SUBSCRIBE_TRANSMIT: usize = 1;
++pub const CTAP_SUBSCRIBE_RECEIVE: usize = 2;
++pub const CTAP_SUBSCRIBE_TRANSMIT_OR_RECEIVE: usize = 3;
++
++pub const CTAP_CALLBACK_TRANSMITED: usize = 1;
++pub const CTAP_CALLBACK_RECEIVED: usize = 2;
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum Side {
++    Transmit,
++    Receive,
++    TransmitOrReceive,
++}
++
++impl Side {
++    fn can_transmit(&self) -> bool {
++        match self {
++            Side::Transmit | Side::TransmitOrReceive => true,
++            Side::Receive => false,
++        }
++    }
++
++    fn can_receive(&self) -> bool {
++        match self {
++            Side::Receive | Side::TransmitOrReceive => true,
++            Side::Transmit => false,
++        }
++    }
++}
++
++#[derive(Default)]
++pub struct App {
++    // Only one app can be connected to this driver, to avoid needing to route packets among apps.
++    // This field tracks this status.
++    connected: bool,
++    // Currently enabled transaction side. Subscribing to a callback or allowing a buffer
++    // automatically sets the corresponding side. Clearing both the callback and the buffer resets
++    // the side to None.
++    side: Option<Side>,
++    callback: Option<Callback>,
++    buffer: Option<AppSlice<Shared, u8>>,
++    // Whether the app is waiting for the kernel signaling a packet transfer.
++    waiting: bool,
++}
++
++impl App {
++    fn check_side(&mut self) {
++        if self.callback.is_none() && self.buffer.is_none() && !self.waiting {
++            self.side = None;
++        }
++    }
++
++    fn set_side(&mut self, side: Side) -> bool {
++        match self.side {
++            None => {
++                self.side = Some(side);
++                true
++            }
++            Some(app_side) => side == app_side,
++        }
++    }
++
++    fn is_ready_for_command(&self, side: Side) -> bool {
++        self.buffer.is_some() && self.callback.is_some() && self.side == Some(side)
++    }
++}
++
++pub trait CtapUsbClient {
++    // Whether this client is ready to receive a packet. This must be checked before calling
++    // packet_received().
++    fn can_receive_packet(&self) -> bool;
++
++    // Signal to the client that a packet has been received.
++    fn packet_received(&self, packet: &[u8; 64]);
++
++    // Signal to the client that a packet has been transmitted.
++    fn packet_transmitted(&self);
++}
++
++pub struct CtapUsbSyscallDriver<'a, 'b, C: 'a> {
++    usb_client: &'a ClientCtapHID<'a, 'b, C>,
++    apps: Grant<App>,
++}
++
++impl<'a, 'b, C: hil::usb::UsbController<'a>> CtapUsbSyscallDriver<'a, 'b, C> {
++    pub fn new(usb_client: &'a ClientCtapHID<'a, 'b, C>, apps: Grant<App>) -> Self {
++        CtapUsbSyscallDriver { usb_client, apps }
++    }
++}
++
++impl<'a, 'b, C: hil::usb::UsbController<'a>> CtapUsbClient for CtapUsbSyscallDriver<'a, 'b, C> {
++    fn can_receive_packet(&self) -> bool {
++        let mut result = false;
++        for app in self.apps.iter() {
++            app.enter(|app, _| {
++                if app.connected {
++                    result = app.waiting
++                        && app.side.map_or(false, |side| side.can_receive())
++                        && app.buffer.is_some();
++                }
++            });
++        }
++        result
++    }
++
++    fn packet_received(&self, packet: &[u8; 64]) {
++        for app in self.apps.iter() {
++            app.enter(|app, _| {
++                if app.connected && app.waiting && app.side.map_or(false, |side| side.can_receive())
++                {
++                    if let Some(buf) = &mut app.buffer {
++                        // Copy the packet to the app's allowed buffer.
++                        buf.as_mut().copy_from_slice(packet);
++                        app.waiting = false;
++                        // Signal to the app that a packet is ready.
++                        app.callback
++                            .map(|mut cb| cb.schedule(CTAP_CALLBACK_RECEIVED, 0, 0));
++                    }
++                }
++            });
++        }
++    }
++
++    fn packet_transmitted(&self) {
++        for app in self.apps.iter() {
++            app.enter(|app, _| {
++                if app.connected
++                    && app.waiting
++                    && app.side.map_or(false, |side| side.can_transmit())
++                {
++                    app.waiting = false;
++                    // Signal to the app that the packet was sent.
++                    app.callback
++                        .map(|mut cb| cb.schedule(CTAP_CALLBACK_TRANSMITED, 0, 0));
++                }
++            });
++        }
++    }
++}
++
++impl<'a, 'b, C: hil::usb::UsbController<'a>> Driver for CtapUsbSyscallDriver<'a, 'b, C> {
++    fn allow(
++        &self,
++        appid: AppId,
++        allow_num: usize,
++        slice: Option<AppSlice<Shared, u8>>,
++    ) -> ReturnCode {
++        let side = match allow_num {
++            CTAP_ALLOW_TRANSMIT => Side::Transmit,
++            CTAP_ALLOW_RECEIVE => Side::Receive,
++            CTAP_ALLOW_TRANSMIT_OR_RECEIVE => Side::TransmitOrReceive,
++            _ => return ReturnCode::ENOSUPPORT,
++        };
++        self.apps
++            .enter(appid, |app, _| {
++                if !app.connected {
++                    ReturnCode::ERESERVE
++                } else {
++                    if let Some(buf) = &slice {
++                        if buf.len() != 64 {
++                            return ReturnCode::EINVAL;
++                        }
++                    }
++                    if !app.set_side(side) {
++                        return ReturnCode::EALREADY;
++                    }
++                    app.buffer = slice;
++                    app.check_side();
++                    ReturnCode::SUCCESS
++                }
++            })
++            .unwrap_or_else(|err| err.into())
++    }
++
++    fn subscribe(
++        &self,
++        subscribe_num: usize,
++        callback: Option<Callback>,
++        appid: AppId,
++    ) -> ReturnCode {
++        let side = match subscribe_num {
++            CTAP_SUBSCRIBE_TRANSMIT => Side::Transmit,
++            CTAP_SUBSCRIBE_RECEIVE => Side::Receive,
++            CTAP_SUBSCRIBE_TRANSMIT_OR_RECEIVE => Side::TransmitOrReceive,
++            _ => return ReturnCode::ENOSUPPORT,
++        };
++        self.apps
++            .enter(appid, |app, _| {
++                if !app.connected {
++                    ReturnCode::ERESERVE
++                } else {
++                    if !app.set_side(side) {
++                        return ReturnCode::EALREADY;
++                    }
++                    app.callback = callback;
++                    app.check_side();
++                    ReturnCode::SUCCESS
++                }
++            })
++            .unwrap_or_else(|err| err.into())
++    }
++
++    fn command(&self, cmd_num: usize, _arg1: usize, _arg2: usize, appid: AppId) -> ReturnCode {
++        match cmd_num {
++            CTAP_CMD_CHECK => ReturnCode::SUCCESS,
++            CTAP_CMD_CONNECT => {
++                // First, check if any app is already connected to this driver.
++                let mut busy = false;
++                for app in self.apps.iter() {
++                    app.enter(|app, _| {
++                        busy |= app.connected;
++                    });
++                }
++
++                self.apps
++                    .enter(appid, |app, _| {
++                        if app.connected {
++                            ReturnCode::EALREADY
++                        } else if busy {
++                            ReturnCode::EBUSY
++                        } else {
++                            self.usb_client.enable();
++                            self.usb_client.attach();
++                            app.connected = true;
++                            ReturnCode::SUCCESS
++                        }
++                    })
++                    .unwrap_or_else(|err| err.into())
++            }
++            CTAP_CMD_TRANSMIT => self
++                .apps
++                .enter(appid, |app, _| {
++                    if !app.connected {
++                        ReturnCode::ERESERVE
++                    } else {
++                        if app.is_ready_for_command(Side::Transmit) {
++                            if app.waiting {
++                                ReturnCode::EALREADY
++                            } else if self
++                                .usb_client
++                                .transmit_packet(app.buffer.as_ref().unwrap().as_ref())
++                            {
++                                app.waiting = true;
++                                ReturnCode::SUCCESS
++                            } else {
++                                ReturnCode::EBUSY
++                            }
++                        } else {
++                            ReturnCode::EINVAL
++                        }
++                    }
++                })
++                .unwrap_or_else(|err| err.into()),
++            CTAP_CMD_RECEIVE => self
++                .apps
++                .enter(appid, |app, _| {
++                    if !app.connected {
++                        ReturnCode::ERESERVE
++                    } else {
++                        if app.is_ready_for_command(Side::Receive) {
++                            if app.waiting {
++                                ReturnCode::EALREADY
++                            } else {
++                                app.waiting = true;
++                                self.usb_client.receive_packet();
++                                ReturnCode::SUCCESS
++                            }
++                        } else {
++                            ReturnCode::EINVAL
++                        }
++                    }
++                })
++                .unwrap_or_else(|err| err.into()),
++            CTAP_CMD_TRANSMIT_OR_RECEIVE => self
++                .apps
++                .enter(appid, |app, _| {
++                    if !app.connected {
++                        ReturnCode::ERESERVE
++                    } else {
++                        if app.is_ready_for_command(Side::TransmitOrReceive) {
++                            if app.waiting {
++                                ReturnCode::EALREADY
++                            } else {
++                                // Indicates to the driver that we can receive any pending packet.
++                                app.waiting = true;
++                                self.usb_client.receive_packet();
++
++                                if !app.waiting {
++                                    // The call to receive_packet() collected a pending packet.
++                                    ReturnCode::SUCCESS
++                                } else {
++                                    // Indicates to the driver that we have a packet to send.
++                                    if self
++                                        .usb_client
++                                        .transmit_packet(app.buffer.as_ref().unwrap().as_ref())
++                                    {
++                                        ReturnCode::SUCCESS
++                                    } else {
++                                        ReturnCode::EBUSY
++                                    }
++                                }
++                            }
++                        } else {
++                            ReturnCode::EINVAL
++                        }
++                    }
++                })
++                .unwrap_or_else(|err| err.into()),
++            CTAP_CMD_CANCEL => self
++                .apps
++                .enter(appid, |app, _| {
++                    if !app.connected {
++                        ReturnCode::ERESERVE
++                    } else {
++                        if app.waiting {
++                            // FIXME: if cancellation failed, the app should still wait. But that
++                            // doesn't work yet.
++                            app.waiting = false;
++                            if self.usb_client.cancel_transaction() {
++                                ReturnCode::SUCCESS
++                            } else {
++                                // Cannot cancel now because the transaction is already in process.
++                                // The app should wait for the callback instead.
++                                ReturnCode::EBUSY
++                            }
++                        } else {
++                            ReturnCode::EALREADY
++                        }
++                    }
++                })
++                .unwrap_or_else(|err| err.into()),
++            _ => ReturnCode::ENOSUPPORT,
++        }
++    }
++}
+diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
+new file mode 100644
+index 00000000..fdf7263a
+--- /dev/null
++++ b/capsules/src/usb/usbc_ctap_hid.rs
+@@ -0,0 +1,352 @@
++//! A USB HID client of the USB hardware interface
++
++use super::descriptors::Buffer64;
++use super::descriptors::ConfigurationDescriptor;
++use super::descriptors::DescriptorType;
++use super::descriptors::DeviceDescriptor;
++use super::descriptors::EndpointAddress;
++use super::descriptors::EndpointDescriptor;
++use super::descriptors::HIDCountryCode;
++use super::descriptors::HIDDescriptor;
++use super::descriptors::HIDSubordinateDescriptor;
++use super::descriptors::InterfaceDescriptor;
++use super::descriptors::ReportDescriptor;
++use super::descriptors::TransferDirection;
++use super::usb_ctap::CtapUsbClient;
++use super::usbc_client_ctrl::ClientCtrl;
++use core::cell::Cell;
++use kernel::common::cells::OptionalCell;
++use kernel::debug;
++use kernel::hil;
++use kernel::hil::usb::TransferType;
++
++const VENDOR_ID: u16 = 0x1915; // Nordic Semiconductor
++const PRODUCT_ID: u16 = 0x521f; // nRF52840 Dongle (PCA10059)
++
++static LANGUAGES: &'static [u16; 1] = &[
++    0x0409, // English (United States)
++];
++
++static STRINGS: &'static [&'static str] = &[
++    // Manufacturer
++    "Nordic Semiconductor ASA",
++    // Product
++    "OpenSK",
++    // Serial number
++    "v0.1",
++];
++
++static ENDPOINTS: &'static [EndpointDescriptor] = &[
++    EndpointDescriptor {
++        endpoint_address: EndpointAddress::new_const(1, TransferDirection::HostToDevice),
++        transfer_type: TransferType::Interrupt,
++        max_packet_size: 64,
++        interval: 5,
++    },
++    EndpointDescriptor {
++        endpoint_address: EndpointAddress::new_const(1, TransferDirection::DeviceToHost),
++        transfer_type: TransferType::Interrupt,
++        max_packet_size: 64,
++        interval: 5,
++    },
++];
++
++static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[
++    0x06, 0xD0, 0xF1, // HID_UsagePage ( FIDO_USAGE_PAGE ),
++    0x09, 0x01, // HID_Usage ( FIDO_USAGE_CTAPHID ),
++    0xA1, 0x01, // HID_Collection ( HID_Application ),
++    0x09, 0x20, // HID_Usage ( FIDO_USAGE_DATA_IN ),
++    0x15, 0x00, // HID_LogicalMin ( 0 ),
++    0x26, 0xFF, 0x00, // HID_LogicalMaxS ( 0xff ),
++    0x75, 0x08, // HID_ReportSize ( 8 ),
++    0x95, 0x40, // HID_ReportCount ( HID_INPUT_REPORT_BYTES ),
++    0x81, 0x02, // HID_Input ( HID_Data | HID_Absolute | HID_Variable ),
++    0x09, 0x21, // HID_Usage ( FIDO_USAGE_DATA_OUT ),
++    0x15, 0x00, // HID_LogicalMin ( 0 ),
++    0x26, 0xFF, 0x00, // HID_LogicalMaxS ( 0xff ),
++    0x75, 0x08, // HID_ReportSize ( 8 ),
++    0x95, 0x40, // HID_ReportCount ( HID_OUTPUT_REPORT_BYTES ),
++    0x91, 0x02, // HID_Output ( HID_Data | HID_Absolute | HID_Variable ),
++    0xC0, // HID_EndCollection
++];
++
++static CTAP_REPORT: ReportDescriptor<'static> = ReportDescriptor {
++    desc: CTAP_REPORT_DESCRIPTOR,
++};
++
++static HID_SUB_DESCRIPTORS: &'static [HIDSubordinateDescriptor] = &[HIDSubordinateDescriptor {
++    typ: DescriptorType::Report,
++    len: CTAP_REPORT_DESCRIPTOR.len() as u16,
++}];
++
++static HID: HIDDescriptor<'static> = HIDDescriptor {
++    hid_class: 0x0110,
++    country_code: HIDCountryCode::NotSupported,
++    sub_descriptors: HID_SUB_DESCRIPTORS,
++};
++
++pub struct ClientCtapHID<'a, 'b, C: 'a> {
++    client_ctrl: ClientCtrl<'a, 'static, C>,
++
++    // A 64-byte buffer for the endpoint
++    buffer: Buffer64,
++
++    // Interaction with the client
++    client: OptionalCell<&'b dyn CtapUsbClient>,
++    tx_packet: OptionalCell<[u8; 64]>,
++    pending_in: Cell<bool>,
++    pending_out: Cell<bool>,
++    delayed_out: Cell<bool>,
++}
++
++impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
++    pub fn new(controller: &'a C) -> Self {
++        ClientCtapHID {
++            client_ctrl: ClientCtrl::new(
++                controller,
++                DeviceDescriptor {
++                    // TODO: set this field at the board level.
++                    max_packet_size_ep0: 64,
++                    vendor_id: VENDOR_ID,
++                    product_id: PRODUCT_ID,
++                    manufacturer_string: 1,
++                    product_string: 2,
++                    serial_number_string: 3,
++                    ..Default::default()
++                },
++                ConfigurationDescriptor {
++                    // Must be non-zero, otherwise dmesg prints the following error:
++                    // [...] usb 2-3: config 0 descriptor??
++                    configuration_value: 1,
++                    ..Default::default()
++                },
++                // Interface declared in the FIDO2 specification, section 8.1.8.1
++                InterfaceDescriptor {
++                    interface_class: 0x03, // HID
++                    interface_subclass: 0x00,
++                    interface_protocol: 0x00,
++                    ..Default::default()
++                },
++                ENDPOINTS,
++                Some(&HID),
++                Some(&CTAP_REPORT),
++                LANGUAGES,
++                STRINGS,
++            ),
++            buffer: Default::default(),
++            client: OptionalCell::empty(),
++            tx_packet: OptionalCell::empty(),
++            pending_in: Cell::new(false),
++            pending_out: Cell::new(false),
++            delayed_out: Cell::new(false),
++        }
++    }
++
++    pub fn set_client(&'a self, client: &'b dyn CtapUsbClient) {
++        self.client.set(client);
++    }
++
++    pub fn transmit_packet(&'a self, packet: &[u8]) -> bool {
++        if self.pending_in.get() {
++            // The previous packet has not yet been transmitted, reject the new one.
++            false
++        } else {
++            self.pending_in.set(true);
++            let mut buf: [u8; 64] = [0; 64];
++            buf.copy_from_slice(packet);
++            self.tx_packet.set(buf);
++            // Alert the controller that we now have data to send on the Interrupt IN endpoint.
++            self.controller().endpoint_resume_in(1);
++            true
++        }
++    }
++
++    pub fn receive_packet(&'a self) -> bool {
++        if self.pending_out.get() {
++            // The previous packet has not yet been received, reject the new one.
++            false
++        } else {
++            self.pending_out.set(true);
++            // In case we reported Delay before, send the pending packet back to the client.
++            // Otherwise, there's nothing to do, the controller will send us a packet_out when a
++            // packet arrives.
++            if self.delayed_out.take() {
++                if self.send_packet_to_client() {
++                    // If that succeeds, alert the controller that we can now
++                    // receive data on the Interrupt OUT endpoint.
++                    self.controller().endpoint_resume_out(1);
++                }
++            }
++            true
++        }
++    }
++
++    // Send an OUT packet available in the controller back to the client.
++    // This returns false if the client is not ready to receive a packet, and true if the client
++    // successfully accepted the packet.
++    fn send_packet_to_client(&'a self) -> bool {
++        // Copy the packet into a buffer to send to the client.
++        let mut buf: [u8; 64] = [0; 64];
++        for (i, x) in self.buffer.buf.iter().enumerate() {
++            buf[i] = x.get();
++        }
++
++        assert!(!self.delayed_out.get());
++
++        // Notify the client
++        if self
++            .client
++            .map_or(false, |client| client.can_receive_packet())
++        {
++            assert!(self.pending_out.take());
++
++            // Clear any pending packet on the transmitting side.
++            // It's up to the client to handle the received packet and decide if this packet
++            // should be re-transmitted or not.
++            self.cancel_in_transaction();
++
++            self.client.map(|client| client.packet_received(&buf));
++            true
++        } else {
++            // Cannot receive now, indicate a delay to the controller.
++            self.delayed_out.set(true);
++            false
++        }
++    }
++
++    pub fn cancel_transaction(&'a self) -> bool {
++        self.cancel_in_transaction() | self.cancel_out_transaction()
++    }
++
++    fn cancel_in_transaction(&'a self) -> bool {
++        self.tx_packet.take();
++        let result = self.pending_in.take();
++        if result {
++            self.controller().endpoint_cancel_in(1);
++        }
++        result
++    }
++
++    fn cancel_out_transaction(&'a self) -> bool {
++        self.pending_out.take()
++    }
++
++    #[inline]
++    fn controller(&'a self) -> &'a C {
++        self.client_ctrl.controller()
++    }
++}
++
++impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtapHID<'a, 'b, C> {
++    fn enable(&'a self) {
++        // Set up the default control endpoint
++        self.client_ctrl.enable();
++
++        // Set up the interrupt in-out endpoint
++        self.controller().endpoint_set_buffer(1, &self.buffer.buf);
++        self.controller()
++            .endpoint_in_out_enable(TransferType::Interrupt, 1);
++    }
++
++    fn attach(&'a self) {
++        self.client_ctrl.attach();
++    }
++
++    fn bus_reset(&'a self) {
++        // Should the client initiate reconfiguration here?
++        // For now, the hardware layer does it.
++
++        debug!("Bus reset");
++    }
++
++    /// Handle a Control Setup transaction
++    fn ctrl_setup(&'a self, endpoint: usize) -> hil::usb::CtrlSetupResult {
++        self.client_ctrl.ctrl_setup(endpoint)
++    }
++
++    /// Handle a Control In transaction
++    fn ctrl_in(&'a self, endpoint: usize) -> hil::usb::CtrlInResult {
++        self.client_ctrl.ctrl_in(endpoint)
++    }
++
++    /// Handle a Control Out transaction
++    fn ctrl_out(&'a self, endpoint: usize, packet_bytes: u32) -> hil::usb::CtrlOutResult {
++        self.client_ctrl.ctrl_out(endpoint, packet_bytes)
++    }
++
++    fn ctrl_status(&'a self, endpoint: usize) {
++        self.client_ctrl.ctrl_status(endpoint)
++    }
++
++    /// Handle the completion of a Control transfer
++    fn ctrl_status_complete(&'a self, endpoint: usize) {
++        self.client_ctrl.ctrl_status_complete(endpoint)
++    }
++
++    /// Handle a Bulk/Interrupt IN transaction
++    fn packet_in(&'a self, transfer_type: TransferType, endpoint: usize) -> hil::usb::InResult {
++        match transfer_type {
++            TransferType::Bulk => hil::usb::InResult::Error,
++            TransferType::Interrupt => {
++                if endpoint != 1 {
++                    return hil::usb::InResult::Error;
++                }
++
++                if let Some(packet) = self.tx_packet.take() {
++                    let buf = &self.buffer.buf;
++                    for i in 0..64 {
++                        buf[i].set(packet[i]);
++                    }
++
++                    hil::usb::InResult::Packet(64)
++                } else {
++                    // Nothing to send
++                    hil::usb::InResult::Delay
++                }
++            }
++            TransferType::Control | TransferType::Isochronous => unreachable!(),
++        }
++    }
++
++    /// Handle a Bulk/Interrupt OUT transaction
++    fn packet_out(
++        &'a self,
++        transfer_type: TransferType,
++        endpoint: usize,
++        packet_bytes: u32,
++    ) -> hil::usb::OutResult {
++        match transfer_type {
++            TransferType::Bulk => hil::usb::OutResult::Error,
++            TransferType::Interrupt => {
++                if endpoint != 1 {
++                    return hil::usb::OutResult::Error;
++                }
++
++                if packet_bytes != 64 {
++                    // Cannot process this packet
++                    hil::usb::OutResult::Error
++                } else {
++                    if self.send_packet_to_client() {
++                        hil::usb::OutResult::Ok
++                    } else {
++                        hil::usb::OutResult::Delay
++                    }
++                }
++            }
++            TransferType::Control | TransferType::Isochronous => unreachable!(),
++        }
++    }
++
++    fn packet_transmitted(&'a self, endpoint: usize) {
++        if endpoint != 1 {
++            panic!("Unexpected transmission on ep {}", endpoint);
++        }
++
++        if self.tx_packet.is_some() {
++            panic!("Unexpected tx_packet while a packet was being transmitted.");
++        }
++        self.pending_in.set(false);
++        // Notify the client
++        self.client.map(|client| client.packet_transmitted());
++    }
++}
+diff --git a/chips/nrf52/src/usbd.rs b/chips/nrf52/src/usbd.rs
+index 8ddb5895..8c1992cc 100644
+--- a/chips/nrf52/src/usbd.rs
++++ b/chips/nrf52/src/usbd.rs
+@@ -1499,7 +1499,23 @@ impl<'a> Usbd<'a> {
+             if epdatastatus.is_set(status_epin(endpoint)) {
+                 let (transfer_type, direction, state) =
+                     self.descriptors[endpoint].state.get().bulk_state();
+-                assert_eq!(state, BulkState::InData);
++                match state {
++                    BulkState::InData => {
++                        // Totally expected state. Nothing to do.
++                    }
++                    BulkState::Init => {
++                        internal_warn!(
++                            "Received a stale epdata IN in an unexpected state: {:?}",
++                            state
++                        );
++                    }
++                    BulkState::OutDelay
++                    | BulkState::OutData
++                    | BulkState::OutDma
++                    | BulkState::InDma => {
++                        internal_err!("Unexpected state: {:?}", state);
++                    }
++                }
+                 self.descriptors[endpoint].state.set(EndpointState::Bulk(
+                     transfer_type,
+                     direction,
+@@ -1677,7 +1693,7 @@ impl<'a> Usbd<'a> {
+     }
+ 
+     fn transmit_in(&self, endpoint: usize) {
+-        debug_info!("transmit_in({})", endpoint);
++        debug_events!("transmit_in({})", endpoint);
+         let regs = &*self.registers;
+ 
+         self.client.map(|client| {
+@@ -1717,7 +1733,7 @@ impl<'a> Usbd<'a> {
+     }
+ 
+     fn transmit_out(&self, endpoint: usize) {
+-        debug_info!("transmit_out({})", endpoint);
++        debug_events!("transmit_out({})", endpoint);
+ 
+         let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
+         // Starting the DMA can only happen in the OutData state, i.e. after an EPDATA event.
+@@ -1882,11 +1898,13 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
+     }
+ 
+     fn endpoint_resume_in(&self, endpoint: usize) {
++        debug_events!("endpoint_resume_in({})", endpoint);
++
+         let (_, direction, _) = self.descriptors[endpoint].state.get().bulk_state();
+         assert!(direction.has_in());
+ 
+         if self.dma_pending.get() {
+-            debug_info!("requesting resume_in[{}]", endpoint);
++            debug_events!("requesting resume_in[{}]", endpoint);
+             // A DMA is already pending. Schedule the resume for later.
+             self.descriptors[endpoint].request_transmit_in.set(true);
+         } else {
+@@ -1896,6 +1914,8 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
+     }
+ 
+     fn endpoint_resume_out(&self, endpoint: usize) {
++        debug_events!("endpoint_resume_out({})", endpoint);
++
+         let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
+         assert!(direction.has_out());
+ 
+@@ -1914,7 +1934,7 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
+                 // happened in the meantime. This pending transaction will now
+                 // continue in transmit_out().
+                 if self.dma_pending.get() {
+-                    debug_info!("requesting resume_out[{}]", endpoint);
++                    debug_events!("requesting resume_out[{}]", endpoint);
+                     // A DMA is already pending. Schedule the resume for later.
+                     self.descriptors[endpoint].request_transmit_out.set(true);
+                 } else {
+@@ -1927,6 +1947,20 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
+             }
+         }
+     }
++
++    fn endpoint_cancel_in(&self, endpoint: usize) {
++        debug_events!("endpoint_cancel_in({})", endpoint);
++
++        let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
++        assert!(direction.has_in());
++        assert_eq!(state, BulkState::InData);
++
++        self.descriptors[endpoint].state.set(EndpointState::Bulk(
++            transfer_type,
++            direction,
++            BulkState::Init,
++        ));
++    }
+ }
+ 
+ fn status_epin(ep: usize) -> Field<u32, EndpointStatus::Register> {
+diff --git a/chips/nrf52840/src/lib.rs b/chips/nrf52840/src/lib.rs
+index 0c281276..7e9f7d1e 100644
+--- a/chips/nrf52840/src/lib.rs
++++ b/chips/nrf52840/src/lib.rs
+@@ -2,7 +2,7 @@
+ 
+ pub use nrf52::{
+     adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nvmc, pinmux,
+-    ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr,
++    ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr, usbd,
+ };
+ pub mod chip;
+ pub mod gpio;
+diff --git a/chips/sam4l/src/usbc/mod.rs b/chips/sam4l/src/usbc/mod.rs
+index 35f3bb7c..28a0b9f9 100644
+--- a/chips/sam4l/src/usbc/mod.rs
++++ b/chips/sam4l/src/usbc/mod.rs
+@@ -1547,6 +1547,10 @@ impl hil::usb::UsbController<'a> for Usbc<'a> {
+         requests.resume_out = true;
+         self.requests[endpoint].set(requests);
+     }
++
++    fn endpoint_cancel_in(&self, _endpoint: usize) {
++        unimplemented!()
++    }
+ }
+ 
+ /// Static state to manage the USBC
+diff --git a/kernel/src/hil/usb.rs b/kernel/src/hil/usb.rs
+index 846f5e93..64610fa5 100644
+--- a/kernel/src/hil/usb.rs
++++ b/kernel/src/hil/usb.rs
+@@ -27,6 +27,8 @@ pub trait UsbController<'a> {
+     fn endpoint_resume_in(&self, endpoint: usize);
+ 
+     fn endpoint_resume_out(&self, endpoint: usize);
++
++    fn endpoint_cancel_in(&self, endpoint: usize);
+ }
+ 
+ #[derive(Clone, Copy, Debug)]

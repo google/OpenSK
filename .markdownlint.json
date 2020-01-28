@@ -1,0 +1,35 @@
+{
+    "default": true,
+    "heading-style": {
+        "style": "atx"
+    },
+    "no-trailing-spaces": {
+        "br_spaces": 0,
+        "strict": true
+    },
+    "ul-indent": {
+        "indent": 4
+    },
+    "line-length": {
+        "line_length": 80,
+        "code_blocks": false
+    },
+    "list-marker-space": {
+        "ol_single": 2,
+        "ol_multi": 2,
+        "ul_single": 3,
+        "ul_multi": 3
+    },
+    "no-inline-html": {
+        "allowed_elements": [
+            "img"
+        ]
+    },
+    "fenced-code-language": true,
+    "code-block-style": {
+        "style": "fenced"
+    },
+    "code-fence-style": {
+        "style": "backtick"
+    }
+}

@@ -1,0 +1,7 @@
+# Target configuration for the CTAP2 app on the nRF52840 chip
+[target.thumbv7em-none-eabi]
+rustflags = [
+  "-C", "link-arg=-Tnrf52840dk_layout.ld",
+  "-C", "relocation-model=static",
+  "-D", "warnings",
+]

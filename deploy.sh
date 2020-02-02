@@ -59,6 +59,7 @@ tockloader_flags=(
 declare -A supported_boards
 supported_boards["nrf52840dk"]="Y"
 supported_boards["nrf52840_dongle"]="Y"
+supported_boards["nrf52840_mdk_usb_dongle"]="Y"
 
 declare -A enabled_features=( [with_ctap1]=Y )
 

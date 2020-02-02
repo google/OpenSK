@@ -1,3 +1,16 @@
+diff --git a/arch/cortex-m/src/scb.rs b/arch/cortex-m/src/scb.rs
+index 8107f165..bf96e47c 100644
+--- a/arch/cortex-m/src/scb.rs
++++ b/arch/cortex-m/src/scb.rs
+@@ -54,3 +54,8 @@ pub unsafe fn reset() {
+     let reset = (0x5FA << 16) | (aircr & (0x7 << 8)) | (1 << 2);
+     SCB.aircr.set(reset);
+ }
++
++/// Software reset using the ARM System Control Block
++pub unsafe fn set_vector_table_offset(offset: u32) {
++    SCB.vtor.set(offset);
++}
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/Cargo.toml b/boards/nordic/nrf52840_mdk_usb_dongle/Cargo.toml
 new file mode 100644
 index 00000000..5b633ffb
@@ -150,14 +163,14 @@ index 00000000..1c9cd9b2
 +JLinkGDBServer -device nRF52840_xxAA -speed 1200 -if swd -AutoConnect 1 -port 2331
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/layout.ld b/boards/nordic/nrf52840_mdk_usb_dongle/layout.ld
 new file mode 100644
-index 00000000..f4a8bf34
+index 00000000..58c85f5b
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/layout.ld
 @@ -0,0 +1,10 @@
 +MEMORY
 +{
-+  rom (rx)  : ORIGIN = 0x00001000, LENGTH = 124K
-+  prog (rx) : ORIGIN = 0x00030000, LENGTH = 832K
++  rom (rx)  : ORIGIN = 0x00001000, LENGTH = 128K
++  prog (rx) : ORIGIN = 0x00030000, LENGTH = 704K
 +  ram (rwx) : ORIGIN = 0x20000000, LENGTH = 256K
 +}
 +
@@ -229,10 +242,10 @@ index 00000000..2c44dc24
 +}
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs b/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs
 new file mode 100644
-index 00000000..329f302c
+index 00000000..0e92473c
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,149 @@
 +//! Tock kernel for the Nordic Semiconductor nRF52840 dongle.
 +//!
 +//! It is based on nRF52840 SoC (Cortex M4 core with a BLE transceiver) with
@@ -242,6 +255,7 @@ index 00000000..329f302c
 +#![no_main]
 +#![deny(missing_docs)]
 +
++use cortexm4::scb;
 +use kernel::component::Component;
 +#[allow(unused_imports)]
 +use kernel::{debug, debug_gpio, debug_verbose, static_init};
@@ -294,6 +308,8 @@ index 00000000..329f302c
 +pub unsafe fn reset_handler() {
 +    // Loads relocations and clears BSS
 +    nrf52840::init();
++
++    scb::set_vector_table_offset(0x00001000);
 +
 +    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
 +    // GPIOs
@@ -373,7 +389,7 @@ index 00000000..329f302c
 +        &mut APP_MEMORY,
 +        &mut PROCESSES,
 +        FAULT_RESPONSE,
-+        nrf52840::uicr::Regulator0Output::V3_0,
++        nrf52840::uicr::Regulator0Output::DEFAULT,
 +        false,
 +        &Some(&nrf52840::usbd::USBD),
 +        chip,

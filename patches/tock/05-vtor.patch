@@ -1,0 +1,13 @@
+diff --git a/arch/cortex-m/src/scb.rs b/arch/cortex-m/src/scb.rs
+index 8107f165..bf96e47c 100644
+--- a/arch/cortex-m/src/scb.rs
++++ b/arch/cortex-m/src/scb.rs
+@@ -54,3 +54,8 @@ pub unsafe fn reset() {
+     let reset = (0x5FA << 16) | (aircr & (0x7 << 8)) | (1 << 2);
+     SCB.aircr.set(reset);
+ }
++
++/// relocate interrupt vector table
++pub unsafe fn set_vector_table_offset(offset: u32) {
++    SCB.vtor.set(offset);
++}

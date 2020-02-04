@@ -1,24 +1,11 @@
-diff --git a/arch/cortex-m/src/scb.rs b/arch/cortex-m/src/scb.rs
-index 8107f165..bf96e47c 100644
---- a/arch/cortex-m/src/scb.rs
-+++ b/arch/cortex-m/src/scb.rs
-@@ -54,3 +54,8 @@ pub unsafe fn reset() {
-     let reset = (0x5FA << 16) | (aircr & (0x7 << 8)) | (1 << 2);
-     SCB.aircr.set(reset);
- }
-+
-+/// Software reset using the ARM System Control Block
-+pub unsafe fn set_vector_table_offset(offset: u32) {
-+    SCB.vtor.set(offset);
-+}
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/Cargo.toml b/boards/nordic/nrf52840_mdk_usb_dongle/Cargo.toml
 new file mode 100644
-index 00000000..5b633ffb
+index 00000000..3da9792f
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/Cargo.toml
 @@ -0,0 +1,26 @@
 +[package]
-+name = "nrf52840_dongle"
++name = "nrf52840_mdk_usb_dongle"
 +version = "0.1.0"
 +authors = ["Tock Project Developers <tock-dev@googlegroups.com>"]
 +build = "build.rs"
@@ -45,46 +32,33 @@ index 00000000..5b633ffb
 +nrf52dk_base = { path = "../nrf52dk_base" }
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/Makefile b/boards/nordic/nrf52840_mdk_usb_dongle/Makefile
 new file mode 100644
-index 00000000..e8359b93
+index 00000000..227e7bff
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/Makefile
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,23 @@
 +# Makefile for building the tock kernel for the nRF development kit
 +
 +TOCK_ARCH=cortex-m4
 +TARGET=thumbv7em-none-eabi
-+PLATFORM=nrf52840_dongle
++PLATFORM=nrf52840_mdk_usb_dongle
 +
 +include ../../Makefile.common
 +
-+TOCKLOADER=tockloader
-+
-+# Where in the nrf52 flash to load the kernel with `tockloader`
-+KERNEL_ADDRESS=0x00000
-+
-+# Upload programs over uart with tockloader
-+ifdef PORT
-+  TOCKLOADER_GENERAL_FLAGS += --port $(PORT)
-+endif
-+
-+TOCKLOADER_JTAG_FLAGS = --jlink --board nrf52dk
++target/$(TARGET)/release/$(PLATFORM).hex: target/$(TARGET)/release/$(PLATFORM).elf
++	#$(Q)$(OBJCOPY) --output-target=ihex $^ $@       # llvm-objcopy generates a different hex file
++	$(Q)objcopy --output-target=ihex $^ $@
 +
 +# Upload the kernel
 +.PHONY: flash
-+flash: target/$(TARGET)/release/$(PLATFORM).bin target/$(TARGET)/release/$(PLATFORM).hex
-+	$(warning Todo, see https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/)
-+
-+# $(TOCKLOADER) $(TOCKLOADER_GENERAL_FLAGS) flash --address $(KERNEL_ADDRESS) $(TOCKLOADER_JTAG_FLAGS) $<
-+
-+target/$(TARGET)/release/$(PLATFORM).hex: target/$(TARGET)/release/$(PLATFORM).elf
-+	$(Q)$(OBJCOPY) --output-target=ihex $^ $@
-+
++flash: target/$(TARGET)/release/$(PLATFORM).hex
++	$(Q)echo "The kernel is at $(realpath $<)"
++	$(warning Todo - flash the kernel, see https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/)
 +
 +# Upload the kernel over serial/bootloader
 +.PHONY: program
 +program: target/$(TARGET)/release/$(PLATFORM).hex
-+	$(warning Todo, see https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/)
-+
++	$(Q)echo "The kernel is at $(realpath $<)"
++	$(warning Todo - flash the kernel, see https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/)
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/README.md b/boards/nordic/nrf52840_mdk_usb_dongle/README.md
 new file mode 100644
 index 00000000..d451fa23
@@ -123,44 +97,6 @@ index 00000000..1fdd4924
 +    println!("cargo:rerun-if-changed=layout.ld");
 +    println!("cargo:rerun-if-changed=../../kernel_layout.ld");
 +}
-diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/jtag/gdbinit_pca10040.jlink b/boards/nordic/nrf52840_mdk_usb_dongle/jtag/gdbinit_pca10040.jlink
-new file mode 100644
-index 00000000..9e217c5b
---- /dev/null
-+++ b/boards/nordic/nrf52840_mdk_usb_dongle/jtag/gdbinit_pca10040.jlink
-@@ -0,0 +1,25 @@
-+#
-+#
-+#
-+# J-LINK GDB SERVER initialization
-+#
-+# This connects to a GDB Server listening
-+# for commands on localhost at tcp port 2331
-+target remote localhost:2331
-+monitor speed 30
-+file ../target/thumbv7em-none-eabi/release/nrf52840_dongle
-+monitor reset
-+#
-+# CPU core initialization (to be done by user)
-+#
-+# Set the processor mode
-+# monitor reg cpsr = 0xd3
-+# Set auto JTAG speed
-+monitor speed auto
-+# Setup GDB FOR FASTER DOWNLOADS
-+set remote memory-write-packet-size 1024
-+set remote memory-write-packet-size fixed
-+# tui enable
-+# layout split
-+# layout service_pending_interrupts
-+b reset_handler
-diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/jtag/jdbserver_pca10040.sh b/boards/nordic/nrf52840_mdk_usb_dongle/jtag/jdbserver_pca10040.sh
-new file mode 100755
-index 00000000..1c9cd9b2
---- /dev/null
-+++ b/boards/nordic/nrf52840_mdk_usb_dongle/jtag/jdbserver_pca10040.sh
-@@ -0,0 +1 @@
-+JLinkGDBServer -device nRF52840_xxAA -speed 1200 -if swd -AutoConnect 1 -port 2331
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/layout.ld b/boards/nordic/nrf52840_mdk_usb_dongle/layout.ld
 new file mode 100644
 index 00000000..58c85f5b
@@ -179,7 +115,7 @@ index 00000000..58c85f5b
 +INCLUDE ../../kernel_layout.ld
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/src/io.rs b/boards/nordic/nrf52840_mdk_usb_dongle/src/io.rs
 new file mode 100644
-index 00000000..2c44dc24
+index 00000000..fae889b1
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/src/io.rs
 @@ -0,0 +1,57 @@
@@ -235,18 +171,18 @@ index 00000000..2c44dc24
 +/// Panic handler
 +pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
 +    // The nRF52840 Dongle LEDs (see back of board)
-+    const LED1_PIN: Pin = Pin::P0_06;
-+    let led = &mut led::LedLow::new(&mut nrf52840::gpio::PORT[LED1_PIN]);
++    const LED1_R_PIN: Pin = Pin::P0_23;
++    let led = &mut led::LedLow::new(&mut nrf52840::gpio::PORT[LED1_R_PIN]);
 +    let writer = &mut WRITER;
 +    debug::panic(&mut [led], writer, pi, &cortexm4::support::nop, &PROCESSES)
 +}
 diff --git a/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs b/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs
 new file mode 100644
-index 00000000..0e92473c
+index 00000000..93da7ff6
 --- /dev/null
 +++ b/boards/nordic/nrf52840_mdk_usb_dongle/src/main.rs
-@@ -0,0 +1,149 @@
-+//! Tock kernel for the Nordic Semiconductor nRF52840 dongle.
+@@ -0,0 +1,123 @@
++//! Tock kernel for the Makerdiary nRF52840 MDK USB Dongle.
 +//!
 +//! It is based on nRF52840 SoC (Cortex M4 core with a BLE transceiver) with
 +//! many exported I/O and peripherals.
@@ -263,10 +199,9 @@ index 00000000..0e92473c
 +use nrf52dk_base::{SpiPins, UartChannel, UartPins};
 +
 +// The nRF52840 MDK USB Dongle LEDs
-+const LED1_PIN: Pin = Pin::P0_08;           // not connected to a LED
-+const LED2_R_PIN: Pin = Pin::P0_23;
-+const LED2_G_PIN: Pin = Pin::P0_22;
-+const LED2_B_PIN: Pin = Pin::P0_24;
++const LED1_R_PIN: Pin = Pin::P0_23;
++const LED1_G_PIN: Pin = Pin::P0_22;
++const LED1_B_PIN: Pin = Pin::P0_24;
 +
 +// The nRF52840 MDK USB Dongle button
 +const BUTTON_PIN: Pin = Pin::P0_18;
@@ -309,39 +244,18 @@ index 00000000..0e92473c
 +    // Loads relocations and clears BSS
 +    nrf52840::init();
 +
++    // relocate vector table, interrupt vector table is at 0x1000
 +    scb::set_vector_table_offset(0x00001000);
 +
 +    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
 +    // GPIOs
 +    let gpio = components::gpio::GpioComponent::new(board_kernel).finalize(
 +        components::gpio_component_helper!(
-+            // left side of the USB plug
-+            &nrf52840::gpio::PORT[Pin::P0_13],
-+            &nrf52840::gpio::PORT[Pin::P0_15],
-+            &nrf52840::gpio::PORT[Pin::P0_17],
-+            &nrf52840::gpio::PORT[Pin::P0_20],
-+            &nrf52840::gpio::PORT[Pin::P0_22],
-+            &nrf52840::gpio::PORT[Pin::P0_24],
-+            &nrf52840::gpio::PORT[Pin::P1_00],
-+            &nrf52840::gpio::PORT[Pin::P0_09],
-+            &nrf52840::gpio::PORT[Pin::P0_10],
-+            // right side of the USB plug
-+            &nrf52840::gpio::PORT[Pin::P0_31],
-+            &nrf52840::gpio::PORT[Pin::P0_29],
-+            &nrf52840::gpio::PORT[Pin::P0_02],
-+            &nrf52840::gpio::PORT[Pin::P1_15],
-+            &nrf52840::gpio::PORT[Pin::P1_13],
-+            &nrf52840::gpio::PORT[Pin::P1_10],
-+            // Below the PCB
-+            &nrf52840::gpio::PORT[Pin::P0_26],
 +            &nrf52840::gpio::PORT[Pin::P0_04],
-+            &nrf52840::gpio::PORT[Pin::P0_11],
-+            &nrf52840::gpio::PORT[Pin::P0_14],
-+            &nrf52840::gpio::PORT[Pin::P1_11],
-+            &nrf52840::gpio::PORT[Pin::P1_07],
-+            &nrf52840::gpio::PORT[Pin::P1_01],
-+            &nrf52840::gpio::PORT[Pin::P1_04],
-+            &nrf52840::gpio::PORT[Pin::P1_02]
++            &nrf52840::gpio::PORT[Pin::P0_05],
++            &nrf52840::gpio::PORT[Pin::P0_06],
++            &nrf52840::gpio::PORT[Pin::P0_07],
++            &nrf52840::gpio::PORT[Pin::P0_08]
 +        ),
 +    );
 +    let button = components::button::ButtonComponent::new(board_kernel).finalize(
@@ -354,19 +268,15 @@ index 00000000..0e92473c
 +
 +    let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
 +        (
-+            &nrf52840::gpio::PORT[LED1_PIN],
++            &nrf52840::gpio::PORT[LED1_R_PIN],
 +            capsules::led::ActivationMode::ActiveLow
 +        ),
 +        (
-+            &nrf52840::gpio::PORT[LED2_R_PIN],
++            &nrf52840::gpio::PORT[LED1_G_PIN],
 +            capsules::led::ActivationMode::ActiveLow
 +        ),
 +        (
-+            &nrf52840::gpio::PORT[LED2_G_PIN],
-+            capsules::led::ActivationMode::ActiveLow
-+        ),
-+        (
-+            &nrf52840::gpio::PORT[LED2_B_PIN],
++            &nrf52840::gpio::PORT[LED1_B_PIN],
 +            capsules::led::ActivationMode::ActiveLow
 +        )
 +    ));
@@ -377,9 +287,9 @@ index 00000000..0e92473c
 +        BUTTON_RST_PIN,
 +        &nrf52840::gpio::PORT,
 +        gpio,
-+        LED2_R_PIN,
-+        LED2_G_PIN,
-+        LED2_B_PIN,
++        LED1_R_PIN,
++        LED1_G_PIN,
++        LED1_B_PIN,
 +        led,
 +        UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD)),
 +        &SpiPins::new(SPI_MOSI, SPI_MISO, SPI_CLK),

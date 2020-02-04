@@ -4,7 +4,7 @@ diff --git a/Cargo.toml b/Cargo.toml
 @@ -7,6 +7,9 @@
 
  [dependencies]
- linked_list_allocator = "0.6.4"
+ linked_list_allocator = "0.6.6"
 +
 +[features]
 +panic_console = []

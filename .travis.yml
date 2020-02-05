@@ -19,8 +19,6 @@ rust:
 os:
   - linux
 
-dist: "trusty"  # we need python3-pip
-
 addons:
   apt:
     packages:

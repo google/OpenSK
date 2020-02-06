@@ -103,7 +103,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     const ITERATIONS: u32 = 10000;
     #[cfg(debug_assertions)]
-    const ITERATIONS: u32 = 1000;
+    const ITERATIONS: u32 = 500;
 
     /** Test that key generation creates valid keys **/
     #[test]

@@ -64,9 +64,9 @@ fn main() {
         .public_key()
         .unwrap()
         .public_eq(&PKey::from_ec_key(pkey).unwrap()));
-    let today = asn1::Asn1Time::days_from_now(0).unwrap();
-    assert!(cert.not_after() > today);
-    assert!(cert.not_before() <= today);
+    let now = asn1::Asn1Time::days_from_now(0).unwrap();
+    assert!(cert.not_after() > now);
+    assert!(cert.not_before() <= now);
 
     let mut cert_bin_file = File::create(&cert_bin_path).unwrap();
     cert_bin_file.write_all(&cert.to_der().unwrap()).unwrap();

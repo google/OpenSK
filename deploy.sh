@@ -148,15 +148,19 @@ build_app_padding () {
   ) | xxd -p -r > "${tab_folder}/padding.bin"
 }
 
-build_app () {
+comma_separated () {
   # Flatten the array
   # This is equivalent to the following python snippet: ' '.join(arr).replace(' ', ',')
-  local feature_list=$(IFS=$'\n'; echo "$@")
-  if [ "X${feature_list}" != "X" ]
+  local list=$(IFS=$'\n'; echo "$@")
+  if [ "X${list}" != "X" ]
   then
-    feature_list="${feature_list// /,}"
+    feature_list="${list// /,}"
   fi
+  echo ${list}
+}
 
+build_app () {
+  local feature_list="$(comma_separated $@)"
   cargo build \
     --release \
     --target=thumbv7em-none-eabi \
@@ -176,14 +180,7 @@ build_app () {
 }
 
 build_crypto_bench () {
-  # Flatten the array
-  # This is equivalent to the following python snippet: ' '.join(arr).replace(' ', ',')
-  local feature_list=$(IFS=$'\n'; echo "$@")
-  if [ "X${feature_list}" != "X" ]
-  then
-    feature_list="${feature_list// /,}"
-  fi
-
+  local feature_list="$(comma_separated $@)"
   cargo build \
     --release \
     --target=thumbv7em-none-eabi \

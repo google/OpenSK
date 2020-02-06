@@ -176,9 +176,18 @@ build_app () {
 }
 
 build_crypto_bench () {
+  # Flatten the array
+  # This is equivalent to the following python snippet: ' '.join(arr).replace(' ', ',')
+  local feature_list=$(IFS=$'\n'; echo "$@")
+  if [ "X${feature_list}" != "X" ]
+  then
+    feature_list="${feature_list// /,}"
+  fi
+
   cargo build \
     --release \
     --target=thumbv7em-none-eabi \
+    --features="${feature_list}" \
     --example crypto_bench
 
   mkdir -p "target/tab"
@@ -310,7 +319,7 @@ fi
 
 if [ "$install_app" = "crypto_bench" ]
 then
-  build_crypto_bench
+  build_crypto_bench "${!enabled_features[@]}"
 fi
 
 if [ "$install_app" != "none" ]

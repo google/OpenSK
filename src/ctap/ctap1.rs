@@ -309,7 +309,7 @@ impl Ctap1Command {
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
-        let attestation_key = crypto::ecdsa::SecKey::from_bytes(&ATTESTATION_PRIVATE_KEY).unwrap();
+        let attestation_key = crypto::ecdsa::SecKey::from_bytes(ATTESTATION_PRIVATE_KEY).unwrap();
         let signature = attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
 
         response.extend(signature.to_asn1_der());

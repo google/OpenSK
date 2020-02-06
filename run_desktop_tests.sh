@@ -36,7 +36,7 @@ cargo check --release --target=thumbv7em-none-eabi --examples
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
 
-if [ "${TRAVIS_OS_NAME}" = "linux" ]
+if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."
   cd libraries/cbor

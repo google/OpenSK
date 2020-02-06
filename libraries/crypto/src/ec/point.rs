@@ -912,6 +912,8 @@ pub mod test {
         }
     }
 
+    // Due to the 3 nested loops, this test is super slow with debug assertions enabled.
+    #[cfg(not(debug_assertions))]
     #[test]
     fn test_add_is_associative() {
         for x in &get_test_values_projective() {

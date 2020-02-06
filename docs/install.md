@@ -23,7 +23,7 @@ hardware:
 *   a [Segger J-Link](https://www.segger.com/products/debug-probes/j-link/) JTAG
     probe.
 *   a
-    [TC2050 Tag-Connect programming cable](http://www.tag-connect.com/TC2050-IDC-NL-050-ALL).
+    [TC2050 Tag-Connect programming cable](https://www.tag-connect.com/product/tc2050-idc-nl-10-pin-no-legs-cable-with-ribbon-connector).
 *   a [Tag-Connect TC2050 ARM2010](http://www.tag-connect.com/TC2050-ARM2010)
     adaptor
 *   optionally a

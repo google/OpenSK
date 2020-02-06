@@ -19,13 +19,13 @@ rust:
 os:
   - linux
 
-dist: "trusty"  # we need python3-pip
-
 addons:
   apt:
     packages:
       - "python3"
       - "python3-pip"
+      - "python3-setuptools"
+      - "python3-wheel"
 
 cache:
   - rust

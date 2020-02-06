@@ -26,6 +26,9 @@ panic_console = ["libtock/panic_console"]
 [dev-dependencies]
 elf2tab = "0.4.0"
 
+[build-dependencies]
+openssl = "0.10"
+
 [profile.dev]
 panic = "abort"
 lto = true # Link Time Optimization usually reduces size of binaries and static libraries

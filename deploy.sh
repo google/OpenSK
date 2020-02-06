@@ -160,7 +160,7 @@ comma_separated () {
 }
 
 build_app () {
-  local feature_list="$(comma_separated $@)"
+  local feature_list="$(comma_separated "$@")"
   cargo build \
     --release \
     --target=thumbv7em-none-eabi \
@@ -180,7 +180,7 @@ build_app () {
 }
 
 build_crypto_bench () {
-  local feature_list="$(comma_separated $@)"
+  local feature_list="$(comma_separated "$@")"
   cargo build \
     --release \
     --target=thumbv7em-none-eabi \

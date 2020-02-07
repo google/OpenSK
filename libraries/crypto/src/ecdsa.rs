@@ -495,14 +495,13 @@ mod test {
     #[test]
     fn test_ring_sign_ring_verify() {
         use ring::rand::SecureRandom;
-        use ring::signature::KeyPair;
+        use ring::signature::{KeyPair, VerificationAlgorithm};
 
         let ring_rng = ring::rand::SystemRandom::new();
 
         for _ in 0..ITERATIONS {
             let mut msg_bytes: [u8; 64] = [Default::default(); 64];
             ring_rng.fill(&mut msg_bytes).unwrap();
-            let msg = untrusted::Input::from(&msg_bytes);
 
             let pkcs8_bytes = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
@@ -511,21 +510,21 @@ mod test {
             .unwrap();
             let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(
                 &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-                untrusted::Input::from(pkcs8_bytes.as_ref()),
+                pkcs8_bytes.as_ref(),
             )
             .unwrap();
             let public_key_bytes = key_pair.public_key().as_ref();
 
-            let sig = key_pair.sign(&ring_rng, msg).unwrap();
+            let sig = key_pair.sign(&ring_rng, &msg_bytes).unwrap();
             let sig_bytes = sig.as_ref();
 
-            assert!(ring::signature::verify(
-                &ring::signature::ECDSA_P256_SHA256_FIXED,
-                untrusted::Input::from(public_key_bytes),
-                msg,
-                untrusted::Input::from(sig_bytes)
-            )
-            .is_ok());
+            assert!(ring::signature::ECDSA_P256_SHA256_FIXED
+                .verify(
+                    untrusted::Input::from(public_key_bytes),
+                    untrusted::Input::from(&msg_bytes),
+                    untrusted::Input::from(sig_bytes)
+                )
+                .is_ok());
         }
     }
 
@@ -548,14 +547,12 @@ mod test {
             .unwrap();
             let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(
                 &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-                untrusted::Input::from(pkcs8_bytes.as_ref()),
+                pkcs8_bytes.as_ref(),
             )
             .unwrap();
             let public_key_bytes = key_pair.public_key().as_ref();
 
-            let sig = key_pair
-                .sign(&ring_rng, untrusted::Input::from(&msg_bytes))
-                .unwrap();
+            let sig = key_pair.sign(&ring_rng, &msg_bytes).unwrap();
             let sig_bytes = sig.as_ref();
 
             let pk = PubKey::from_bytes_uncompressed(public_key_bytes).unwrap();
@@ -567,6 +564,8 @@ mod test {
     // Test that messages signed by this code are correctly verified by the ring crate.
     #[test]
     fn test_self_sign_ring_verify() {
+        use ring::signature::VerificationAlgorithm;
+
         let mut rng = ThreadRng256 {};
 
         for _ in 0..ITERATIONS {
@@ -580,13 +579,13 @@ mod test {
             let mut sig_bytes: [u8; 64] = [Default::default(); 64];
             sign.to_bytes(&mut sig_bytes);
 
-            assert!(ring::signature::verify(
-                &ring::signature::ECDSA_P256_SHA256_FIXED,
-                untrusted::Input::from(&public_key_bytes),
-                untrusted::Input::from(&msg_bytes),
-                untrusted::Input::from(&sig_bytes)
-            )
-            .is_ok());
+            assert!(ring::signature::ECDSA_P256_SHA256_FIXED
+                .verify(
+                    untrusted::Input::from(&public_key_bytes),
+                    untrusted::Input::from(&msg_bytes),
+                    untrusted::Input::from(&sig_bytes)
+                )
+                .is_ok());
         }
     }
 

@@ -13,6 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set -e
+
+# Check that rustup and pip3 are installed
+check_command () {
+  if ! which "$1" >/dev/null
+  then
+    echo "Missing $1 command.$2"
+    exit 1
+  fi
+}
+check_command rustup " Follow the steps under https://rustup.rs/ to install it."
+check_command pip3
+
 # Ensure the submodules are pulled and up-to-date
 git submodule update --init
 

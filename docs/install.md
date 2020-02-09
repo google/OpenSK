@@ -43,7 +43,7 @@ This guide **does not** cover how to setup the JTAG probe on your system.
 In order to compile and flash a working OpenSK firmware, you will need the
 following:
 
-*   a working [Rust](https://rustup.rs/) toolchain installed on your system
+*   rustup (can be installed with https://rustup.rs/)
 *   python3 and pip
 *   the OpenSSL command line tool
 

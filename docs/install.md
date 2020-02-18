@@ -260,3 +260,6 @@ sudo udevadm control --reload
 ```
 
 Then, you will need to unplug and replug the key for the rule to trigger.
+
+To test whether the installation was successful, visit a
+[demo website](https://webauthn.io/) and try to register and login.

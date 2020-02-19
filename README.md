@@ -55,7 +55,7 @@ For a more detailed guide, please refer to our
 
     ```shell
     # Nordic nRF52840-DK board
-    ./deploy.py os --board=nrf52840dk
+    ./deploy.py os --board=nrf52840_dk
     # Nordic nRF52840-Dongle
     ./deploy.py os --board=nrf52840_dongle
     ```

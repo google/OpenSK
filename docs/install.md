@@ -145,7 +145,7 @@ Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
     differ_):
 
     ```shell
-    $ ./deploy.py os --board=nrf52840_dongle
+    $ ./deploy.py os --board=nrf52840_dk
         info: Updating rust toolchain to nightly-2020-02-03
         info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
         info: checking for self-updates

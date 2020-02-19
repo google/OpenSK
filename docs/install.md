@@ -261,12 +261,12 @@ sudo udevadm control --reload
 
 Then, you will need to unplug and replug the key for the rule to trigger.
 
-## Verifying the installation
+## Troubleshooting
 
 To test whether the installation was successful, visit a
 [demo website](https://webauthn.io/) and try to register and login.
 
-### Troubleshooting (Linux only)
+### Linux
 
 If you have issues with the demo website, the following commands should help you
 understand whether OpenSK was installed properly.

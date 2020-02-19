@@ -1,0 +1,77 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 844e424..386a9ed 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -6,7 +6,7 @@ license = "MIT/Apache-2.0"
+ edition = "2018"
+ 
+ [dependencies]
+-linked_list_allocator = "0.6.6"
++linked_list_allocator = { version = "0.6.6", default-features = false }
+ 
+ [features]
+ panic_console = []
+diff --git a/src/entry_point.rs b/src/entry_point.rs
+index 15e1d03..2fe5c40 100644
+--- a/src/entry_point.rs
++++ b/src/entry_point.rs
+@@ -1,8 +1,10 @@
+ use crate::memop;
+ use crate::syscalls;
+-use crate::ALLOCATOR;
++use core::alloc::{GlobalAlloc, Layout};
+ use core::intrinsics;
+ use core::ptr;
++use core::ptr::NonNull;
++use linked_list_allocator::Heap;
+ 
+ // _start and rust_start are the first two procedures executed when a Tock
+ // application starts. _start is invoked directly by the Tock kernel; it
+@@ -357,7 +359,7 @@ pub unsafe extern "C" fn rust_start(app_start: usize, stacktop: usize, app_heap_
+     // Tell the kernel the new app heap break.
+     memop::set_brk(app_heap_end as *const u8);
+ 
+-    ALLOCATOR.lock().init(app_heap_start, HEAP_SIZE);
++    HEAP.init(app_heap_start, HEAP_SIZE);
+ 
+     main(0, ptr::null());
+ 
+@@ -365,3 +367,23 @@ pub unsafe extern "C" fn rust_start(app_start: usize, stacktop: usize, app_heap_
+         syscalls::yieldk();
+     }
+ }
++
++#[cfg(any(target_arch = "arm", target_arch = "riscv32"))]
++#[global_allocator]
++static ALLOCATOR: TockAllocator = TockAllocator;
++
++static mut HEAP: Heap = Heap::empty();
++
++struct TockAllocator;
++
++unsafe impl GlobalAlloc for TockAllocator {
++    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
++        HEAP.allocate_first_fit(layout)
++            .ok()
++            .map_or(0 as *mut u8, |allocation| allocation.as_ptr())
++    }
++
++    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
++        HEAP.deallocate(NonNull::new_unchecked(ptr), layout)
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index c9001bf..2f9c1c0 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -44,10 +44,6 @@ pub mod syscalls;
+ #[path = "syscalls_mock.rs"]
+ pub mod syscalls;
+ 
+-#[cfg(any(target_arch = "arm", target_arch = "riscv32"))]
+-#[global_allocator]
+-static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+-
+ // Dummy structure to force importing the panic_handler and other no_std elements when nothing else
+ // is imported.
+ pub struct LibTock;

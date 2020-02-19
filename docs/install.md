@@ -318,5 +318,32 @@ sudo udevadm control --reload
 
 Then, you will need to unplug and replug the key for the rule to trigger.
 
+## Troubleshooting
+
 To test whether the installation was successful, visit a
 [demo website](https://webauthn.io/) and try to register and login.
+
+### Linux
+
+If you have issues with the demo website, the following commands should help you
+understand whether OpenSK was installed properly.
+
+When plugging in the USB key, the following line should appear in `lsusb`.
+```
+$ lsusb
+...
+Bus XXX Device YYY: ID 1915:521f Nordic Semiconductor ASA OpenSK
+```
+
+You should also see lines similar to the following in `dmesg`.
+```
+$ dmesg
+...
+[XXX] usb A-BB: new full-speed USB device number 00 using xhci_hcd
+[XXX] usb A-BB: New USB device found, idVendor=1915, idProduct=521f, bcdDevice= 0.01
+[XXX] usb A-BB: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[XXX] usb A-BB: Product: OpenSK
+[XXX] usb A-BB: Manufacturer: Nordic Semiconductor ASA
+[XXX] usb A-BB: SerialNumber: v0.1
+[XXX] hid-generic 0000:0000:0000.0000: hiddev0,hidraw0: USB HID v1.10 Device [Nordic Semiconductor ASA OpenSK] on usb-0000:00:00.0-00/input0
+```

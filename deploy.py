@@ -310,6 +310,11 @@ class OpenSKInstaller(object):
 def main(args):
     # Make sure the current working directory is the right one before running
     os.chdir(os.path.realpath(os.path.dirname(__file__)))
+    # Check for pre-requisite executable files.
+    if not shutil.which("JLinkExe"):
+        fatal(("Couldn't find JLinkExe binary. Make sure Segger JLink tools "
+               "are installed and correctly set up."))
+
     OpenSKInstaller(args).run()
 
 

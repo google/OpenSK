@@ -63,19 +63,21 @@ $ ./setup.sh
 [-] Applying patch "02-usb.patch"... DONE.
 [-] Applying patch "03-app-memory.patch"... DONE.
 [-] Applying patch "04-rtt.patch"... DONE.
-[-] Applying patch "01-panic_console.patch"... DONE.
-[-] Applying patch "02-timer.patch"... DONE.
-[-] Applying patch "03-public_syscalls.patch"... DONE.
-[-] Applying patch "04-bigger_heap.patch"... DONE.
+[-] Applying patch "01-linked_list_allocator.patch"... DONE.
+[-] Applying patch "02-panic_console.patch"... DONE.
+[-] Applying patch "03-timer.patch"... DONE.
+[-] Applying patch "04-public_syscalls.patch"... DONE.
+[-] Applying patch "05-bigger_heap.patch"... DONE.
+[-] Applying patch "06-no_spin_allocator.patch"... DONE.
 Signature ok
 subject=CN = Google OpenSK CA
 Getting Private key
 Signature ok
 subject=CN = Google OpenSK Hacker Edition
 Getting CA Private Key
-info: syncing channel updates for 'nightly-2020-01-16-x86_64-unknown-linux-gnu'
+info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
 
-  nightly-2020-01-16-x86_64-unknown-linux-gnu unchanged - rustc 1.42.0-nightly (3291ae339 2020-01-15)
+  nightly-2020-02-03-x86_64-unknown-linux-gnu unchanged - rustc 1.42.0-nightly (f43c34a13 2020-02-02)
 
 Requirement already up-to-date: tockloader in /usr/lib/python3/dist-packages/tockloader-1.4.0.dev0-py3.7.egg (1.4.0.dev0)
 Requirement already satisfied, skipping upgrade: argcomplete>=1.8.2 in /usr/lib/python3/dist-packages (from tockloader) (1.10.0)
@@ -127,8 +129,9 @@ File              | Purpose
 If you want to use your own attestation certificate and private key, simply
 replace `opensk_cert.pem` and `opensk.key` files.
 
-Our build script is responsible for converting `opensk_cert.pem` and
-`opensk.key` files into the following Rust file: `src/ctap/key_material.rs`.
+Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
+`opensk.key` files into raw data that is then used by the Rust file:
+`src/ctap/key_material.rs`.
 
 ### Flashing a firmware
 
@@ -138,45 +141,72 @@ Our build script is responsible for converting `opensk_cert.pem` and
 
 1.  Connect a micro USB cable to the JTAG USB port.
 
-1.  Run our script for compiling/flashing your device (_output may differ_):
+1.  Run our script for compiling/flashing Tock OS on your device (_output may
+    differ_):
 
     ```shell
-    $ board=nrf52840dk ./deploy.sh app os
-    make: Entering directory './third_party/tock/boards/nordic/nrf52840dk'
-       Compiling kernel v0.1.0 (./third_party/tock/kernel)
-       Compiling cortexm v0.1.0 (./third_party/tock/arch/cortex-m)
-       Compiling nrf5x v0.1.0 (./third_party/tock/chips/nrf5x)
-       Compiling capsules v0.1.0 (./third_party/tock/capsules)
-       Compiling cortexm4 v0.1.0 (./third_party/tock/arch/cortex-m4)
-       Compiling nrf52 v0.1.0 (./third_party/tock/chips/nrf52)
-       Compiling nrf52840 v0.1.0 (./third_party/tock/chips/nrf52840)
-       Compiling components v0.1.0 (./third_party/tock/boards/components)
-       Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
-       Compiling nrf52840dk v0.1.0 (./third_party/tock/boards/nordic/nrf52840dk)
-        Finished release [optimized + debuginfo] target(s) in 11.28s
-       text    data     bss     dec     hex filename
-     114688    1760  260384  376832   5c000 target/thumbv7em-none-eabi/release/nrf52840dk
-     tockloader  flash --address 0x00000 --jlink --board nrf52dk target/thumbv7em-none-eabi/release/nrf52840dk.bin
-     [STATUS ] Flashing binar(y|ies) to board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.324 seconds
+    $ ./deploy.py os --board=nrf52840_dk
+        info: Updating rust toolchain to nightly-2020-02-03
+        info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
+        info: checking for self-updates
+        info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
+        info: Rust toolchain up-to-date
+        info: Installing Tock on board nrf52840_dk
+            Compiling tock-registers v0.5.0 (./third_party/tock/libraries/tock-register-interface)
+            Compiling tock-cells v0.1.0 (./third_party/tock/libraries/tock-cells)
+            Compiling enum_primitive v0.1.0 (./third_party/tock/libraries/enum_primitive)
+            Compiling tock_rt0 v0.1.0 (./third_party/tock/libraries/tock-rt0)
+            Compiling nrf52840dk v0.1.0 (./third_party/tock/boards/nordic/nrf52840dk)
+            Compiling kernel v0.1.0 (./third_party/tock/kernel)
+            Compiling cortexm v0.1.0 (./third_party/tock/arch/cortex-m)
+            Compiling nrf5x v0.1.0 (./third_party/tock/chips/nrf5x)
+            Compiling capsules v0.1.0 (./third_party/tock/capsules)
+            Compiling cortexm4 v0.1.0 (./third_party/tock/arch/cortex-m4)
+            Compiling nrf52 v0.1.0 (./third_party/tock/chips/nrf52)
+            Compiling nrf52840 v0.1.0 (./third_party/tock/chips/nrf52840)
+            Compiling components v0.1.0 (./third_party/tock/boards/components)
+            Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
+                Finished release [optimized + debuginfo] target(s) in 11.97s
+        [STATUS ] Flashing binar(y|ies) to board...
+        [INFO   ] Using known arch and jtag-device for known board nrf52dk
+        [INFO   ] Finished in 0.284 seconds
+    ```
 
-     make: Leaving directory './third_party/tock/boards/nordic/nrf52840dk'
-     [STATUS ] Preparing to uninstall apps...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [ERROR  ] No apps are installed on the board
+1.  Run our script for compiling/flashing the OpenSK application on your device
+    (_output may differ_):
 
-       Compiling libtock v0.1.0 (./third_party/libtock-rs)
-       Compiling crypto v0.1.0 (./libraries/crypto)
-       Compiling ctap2 v0.1.0 (.)
-         Finished release [optimized] target(s) in 7.60s
-     [STATUS ] Flashing binar(y|ies) to board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.305 seconds
-
-     [STATUS ] Installing app on the board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.975 seconds
+    ```shell
+    $ ./deploy.py app --opensk
+    info: Updating rust toolchain to nightly-2020-02-03
+    info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
+    info: checking for self-updates
+    info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
+    info: Rust toolchain up-to-date
+    info: Erasing all installed applications
+    All apps have been erased.
+    info: Building OpenSK application
+        Compiling autocfg v1.0.0
+        Compiling pkg-config v0.3.17
+        Compiling cc v1.0.50
+        Compiling libc v0.2.66
+        Compiling bitflags v1.2.1
+        Compiling foreign-types-shared v0.1.1
+        Compiling openssl v0.10.28
+        Compiling cfg-if v0.1.10
+        Compiling lazy_static v1.4.0
+        Compiling byteorder v1.3.2
+        Compiling linked_list_allocator v0.6.6
+        Compiling arrayref v0.3.6
+        Compiling cbor v0.1.0 (./libraries/cbor)
+        Compiling subtle v2.2.2
+        Compiling foreign-types v0.3.2
+        Compiling libtock v0.1.0 (./third_party/libtock-rs)
+        Compiling crypto v0.1.0 (./libraries/crypto)
+        Compiling openssl-sys v0.9.54
+        Compiling ctap2 v0.1.0 (.)
+            Finished release [optimized] target(s) in 15.34s
+    info: Flashing padding application
+    info: Installing Tock application ctap2
     ```
 
 1.  Connect a micro USB cable to the device USB port.
@@ -202,45 +232,72 @@ the board in order to see your OpenSK device on your system.
 
     ![Nordic dongle retainer clip](img/dongle_clip.jpg)
 
-1.  Run our script for compiling/flashing your device (_output may differ_):
+1.  Run our script for compiling/flashing Tock OS on your device (_output may
+    differ_):
 
     ```shell
-    $ board=nrf52840_dongle ./deploy.sh app os
-     make: Entering directory './third_party/tock/boards/nordic/nrf52840_dongle'
-       Compiling kernel v0.1.0 (./third_party/tock/kernel)
-       Compiling cortexm v0.1.0 (./third_party/tock/arch/cortex-m)
-       Compiling nrf5x v0.1.0 (./third_party/tock/chips/nrf5x)
-       Compiling capsules v0.1.0 (./third_party/tock/capsules)
-       Compiling cortexm4 v0.1.0 (./third_party/tock/arch/cortex-m4)
-       Compiling nrf52 v0.1.0 (./third_party/tock/chips/nrf52)
-       Compiling nrf52840 v0.1.0 (./third_party/tock/chips/nrf52840)
-       Compiling components v0.1.0 (./third_party/tock/boards/components)
-       Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
-       Compiling nrf52840_dongle v0.1.0 (./third_party/tock/boards/nordic/nrf52840_dongle)
-         Finished release [optimized + debuginfo] target(s) in 10.47s
-       text    data     bss     dec     hex filename
-     110592    1688  252264  364544   59000 target/thumbv7em-none-eabi/release/nrf52840_dongle
-     tockloader  flash --address 0x00000 --jlink --board nrf52dk target/thumbv7em-none-eabi/release/nrf52840_dongle.bin
-     [STATUS ] Flashing binar(y|ies) to board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.296 seconds
+    $ ./deploy.py os --board=nrf52840_dongle
+    info: Updating rust toolchain to nightly-2020-02-03
+    info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
+    info: checking for self-updates
+    info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
+    info: Rust toolchain up-to-date
+    info: Installing Tock on board nrf52840_dongle
+        Compiling tock-cells v0.1.0 (./third_party/tock/libraries/tock-cells)
+        Compiling tock-registers v0.5.0 (./third_party/tock/libraries/tock-register-interface)
+        Compiling enum_primitive v0.1.0 (./third_party/tock/libraries/enum_primitive)
+        Compiling tock_rt0 v0.1.0 (./third_party/tock/libraries/tock-rt0)
+        Compiling nrf52840_dongle v0.1.0 (./third_party/tock/boards/nordic/nrf52840_dongle)
+        Compiling kernel v0.1.0 (./third_party/tock/kernel)
+        Compiling cortexm v0.1.0 (./third_party/tock/arch/cortex-m)
+        Compiling nrf5x v0.1.0 (./third_party/tock/chips/nrf5x)
+        Compiling capsules v0.1.0 (./third_party/tock/capsules)
+        Compiling cortexm4 v0.1.0 (./third_party/tock/arch/cortex-m4)
+        Compiling nrf52 v0.1.0 (./third_party/tock/chips/nrf52)
+        Compiling nrf52840 v0.1.0 (./third_party/tock/chips/nrf52840)
+        Compiling components v0.1.0 (./third_party/tock/boards/components)
+        Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
+            Finished release [optimized + debuginfo] target(s) in 11.72s
+        [STATUS ] Flashing binar(y|ies) to board...
+        [INFO   ] Using known arch and jtag-device for known board nrf52dk
+        [INFO   ] Finished in 0.280 seconds
+    ```
 
-     make: Leaving directory './third_party/tock/boards/nordic/nrf52840_dongle'
-     [STATUS ] Preparing to uninstall apps...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [ERROR  ] No apps are installed on the board
+1.  Run our script for compiling/flashing the OpenSK application on your device
+    (_output may differ_):
 
-       Compiling libtock v0.1.0 (./third_party/libtock-rs)
-       Compiling crypto v0.1.0 (./libraries/crypto)
-       Compiling ctap2 v0.1.0 (.)
-         Finished release [optimized] target(s) in 7.60s
-     [STATUS ] Flashing binar(y|ies) to board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.317 seconds
-
-     [STATUS ] Installing app on the board...
-     [INFO   ] Using known arch and jtag-device for known board nrf52dk
-     [INFO   ] Finished in 0.902 seconds
+    ```shell
+    $ ./deploy.py app --opensk
+    info: Updating rust toolchain to nightly-2020-02-03
+    info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
+    info: checking for self-updates
+    info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
+    info: Rust toolchain up-to-date
+    info: Erasing all installed applications
+    All apps have been erased.
+    info: Building OpenSK application
+        Compiling autocfg v1.0.0
+        Compiling pkg-config v0.3.17
+        Compiling cc v1.0.50
+        Compiling libc v0.2.66
+        Compiling bitflags v1.2.1
+        Compiling foreign-types-shared v0.1.1
+        Compiling openssl v0.10.28
+        Compiling cfg-if v0.1.10
+        Compiling lazy_static v1.4.0
+        Compiling byteorder v1.3.2
+        Compiling linked_list_allocator v0.6.6
+        Compiling arrayref v0.3.6
+        Compiling cbor v0.1.0 (./libraries/cbor)
+        Compiling subtle v2.2.2
+        Compiling foreign-types v0.3.2
+        Compiling libtock v0.1.0 (./third_party/libtock-rs)
+        Compiling crypto v0.1.0 (./libraries/crypto)
+        Compiling openssl-sys v0.9.54
+        Compiling ctap2 v0.1.0 (.)
+            Finished release [optimized] target(s) in 15.34s
+    info: Flashing padding application
+    info: Installing Tock application ctap2
     ```
 
 1.  Remove the programming cable and the USB-A extension cable.

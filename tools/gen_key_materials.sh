@@ -23,9 +23,6 @@ generate_crypto_materials () {
   local opensk_key=crypto_data/opensk.key
   local opensk_cert_name=crypto_data/opensk_cert
 
-  # Rust file that we will generate will all cryptographic data.
-  local rust_file=src/ctap/key_material.rs
-
   # Allow invoker to override the command with a full path.
   local openssl=${OPENSSL:-$(which openssl)}
 
@@ -35,6 +32,9 @@ generate_crypto_materials () {
     echo "Missing openssl command. Try to specify its full path using OPENSSL environment variable."
     exit 1
   fi
+
+  # Exit on first error
+  set -e
 
   force_generate="$1"
   mkdir -p crypto_data
@@ -85,3 +85,5 @@ generate_crypto_materials () {
       -sha256
   fi
 }
+
+generate_crypto_materials "$1"

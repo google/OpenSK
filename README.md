@@ -49,23 +49,22 @@ For a more detailed guide, please refer to our
     ./setup.sh
     ```
 
-2.  If you have a Nordic development board that doesn't already have Tock OS
-    installed, you can install both TockOS and the OpenSK application by running
-    the following command, depending on the board you have:
+2.  If Tock OS is already installed on your board, move to the next step.
+    Otherwise, just run one of the following commands, depending on the board
+    you have:
 
     ```shell
     # Nordic nRF52840-DK board
-    board=nrf52840dk ./deploy.sh os app
+    ./deploy.py os --board=nrf52840_dk
     # Nordic nRF52840-Dongle
-    board=nrf52840_dongle ./deploy.sh os app
+    ./deploy.py os --board=nrf52840_dongle
     ```
 
-3.  If Tock OS is already installed and you want to install/update the OpenSK
-    application on your board (**Warning**: it will erase the locally stored
-    credentials), run:
+3.  Next step is to install/update the OpenSK application on your board
+    (**Warning**: it will erase the locally stored credentials). Run:
 
     ```shell
-    ./deploy.sh app
+    ./deploy.py app --opensk
     ```
 
 4.  On Linux, you may want to avoid the need for `root` privileges to interact
@@ -83,7 +82,7 @@ If you build your own security key, depending on the hardware you use, there are
 a few things you can personalize:
 
 1.  If you have multiple buttons, choose the buttons responsible for user
-    presence in main.rs.
+    presence in `main.rs`.
 2.  Decide whether you want to use batch attestation. There is a boolean flag in
     `ctap/mod.rs`. It is mandatory for U2F, and you can create your own
     self-signed certificate. The flag is used for FIDO2 and has some privacy

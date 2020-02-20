@@ -53,12 +53,6 @@ fn main() {
     let key_len = priv_key_vec.len();
 
     assert!(
-        key_len >= 30,
-        "Invalid private key (too small): {} ({:#?})",
-        priv_key_hex,
-        priv_key_vec,
-    );
-    assert!(
         key_len <= 33,
         "Invalid private key (too big): {} ({:#?})",
         priv_key_hex,
@@ -68,8 +62,7 @@ fn main() {
     // Copy OpenSSL generated key to our vec, starting from the end
     let mut output_vec = [0u8; 32];
     let min_key_len = std::cmp::min(key_len, 32);
-    output_vec[32usize.saturating_sub(min_key_len)..]
-        .copy_from_slice(&priv_key_vec[key_len.saturating_sub(min_key_len)..]);
+    output_vec[32 - min_key_len..].copy_from_slice(&priv_key_vec[key_len - min_key_len..]);
 
     // Create the raw private key out of the OpenSSL data
     let mut priv_key_bin_file = File::create(&priv_key_bin_path).unwrap();

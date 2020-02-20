@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "davidanson.vscode-markdownlint",
-        "rust-lang.rust"
+        "rust-lang.rust",
+        "ms-python.python"
     ]
 }

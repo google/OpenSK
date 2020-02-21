@@ -25,6 +25,7 @@ import os
 import shutil
 import subprocess
 import sys
+from tockloader.exceptions import TockLoaderException
 from tockloader import tab, tbfh, tockloader
 
 # This structure allows us in the future to also support out-of-tree boards.
@@ -104,7 +105,7 @@ class RemoveConstAction(argparse.Action):
     else:
       items = copy.copy(items)
     if self.const in items:
-      self.remove(self.const)
+      items.remove(self.const)
     setattr(namespace, self.dest, items)
 
 
@@ -234,7 +235,7 @@ class OpenSKInstaller(object):
     tabs = [tab.TAB(tab_filename)]
     try:
       tock.install(tabs, replace="yes", erase=args.erase)
-    except tockloader.exceptions.TockLoaderException as e:
+    except TockLoaderException as e:
       fatal("Couldn't install Tock application {}: {}".format(
           self.args.application, str(e)))
 
@@ -252,7 +253,7 @@ class OpenSKInstaller(object):
     tock.open(args)
     try:
       tock.flash_binary(padding, args.address)
-    except tockloader.exceptions.TockLoaderException as e:
+    except TockLoaderException as e:
       fatal("Couldn't install padding: {}".format(str(e)))
 
   def clear_apps(self):
@@ -263,7 +264,7 @@ class OpenSKInstaller(object):
     tock.open(args)
     try:
       tock.erase_apps(False)
-    except tockloader.exceptions.TockLoaderException as e:
+    except TockLoaderException as e:
       # Erasing apps is not critical
       info(("A non-critical error occured while erasing "
             "apps: {}".format(str(e))))

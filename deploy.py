@@ -19,12 +19,13 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import colorama
 import copy
 import os
 import shutil
 import subprocess
 import sys
+
+import colorama
 from tockloader.exceptions import TockLoaderException
 from tockloader import tab, tbfh, tockloader
 
@@ -77,6 +78,7 @@ def info(msg):
 
 class RemoveConstAction(argparse.Action):
 
+  #pylint: disable=W0622
   def __init__(self,
                option_strings,
                dest,
@@ -100,7 +102,7 @@ class RemoveConstAction(argparse.Action):
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L138-L147
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L1028-L1052
     items = getattr(namespace, self.dest, [])
-    if type(items) is list:
+    if isinstance(items, list):
       items = items[:]
     else:
       items = copy.copy(items)
@@ -109,7 +111,7 @@ class RemoveConstAction(argparse.Action):
     setattr(namespace, self.dest, items)
 
 
-class OpenSKInstaller(object):
+class OpenSKInstaller:
 
   def __init__(self, args):
     colorama.init()
@@ -170,7 +172,7 @@ class OpenSKInstaller(object):
         ["make", "-C", SUPPORTED_BOARDS[self.args.board], "flash"])
 
   def build_and_install_example(self):
-    assert (self.args.application)
+    assert self.args.application
     self.checked_command_output([
         "cargo", "build", "--release", "--target=thumbv7em-none-eabi",
         "--features={}".format(",".join(self.args.features)), "--example",
@@ -181,7 +183,7 @@ class OpenSKInstaller(object):
                      self.args.application))
 
   def build_and_install_opensk(self):
-    assert (self.args.application)
+    assert self.args.application
     info("Building OpenSK application")
     self.checked_command_output([
         "cargo",
@@ -204,7 +206,7 @@ class OpenSKInstaller(object):
              "key and/or certificate for OpenSK"))
 
   def install_elf_file(self, elf_path):
-    assert (self.args.application)
+    assert self.args.application
     package_parameter = "-n"
     elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
         ' ', maxsplit=1)[1]
@@ -306,6 +308,7 @@ class OpenSKInstaller(object):
       error(("It seems that something went wrong. "
              "App/example not found on your board."))
       return 1
+    return 0
 
 
 def main(args):
@@ -330,8 +333,8 @@ if __name__ == '__main__':
             "applications won't be erased from the board."),
   )
 
-  parser = argparse.ArgumentParser()
-  commands = parser.add_subparsers(
+  main_parser = argparse.ArgumentParser()
+  commands = main_parser.add_subparsers(
       dest="action",
       help=("Indicates which part of the firmware should be compiled and "
             "flashed to the connected board."))
@@ -390,14 +393,14 @@ if __name__ == '__main__':
             "(i.e. more debug messages will be sent over the console port "
             "such as hexdumps of packets)."),
   )
-  apps = app_commands.add_mutually_exclusive_group()
-  apps.add_argument(
+  apps_group = app_commands.add_mutually_exclusive_group()
+  apps_group.add_argument(
       "--opensk",
       dest="application",
       action="store_const",
       const="ctap2",
       help="Compiles and installs the OpenSK application.")
-  apps.add_argument(
+  apps_group.add_argument(
       "--crypto_bench",
       dest="application",
       action="store_const",
@@ -407,4 +410,4 @@ if __name__ == '__main__':
 
   app_commands.set_defaults(features=["with_ctap1"])
 
-  main(parser.parse_args())
+  main(main_parser.parse_args())

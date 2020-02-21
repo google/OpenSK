@@ -14,6 +14,9 @@
   "python.formatting.yapfArgs": [
     "--style=chromium"
   ],
+  "python.linting.enabled": true,
+  "python.linting.lintOnSave": true,
+  "python.linting.pylintEnabled": true,
   "[python]": {
     "editor.tabSize": 2
   },

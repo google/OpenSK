@@ -347,3 +347,19 @@ $ dmesg
 [XXX] usb A-BB: SerialNumber: v0.1
 [XXX] hid-generic 0000:0000:0000.0000: hiddev0,hidraw0: USB HID v1.10 Device [Nordic Semiconductor ASA OpenSK] on usb-0000:00:00.0-00/input0
 ```
+
+### Mac OS X
+
+If you have issues with the demo website, the following commands should help you
+understand whether OpenSK was installed properly.
+
+When plugging in the USB key, you should see a similar line by using the `ioreg`
+tool:
+
+```shell
+$ ioreg -P USB
++-o Root  <class IORegistryEntry, id 0x100000100, retain 21>
+...
+  +-o AppleUSBXHCI Root Hub Simulation@14000000  <class AppleUSBRootHubDevice, id 0x100000a00, registered, matched, active, busy 0 (0 ms), retain 9>
+    +-o OpenSK@14400000  <class AppleUSBDevice, id 0x100003c04, registered, matched, active, busy 0 (0 ms), retain 13>
+```

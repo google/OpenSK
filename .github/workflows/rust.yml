@@ -25,6 +25,7 @@ jobs:
 
   cargo_format_src:
     name: Cargo format src/
+    runs-on: ubuntu-latest
     needs: initial_setup
     steps:
       - uses: actions-rs/cargo@v1
@@ -33,6 +34,7 @@ jobs:
           args: --all -- --check
   cargo_format_cbor:
     name: Cargo format libraries/cbor
+    runs-on: ubuntu-latest
     needs: initial_setup
     steps:
       - run: cd libraries/crypto
@@ -42,6 +44,7 @@ jobs:
           args: --all -- --check
   cargo_format_crypto:
     name: Cargo format libraries/crypto
+    runs-on: ubuntu-latest
     needs: initial_setup
     steps:
       - run: cd libraries/crypto
@@ -51,6 +54,7 @@ jobs:
           args: --all -- --check
   cargo_check:
     name: Cargo Check
+    runs-on: ubuntu-latest
     needs: initial_setup
     steps:
       - name: Check OpenSK w/o features

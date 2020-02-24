@@ -43,7 +43,7 @@ This guide **does not** cover how to setup the JTAG probe on your system.
 In order to compile and flash a working OpenSK firmware, you will need the
 following:
 
-*   rustup (can be installed with https://rustup.rs/)
+*   rustup (can be installed with [Rustup](https://rustup.rs/))
 *   python3 and pip
 *   the OpenSSL command line tool
 
@@ -329,14 +329,16 @@ If you have issues with the demo website, the following commands should help you
 understand whether OpenSK was installed properly.
 
 When plugging in the USB key, the following line should appear in `lsusb`.
-```
+
+```shell
 $ lsusb
 ...
 Bus XXX Device YYY: ID 1915:521f Nordic Semiconductor ASA OpenSK
 ```
 
 You should also see lines similar to the following in `dmesg`.
-```
+
+```shell
 $ dmesg
 ...
 [XXX] usb A-BB: new full-speed USB device number 00 using xhci_hcd

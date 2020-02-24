@@ -1,0 +1,79 @@
+on:
+  push:
+    paths:
+      - 'examples/*.rs'
+      - 'libraries/**/*.rs'
+      - 'src/**/*.rs'
+      - 'patches/**'
+      - '**/Cargo.toml'
+      - '.cargo/config'
+      - '!third_party/**'
+
+jobs:
+  initial_setup:
+    name: Set up project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: thumbv7em-none-eabi
+          override: true
+      - run: ./setup.sh
+
+  cargo_format_src:
+    name: Cargo format src/
+    needs: initial_setup
+    steps:
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+  cargo_format_cbor:
+    name: Cargo format libraries/cbor
+    needs: initial_setup
+    steps:
+      - uses: actions-rs/cargo@v1
+        working-directory: libraries/cbor
+        with:
+          command: fmt
+          args: --all -- --check
+  cargo_format_crypto:
+    name: Cargo format libraries/crypto
+    needs: initial_setup
+    steps:
+      - uses: actions-rs/cargo@v1
+        working-directory: libraries/crypto
+        with:
+          command: fmt
+          args: --all -- --check
+  cargo_check:
+    name: Cargo Check
+    needs: initial_setup
+    steps:
+      - name: Check OpenSK w/o features
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release
+      - name: Check OpenSK with_ctap1
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features with_ctap1
+      - name: Check OpenSK debug_ctap
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_ctap
+      - name: Check OpenSK debug_ctap,with_ctap1
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1
+      - name: Check examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --examples

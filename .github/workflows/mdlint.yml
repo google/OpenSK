@@ -1,0 +1,18 @@
+name: markdownlint
+on:
+  push:
+    paths:
+      - '**/*.md'
+      - '.markdownlint.json'
+      - '!third_party/**'
+
+jobs:
+  pylint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: markdownlint-cli
+        uses: nosborn/github-action-markdown-cli@v1.1.1
+        with:
+          files: **/*.md
+          config_file: ".markdownlint.json"

@@ -15,6 +15,9 @@
 
 set -e
 
+# Ensure the script doesn't fail on Github workflows
+TERM=${TERM:-vt100}
+
 # Check that rustup and pip3 are installed
 check_command () {
   if ! which "$1" >/dev/null

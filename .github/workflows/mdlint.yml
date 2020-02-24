@@ -7,7 +7,7 @@ on: [push]
 #      - '!third_party/**'
 
 jobs:
-  pylint:
+  mdlint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2

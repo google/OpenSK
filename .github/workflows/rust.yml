@@ -1,3 +1,4 @@
+name: Cargo check
 on: [push]
 #  push:
 #    paths:
@@ -34,8 +35,8 @@ jobs:
     name: Cargo format libraries/cbor
     needs: initial_setup
     steps:
+      - runs: cd libraries/crypto
       - uses: actions-rs/cargo@v1
-        working-directory: libraries/cbor
         with:
           command: fmt
           args: --all -- --check
@@ -43,8 +44,8 @@ jobs:
     name: Cargo format libraries/crypto
     needs: initial_setup
     steps:
+      - runs: cd libraries/crypto
       - uses: actions-rs/cargo@v1
-        working-directory: libraries/crypto
         with:
           command: fmt
           args: --all -- --check

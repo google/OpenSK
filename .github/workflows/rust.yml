@@ -35,7 +35,7 @@ jobs:
     name: Cargo format libraries/cbor
     needs: initial_setup
     steps:
-      - runs: cd libraries/crypto
+      - run: cd libraries/crypto
       - uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -44,7 +44,7 @@ jobs:
     name: Cargo format libraries/crypto
     needs: initial_setup
     steps:
-      - runs: cd libraries/crypto
+      - run: cd libraries/crypto
       - uses: actions-rs/cargo@v1
         with:
           command: fmt

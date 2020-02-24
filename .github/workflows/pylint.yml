@@ -1,10 +1,10 @@
 name: pylint
-on:
-  push:
-    paths:
-      - '**/*.py'
-      - '.pylintrc'
-      - '!third_party/**'
+on: [push]
+#  push:
+#    paths:
+#      - '**/*.py'
+#      - '.pylintrc'
+#      - '!third_party/**'
 jobs:
   pylint:
     runs-on: ubuntu-latest

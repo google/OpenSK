@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Ensure the script doesn't fail on Github workflows
+export TERM=${TERM:-vt100}
+done_text="$(tput bold)DONE.$(tput sgr0)"
+
 set -e
 
 # Check that rustup and pip3 are installed
@@ -28,8 +32,6 @@ check_command pip3
 
 # Ensure the submodules are pulled and up-to-date
 git submodule update --init
-
-done_text="$(tput bold)DONE.$(tput sgr0)"
 
 patch_conflict_detected () {
   cat <<EOF

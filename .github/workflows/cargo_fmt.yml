@@ -1,0 +1,49 @@
+name: Cargo format
+on:
+  push:
+    paths:
+      - 'examples/*.rs'
+      - 'libraries/**/*.rs'
+      - 'src/**/*.rs'
+      - 'patches/**'
+      - '**/Cargo.toml'
+      - '.cargo/config'
+      - '!third_party/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  cargo_format:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: thumbv7em-none-eabi
+          override: true
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Cargo format src/
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Cargo format libraries/cbor
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path libraries/cbor/Cargo.toml --all -- --check
+
+      - name: Cargo format libraries/crypto
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path libraries/crypto/Cargo.toml --all -- --check

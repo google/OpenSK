@@ -1,0 +1,61 @@
+name: Cargo check
+on:
+  push:
+    paths:
+      - 'examples/*.rs'
+      - 'libraries/**/*.rs'
+      - 'src/**/*.rs'
+      - 'patches/**'
+      - '**/Cargo.toml'
+      - '.cargo/config'
+      - '!third_party/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  cargo_check:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: thumbv7em-none-eabi
+          override: true
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Check OpenSK w/o features
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release
+
+      - name: Check OpenSK with_ctap1
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features with_ctap1
+
+      - name: Check OpenSK debug_ctap
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_ctap
+
+      - name: Check OpenSK debug_ctap,with_ctap1
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1
+
+      - name: Check examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --examples

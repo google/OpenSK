@@ -1,6 +1,10 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
 [![Build Status](https://travis-ci.org/google/OpenSK.svg?branch=master)](https://travis-ci.org/google/OpenSK)
+![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=master)
+![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=master)
+![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=master)
+![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=master)
 
 ## OpenSK
 

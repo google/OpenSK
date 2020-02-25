@@ -5,6 +5,8 @@ on:
       - '**/*.py'
       - '.pylintrc'
       - '!third_party/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
 jobs:
   pylint:
     runs-on: ubuntu-latest

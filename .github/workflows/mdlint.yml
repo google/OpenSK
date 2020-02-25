@@ -5,6 +5,8 @@ on:
       - '**/*.md'
       - '.markdownlint.json'
       - '!third_party/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   mdlint:

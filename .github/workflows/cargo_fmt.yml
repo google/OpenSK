@@ -14,7 +14,7 @@ on:
 
 jobs:
   cargo_format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

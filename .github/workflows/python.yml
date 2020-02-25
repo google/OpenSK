@@ -9,7 +9,7 @@ on:
     types: [opened, synchronize, reopened]
 jobs:
   pylint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     strategy:
       matrix:
         python-version: [3.6, 3.7, 3.8]
@@ -26,4 +26,19 @@ jobs:
       - name: Test code with pylint
         run: |
           pip install pylint
-          pylint --rcfile=.pylintrc `find . -maxdepth 1 -type f -name '*.py'`
+          pylint --rcfile=.pylintrc --score=n `find . ! -path "./third_party/*" -type f -name '*.py'`
+
+  yapf:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python 3.7
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install yapf
+      - name: Test code formatting with yapf
+        run: yapf --style=chromium --recursive --exclude third_party --diff .

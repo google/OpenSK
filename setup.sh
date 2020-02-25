@@ -17,7 +17,7 @@
 export TERM=${TERM:-vt100}
 done_text="$(tput bold)DONE.$(tput sgr0)"
 
-set -ex
+set -e
 
 # Check that rustup and pip3 are installed
 check_command () {

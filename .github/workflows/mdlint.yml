@@ -1,10 +1,10 @@
 name: markdownlint
-on: [push]
-#  push:
-#    paths:
-#      - '**/*.md'
-#      - '.markdownlint.json'
-#      - '!third_party/**'
+on:
+  push:
+    paths:
+      - '**/*.md'
+      - '.markdownlint.json'
+      - '!third_party/**'
 
 jobs:
   mdlint:

@@ -1,0 +1,47 @@
+{
+    "problemMatcher": [
+        {
+            "owner": "yapf-diff",
+            "pattern": [
+                {
+                    "regexp": "^[+-]{3}\\s*([^\\s]*)\\s*\\((original|reformatted)\\)$",
+                    "file": 1
+                },
+                {
+                    "regexp": "^@@\\s*-(\\d+),(\\d+)\\s*\\+(\\d+),(\\d+)\\s*@@$",
+                    "line": 1,
+                    "column": 2
+                },
+                {
+                    "regexp": "^(\\s|\\+[^+]|\\-[^-]).*$",
+                    "loop": true,
+                    "message": 1
+                }
+            ]
+        },
+        {
+            "owner": "pylint",
+            "pattern": [
+                {
+                    "regexp": "^PYLINT:\\(.*)/.*$",
+                    "fromPath": 1
+                },
+                {
+                    "regexp": "^\\*{13}\\s*Module\\s+(.*)$",
+                    "file": 1
+                },
+                {
+                    "regexp": "^([CEFIRW]\\d{4}):\\s*(\\d+)\\s*:\\s*(.*)$",
+                    "code": 1,
+                    "line": 2,
+                    "message": 3
+                },
+                {
+                    "regexp": "^([^CEFIRW*]*)$",
+                    "message": 1,
+                    "loop": true
+                }
+            ]
+        }
+    ]
+}

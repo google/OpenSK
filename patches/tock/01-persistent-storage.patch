@@ -1,8 +1,8 @@
 diff --git a/boards/nordic/nrf52dk_base/src/lib.rs b/boards/nordic/nrf52dk_base/src/lib.rs
-index ddac9dbd..7e2a3298 100644
+index fe493727..105f7120 100644
 --- a/boards/nordic/nrf52dk_base/src/lib.rs
 +++ b/boards/nordic/nrf52dk_base/src/lib.rs
-@@ -105,6 +105,7 @@ pub struct Platform {
+@@ -104,6 +104,7 @@ pub struct Platform {
      // The nRF52dk does not have the flash chip on it, so we make this optional.
      nonvolatile_storage:
          Option<&'static capsules::nonvolatile_storage_driver::NonvolatileStorage<'static>>,
@@ -18,9 +18,9 @@ index ddac9dbd..7e2a3298 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -408,6 +410,14 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
-         None
-     };
+@@ -405,6 +407,14 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+     );
+     nrf52::acomp::ACOMP.set_client(analog_comparator);
  
 +    let nvmc = static_init!(
 +        nrf52::nvmc::SyscallDriver,
@@ -33,8 +33,8 @@ index ddac9dbd..7e2a3298 100644
      // Start all of the clocks. Low power operation will require a better
      // approach than this.
      nrf52::clock::CLOCK.low_stop();
-@@ -441,6 +451,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
-         alarm: alarm,
+@@ -439,6 +449,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+         analog_comparator: analog_comparator,
          nonvolatile_storage: nonvolatile_storage,
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
 +        nvmc: nvmc,
@@ -286,10 +286,10 @@ index 5abd2d84..5a726fdb 100644
 +    }
 +}
 diff --git a/kernel/src/callback.rs b/kernel/src/callback.rs
-index 95b25cc0..a7d8bc5c 100644
+index ece4a443..9a1afc84 100644
 --- a/kernel/src/callback.rs
 +++ b/kernel/src/callback.rs
-@@ -50,6 +50,31 @@ impl AppId {
+@@ -52,6 +52,31 @@ impl AppId {
              (start, end)
          })
      }

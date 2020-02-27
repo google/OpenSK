@@ -45,6 +45,6 @@ jobs:
           pip install yapf tockloader
       - name: Test code formatting with yapf
         run: |
-        ./setup.sh
-        echo ::add-matcher::./.github/python_matcher.json
-        yapf --style=chromium --recursive --exclude third_party --diff .
+          ./setup.sh
+          echo ::add-matcher::./.github/python_matcher.json
+          yapf --style=chromium --recursive --exclude third_party --diff .

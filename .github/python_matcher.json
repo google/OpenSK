@@ -23,7 +23,7 @@
             "owner": "pylint",
             "pattern": [
                 {
-                    "regexp": "^PYLINT:\\(.*)/.*$",
+                    "regexp": "^PYLINT:(.*)/.*$",
                     "fromPath": 1
                 },
                 {

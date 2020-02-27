@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import colorama
 import argparse
 import copy
 import os
@@ -25,14 +26,13 @@ import shutil
 import subprocess
 import sys
 
-import colorama
 from tockloader.exceptions import TockLoaderException
 from tockloader import tab, tbfh, tockloader
 
 # This structure allows us in the future to also support out-of-tree boards.
 SUPPORTED_BOARDS = {
     "nrf52840_dk": "third_party/tock/boards/nordic/nrf52840dk",
-    "nrf52840_dongle":"third_party/tock/boards/nordic/nrf52840_dongle"
+    "nrf52840_dongle": "third_party/tock/boards/nordic/nrf52840_dongle"
 }
 
 # The STACK_SIZE value below must match the one used in the linker script

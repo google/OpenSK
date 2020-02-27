@@ -1,8 +1,8 @@
 diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
-index 5a9da538..75043d13 100644
+index 9a8dccfd..ad3e69b8 100644
 --- a/boards/nordic/nrf52840_dongle/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle/src/main.rs
-@@ -140,6 +140,7 @@ pub unsafe fn reset_handler() {
+@@ -144,6 +144,7 @@ pub unsafe fn reset_handler() {
          FAULT_RESPONSE,
          nrf52840::uicr::Regulator0Output::V3_0,
          false,
@@ -11,10 +11,10 @@ index 5a9da538..75043d13 100644
      );
  }
 diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
-index 0b19ea3f..bd71dfbe 100644
+index 127c4f2f..a5847805 100644
 --- a/boards/nordic/nrf52840dk/src/main.rs
 +++ b/boards/nordic/nrf52840dk/src/main.rs
-@@ -252,6 +252,7 @@ pub unsafe fn reset_handler() {
+@@ -236,6 +236,7 @@ pub unsafe fn reset_handler() {
          FAULT_RESPONSE,
          nrf52840::uicr::Regulator0Output::DEFAULT,
          false,
@@ -23,10 +23,10 @@ index 0b19ea3f..bd71dfbe 100644
      );
  }
 diff --git a/boards/nordic/nrf52dk/src/main.rs b/boards/nordic/nrf52dk/src/main.rs
-index b49518ff..39f996c4 100644
+index d67ac695..b0bd8bf1 100644
 --- a/boards/nordic/nrf52dk/src/main.rs
 +++ b/boards/nordic/nrf52dk/src/main.rs
-@@ -209,6 +209,7 @@ pub unsafe fn reset_handler() {
+@@ -213,6 +213,7 @@ pub unsafe fn reset_handler() {
          FAULT_RESPONSE,
          nrf52832::uicr::Regulator0Output::DEFAULT,
          false,
@@ -35,10 +35,10 @@ index b49518ff..39f996c4 100644
      );
  }
 diff --git a/boards/nordic/nrf52dk_base/src/lib.rs b/boards/nordic/nrf52dk_base/src/lib.rs
-index 7e2a3298..d391e455 100644
+index 105f7120..535e5cd8 100644
 --- a/boards/nordic/nrf52dk_base/src/lib.rs
 +++ b/boards/nordic/nrf52dk_base/src/lib.rs
-@@ -102,6 +102,13 @@ pub struct Platform {
+@@ -101,6 +101,13 @@ pub struct Platform {
          'static,
          capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
      >,
@@ -70,7 +70,7 @@ index 7e2a3298..d391e455 100644
      chip: &'static nrf52::chip::NRF52<I>,
  ) {
      // Make non-volatile memory writable and activate the reset button
-@@ -418,6 +429,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -415,6 +426,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          )
      );
  
@@ -115,10 +115,10 @@ index 7e2a3298..d391e455 100644
      // Start all of the clocks. Low power operation will require a better
      // approach than this.
      nrf52::clock::CLOCK.low_stop();
-@@ -449,6 +498,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
-         rng: rng,
+@@ -447,6 +496,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          temp: temp,
          alarm: alarm,
+         analog_comparator: analog_comparator,
 +        usb: usb_driver,
          nonvolatile_storage: nonvolatile_storage,
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
@@ -967,15 +967,15 @@ index 8ddb5895..8c1992cc 100644
  
  fn status_epin(ep: usize) -> Field<u32, EndpointStatus::Register> {
 diff --git a/chips/nrf52840/src/lib.rs b/chips/nrf52840/src/lib.rs
-index 0c281276..7e9f7d1e 100644
+index 9d58a705..942d0288 100644
 --- a/chips/nrf52840/src/lib.rs
 +++ b/chips/nrf52840/src/lib.rs
 @@ -2,7 +2,7 @@
  
  pub use nrf52::{
-     adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nvmc, pinmux,
--    ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr,
-+    ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr, usbd,
+     acomp, adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nvmc,
+-    pinmux, ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr,
++    pinmux, ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr, usbd,
  };
  pub mod chip;
  pub mod gpio;

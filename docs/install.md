@@ -359,7 +359,7 @@ When plugging in the USB key, you should see a similar line by using the `ioreg`
 tool:
 
 ```shell
-$ ioreg -P USB
+$ ioreg -p IOUSB
 +-o Root  <class IORegistryEntry, id 0x100000100, retain 21>
 ...
   +-o AppleUSBXHCI Root Hub Simulation@14000000  <class AppleUSBRootHubDevice, id 0x100000a00, registered, matched, active, busy 0 (0 ms), retain 9>

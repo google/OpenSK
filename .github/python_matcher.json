@@ -35,11 +35,6 @@
                     "code": 1,
                     "line": 2,
                     "message": 3
-                },
-                {
-                    "regexp": "^([^CEFIRW*]*)$",
-                    "message": 1,
-                    "loop": true
                 }
             ]
         }

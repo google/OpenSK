@@ -32,7 +32,7 @@ from tockloader import tab, tbfh, tockloader
 # This structure allows us in the future to also support out-of-tree boards.
 SUPPORTED_BOARDS = {
     "nrf52840_dk": "third_party/tock/boards/nordic/nrf52840dk",
-    "nrf52840_dongle": "third_party/tock/boards/nordic/nrf52840_dongle"
+    "nrf52840_dongle":"third_party/tock/boards/nordic/nrf52840_dongle"
 }
 
 # The STACK_SIZE value below must match the one used in the linker script

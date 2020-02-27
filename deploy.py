@@ -18,7 +18,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import colorama
 import argparse
 import copy
 import os
@@ -26,6 +25,7 @@ import shutil
 import subprocess
 import sys
 
+import colorama
 from tockloader.exceptions import TockLoaderException
 from tockloader import tab, tbfh, tockloader
 

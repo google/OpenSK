@@ -26,7 +26,8 @@ jobs:
       - name: Test code with pylint
         run: |
           echo ::add-matcher::./.github/python_matcher.json
-          find . ! -path "./third_party/*" -type f -name '*.py' -exec echo PYLINT:\{\} \; -exec pylint --rcfile=.pylintrc --score=n \{\} \;
+          find . -type f -name '*.py' -exec echo PYLINT:\{\} \; -exec pylint --rcfile=.pylintrc --score=n \{\} \;
+#          find . ! -path "./third_party/*" -type f -name '*.py' -exec echo PYLINT:\{\} \; -exec pylint --rcfile=.pylintrc --score=n \{\} \;
 
   yapf:
     runs-on: ubuntu-18.04

@@ -2,8 +2,8 @@
 name: CBOR tests
 on:
   push:
-    paths:
-      - 'libraries/cbor/**/*'
+#    paths:
+#      - 'libraries/cbor/**/*'
   pull_request:
     types: [opened, synchronize, reopened]
 

@@ -2,8 +2,8 @@
 name: OpenSK tests
 on:
   push:
-    paths:
-      - 'src/**/*.rs'
+#    paths:
+#      - 'src/**/*.rs'
   pull_request:
     types: [opened, synchronize, reopened]
 

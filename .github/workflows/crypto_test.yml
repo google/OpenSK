@@ -1,5 +1,5 @@
 ---
-name: CBOR tests
+name: Crypto library tests
 on:
   push:
 #    paths:

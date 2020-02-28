@@ -2,8 +2,8 @@
 name: Crypto library tests
 on:
   push:
-#    paths:
-#      - 'libraries/crypto/**/*'
+    paths:
+      - 'libraries/crypto/**/*'
   pull_request:
     types: [opened, synchronize, reopened]
 

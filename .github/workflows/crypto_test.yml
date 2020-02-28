@@ -6,6 +6,8 @@ on:
       - 'libraries/crypto/**/*'
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - 'libraries/crypto/**/*'
 
 jobs:
   crypto_test:

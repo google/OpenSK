@@ -1,0 +1,50 @@
+---
+name: OpenSK tests
+on:
+  push:
+    paths:
+      - 'src/**/*.rs'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ctap2_test:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: thumbv7em-none-eabi
+          override: true
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Unit testing of CTAP2 (release mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --features std
+
+      - name: Unit testing of CTAP2 (debug mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features std
+
+      - name: Unit testing of CTAP2 (release mode + CTAP1)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features std,with_ctap1
+
+      - name: Unit testing of CTAP2 (debug mode + CTAP1)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features std,with_ctap1

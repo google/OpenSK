@@ -7,7 +7,10 @@ on:
 
 jobs:
   build_ctap2:
-    runs-on: ubuntu-18.04
+    strategy:
+      matriX:
+        os: [ubuntu-18.04, macos-10.15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

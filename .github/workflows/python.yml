@@ -26,7 +26,7 @@ jobs:
       - name: Register matcher
         run: echo ::add-matcher::./.github/python_matcher.json
       - name: Test code with pylint
-        runs: ./tools/run_pylint.sh
+        run: ./tools/run_pylint.sh
 
   yapf:
     runs-on: ubuntu-18.04

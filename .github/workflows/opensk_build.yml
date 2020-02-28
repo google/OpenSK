@@ -8,7 +8,7 @@ on:
 jobs:
   build_ctap2:
     strategy:
-      matriX:
+      matrix:
         os: [ubuntu-18.04, macos-10.15]
     runs-on: ${{ matrix.os }}
     steps:

@@ -12,9 +12,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
           target: thumbv7em-none-eabi
-          override: true
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7

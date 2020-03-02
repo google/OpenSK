@@ -35,9 +35,8 @@ fn main() {
 
     // Load the OpenSSL PEM ECC key
     let ecc_data = include_bytes!("crypto_data/opensk.key");
-    let pkey = ec::EcKey::private_key_from_pem(ecc_data)
-        .ok()
-        .expect("Failed to load OpenSK private key file");
+    let pkey =
+        ec::EcKey::private_key_from_pem(ecc_data).expect("Failed to load OpenSK private key file");
 
     // Check key validity
     pkey.check_key().unwrap();
@@ -70,9 +69,7 @@ fn main() {
 
     // Convert the PEM certificate to DER and extract the serial for AAGUID
     let input_pem_cert = include_bytes!("crypto_data/opensk_cert.pem");
-    let cert = x509::X509::from_pem(input_pem_cert)
-        .ok()
-        .expect("Failed to load OpenSK certificate");
+    let cert = x509::X509::from_pem(input_pem_cert).expect("Failed to load OpenSK certificate");
 
     // Do some sanity check on the certificate
     assert!(cert

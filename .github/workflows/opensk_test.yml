@@ -1,20 +1,17 @@
-name: Cargo format
+---
+name: OpenSK tests
 on:
   push:
     paths:
-      - 'examples/*.rs'
-      - 'libraries/**/*.rs'
       - 'src/**/*.rs'
-      - 'patches/**'
-      - '**/Cargo.toml'
-      - '.cargo/config'
-      - '!third_party/**'
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  cargo_format:
+  ctap2_test:
+    name: CTAP2 unit tests
     runs-on: ubuntu-18.04
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -28,20 +25,27 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
-      - name: Cargo format src/
+      - name: Unit testing of CTAP2 (release mode)
         uses: actions-rs/cargo@v1
         with:
-          command: fmt
-          args: --all -- --check
+          command: test
+          args: --release --features std
 
-      - name: Cargo format libraries/cbor
+      - name: Unit testing of CTAP2 (debug mode)
         uses: actions-rs/cargo@v1
         with:
-          command: fmt
-          args: --manifest-path libraries/cbor/Cargo.toml --all -- --check
+          command: test
+          args: --features std
 
-      - name: Cargo format libraries/crypto
+      - name: Unit testing of CTAP2 (release mode + CTAP1)
         uses: actions-rs/cargo@v1
         with:
-          command: fmt
-          args: --manifest-path libraries/crypto/Cargo.toml --all -- --check
+          command: test
+          args: --release --features std,with_ctap1
+
+      - name: Unit testing of CTAP2 (debug mode + CTAP1)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features std,with_ctap1
+

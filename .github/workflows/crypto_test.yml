@@ -1,0 +1,40 @@
+---
+name: Crypto library tests
+on:
+  push:
+    paths:
+      - 'libraries/crypto/**/*'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'libraries/crypto/**/*'
+
+jobs:
+  crypto_test:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - run: echo "::set-env name=RUSTFLAGS::-C target-feature=+aes"
+
+      - name: Unit testing of crypto library (release mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path libraries/crypto/Cargo.toml --release --features std,derive_debug
+
+      - name: Unit testing of crypto library (debug mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path libraries/crypto/Cargo.toml --features std,derive_debug

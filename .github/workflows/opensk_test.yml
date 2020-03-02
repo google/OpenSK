@@ -9,7 +9,12 @@ on:
 
 jobs:
   ctap2_test:
+    name: CTAP2 unit tests
     runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        cargo_features: [std std,with_ctap1]
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -27,22 +32,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --release --features std
+          args: --release --features ${{ cargo_features }}
 
       - name: Unit testing of CTAP2 (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features std
-
-      - name: Unit testing of CTAP2 (release mode + CTAP1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap1
-
-      - name: Unit testing of CTAP2 (debug mode + CTAP1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap1
+          args: --features ${{ cargo_features }}

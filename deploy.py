@@ -372,7 +372,7 @@ if __name__ == '__main__':
       const="debug_allocations",
       dest="features",
       help=("The console will be used to output allocator statistics every "
-            "yime an allocation/deallocation happens."),
+            "time an allocation/deallocation happens."),
   )
   app_commands.add_argument(
       "--no-u2f",

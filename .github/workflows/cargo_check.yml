@@ -46,11 +46,29 @@ jobs:
           command: check
           args: --target thumbv7em-none-eabi --release --features debug_ctap
 
+      - name: Check OpenSK panic_console
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features panic_console
+
+      - name: Check OpenSK debug_allocations
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_allocations
+
       - name: Check OpenSK debug_ctap,with_ctap1
         uses: actions-rs/cargo@v1
         with:
           command: check
           args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1
+
+      - name: Check OpenSK debug_ctap,with_ctap1,panic_console,debug_allocations
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1,panic_console,debug_allocations
 
       - name: Check examples
         uses: actions-rs/cargo@v1

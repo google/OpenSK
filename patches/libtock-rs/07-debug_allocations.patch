@@ -11,10 +11,10 @@ index 386a9ed..af3c5db 100644
  [dev-dependencies]
  corepack = { version = "0.4.0", default-features = false, features = ["alloc"] }
 diff --git a/src/entry_point.rs b/src/entry_point.rs
-index 2fe5c40..c978ee5 100644
+index 2fe5c40..545d163 100644
 --- a/src/entry_point.rs
 +++ b/src/entry_point.rs
-@@ -368,22 +368,77 @@ pub unsafe extern "C" fn rust_start(app_start: usize, stacktop: usize, app_heap_
+@@ -368,22 +368,82 @@ pub unsafe extern "C" fn rust_start(app_start: usize, stacktop: usize, app_heap_
      }
  }
  
@@ -33,6 +33,11 @@ index 2fe5c40..c978ee5 100644
  static mut HEAP: Heap = Heap::empty();
  
 -struct TockAllocator;
++// With the "debug_allocations" feature, we use `AtomicUsize` to store the
++// statistics because:
++// - it is `Sync`, so we can use it in a static object (the allocator),
++// - it implements interior mutability, so we can use it in the allocator
++//   methods (that take an immutable `&self` reference).
 +struct TockAllocator {
 +    #[cfg(feature = "debug_allocations")]
 +    count: AtomicUsize,

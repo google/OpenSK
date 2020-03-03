@@ -58,6 +58,12 @@ jobs:
           command: check
           args: --target thumbv7em-none-eabi --release --features debug_allocations
 
+      - name: Check OpenSK ram_storage
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features ram_storage
+
       - name: Check OpenSK debug_ctap,with_ctap1
         uses: actions-rs/cargo@v1
         with:

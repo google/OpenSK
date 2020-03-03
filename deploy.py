@@ -405,6 +405,14 @@ if __name__ == "__main__":
             "(i.e. more debug messages will be sent over the console port "
             "such as hexdumps of packets)."),
   )
+  app_commands.add_argument(
+      "--no-persistent-storage",
+      action="append_const",
+      const="ram_storage",
+      dest="features",
+      help=("Compiles and installs the OpenSK application without persistent "
+            "storage (i.e. unplugging the key will reset the key)."),
+  )
   apps_group = app_commands.add_mutually_exclusive_group()
   apps_group.add_argument(
       "--opensk",

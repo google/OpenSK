@@ -371,6 +371,14 @@ if __name__ == "__main__":
             "board."),
   )
   app_commands.add_argument(
+      "--debug-allocations",
+      action="append_const",
+      const="debug_allocations",
+      dest="features",
+      help=("The console will be used to output allocator statistics every "
+            "time an allocation/deallocation happens."),
+  )
+  app_commands.add_argument(
       "--no-u2f",
       action=RemoveConstAction,
       const="with_ctap1",

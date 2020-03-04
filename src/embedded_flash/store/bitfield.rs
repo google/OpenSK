@@ -55,6 +55,11 @@ impl ByteGap {
             bit + 8 * self.length
         }
     }
+
+    /// Returns the slice of `data` corresponding to the gap.
+    pub fn slice(self, data: &[u8]) -> &[u8] {
+        &data[self.start..self.start + self.length]
+    }
 }
 
 /// Returns whether a bit is set in a sequence of bits.

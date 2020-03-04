@@ -59,6 +59,14 @@ pub struct Format {
     /// - 1 for insert entries.
     replace_bit: usize,
 
+    /// Whether a user entry has sensitive data.
+    ///
+    /// When a user entry with sensitive data is deleted, the data is overwritten with zeroes.
+    ///
+    /// - 0 for sensitive data.
+    /// - 1 for non-sensitive data.
+    sensitive_bit: usize,
+
     /// The data length of a user entry.
     length_range: bitfield::BitRange,
 
@@ -138,8 +146,9 @@ impl Format {
         let deleted_bit = present_bit + 1;
         let internal_bit = deleted_bit + 1;
         let replace_bit = internal_bit + 1;
+        let sensitive_bit = replace_bit + 1;
         let length_range = bitfield::BitRange {
-            start: replace_bit + 1,
+            start: sensitive_bit + 1,
             length: byte_bits,
         };
         let tag_range = bitfield::BitRange {
@@ -182,6 +191,7 @@ impl Format {
             deleted_bit,
             internal_bit,
             replace_bit,
+            sensitive_bit,
             length_range,
             tag_range,
             replace_page_range,
@@ -196,10 +206,11 @@ impl Format {
         // Make sure all the following conditions hold:
         // - The page header is one word.
         // - The internal entry is one word.
-        // - The entry header fits in one word.
+        // - The entry header fits in one word (which is equivalent to the entry header size being
+        //   exactly one word for sensitive entries).
         if format.page_header_size() != word_size
             || format.internal_entry_size() != word_size
-            || format.header_size() > word_size
+            || format.header_size(true) != word_size
         {
             return None;
         }
@@ -220,28 +231,46 @@ impl Format {
     /// Returns the entry header length in bytes.
     ///
     /// This is the smallest number of bytes necessary to store all fields of the entry info up to
-    /// and including `length`.
-    pub fn header_size(&self) -> usize {
-        self.bits_to_bytes(self.length_range.end())
+    /// and including `length`. For sensitive entries, the result is word-aligned.
+    pub fn header_size(&self, sensitive: bool) -> usize {
+        let mut size = self.bits_to_bytes(self.length_range.end());
+        if sensitive {
+            // We need to align to the next word boundary so that wiping the user data will not
+            // count as a write to the header.
+            size = self.align_word(size);
+        }
+        size
+    }
+
+    /// Returns the entry header length in bytes.
+    ///
+    /// This is a convenience function for `header_size` above.
+    fn header_offset(&self, entry: &[u8]) -> usize {
+        self.header_size(self.is_sensitive(entry))
     }
 
     /// Returns the entry info length in bytes.
     ///
     /// This is the number of bytes necessary to store all fields of the entry info. This also
-    /// includes the internal padding to protect the `committed` bit from the `deleted` bit.
-    fn info_size(&self, is_replace: IsReplace) -> usize {
+    /// includes the internal padding to protect the `committed` bit from the `deleted` bit and to
+    /// protect the entry info from the user data for sensitive entries.
+    fn info_size(&self, is_replace: IsReplace, sensitive: bool) -> usize {
         let suffix_bits = 2; // committed + complete
         let info_bits = match is_replace {
             IsReplace::Replace => self.replace_byte_range.end() + suffix_bits,
             IsReplace::Insert => self.tag_range.end() + suffix_bits,
         };
-        let info_size = self.bits_to_bytes(info_bits);
+        let mut info_size = self.bits_to_bytes(info_bits);
         // If the suffix bits would end up in the header, we need to add one byte for them.
-        if info_size == self.header_size() {
-            info_size + 1
-        } else {
-            info_size
+        let header_size = self.header_size(sensitive);
+        if info_size <= header_size {
+            info_size = header_size + 1;
         }
+        // If the entry is sensitive, we need to align to the next word boundary.
+        if sensitive {
+            info_size = self.align_word(info_size);
+        }
+        info_size
     }
 
     /// Returns the length in bytes of an entry.
@@ -249,8 +278,8 @@ impl Format {
     /// This depends on the length of the user data and whether the entry replaces an old entry or
     /// is an insertion. This also includes the internal padding to protect the `committed` bit from
     /// the `deleted` bit.
-    pub fn entry_size(&self, is_replace: IsReplace, length: usize) -> usize {
-        let mut entry_size = length + self.info_size(is_replace);
+    pub fn entry_size(&self, is_replace: IsReplace, sensitive: bool, length: usize) -> usize {
+        let mut entry_size = length + self.info_size(is_replace, sensitive);
         let word_size = self.word_size;
         entry_size = self.align_word(entry_size);
         // The entry must be at least 2 words such that the `committed` and `deleted` bits are on
@@ -308,6 +337,14 @@ impl Format {
         bitfield::set_zero(self.replace_bit, header, bitfield::NO_GAP)
     }
 
+    pub fn is_sensitive(&self, header: &[u8]) -> bool {
+        bitfield::is_zero(self.sensitive_bit, header, bitfield::NO_GAP)
+    }
+
+    pub fn set_sensitive(&self, header: &mut [u8]) {
+        bitfield::set_zero(self.sensitive_bit, header, bitfield::NO_GAP)
+    }
+
     pub fn get_length(&self, header: &[u8]) -> usize {
         bitfield::get_range(self.length_range, header, bitfield::NO_GAP)
     }
@@ -317,16 +354,19 @@ impl Format {
     }
 
     pub fn get_data<'a>(&self, entry: &'a [u8]) -> &'a [u8] {
-        &entry[self.header_size()..][..self.get_length(entry)]
+        &entry[self.header_offset(entry)..][..self.get_length(entry)]
     }
 
     /// Returns the span of user data in an entry.
     ///
     /// The complement of this gap in the entry is exactly the entry info. The header is before the
     /// gap and the footer is after the gap.
-    fn entry_gap(&self, entry: &[u8]) -> bitfield::ByteGap {
-        let start = self.header_size();
-        let length = self.get_length(entry);
+    pub fn entry_gap(&self, entry: &[u8]) -> bitfield::ByteGap {
+        let start = self.header_offset(entry);
+        let mut length = self.get_length(entry);
+        if self.is_sensitive(entry) {
+            length = self.align_word(length);
+        }
         bitfield::ByteGap { start, length }
     }
 
@@ -406,16 +446,23 @@ impl Format {
 
     /// Builds an entry for replace or insert operations.
     pub fn build_entry(&self, replace: Option<Index>, user_entry: StoreEntry) -> Vec<u8> {
-        let StoreEntry { tag, data } = user_entry;
+        let StoreEntry {
+            tag,
+            data,
+            sensitive,
+        } = user_entry;
         let is_replace = match replace {
             None => IsReplace::Insert,
             Some(_) => IsReplace::Replace,
         };
-        let entry_len = self.entry_size(is_replace, data.len());
+        let entry_len = self.entry_size(is_replace, sensitive, data.len());
         let mut entry = Vec::with_capacity(entry_len);
         // Build the header.
-        entry.resize(self.header_size(), 0xff);
+        entry.resize(self.header_size(sensitive), 0xff);
         self.set_present(&mut entry[..]);
+        if sensitive {
+            self.set_sensitive(&mut entry[..]);
+        }
         self.set_length(&mut entry[..], data.len());
         // Add the data.
         entry.extend_from_slice(data);

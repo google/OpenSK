@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
+# pylint: disable=C0111
 
 from __future__ import absolute_import
 from __future__ import division
@@ -26,8 +27,10 @@ import subprocess
 import sys
 
 import colorama
+from tockloader import tab
+from tockloader import tbfh
+from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
-from tockloader import tab, tbfh, tockloader
 
 # This structure allows us in the future to also support out-of-tree boards.
 SUPPORTED_BOARDS = {
@@ -78,7 +81,7 @@ def info(msg):
 
 class RemoveConstAction(argparse.Action):
 
-  #pylint: disable=W0622
+  # pylint: disable=W0622
   def __init__(self,
                option_strings,
                dest,
@@ -155,7 +158,7 @@ class OpenSKInstaller:
       # associated to the version and split will only return 1 item.
       # To avoid failing later when accessing the date, we insert an
       # empty value.
-      target_toolchain.append('')
+      target_toolchain.append("")
     current_version = self.checked_command_output(["rustc", "--version"])
     if not all((target_toolchain[0] in current_version,
                 target_toolchain[1] in current_version)):
@@ -209,7 +212,7 @@ class OpenSKInstaller:
     assert self.args.application
     package_parameter = "-n"
     elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
-        ' ', maxsplit=1)[1]
+        " ", maxsplit=1)[1]
     # Starting from v0.5.0-dev the parameter changed.
     # Current pyblished crate is 0.4.0 but we don't want developers
     # running the HEAD from github to be stuck
@@ -232,7 +235,7 @@ class OpenSKInstaller:
     setattr(args, "erase", self.args.clear_apps)
     setattr(args, "make", False)
     setattr(args, "no_replace", False)
-    tock = tockloader.TockLoader(args)
+    tock = loader.TockLoader(args)
     tock.open(args)
     tabs = [tab.TAB(tab_filename)]
     try:
@@ -251,7 +254,7 @@ class OpenSKInstaller:
     info("Flashing padding application")
     args = copy.copy(self.tockloader_default_args)
     setattr(args, "address", 0x30000)
-    tock = tockloader.TockLoader(args)
+    tock = loader.TockLoader(args)
     tock.open(args)
     try:
       tock.flash_binary(padding, args.address)
@@ -262,7 +265,7 @@ class OpenSKInstaller:
     args = copy.copy(self.tockloader_default_args)
     setattr(args, "app_address", 0x40000)
     info("Erasing all installed applications")
-    tock = tockloader.TockLoader(args)
+    tock = loader.TockLoader(args)
     tock.open(args)
     try:
       tock.erase_apps(False)
@@ -271,9 +274,10 @@ class OpenSKInstaller:
       info(("A non-critical error occured while erasing "
             "apps: {}".format(str(e))))
 
+  # pylint: disable=W0212
   def verify_flashed_app(self, expected_app):
     args = copy.copy(self.tockloader_default_args)
-    tock = tockloader.TockLoader(args)
+    tock = loader.TockLoader(args)
     app_found = False
     with tock._start_communication_with_board():
       apps = [app.name for app in tock._extract_all_app_headers()]
@@ -322,7 +326,7 @@ def main(args):
   OpenSKInstaller(args).run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   shared_parser = argparse.ArgumentParser(add_help=False)
   shared_parser.add_argument(
       "--dont-clear-apps",

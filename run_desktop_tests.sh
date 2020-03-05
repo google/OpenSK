@@ -41,14 +41,8 @@ echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
 
 echo "Checking that supported boards build properly..."
-cd third_party/tock/boards
-cd nordic/nrf52840dk
-make
-cd ../..
-cd nordic/nrf52840_dongle
-make
-cd ../..
-cd ../../..
+make -C third_party/tock/boards/nordic/nrf52840dk
+make -C third_party/tock/boards/nordic/nrf52840_dongle
 
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then

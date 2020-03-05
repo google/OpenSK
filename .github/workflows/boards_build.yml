@@ -25,6 +25,6 @@ jobs:
         run: ./setup.sh
 
       - name: Building board nrf52840dk
-        run: cd third_party/tock/boards/nordic/nrf52840dk && make
+        run: make -C third_party/tock/boards/nordic/nrf52840dk
       - name: Building board nrf52840_dongle
-        run: cd third_party/tock/boards/nordic/nrf52840_dongle && make
+        run: make -C third_party/tock/boards/nordic/nrf52840_dongle

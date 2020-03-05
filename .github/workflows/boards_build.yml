@@ -2,6 +2,9 @@
 name: Build supported boards
 on:
   push:
+    paths:
+     - 'patches/tock/*'
+     - 'third_party/tock/**'
   pull_request:
     types: [opened, synchronize, reopened]
 

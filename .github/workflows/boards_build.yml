@@ -1,0 +1,30 @@
+---
+name: Build supported boards
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build_boards:
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-10.15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Building board nrf52840dk
+        run: cd third_party/tock/boards/nordic/nrf52840dk && make
+      - name: Building board nrf52840_dongle
+        run: cd third_party/tock/boards/nordic/nrf52840_dongle && make

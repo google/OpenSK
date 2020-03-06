@@ -3,11 +3,11 @@ name: Crypto library tests
 on:
   push:
     paths:
-      - 'libraries/crypto/**/*'
+      - 'libraries/crypto/**'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'libraries/crypto/**/*'
+      - 'libraries/crypto/**'
 
 jobs:
   crypto_test:

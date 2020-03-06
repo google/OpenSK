@@ -40,6 +40,10 @@ cargo check --release --target=thumbv7em-none-eabi --examples
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
 
+echo "Checking that supported boards build properly..."
+make -C third_party/tock/boards/nordic/nrf52840dk
+make -C third_party/tock/boards/nordic/nrf52840_dongle
+
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."

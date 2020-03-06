@@ -1,0 +1,35 @@
+---
+name: Build supported boards
+on:
+  push:
+    paths:
+     - 'patches/tock/*'
+     - 'third_party/tock/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build_boards:
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-10.15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+      - name: Create a long build directory
+        run: mkdir this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz && mv third_party this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/
+
+      - name: Building board nrf52840dk
+        run: make -C this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/third_party/tock/boards/nordic/nrf52840dk
+      - name: Building board nrf52840_dongle
+        run: make -C this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/third_party/tock/boards/nordic/nrf52840_dongle

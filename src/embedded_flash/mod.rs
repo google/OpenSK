@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "std")]
 mod buffer;
 mod storage;
 mod store;
 mod syscall;
 
-#[cfg(feature = "std")]
 pub use self::buffer::{BufferOptions, BufferStorage};
 pub use self::storage::{Index, Storage, StorageError, StorageResult};
 pub use self::store::{Store, StoreConfig, StoreEntry, StoreError, StoreIndex};

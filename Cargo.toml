@@ -23,6 +23,7 @@ debug_ctap = ["crypto/derive_debug"]
 with_ctap1 = ["crypto/with_ctap1"]
 panic_console = ["libtock/panic_console"]
 debug_allocations = ["libtock/debug_allocations"]
+ram_storage = []
 
 [dev-dependencies]
 elf2tab = "0.4.0"

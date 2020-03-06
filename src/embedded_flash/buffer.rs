@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{Index, Storage, StorageError, StorageResult};
+use alloc::boxed::Box;
 
 pub struct BufferStorage {
     storage: Box<[u8]>,
@@ -230,7 +231,7 @@ impl Snapshot {
 
     fn get(&mut self) -> Result<Box<[u8]>, usize> {
         let mut snapshot = Snapshot::Ready;
-        std::mem::swap(self, &mut snapshot);
+        core::mem::swap(self, &mut snapshot);
         match snapshot {
             Snapshot::Armed { delay } => Err(delay),
             Snapshot::Taken { storage } => Ok(storage),

@@ -21,9 +21,9 @@ use alloc::vec::Vec;
 use core::convert::TryInto;
 use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError, StoreIndex};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "ram_storage"))]
 type Storage = embedded_flash::BufferStorage;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "ram_storage")))]
 type Storage = embedded_flash::SyscallStorage;
 
 // Those constants may be modified before compilation to tune the behavior of the key.
@@ -44,6 +44,9 @@ type Storage = embedded_flash::SyscallStorage;
 // We have: I = ((P - 1) * 4092 - K * S) / 12 * C
 //
 // With P=20 and K=150, we have I > 2M which is enough for 500 increments per day for 10 years.
+#[cfg(feature = "ram_storage")]
+const NUM_PAGES: usize = 2;
+#[cfg(not(feature = "ram_storage"))]
 const NUM_PAGES: usize = 20;
 const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
 
@@ -130,10 +133,14 @@ pub struct PersistentStore {
     store: embedded_flash::Store<Storage, Config>,
 }
 
+#[cfg(feature = "ram_storage")]
+const PAGE_SIZE: usize = 0x100;
+#[cfg(not(feature = "ram_storage"))]
 const PAGE_SIZE: usize = 0x1000;
+
 const STORE_SIZE: usize = NUM_PAGES * PAGE_SIZE;
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "ram_storage")))]
 #[link_section = ".app_state"]
 static STORE: [u8; STORE_SIZE] = [0xff; STORE_SIZE];
 
@@ -144,9 +151,9 @@ impl PersistentStore {
     ///
     /// This should be at most one instance of persistent store per program lifetime.
     pub fn new(rng: &mut impl Rng256) -> PersistentStore {
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "ram_storage")))]
         let storage = PersistentStore::new_prod_storage();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ram_storage"))]
         let storage = PersistentStore::new_test_storage();
         let mut store = PersistentStore {
             store: embedded_flash::Store::new(storage, Config).unwrap(),
@@ -155,7 +162,7 @@ impl PersistentStore {
         store
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "ram_storage")))]
     fn new_prod_storage() -> Storage {
         let store = unsafe {
             // Safety: The store cannot alias because this function is called only once.
@@ -167,7 +174,7 @@ impl PersistentStore {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ram_storage"))]
     fn new_test_storage() -> Storage {
         let store = vec![0xff; STORE_SIZE].into_boxed_slice();
         let options = embedded_flash::BufferOptions {

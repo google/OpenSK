@@ -220,6 +220,78 @@ impl TryFrom<&cbor::Value> for Extensions {
     }
 }
 
+impl From<Extensions> for cbor::Value {
+    fn from(extensions: Extensions) -> Self {
+        cbor_map_btree!(extensions
+            .0
+            .iter()
+            .map(|(key, value)| (cbor_text!(key), value.clone()))
+            .collect())
+    }
+}
+
+impl Extensions {
+    #[cfg(test)]
+    pub fn new(extension_map: BTreeMap<String, cbor::Value>) -> Self {
+        Extensions(extension_map)
+    }
+
+    pub fn has_make_credential_hmac_secret(&self) -> Result<bool, Ctap2StatusCode> {
+        self.0
+            .get("hmac-secret")
+            .map(read_bool)
+            .unwrap_or(Ok(false))
+    }
+
+    pub fn get_assertion_hmac_secret(
+        &self,
+    ) -> Option<Result<GetAssertionHmacSecretInput, Ctap2StatusCode>> {
+        self.0
+            .get("hmac-secret")
+            .map(GetAssertionHmacSecretInput::try_from)
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct GetAssertionHmacSecretInput {
+    pub key_agreement: CoseKey,
+    pub salt_enc: Vec<u8>,
+    pub salt_auth: Vec<u8>,
+}
+
+impl TryFrom<&cbor::Value> for GetAssertionHmacSecretInput {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let input_map = read_map(cbor_value)?;
+        let cose_key = read_map(ok_or_missing(input_map.get(&cbor_unsigned!(1)))?)?;
+        let salt_enc = read_byte_string(ok_or_missing(input_map.get(&cbor_unsigned!(2)))?)?;
+        let salt_auth = read_byte_string(ok_or_missing(input_map.get(&cbor_unsigned!(3)))?)?;
+        Ok(Self {
+            key_agreement: CoseKey(cose_key.clone()),
+            salt_enc,
+            salt_auth,
+        })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct GetAssertionHmacSecretOutput(Vec<u8>);
+
+impl From<GetAssertionHmacSecretOutput> for cbor::Value {
+    fn from(message: GetAssertionHmacSecretOutput) -> cbor::Value {
+        cbor_bytes!(message.0)
+    }
+}
+
+impl TryFrom<&cbor::Value> for GetAssertionHmacSecretOutput {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        Ok(GetAssertionHmacSecretOutput(read_byte_string(cbor_value)?))
+    }
+}
+
 // Even though options are optional, we can use the default if not present.
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct MakeCredentialOptions {
@@ -314,6 +386,7 @@ pub struct PublicKeyCredentialSource {
     pub rp_id: String,
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub other_ui: Option<String>,
+    pub cred_random: Option<Vec<u8>>,
 }
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
@@ -324,12 +397,17 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             None => cbor_null!(),
             Some(other_ui) => cbor_text!(other_ui),
         };
+        let cred_random = match credential.cred_random {
+            None => cbor_null!(),
+            Some(cred_random) => cbor_bytes!(cred_random),
+        };
         cbor_array! {
             credential.credential_id,
             private_key,
             credential.rp_id,
             credential.user_handle,
             other_ui,
+            cred_random,
         }
     }
 }
@@ -341,7 +419,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         use cbor::{SimpleValue, Value};
 
         let fields = read_array(&cbor_value)?;
-        if fields.len() != 5 {
+        if fields.len() != 6 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let credential_id = read_byte_string(&fields[0])?;
@@ -357,6 +435,10 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             Value::Simple(SimpleValue::NullValue) => None,
             cbor_value => Some(read_text_string(cbor_value)?),
         };
+        let cred_random = match &fields[5] {
+            Value::Simple(SimpleValue::NullValue) => None,
+            cbor_value => Some(read_byte_string(cbor_value)?),
+        };
         Ok(PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
@@ -364,6 +446,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             rp_id,
             user_handle,
             other_ui,
+            cred_random,
         })
     }
 }
@@ -993,6 +1076,7 @@ mod test {
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             other_ui: None,
+            cred_random: None,
         };
 
         assert_eq!(
@@ -1002,6 +1086,16 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             other_ui: Some("other".to_string()),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            cred_random: Some([0x00; 32].to_vec()),
             ..credential
         };
 

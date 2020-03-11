@@ -19,8 +19,9 @@ successfully tested on the following boards:
 
 ## Disclaimer
 
-This project is proof-of-concept and a research platform. It's still under
-development and as such comes with a few limitations:
+This project is **proof-of-concept and a research platform**. It is **NOT**
+meant for a day to day usage. It's still under development and as such comes
+with a few limitations:
 
 ### FIDO2
 
@@ -53,25 +54,17 @@ For a more detailed guide, please refer to our
     ./setup.sh
     ```
 
-2.  If Tock OS is already installed on your board, move to the next step.
-    Otherwise, just run one of the following commands, depending on the board
-    you have:
+2.  Next step is to install Tock OS as well as the OpenSK application on your
+    board (**Warning**: it will erase the locally stored credentials). Run:
 
     ```shell
     # Nordic nRF52840-DK board
-    ./deploy.py os --board=nrf52840_dk
+    ./deploy.py --board=nrf52840dk --opensk
     # Nordic nRF52840-Dongle
-    ./deploy.py os --board=nrf52840_dongle
+    ./deploy.py --board=nrf52840_dongle --opensk
     ```
 
-3.  Next step is to install/update the OpenSK application on your board
-    (**Warning**: it will erase the locally stored credentials). Run:
-
-    ```shell
-    ./deploy.py app --opensk
-    ```
-
-4.  On Linux, you may want to avoid the need for `root` privileges to interact
+3.  On Linux, you may want to avoid the need for `root` privileges to interact
     with the key. For that purpose we provide a udev rule file that can be
     installed with the following command:
 

@@ -298,58 +298,12 @@ class OpenSKInstaller:
       self.checked_command_output(["rustup", "target", "add", arch])
     info("Rust toolchain up-to-date")
 
-  def search_binary(self, name, start_directory="."):
-    for root, _, files in os.walk(start_directory):
-      for fname in files:
-        if fname == name:
-          return os.path.join(root, fname)
-    return None
-
   def build_tockos(self):
     info("Building Tock OS for board {}".format(self.args.board))
     props = SUPPORTED_BOARDS[self.args.board]
     out_directory = os.path.join(props.path, "target", props.arch, "release")
     os.makedirs(out_directory, exist_ok=True)
-    rust_flags = [
-        "-C",
-        "link-arg=-Tlayout.ld",
-        "-C",
-        "linker=rust-lld",
-        "-C",
-        "linker-flavor=ld.lld",
-        "-C",
-        "relocation-model=dynamic-no-pic",
-        "-C",
-        "link-arg=-zmax-page-size=512",
-        "--remap-path-prefix={}=".format(os.path.realpath(props.path)),
-    ]
-    env = os.environ.copy()
-    env["RUSTFLAGS"] = " ".join(rust_flags)
-    self.checked_command_output(
-        ["cargo", "build", "--release", "--target={}".format(props.arch)],
-        env=env,
-        cwd=props.path)
-    info("Converting Tock OS file into a binary")
-    kernel_name = os.path.basename(props.path)
-    shutil.copyfile(
-        os.path.join(out_directory, kernel_name),
-        os.path.join(out_directory, "{}.elf".format(kernel_name)))
-    # Find appropriate llvm-objcopy
-    llvm_dir = self.checked_command_output(["rustc", "--print=sysroot"],
-                                           cwd=props.path).strip()
-    if not llvm_dir:
-      fatal("Couldn't determine where rustc is installed. "
-            "This shouldn't happen.")
-    if not os.path.isdir(llvm_dir):
-      fatal("Something went wrong while locating llvm-objcopy.")
-    objcopy = self.search_binary("llvm-objcopy", start_directory=llvm_dir)
-    if not objcopy:
-      fatal("Couldn't locate llvm-objcopy binary in your system.")
-    self.checked_command_output([
-        objcopy, "--output-target=binary",
-        os.path.join(out_directory, "{}.elf".format(kernel_name)),
-        os.path.join(out_directory, "{}.bin".format(kernel_name))
-    ])
+    self.checked_command_output(["make"], cwd=props.path)
 
   def build_example(self):
     info("Building example {}".format(self.args.application))

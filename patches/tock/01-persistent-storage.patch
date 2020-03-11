@@ -286,10 +286,10 @@ index 5abd2d84..5a726fdb 100644
 +    }
 +}
 diff --git a/kernel/src/callback.rs b/kernel/src/callback.rs
-index ece4a443..9a1afc84 100644
+index c812e0bf..bd1613b3 100644
 --- a/kernel/src/callback.rs
 +++ b/kernel/src/callback.rs
-@@ -52,6 +52,31 @@ impl AppId {
+@@ -130,6 +130,31 @@ impl AppId {
              (start, end)
          })
      }

@@ -20,8 +20,8 @@ successfully tested on the following boards:
 ## Disclaimer
 
 This project is **proof-of-concept and a research platform**. It is **NOT**
-meant for a day to day usage. It's still under development and as such comes
-with a few limitations:
+meant for a daily usage. It's still under development and as such comes with a
+few limitations:
 
 ### FIDO2
 

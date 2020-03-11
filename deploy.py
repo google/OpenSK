@@ -516,6 +516,7 @@ class OpenSKInstaller:
 
   def create_hex_file(self, dest_file):
     # We produce an intelhex file with everything in it
+    # https://en.wikipedia.org/wiki/Intel_HEX
     # pylint: disable=g-import-not-at-top,import-outside-toplevel
     import intelhex
     board_props = SUPPORTED_BOARDS[self.args.board]

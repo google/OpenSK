@@ -28,6 +28,7 @@ import subprocess
 import sys
 
 import colorama
+from six.moves import input
 from tockloader import tab
 from tockloader import tbfh
 from tockloader import tockloader as loader
@@ -292,7 +293,7 @@ class OpenSKInstaller:
       # Need to update
       self.checked_command_output(
           ["rustup", "install", target_toolchain_fullstring])
-    targets = set([x.arch for _, x in SUPPORTED_BOARDS.items()])
+    targets = {x.arch for x in SUPPORTED_BOARDS.values()}
     for arch in targets:
       self.checked_command_output(["rustup", "target", "add", arch])
     info("Rust toolchain up-to-date")

@@ -124,11 +124,11 @@ index 105f7120..535e5cd8 100644
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
          nvmc: nvmc,
 diff --git a/capsules/src/driver.rs b/capsules/src/driver.rs
-index 9305e6a7..40466f44 100644
+index bfc06429..5858d352 100644
 --- a/capsules/src/driver.rs
 +++ b/capsules/src/driver.rs
-@@ -24,6 +24,7 @@ pub enum NUM {
-     Spi                   = 0x20001,
+@@ -25,6 +25,7 @@ pub enum NUM {
+     I2cMaster             = 0x20003,
      UsbUser               = 0x20005,
      I2cMasterSlave        = 0x20006,
 +    UsbCtap               = 0x20009,
@@ -509,10 +509,10 @@ index 00000000..da3d16d8
 +}
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
 new file mode 100644
-index 00000000..fdf7263a
+index 00000000..4b1916cf
 --- /dev/null
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,359 @@
 +//! A USB HID client of the USB hardware interface
 +
 +use super::descriptors::Buffer64;
@@ -603,8 +603,9 @@ index 00000000..fdf7263a
 +pub struct ClientCtapHID<'a, 'b, C: 'a> {
 +    client_ctrl: ClientCtrl<'a, 'static, C>,
 +
-+    // A 64-byte buffer for the endpoint
-+    buffer: Buffer64,
++    // 64-byte buffers for the endpoint
++    in_buffer: Buffer64,
++    out_buffer: Buffer64,
 +
 +    // Interaction with the client
 +    client: OptionalCell<&'b dyn CtapUsbClient>,
@@ -648,7 +649,8 @@ index 00000000..fdf7263a
 +                LANGUAGES,
 +                STRINGS,
 +            ),
-+            buffer: Default::default(),
++            in_buffer: Default::default(),
++            out_buffer: Default::default(),
 +            client: OptionalCell::empty(),
 +            tx_packet: OptionalCell::empty(),
 +            pending_in: Cell::new(false),
@@ -702,7 +704,7 @@ index 00000000..fdf7263a
 +    fn send_packet_to_client(&'a self) -> bool {
 +        // Copy the packet into a buffer to send to the client.
 +        let mut buf: [u8; 64] = [0; 64];
-+        for (i, x) in self.buffer.buf.iter().enumerate() {
++        for (i, x) in self.out_buffer.buf.iter().enumerate() {
 +            buf[i] = x.get();
 +        }
 +
@@ -735,11 +737,7 @@ index 00000000..fdf7263a
 +
 +    fn cancel_in_transaction(&'a self) -> bool {
 +        self.tx_packet.take();
-+        let result = self.pending_in.take();
-+        if result {
-+            self.controller().endpoint_cancel_in(1);
-+        }
-+        result
++        self.pending_in.take()
 +    }
 +
 +    fn cancel_out_transaction(&'a self) -> bool {
@@ -758,7 +756,10 @@ index 00000000..fdf7263a
 +        self.client_ctrl.enable();
 +
 +        // Set up the interrupt in-out endpoint
-+        self.controller().endpoint_set_buffer(1, &self.buffer.buf);
++        self.controller()
++            .endpoint_set_in_buffer(1, &self.in_buffer.buf);
++        self.controller()
++            .endpoint_set_out_buffer(1, &self.out_buffer.buf);
 +        self.controller()
 +            .endpoint_in_out_enable(TransferType::Interrupt, 1);
 +    }
@@ -808,7 +809,7 @@ index 00000000..fdf7263a
 +                }
 +
 +                if let Some(packet) = self.tx_packet.take() {
-+                    let buf = &self.buffer.buf;
++                    let buf = &self.in_buffer.buf;
 +                    for i in 0..64 {
 +                        buf[i].set(packet[i]);
 +                    }
@@ -861,149 +862,13 @@ index 00000000..fdf7263a
 +            panic!("Unexpected tx_packet while a packet was being transmitted.");
 +        }
 +        self.pending_in.set(false);
++
++        // Clear any pending packet on the receiving side.
++        // It's up to the client to handle the transmitted packet and decide if they want to
++        // receive another packet.
++        self.cancel_out_transaction();
++
 +        // Notify the client
 +        self.client.map(|client| client.packet_transmitted());
 +    }
 +}
-diff --git a/chips/nrf52/src/usbd.rs b/chips/nrf52/src/usbd.rs
-index 8ddb5895..8c1992cc 100644
---- a/chips/nrf52/src/usbd.rs
-+++ b/chips/nrf52/src/usbd.rs
-@@ -1499,7 +1499,23 @@ impl<'a> Usbd<'a> {
-             if epdatastatus.is_set(status_epin(endpoint)) {
-                 let (transfer_type, direction, state) =
-                     self.descriptors[endpoint].state.get().bulk_state();
--                assert_eq!(state, BulkState::InData);
-+                match state {
-+                    BulkState::InData => {
-+                        // Totally expected state. Nothing to do.
-+                    }
-+                    BulkState::Init => {
-+                        internal_warn!(
-+                            "Received a stale epdata IN in an unexpected state: {:?}",
-+                            state
-+                        );
-+                    }
-+                    BulkState::OutDelay
-+                    | BulkState::OutData
-+                    | BulkState::OutDma
-+                    | BulkState::InDma => {
-+                        internal_err!("Unexpected state: {:?}", state);
-+                    }
-+                }
-                 self.descriptors[endpoint].state.set(EndpointState::Bulk(
-                     transfer_type,
-                     direction,
-@@ -1677,7 +1693,7 @@ impl<'a> Usbd<'a> {
-     }
- 
-     fn transmit_in(&self, endpoint: usize) {
--        debug_info!("transmit_in({})", endpoint);
-+        debug_events!("transmit_in({})", endpoint);
-         let regs = &*self.registers;
- 
-         self.client.map(|client| {
-@@ -1717,7 +1733,7 @@ impl<'a> Usbd<'a> {
-     }
- 
-     fn transmit_out(&self, endpoint: usize) {
--        debug_info!("transmit_out({})", endpoint);
-+        debug_events!("transmit_out({})", endpoint);
- 
-         let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
-         // Starting the DMA can only happen in the OutData state, i.e. after an EPDATA event.
-@@ -1882,11 +1898,13 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
-     }
- 
-     fn endpoint_resume_in(&self, endpoint: usize) {
-+        debug_events!("endpoint_resume_in({})", endpoint);
-+
-         let (_, direction, _) = self.descriptors[endpoint].state.get().bulk_state();
-         assert!(direction.has_in());
- 
-         if self.dma_pending.get() {
--            debug_info!("requesting resume_in[{}]", endpoint);
-+            debug_events!("requesting resume_in[{}]", endpoint);
-             // A DMA is already pending. Schedule the resume for later.
-             self.descriptors[endpoint].request_transmit_in.set(true);
-         } else {
-@@ -1896,6 +1914,8 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
-     }
- 
-     fn endpoint_resume_out(&self, endpoint: usize) {
-+        debug_events!("endpoint_resume_out({})", endpoint);
-+
-         let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
-         assert!(direction.has_out());
- 
-@@ -1914,7 +1934,7 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
-                 // happened in the meantime. This pending transaction will now
-                 // continue in transmit_out().
-                 if self.dma_pending.get() {
--                    debug_info!("requesting resume_out[{}]", endpoint);
-+                    debug_events!("requesting resume_out[{}]", endpoint);
-                     // A DMA is already pending. Schedule the resume for later.
-                     self.descriptors[endpoint].request_transmit_out.set(true);
-                 } else {
-@@ -1927,6 +1947,20 @@ impl<'a> hil::usb::UsbController<'a> for Usbd<'a> {
-             }
-         }
-     }
-+
-+    fn endpoint_cancel_in(&self, endpoint: usize) {
-+        debug_events!("endpoint_cancel_in({})", endpoint);
-+
-+        let (transfer_type, direction, state) = self.descriptors[endpoint].state.get().bulk_state();
-+        assert!(direction.has_in());
-+        assert_eq!(state, BulkState::InData);
-+
-+        self.descriptors[endpoint].state.set(EndpointState::Bulk(
-+            transfer_type,
-+            direction,
-+            BulkState::Init,
-+        ));
-+    }
- }
- 
- fn status_epin(ep: usize) -> Field<u32, EndpointStatus::Register> {
-diff --git a/chips/nrf52840/src/lib.rs b/chips/nrf52840/src/lib.rs
-index 9d58a705..942d0288 100644
---- a/chips/nrf52840/src/lib.rs
-+++ b/chips/nrf52840/src/lib.rs
-@@ -2,7 +2,7 @@
- 
- pub use nrf52::{
-     acomp, adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nvmc,
--    pinmux, ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr,
-+    pinmux, ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr, usbd,
- };
- pub mod chip;
- pub mod gpio;
-diff --git a/chips/sam4l/src/usbc/mod.rs b/chips/sam4l/src/usbc/mod.rs
-index 35f3bb7c..28a0b9f9 100644
---- a/chips/sam4l/src/usbc/mod.rs
-+++ b/chips/sam4l/src/usbc/mod.rs
-@@ -1547,6 +1547,10 @@ impl hil::usb::UsbController<'a> for Usbc<'a> {
-         requests.resume_out = true;
-         self.requests[endpoint].set(requests);
-     }
-+
-+    fn endpoint_cancel_in(&self, _endpoint: usize) {
-+        unimplemented!()
-+    }
- }
- 
- /// Static state to manage the USBC
-diff --git a/kernel/src/hil/usb.rs b/kernel/src/hil/usb.rs
-index 846f5e93..64610fa5 100644
---- a/kernel/src/hil/usb.rs
-+++ b/kernel/src/hil/usb.rs
-@@ -27,6 +27,8 @@ pub trait UsbController<'a> {
-     fn endpoint_resume_in(&self, endpoint: usize);
- 
-     fn endpoint_resume_out(&self, endpoint: usize);
-+
-+    fn endpoint_cancel_in(&self, endpoint: usize);
- }
- 
- #[derive(Clone, Copy, Debug)]

@@ -547,6 +547,10 @@ class OpenSKInstaller:
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
+    if not self.args.tockos and not self.args.application:
+      info("Nothing to do.")
+      return 0
+
     # Compile what needs to be compiled
     if self.args.tockos:
       self.build_tockos()

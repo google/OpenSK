@@ -485,25 +485,26 @@ class OpenSKInstaller:
         kern_hex.frombytes(kernel.read(), offset=board_props.kernel_address)
         final_hex.merge(kern_hex, overlap="error")
 
-    # Add padding
-    if board_props.padding_address:
-      padding_hex = intelhex.IntelHex()
-      padding_hex.frombytes(
-          self.get_padding(), offset=board_props.padding_address)
-      final_hex.merge(padding_hex, overlap="error")
+    if self.args.application:
+      # Add padding
+      if board_props.padding_address:
+        padding_hex = intelhex.IntelHex()
+        padding_hex.frombytes(
+            self.get_padding(), offset=board_props.padding_address)
+        final_hex.merge(padding_hex, overlap="error")
 
-    # Now we can add the application from the TAB file
-    app_tab_path = "target/tab/{}.tab".format(self.args.application)
-    assert os.path.exists(app_tab_path)
-    app_tab = tab.TAB(app_tab_path)
-    if board_props.arch not in app_tab.get_supported_architectures():
-      fatal(("It seems that the TAB file was not produced for the "
-             "architecture {}".format(board_props.arch)))
-    app_hex = intelhex.IntelHex()
-    app_hex.frombytes(
-        app_tab.extract_app(board_props.arch).get_binary(),
-        offset=board_props.app_address)
-    final_hex.merge(app_hex)
+      # Now we can add the application from the TAB file
+      app_tab_path = "target/tab/{}.tab".format(self.args.application)
+      assert os.path.exists(app_tab_path)
+      app_tab = tab.TAB(app_tab_path)
+      if board_props.arch not in app_tab.get_supported_architectures():
+        fatal(("It seems that the TAB file was not produced for the "
+               "architecture {}".format(board_props.arch)))
+      app_hex = intelhex.IntelHex()
+      app_hex.frombytes(
+          app_tab.extract_app(board_props.arch).get_binary(),
+          offset=board_props.app_address)
+      final_hex.merge(app_hex)
     info("Generating all-merged HEX file: {}".format(dest_file))
     final_hex.tofile(dest_file, format="hex")
 
@@ -546,9 +547,6 @@ class OpenSKInstaller:
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
-    if self.args.application is None:
-      fatal("Please specify an application to be flashed")
-
     # Compile what needs to be compiled
     if self.args.tockos:
       self.build_tockos()
@@ -556,6 +554,8 @@ class OpenSKInstaller:
     if self.args.application == "ctap2":
       self.generate_crypto_materials(self.args.regenerate_keys)
       self.build_opensk()
+    elif self.args.application is None:
+      info("No application selected.")
     else:
       self.build_example()
 
@@ -568,16 +568,19 @@ class OpenSKInstaller:
       if self.args.tockos:
         # Install Tock OS
         self.install_tock_os()
-      # Install padding and application
-      self.install_padding()
-      self.install_tab_file("target/tab/{}.tab".format(self.args.application))
-      if self.verify_flashed_app(self.args.application):
-        info("You're all set!")
-        return 0
-      error(("It seems that something went wrong. App/example not found "
+      # Install padding and application if needed
+      if self.args.application:
+        self.install_padding()
+        self.install_tab_file("target/tab/{}.tab".format(self.args.application))
+        if self.verify_flashed_app(self.args.application):
+          info("You're all set!")
+          return 0
+        error(
+            ("It seems that something went wrong. App/example not found "
              "on your board. Ensure the connections between the programmer and "
              "the board are correct."))
-      return 1
+        return 1
+      return 0
 
     if self.args.programmer in ("pyocd", "nordicdfu", "none"):
       dest_file = "target/{}_merged.hex".format(self.args.board)
@@ -734,7 +737,14 @@ if __name__ == "__main__":
             "storage (i.e. unplugging the key will reset the key)."),
   )
 
-  apps_group = main_parser.add_mutually_exclusive_group()
+  apps_group = main_parser.add_mutually_exclusive_group(required=True)
+  apps_group.add_argument(
+      "--no-app",
+      dest="application",
+      action="store_const",
+      const=None,
+      help=("Doesn't compile nor install any application. Useful when you only "
+            "want to update Tock OS kernel."))
   apps_group.add_argument(
       "--opensk",
       dest="application",

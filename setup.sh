@@ -81,7 +81,7 @@ source tools/gen_key_materials.sh
 generate_crypto_materials N
 
 rustup install $(head -n 1 rust-toolchain)
-pip3 install --user --upgrade tockloader
+pip3 install --user --upgrade tockloader six intelhex
 rustup target add thumbv7em-none-eabi
 
 # Install dependency to create applications.

@@ -48,6 +48,10 @@ echo "Checking that supported boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk
 make -C third_party/tock/boards/nordic/nrf52840_dongle
 
+echo "Checking that other boards build properly..."
+make -C boards/nrf52840_dongle_dfu
+make -C boards/nrf52840_mdk_dfu
+
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."

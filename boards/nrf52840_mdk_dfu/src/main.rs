@@ -76,7 +76,7 @@ pub unsafe fn reset_handler() {
     let button = components::button::ButtonComponent::new(board_kernel).finalize(
         components::button_component_helper!((
             &nrf52840::gpio::PORT[BUTTON_PIN],
-            kernel::hil::ActivationMode::ActiveLow,
+            kernel::hil::gpio::ActivationMode::ActiveLow,
             kernel::hil::gpio::FloatingState::PullUp
         )),
     );

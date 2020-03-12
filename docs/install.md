@@ -16,8 +16,9 @@ You will need one the following supported boards:
     scenarios as the JTAG probe is already on the board.
 *   [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
     to have a more practical form factor.
+*   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
 
-In the case of the Nordic USB dongle, you will also need the following extra
+In the case of the Nordic USB dongle, you may also need the following extra
 hardware:
 
 *   a [Segger J-Link](https://www.segger.com/products/debug-probes/j-link/) JTAG
@@ -30,13 +31,18 @@ hardware:
     [Tag-Connect TC2050 retainer clip](http://www.tag-connect.com/TC2050-CLIP)
     to keep the spring loaded connector pressed to the PCB.
 
-Although [OpenOCD](http://openocd.org/) should be supported we encountered some
-issues while trying to flash a firmware with it. Therefore we suggest at the
-moment to use a
-[Segger J-Link](https://www.segger.com/products/debug-probes/j-link/) probe
-instead.
+Additionnaly, OpenSK supports other ways to flash your board:
 
-This guide **does not** cover how to setup the JTAG probe on your system.
+*   [OpenOCD](http://openocd.org/).
+*   [Segger J-Link](https://www.segger.com/products/debug-probes/j-link/)
+    (default method).
+*   [pyOCD](https://pypi.org/project/pyocd/).
+*   [nrfutil](https://pypi.org/project/nrfutil/) for the USB dongle boards that
+    supports it, which allows you to directly flash a working board over USB
+    without additional hardware.
+
+This guide **does not** cover how to setup the JTAG probe and their related
+tools on your system.
 
 ### Software
 
@@ -141,17 +147,17 @@ Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
 
 1.  Connect a micro USB cable to the JTAG USB port.
 
-1.  Run our script for compiling/flashing Tock OS on your device (_output may
-    differ_):
+1.  Run our script for compiling/flashing Tock OS and OpenSK on your device
+    (_output may differ_):
 
     ```shell
-    $ ./deploy.py os --board=nrf52840_dk
+    $ ./deploy.py --board=nrf52840dk --opensk
         info: Updating rust toolchain to nightly-2020-02-03
         info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
         info: checking for self-updates
         info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
         info: Rust toolchain up-to-date
-        info: Installing Tock on board nrf52840_dk
+        info: Building Tock OS for board nrf52840dk
             Compiling tock-registers v0.5.0 (./third_party/tock/libraries/tock-register-interface)
             Compiling tock-cells v0.1.0 (./third_party/tock/libraries/tock-cells)
             Compiling enum_primitive v0.1.0 (./third_party/tock/libraries/enum_primitive)
@@ -166,47 +172,17 @@ Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
             Compiling nrf52840 v0.1.0 (./third_party/tock/chips/nrf52840)
             Compiling components v0.1.0 (./third_party/tock/boards/components)
             Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
-                Finished release [optimized + debuginfo] target(s) in 11.97s
-        [STATUS ] Flashing binar(y|ies) to board...
-        [INFO   ] Using known arch and jtag-device for known board nrf52dk
-        [INFO   ] Finished in 0.284 seconds
-    ```
-
-1.  Run our script for compiling/flashing the OpenSK application on your device
-    (_output may differ_):
-
-    ```shell
-    $ ./deploy.py app --opensk
-    info: Updating rust toolchain to nightly-2020-02-03
-    info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
-    info: checking for self-updates
-    info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
-    info: Rust toolchain up-to-date
-    info: Erasing all installed applications
-    All apps have been erased.
-    info: Building OpenSK application
-        Compiling autocfg v1.0.0
-        Compiling pkg-config v0.3.17
-        Compiling cc v1.0.50
-        Compiling libc v0.2.66
-        Compiling bitflags v1.2.1
-        Compiling foreign-types-shared v0.1.1
-        Compiling openssl v0.10.28
-        Compiling cfg-if v0.1.10
-        Compiling lazy_static v1.4.0
-        Compiling byteorder v1.3.2
-        Compiling linked_list_allocator v0.6.6
-        Compiling arrayref v0.3.6
-        Compiling cbor v0.1.0 (./libraries/cbor)
-        Compiling subtle v2.2.2
-        Compiling foreign-types v0.3.2
-        Compiling libtock v0.1.0 (./third_party/libtock-rs)
-        Compiling crypto v0.1.0 (./libraries/crypto)
-        Compiling openssl-sys v0.9.54
-        Compiling ctap2 v0.1.0 (.)
-            Finished release [optimized] target(s) in 15.34s
-    info: Flashing padding application
-    info: Installing Tock application ctap2
+                Finished release [optimized + debuginfo] target(s) in 13.15s
+        info: Converting Tock OS file into a binary
+        info: Building OpenSK application
+            Finished release [optimized] target(s) in 0.02s
+        info: Generating Tock TAB file for application/example ctap2
+        info: Erasing all installed applications
+        All apps have been erased.
+        info: Flashing file third_party/tock/boards/nordic/nrf52840dk/target/thumbv7em-none-eabi/release/nrf52840dk.bin.
+        info: Flashing padding application
+        info: Installing Tock application ctap2
+        info: You're all set!
     ```
 
 1.  Connect a micro USB cable to the device USB port.
@@ -216,6 +192,8 @@ have to press the `BOOT/RESET` button, located next to the device USB port on
 the board in order to see your OpenSK device on your system.
 
 #### Nordic nRF52840 Dongle
+
+##### Using external programmer (JLink, OpenOCD, etc.)
 
 ![Nordic dongle](img/dongle_front.jpg)
 
@@ -232,17 +210,18 @@ the board in order to see your OpenSK device on your system.
 
     ![Nordic dongle retainer clip](img/dongle_clip.jpg)
 
-1.  Run our script for compiling/flashing Tock OS on your device (_output may
-    differ_):
+1.  Depending on the programmer you're using, you may have to adapt the next
+    command line. Run our script for compiling/flashing Tock OS on your device
+    (_output may differ_):
 
     ```shell
-    $ ./deploy.py os --board=nrf52840_dongle
+    $ ./deploy.py os --board=nrf52840_dongle --programmer=jlink
     info: Updating rust toolchain to nightly-2020-02-03
     info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
     info: checking for self-updates
     info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
     info: Rust toolchain up-to-date
-    info: Installing Tock on board nrf52840_dongle
+    info: Building Tock OS for board nrf52840_dongle
         Compiling tock-cells v0.1.0 (./third_party/tock/libraries/tock-cells)
         Compiling tock-registers v0.5.0 (./third_party/tock/libraries/tock-register-interface)
         Compiling enum_primitive v0.1.0 (./third_party/tock/libraries/enum_primitive)
@@ -258,49 +237,38 @@ the board in order to see your OpenSK device on your system.
         Compiling components v0.1.0 (./third_party/tock/boards/components)
         Compiling nrf52dk_base v0.1.0 (./third_party/tock/boards/nordic/nrf52dk_base)
             Finished release [optimized + debuginfo] target(s) in 11.72s
-        [STATUS ] Flashing binar(y|ies) to board...
-        [INFO   ] Using known arch and jtag-device for known board nrf52dk
-        [INFO   ] Finished in 0.280 seconds
-    ```
-
-1.  Run our script for compiling/flashing the OpenSK application on your device
-    (_output may differ_):
-
-    ```shell
-    $ ./deploy.py app --opensk
-    info: Updating rust toolchain to nightly-2020-02-03
-    info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
-    info: checking for self-updates
-    info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
-    info: Rust toolchain up-to-date
+    info: Converting Tock OS file into a binary
+    info: Building OpenSK application
+        Finished release [optimized] target(s) in 0.02s
+    info: Generating Tock TAB file for application/example ctap2
     info: Erasing all installed applications
     All apps have been erased.
-    info: Building OpenSK application
-        Compiling autocfg v1.0.0
-        Compiling pkg-config v0.3.17
-        Compiling cc v1.0.50
-        Compiling libc v0.2.66
-        Compiling bitflags v1.2.1
-        Compiling foreign-types-shared v0.1.1
-        Compiling openssl v0.10.28
-        Compiling cfg-if v0.1.10
-        Compiling lazy_static v1.4.0
-        Compiling byteorder v1.3.2
-        Compiling linked_list_allocator v0.6.6
-        Compiling arrayref v0.3.6
-        Compiling cbor v0.1.0 (./libraries/cbor)
-        Compiling subtle v2.2.2
-        Compiling foreign-types v0.3.2
-        Compiling libtock v0.1.0 (./third_party/libtock-rs)
-        Compiling crypto v0.1.0 (./libraries/crypto)
-        Compiling openssl-sys v0.9.54
-        Compiling ctap2 v0.1.0 (.)
-            Finished release [optimized] target(s) in 15.34s
+    info: Flashing file third_party/tock/boards/nordic/nrf52840_dongle/target/thumbv7em-none-eabi/release/nrf52840_dongle.bin.
     info: Flashing padding application
     info: Installing Tock application ctap2
+    info: You're all set!
     ```
 
 1.  Remove the programming cable and the USB-A extension cable.
+
+### Advanced installation
+
+Although flashing using a Segger JLink probe is the officially supported way,
+our tool, `deploy.py` also supports other methods:
+
+*   OpenOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=openocd`
+*   pyOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=pyocd`
+*   Nordic DFU: `./deploy.py --board=nrf52840_dongle --opensk
+    --programmer=nordicdfu`
+*   Custom: `./deploy.py --board=nrf52840_dongle --opensk --programmer=none`. In
+    this case, an IntelHex file will be created and how to program a board is
+    left to the user.
+
+If your board is already flashed with Tock OS, you may skip installing it:
+`./deploy.py --board=nrf52840dk --opensk --no-tockos`
+
+For more options, we invite you to read the help of our `deploy.py` script by
+running `./deploy.py --help`.
 
 ### Installing the udev rule (Linux only)
 

@@ -20,6 +20,7 @@
   "python.linting.enabled": true,
   "python.linting.lintOnSave": true,
   "python.linting.pylintEnabled": true,
+  "python.linting.pylintPath": "pylint",
   "[python]": {
     "editor.tabSize": 2
   },

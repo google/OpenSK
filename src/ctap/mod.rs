@@ -81,9 +81,13 @@ const PIN_PADDED_LENGTH: usize = 64;
 // - 32 byte relying party ID hashed with SHA256,
 // - 32 byte HMAC-SHA256 over everything else.
 pub const ENCRYPTED_CREDENTIAL_ID_SIZE: usize = 112;
+// Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
+// Set this bit when checking user verification.
 const UV_FLAG: u8 = 0x04;
+// Set this bit when performing attestation.
 const AT_FLAG: u8 = 0x40;
+// Set this bit when an extension is used.
 const ED_FLAG: u8 = 0x80;
 
 pub const TOUCH_TIMEOUT_MS: isize = 30000;
@@ -111,7 +115,7 @@ fn check_pin_auth(hmac_key: &[u8], hmac_contents: &[u8], pin_auth: &[u8]) -> boo
 // The last step is to re-encrypt the outputs.
 pub fn encrypt_hmac_secret_output(
     shared_secret: &[u8; 32],
-    salt_enc: Vec<u8>,
+    salt_enc: &[u8],
     cred_random: &[u8],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     if salt_enc.len() != 32 && salt_enc.len() != 64 {
@@ -421,11 +425,8 @@ where
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
 
-        let use_hmac_extension = if let Some(extensions) = extensions {
-            extensions.has_make_credential_hmac_secret()?
-        } else {
-            false
-        };
+        let use_hmac_extension =
+            extensions.map_or(Ok(false), |e| e.has_make_credential_hmac_secret())?;
         if use_hmac_extension && !options.rk {
             // The extension is actually supported, but we need resident keys.
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
@@ -611,10 +612,9 @@ where
             }
         }
 
-        let get_assertion_hmac_secret_input = if let Some(extensions) = extensions {
-            extensions.get_assertion_hmac_secret().transpose()?
-        } else {
-            None
+        let get_assertion_hmac_secret_input = match extensions {
+            Some(extensions) => extensions.get_assertion_hmac_secret().transpose()?,
+            None => None,
         };
         if get_assertion_hmac_secret_input.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.
@@ -703,11 +703,10 @@ where
                 return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
             }
 
-            let encrypted_output = if let Some(cred_random) = &credential.cred_random {
-                encrypt_hmac_secret_output(&shared_secret, salt_enc, cred_random)?
-            } else {
-                // This happens because the credential was not created with HMAC-secret.
-                return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+            let encrypted_output = match &credential.cred_random {
+                Some(cr) => encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cr)?,
+                // This is the case if the credential was not created with HMAC-secret.
+                None => return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION),
             };
 
             let extensions = cbor_map! {
@@ -1524,25 +1523,25 @@ mod test {
     #[test]
     fn test_encrypt_hmac_secret_output() {
         let shared_secret = [0x55; 32];
-        let salt_enc = vec![0x5E; 32];
-        let cred_random = vec![0xC9; 32];
-        let output = encrypt_hmac_secret_output(&shared_secret, salt_enc, &cred_random);
+        let salt_enc = [0x5E; 32];
+        let cred_random = [0xC9; 32];
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
         assert_eq!(output.unwrap().len(), 32);
 
-        let salt_enc = vec![0x5E; 48];
-        let output = encrypt_hmac_secret_output(&shared_secret, salt_enc, &cred_random);
+        let salt_enc = [0x5E; 48];
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
         assert_eq!(
             output,
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
         );
 
-        let salt_enc = vec![0x5E; 64];
-        let output = encrypt_hmac_secret_output(&shared_secret, salt_enc, &cred_random);
+        let salt_enc = [0x5E; 64];
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
         assert_eq!(output.unwrap().len(), 64);
 
-        let salt_enc = vec![0x5E; 32];
-        let cred_random = vec![0xC9; 33];
-        let output = encrypt_hmac_secret_output(&shared_secret, salt_enc, &cred_random);
+        let salt_enc = [0x5E; 32];
+        let cred_random = [0xC9; 33];
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
         assert_eq!(
             output,
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)

@@ -224,8 +224,8 @@ impl From<Extensions> for cbor::Value {
     fn from(extensions: Extensions) -> Self {
         cbor_map_btree!(extensions
             .0
-            .iter()
-            .map(|(key, value)| (cbor_text!(key), value.clone()))
+            .into_iter()
+            .map(|(key, value)| (cbor_text!(key), value))
             .collect())
     }
 }
@@ -1095,7 +1095,7 @@ mod test {
         );
 
         let credential = PublicKeyCredentialSource {
-            cred_random: Some([0x00; 32].to_vec()),
+            cred_random: Some(vec![0x00; 32]),
             ..credential
         };
 

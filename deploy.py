@@ -591,6 +591,7 @@ class OpenSKInstaller:
 
     if self.args.programmer in ("pyocd", "nordicdfu", "none"):
       dest_file = "target/{}_merged.hex".format(self.args.board)
+      os.makedirs("target", exist_ok=True)
       self.create_hex_file(dest_file)
 
       if self.args.programmer == "pyocd":

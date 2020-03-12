@@ -26,6 +26,12 @@ jobs:
         run: python -m pip install --upgrade pip setuptools wheel
       - name: Set up OpenSK
         run: ./setup.sh
+
+      - name: Building board nrf52840_dongle_dfu
+        run: ./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
+      - name: Building board nrf52840_mdk_dfu
+        run: ./deploy.py --board=nrf52840_mdk_dfu --no-app --programmer=none
+
       - name: Create a long build directory
         run: mkdir this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz && mv third_party this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/
 

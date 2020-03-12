@@ -41,15 +41,19 @@ PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
 OpenSKBoard = collections.namedtuple(
     "OpenSKBoard",
     [
-        # Location of the Tock board (where the Makefile file is
+        # Location of the Tock board (where the Makefile file is)
         "path",
-        # Targeted architecture (e.g. thumbv7em-none-eabi)
+        # Target architecture (e.g. thumbv7em-none-eabi)
         "arch",
         # Size of 1 page of flash memory
         "page_size",
         # Flash address at which the kernel will be written
         "kernel_address",
-        # Set to None is padding is not required for the board
+        # Set to None is padding is not required for the board.
+        # This creates a fake Tock OS application that starts at the
+        # address specified by this parameter (must match the `prog` value
+        # specified on the board's `layout.ld` file) and will end at
+        # `app_address`.
         "padding_address",
         # Linker script to produce a working app for this board
         "app_ldscript",
@@ -293,9 +297,8 @@ class OpenSKInstaller:
       # Need to update
       self.checked_command_output(
           ["rustup", "install", target_toolchain_fullstring])
-    targets = {x.arch for x in SUPPORTED_BOARDS.values()}
-    for arch in targets:
-      self.checked_command_output(["rustup", "target", "add", arch])
+    self.checked_command_output(
+        ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):
@@ -427,7 +430,7 @@ class OpenSKInstaller:
     try:
       tock.flash_binary(kernel, board_props.kernel_address)
     except TockLoaderException as e:
-      fatal("Couldn't install padding: {}".format(str(e)))
+      fatal("Couldn't install Tock OS: {}".format(str(e)))
 
   def install_padding(self):
     padding = self.get_padding()

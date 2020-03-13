@@ -528,6 +528,10 @@ class OpenSKInstaller:
       assert_mandatory_binary("nrfutil")
       assert_python_library("intelhex")
       assert_python_library("nordicsemi.lister")
+      nrfutil_version = __import__("nordicsemi").version.NRFUTIL_VERSION
+      if not nrfutil_version.startswith("6."):
+        fatal(("You need to install nrfutil python3 package v6.0 or above. "
+               "Found: {}".format(nrfutil_version)))
       if not SUPPORTED_BOARDS[self.args.board].nordic_dfu:
         fatal("This board doesn't support flashing over DFU.")
 

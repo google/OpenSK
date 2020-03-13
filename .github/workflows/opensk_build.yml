@@ -24,8 +24,16 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
+      - name: Building sha256sum tool
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
+
       - name: Building OpenSK
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --target=thumbv7em-none-eabi --features with_ctap1
+      - name: Compute SHA-256 sum
+        run: ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2

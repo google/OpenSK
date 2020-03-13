@@ -64,17 +64,23 @@ jobs:
           command: check
           args: --target thumbv7em-none-eabi --release --features ram_storage
 
+      - name: Check OpenSK verbose
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features verbose
+
       - name: Check OpenSK debug_ctap,with_ctap1
         uses: actions-rs/cargo@v1
         with:
           command: check
           args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1
 
-      - name: Check OpenSK debug_ctap,with_ctap1,panic_console,debug_allocations
+      - name: Check OpenSK debug_ctap,with_ctap1,panic_console,debug_allocations,verbose
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1,panic_console,debug_allocations
+          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1,panic_console,debug_allocations,verbose
 
       - name: Check examples
         uses: actions-rs/cargo@v1

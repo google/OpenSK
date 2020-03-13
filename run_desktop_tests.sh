@@ -24,6 +24,9 @@ cd libraries/crypto
 cargo fmt --all -- --check
 cd ../..
 
+echo "Building sha256sum tool..."
+cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
+
 echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
@@ -39,10 +42,15 @@ cargo check --release --target=thumbv7em-none-eabi --examples
 
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
+./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2
 
 echo "Checking that supported boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk
 make -C third_party/tock/boards/nordic/nrf52840_dongle
+
+echo "Checking that other boards build properly..."
+make -C boards/nrf52840_dongle_dfu
+make -C boards/nrf52840_mdk_dfu
 
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then

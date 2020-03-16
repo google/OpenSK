@@ -706,12 +706,29 @@ if __name__ == "__main__":
             "board."),
   )
   main_parser.add_argument(
+      "--debug",
+      action="append_const",
+      const="debug_ctap",
+      dest="features",
+      help=("Compiles and installs the OpenSK application in debug mode "
+            "(i.e. more debug messages will be sent over the console port "
+            "such as hexdumps of packets)."),
+  )
+  main_parser.add_argument(
       "--debug-allocations",
       action="append_const",
       const="debug_allocations",
       dest="features",
       help=("The console will be used to output allocator statistics every "
             "time an allocation/deallocation happens."),
+  )
+  main_parser.add_argument(
+      "--verbose",
+      action="append_const",
+      const="verbose",
+      dest="features",
+      help=("The console will be used to output verbose information about the "
+            "OpenSK application. This also automatically activates --debug."),
   )
   main_parser.add_argument(
       "--no-u2f",
@@ -730,15 +747,6 @@ if __name__ == "__main__":
             "under the crypto_data/ directory. "
             "This is useful to allow flashing multiple OpenSK authenticators "
             "in a row without them being considered clones."),
-  )
-  main_parser.add_argument(
-      "--debug",
-      action="append_const",
-      const="debug_ctap",
-      dest="features",
-      help=("Compiles and installs the  OpenSK application in debug mode "
-            "(i.e. more debug messages will be sent over the console port "
-            "such as hexdumps of packets)."),
   )
   main_parser.add_argument(
       "--no-persistent-storage",

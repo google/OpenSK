@@ -18,12 +18,13 @@ arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 
 [features]
-std = ["cbor/std", "crypto/std", "crypto/derive_debug"]
-debug_ctap = ["crypto/derive_debug"]
-with_ctap1 = ["crypto/with_ctap1"]
-panic_console = ["libtock/panic_console"]
 debug_allocations = ["libtock/debug_allocations"]
+debug_ctap = ["crypto/derive_debug"]
+panic_console = ["libtock/panic_console"]
+std = ["cbor/std", "crypto/std", "crypto/derive_debug"]
 ram_storage = []
+verbose = ["debug_ctap"]
+with_ctap1 = ["crypto/with_ctap1"]
 
 [dev-dependencies]
 elf2tab = "0.4.0"

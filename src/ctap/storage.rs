@@ -453,6 +453,7 @@ mod test {
             rp_id: String::from(rp_id),
             user_handle,
             other_ui: None,
+            cred_random: None,
         }
     }
 
@@ -621,6 +622,7 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             other_ui: None,
+            cred_random: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }

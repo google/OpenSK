@@ -1,8 +1,8 @@
 diff --git a/src/console.rs b/src/console.rs
-index ecd7ad1..785de01 100644
+index ecd7ad1..ae1b826 100644
 --- a/src/console.rs
 +++ b/src/console.rs
-@@ -16,33 +16,58 @@ mod allow_nr {
+@@ -16,33 +16,63 @@ mod allow_nr {
      pub const SHARE_BUFFER: usize = 1;
  }
  
@@ -55,7 +55,12 @@ index ecd7ad1..785de01 100644
      }
  
 -    fn flush(&mut self, num_bytes_to_print: usize) {
-+    fn flush(&mut self) {
++    pub fn flush(&mut self) {
++        if self.is_empty() {
++            // Don't trigger any syscall if the buffer is empty.
++            return;
++        }
++
 +        let count = self.count_pending;
 +        // Clear the buffer even in case of error, to avoid an infinite loop.
 +        self.count_pending = 0;
@@ -68,7 +73,7 @@ index ecd7ad1..785de01 100644
          );
          if result.is_err() {
              return;
-@@ -59,8 +84,7 @@ impl Console {
+@@ -59,8 +89,7 @@ impl Console {
              return;
          }
  
@@ -78,15 +83,13 @@ index ecd7ad1..785de01 100644
          if result_code < 0 {
              return;
          }
-@@ -69,6 +93,14 @@ impl Console {
+@@ -69,6 +98,12 @@ impl Console {
      }
  }
  
 +impl Drop for Console {
 +    fn drop(&mut self) {
-+        if !self.is_empty() {
-+            self.flush();
-+        }
++        self.flush();
 +    }
 +}
 +

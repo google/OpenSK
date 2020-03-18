@@ -771,8 +771,8 @@ impl<C: StoreConfig> Store<BufferStorage, C> {
         self.initialize_page(page, erase_count);
     }
 
-    /// Checks whether all deleted sensitive entries have been wiped.
-    pub fn check_wiped(&self) {
+    /// Returns whether all deleted sensitive entries have been wiped.
+    pub fn deleted_entries_are_wiped(&self) -> bool {
         for (_, entry) in Iter::new(self) {
             if !self.format.is_present(entry)
                 || !self.format.is_deleted(entry)
@@ -783,8 +783,11 @@ impl<C: StoreConfig> Store<BufferStorage, C> {
             }
             let gap = self.format.entry_gap(entry);
             let data = gap.slice(entry);
-            assert!(data.iter().all(|&byte| byte == 0x00));
+            if !data.iter().all(|&byte| byte == 0x00) {
+                return false;
+            }
         }
+        true
     }
 }
 
@@ -961,7 +964,7 @@ mod tests {
         store.delete(index).unwrap();
         assert_eq!(store.find_all(&key).count(), 0);
         assert_eq!(store.iter().count(), 0);
-        store.check_wiped();
+        assert!(store.deleted_entries_are_wiped());
     }
 
     #[test]

@@ -61,10 +61,13 @@ pub struct Format {
 
     /// Whether a user entry has sensitive data.
     ///
-    /// When a user entry with sensitive data is deleted, the data is overwritten with zeroes.
-    ///
     /// - 0 for sensitive data.
     /// - 1 for non-sensitive data.
+    ///
+    /// When a user entry with sensitive data is deleted, the data is overwritten with zeroes. This
+    /// feature is subject to the same guarantees as all other features of the store, in particular
+    /// deleting a sensitive entry is atomic. See the store module-level documentation for more
+    /// information.
     sensitive_bit: usize,
 
     /// The data length of a user entry.

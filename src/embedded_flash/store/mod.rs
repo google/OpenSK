@@ -43,6 +43,28 @@
 //! The data-structure can be configured with the `StoreConfig` trait. By implementing this trait,
 //! the number of possible tags and the association between keys and entries are defined.
 //!
+//! # Properties
+//!
+//! The data-structure provides the following properties:
+//! - When an operation returns success, then the represented multi-set is updated accordingly. For
+//!   example, an inserted entry can be find with alteration until replaced or deleted.
+//! - When an operation returns an error, the resulting multi-set state is described in the error
+//!   documentation.
+//! - When power is lost before an operation returns, the operation will either succeed or be
+//!   rolled-back on the next initialization. So the multi-set would be either left unchanged or
+//!   updated accordingly.
+//!
+//! Those properties rely on the following assumptions:
+//! - Writing a word to flash is atomic. When power is lost, the word is either fully written or not
+//!   written at all.
+//! - Reading a word from flash is deterministic. When power is lost while writing or erasing a word
+//!   (erasing a page containing that word), reading that word repeatedly returns the same result
+//!   (until it is written or its page is erased).
+//! - To decide whether a page has been erased, it is enough to test if all its bits are equal to 1.
+//!
+//! The properties still hold outside those assumptions but with weaker probabilities as the usage
+//! diverges from the assumptions.
+//!
 //! # Implementation
 //!
 //! The store is a page-aligned sequence of bits. It matches the following grammar:

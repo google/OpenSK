@@ -47,7 +47,7 @@
 //!
 //! The data-structure provides the following properties:
 //! - When an operation returns success, then the represented multi-set is updated accordingly. For
-//!   example, an inserted entry can be find with alteration until replaced or deleted.
+//!   example, an inserted entry can be found without alteration until replaced or deleted.
 //! - When an operation returns an error, the resulting multi-set state is described in the error
 //!   documentation.
 //! - When power is lost before an operation returns, the operation will either succeed or be
@@ -62,8 +62,8 @@
 //!   (until it is written or its page is erased).
 //! - To decide whether a page has been erased, it is enough to test if all its bits are equal to 1.
 //!
-//! The properties still hold outside those assumptions but with weaker probabilities as the usage
-//! diverges from the assumptions.
+//! The properties may still hold outside those assumptions but with weaker probabilities as the
+//! usage diverges from the assumptions.
 //!
 //! # Implementation
 //!

@@ -115,7 +115,7 @@ SUPPORTED_BOARDS = {
         ),
     "nrf52840_dongle_dfu":
         OpenSKBoard(
-            path="boards/nrf52840_dongle_dfu",
+            path="third_party/tock/boards/nordic/nrf52840_dongle_dfu",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0x1000,
@@ -132,7 +132,7 @@ SUPPORTED_BOARDS = {
         ),
     "nrf52840_mdk_dfu":
         OpenSKBoard(
-            path="boards/nrf52840_mdk_dfu",
+            path="third_party/tock/boards/nordic/nrf52840_mdk_dfu",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0x1000,
@@ -304,7 +304,7 @@ class OpenSKInstaller:
   def build_tockos(self):
     info("Building Tock OS for board {}".format(self.args.board))
     props = SUPPORTED_BOARDS[self.args.board]
-    out_directory = os.path.join(props.path, "target", props.arch, "release")
+    out_directory = os.path.join("third_party", "tock", "target", props.arch, "release")
     os.makedirs(out_directory, exist_ok=True)
     self.checked_command_output(["make"], cwd=props.path)
 
@@ -418,7 +418,7 @@ class OpenSKInstaller:
 
   def install_tock_os(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
-    kernel_file = os.path.join(board_props.path, "target", board_props.arch,
+    kernel_file = os.path.join("third_party", "tock", "target", board_props.arch,
                                "release", "{}.bin".format(self.args.board))
     info("Flashing file {}.".format(kernel_file))
     with open(kernel_file, "rb") as f:
@@ -481,7 +481,7 @@ class OpenSKInstaller:
 
     if self.args.tockos:
       # Process kernel
-      kernel_path = os.path.join(board_props.path, "target", board_props.arch,
+      kernel_path = os.path.join("third_party", "tock", "target", board_props.arch,
                                  "release", "{}.bin".format(self.args.board))
       with open(kernel_path, "rb") as kernel:
         kern_hex = intelhex.IntelHex()

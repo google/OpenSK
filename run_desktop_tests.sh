@@ -50,8 +50,16 @@ make -C third_party/tock/boards/nordic/nrf52840dk
 make -C third_party/tock/boards/nordic/nrf52840_dongle
 
 echo "Checking that other boards build properly..."
-make -C boards/nrf52840_dongle_dfu
-make -C boards/nrf52840_mdk_dfu
+make -C third_party/tock/boards/nordic/nrf52840_dongle_dfu
+make -C third_party/tock/boards/nordic/nrf52840_mdk_dfu
+
+echo "Checking deployment of supported boards..."
+./deploy.py --board=nrf52840dk --no-app --programmer=none
+./deploy.py --board=nrf52840_dongle --no-app --programmer=none
+
+echo "Checking deployment of other boards..."
+./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
+./deploy.py --board=nrf52840_mdk_dfu --no-app --programmer=none
 
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then

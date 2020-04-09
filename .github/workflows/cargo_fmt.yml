@@ -20,6 +20,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi
+          components: rustfmt
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7

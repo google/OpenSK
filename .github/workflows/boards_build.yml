@@ -27,15 +27,11 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
+      - name: Building board nrf52840dk
+        run: ./deploy.py --board=nrf52840dk --no-app --programmer=none
+      - name: Building board nrf52840_dongle
+        run: ./deploy.py --board=nrf52840_dongle --no-app --programmer=none
       - name: Building board nrf52840_dongle_dfu
         run: ./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
       - name: Building board nrf52840_mdk_dfu
         run: ./deploy.py --board=nrf52840_mdk_dfu --no-app --programmer=none
-
-      - name: Create a long build directory
-        run: mkdir this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz && mv third_party this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/
-
-      - name: Building board nrf52840dk
-        run: make -C this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/third_party/tock/boards/nordic/nrf52840dk
-      - name: Building board nrf52840_dongle
-        run: make -C this-is-a-long-build-directory-0123456789abcdefghijklmnopqrstuvwxyz/third_party/tock/boards/nordic/nrf52840_dongle

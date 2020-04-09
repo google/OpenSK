@@ -46,6 +46,11 @@ EOF
   exit 1
 }
 
+# Copy additional boards to the kernel.
+echo -n '[-] Copying additional boards to Tock... '
+cp -r boards/* third_party/tock/boards
+echo $done_text
+
 # Apply patches to kernel. Do that in a sub-shell
 (
   cd third_party/tock/ && \

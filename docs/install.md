@@ -50,8 +50,9 @@ In order to compile and flash a working OpenSK firmware, you will need the
 following:
 
 *   rustup (can be installed with [Rustup](https://rustup.rs/))
-*   python3 and pip
-*   the OpenSSL command line tool
+*   python3 and pip (can be installed with the `python3-pip` package on Debian)
+*   the OpenSSL command line tool (can be installed with the `libssl-dev`
+    package on Debian)
 
 The scripts provided in this project have been tested under Linux and OS X. We
 haven't tested them on Windows and other platforms.

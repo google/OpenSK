@@ -1,0 +1,39 @@
+---
+name: Check that binaries are reproducible
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check_hashes:
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-10.15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Use sample cryptographic material
+        run: rm -R crypto_data/ && cp -r reproducible/sample_crypto_data crypto_data
+      - name: Computing cryptographic hashes
+        run: ./reproduce_hashes.sh
+
+      - name: Upload reproduced binaries
+        uses: actions/upload-artifact@v1
+        with:
+          name: reproduced-${{ matrix.os }}
+          path: reproducible/reproduced.tar
+
+      - name: Comparing cryptographic hashes
+        run: git diff --no-index reproducible/reference_binaries_${{ matrix.os }}.sha256sum reproducible/binaries.sha256sum

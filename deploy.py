@@ -392,19 +392,17 @@ class OpenSKInstaller:
     assert self.args.application
     info("Generating Tock TAB file for application/example {}".format(
         self.args.application))
-    package_parameter = "-n"
     elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
-        " ", maxsplit=1)[1]
-    # Starting from v0.5.0-dev the parameter changed.
-    # Current pyblished crate is 0.4.0 but we don't want developers
-    # running the HEAD from github to be stuck
-    if "0.5.0-dev" in elf2tab_ver:
-      package_parameter = "--package-name"
+        "\n", maxsplit=1)[0]
+    if elf2tab_ver != "elf2tab 0.5.0":
+      fatal("Unsupported elf2tab version {!a}. Please use 0.5.0.".format(
+          elf2tab_ver))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
     elf2tab_args = [
-        "elf2tab", package_parameter, self.args.application, "-o", tab_filename
+        "elf2tab", "--deterministic", "--package-name", self.args.application,
+        "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")

@@ -121,6 +121,36 @@ impl TryFrom<&cbor::Value> for PublicKeyCredentialType {
     }
 }
 
+#[derive(PartialEq)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct PublicKeyCredentialParameter {
+    pub cred_type: PublicKeyCredentialType,
+    pub alg: SignatureAlgorithm,
+}
+
+impl TryFrom<&cbor::Value> for PublicKeyCredentialParameter {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let cred_param_map = read_map(cbor_value)?;
+        let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(
+            cred_param_map.get(&cbor_text!("type")),
+        )?)?;
+        let alg =
+            SignatureAlgorithm::try_from(ok_or_missing(cred_param_map.get(&cbor_text!("alg")))?)?;
+        Ok(Self { cred_type, alg })
+    }
+}
+
+impl From<PublicKeyCredentialParameter> for cbor::Value {
+    fn from(cred_param: PublicKeyCredentialParameter) -> Self {
+        cbor_map_options! {
+            "type" => cred_param.cred_type,
+            "alg" => cred_param.alg as i64,
+        }
+    }
+}
+
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub enum AuthenticatorTransport {
     Usb,
@@ -369,10 +399,21 @@ impl From<PackedAttestationStatement> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(PartialEq)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum SignatureAlgorithm {
     ES256 = ecdsa::PubKey::ES256_ALGORITHM as isize,
+}
+
+impl TryFrom<&cbor::Value> for SignatureAlgorithm {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match read_integer(cbor_value)? {
+            ecdsa::PubKey::ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+        }
+    }
 }
 
 #[derive(Clone)]

@@ -28,7 +28,9 @@ few limitations:
 Although we tested and implemented our firmware based on the published
 [CTAP2.0 specifications](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html),
 our implementation was not reviewed nor officially tested and doesn't claim to
-be FIDO Certified.
+be FIDO Certified. With the upcoming next version of the
+[CTAP2.1 specifications](https://fidoalliance.org/specs/fido2/fido-client-to-authenticator-protocol-v2.1-rd-20191217.html),
+we started adding features, so master is currently between version 2.0 and 2.1.
 
 ### Cryptography
 

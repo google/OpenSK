@@ -15,7 +15,7 @@
   // Try to make VSCode formating as close as possible to the Google style.
   "python.formatting.provider": "yapf",
   "python.formatting.yapfArgs": [
-    "--style=chromium"
+    "--style=yapf"
   ],
   "python.linting.enabled": true,
   "python.linting.lintOnSave": true,

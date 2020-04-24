@@ -291,8 +291,8 @@ class OpenSKInstaller:
       # empty value.
       target_toolchain.append("")
     current_version = self.checked_command_output(["rustc", "--version"])
-    if not all((target_toolchain[0] in current_version,
-                target_toolchain[1] in current_version)):
+    if not (target_toolchain[0] in current_version and
+            target_toolchain[1] in current_version):
       info("Updating rust toolchain to {}".format("-".join(target_toolchain)))
       # Need to update
       self.checked_command_output(

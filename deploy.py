@@ -115,7 +115,7 @@ SUPPORTED_BOARDS = {
         ),
     "nrf52840_dongle_dfu":
         OpenSKBoard(
-            path="boards/nrf52840_dongle_dfu",
+            path="third_party/tock/boards/nordic/nrf52840_dongle_dfu",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0x1000,
@@ -132,7 +132,7 @@ SUPPORTED_BOARDS = {
         ),
     "nrf52840_mdk_dfu":
         OpenSKBoard(
-            path="boards/nrf52840_mdk_dfu",
+            path="third_party/tock/boards/nordic/nrf52840_mdk_dfu",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0x1000,
@@ -304,7 +304,8 @@ class OpenSKInstaller:
   def build_tockos(self):
     info("Building Tock OS for board {}".format(self.args.board))
     props = SUPPORTED_BOARDS[self.args.board]
-    out_directory = os.path.join(props.path, "target", props.arch, "release")
+    out_directory = os.path.join("third_party", "tock", "target", props.arch,
+                                 "release")
     os.makedirs(out_directory, exist_ok=True)
     self.checked_command_output(["make"], cwd=props.path)
 
@@ -418,8 +419,9 @@ class OpenSKInstaller:
 
   def install_tock_os(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
-    kernel_file = os.path.join(board_props.path, "target", board_props.arch,
-                               "release", "{}.bin".format(self.args.board))
+    kernel_file = os.path.join("third_party", "tock", "target",
+                               board_props.arch, "release",
+                               "{}.bin".format(self.args.board))
     info("Flashing file {}.".format(kernel_file))
     with open(kernel_file, "rb") as f:
       kernel = f.read()
@@ -481,8 +483,9 @@ class OpenSKInstaller:
 
     if self.args.tockos:
       # Process kernel
-      kernel_path = os.path.join(board_props.path, "target", board_props.arch,
-                                 "release", "{}.bin".format(self.args.board))
+      kernel_path = os.path.join("third_party", "tock", "target",
+                                 board_props.arch, "release",
+                                 "{}.bin".format(self.args.board))
       with open(kernel_path, "rb") as kernel:
         kern_hex = intelhex.IntelHex()
         kern_hex.frombytes(kernel.read(), offset=board_props.kernel_address)
@@ -706,12 +709,29 @@ if __name__ == "__main__":
             "board."),
   )
   main_parser.add_argument(
+      "--debug",
+      action="append_const",
+      const="debug_ctap",
+      dest="features",
+      help=("Compiles and installs the OpenSK application in debug mode "
+            "(i.e. more debug messages will be sent over the console port "
+            "such as hexdumps of packets)."),
+  )
+  main_parser.add_argument(
       "--debug-allocations",
       action="append_const",
       const="debug_allocations",
       dest="features",
       help=("The console will be used to output allocator statistics every "
             "time an allocation/deallocation happens."),
+  )
+  main_parser.add_argument(
+      "--verbose",
+      action="append_const",
+      const="verbose",
+      dest="features",
+      help=("The console will be used to output verbose information about the "
+            "OpenSK application. This also automatically activates --debug."),
   )
   main_parser.add_argument(
       "--no-u2f",
@@ -730,15 +750,6 @@ if __name__ == "__main__":
             "under the crypto_data/ directory. "
             "This is useful to allow flashing multiple OpenSK authenticators "
             "in a row without them being considered clones."),
-  )
-  main_parser.add_argument(
-      "--debug",
-      action="append_const",
-      const="debug_ctap",
-      dest="features",
-      help=("Compiles and installs the  OpenSK application in debug mode "
-            "(i.e. more debug messages will be sent over the console port "
-            "such as hexdumps of packets)."),
   )
   main_parser.add_argument(
       "--no-persistent-storage",

@@ -43,6 +43,28 @@
 //! The data-structure can be configured with the `StoreConfig` trait. By implementing this trait,
 //! the number of possible tags and the association between keys and entries are defined.
 //!
+//! # Properties
+//!
+//! The data-structure provides the following properties:
+//! - When an operation returns success, then the represented multi-set is updated accordingly. For
+//!   example, an inserted entry can be found without alteration until replaced or deleted.
+//! - When an operation returns an error, the resulting multi-set state is described in the error
+//!   documentation.
+//! - When power is lost before an operation returns, the operation will either succeed or be
+//!   rolled-back on the next initialization. So the multi-set would be either left unchanged or
+//!   updated accordingly.
+//!
+//! Those properties rely on the following assumptions:
+//! - Writing a word to flash is atomic. When power is lost, the word is either fully written or not
+//!   written at all.
+//! - Reading a word from flash is deterministic. When power is lost while writing or erasing a word
+//!   (erasing a page containing that word), reading that word repeatedly returns the same result
+//!   (until it is written or its page is erased).
+//! - To decide whether a page has been erased, it is enough to test if all its bits are equal to 1.
+//!
+//! The properties may still hold outside those assumptions but with weaker probabilities as the
+//! usage diverges from the assumptions.
+//!
 //! # Implementation
 //!
 //! The store is a page-aligned sequence of bits. It matches the following grammar:
@@ -57,7 +79,7 @@
 //!     new_page:page_bits
 //!     Padding(word)
 //! Entry := Header Data Footer
-//! // Let X be the byte following `length` in `Info`.
+//! // Let X be the byte (word-aligned for sensitive queries) following `length` in `Info`.
 //! Header := Info[..X]  // must fit in one word
 //! Footer := Info[X..]  // must fit in one word
 //! Info :=
@@ -65,6 +87,7 @@
 //!     deleted:1
 //!     internal=1
 //!     replace:1
+//!     sensitive:1
 //!     length:byte_bits
 //!     tag:tag_bits
 //!     [  // present if `replace` is 0
@@ -109,15 +132,16 @@
 //!    0.1   deleted
 //!    0.2   internal
 //!    0.3   replace
-//!    0.4   length (9 bits)
-//!    1.5   tag (least significant 3 bits out of 5)
+//!    0.4   sensitive
+//!    0.5   length (9 bits)
+//!    1.6   tag (least significant 2 bits out of 5)
 //! (the header ends at the first byte boundary after `length`)
 //!    2.0   <user data> (2 bytes in this example)
 //! (the footer starts immediately after the user data)
-//!    4.0   tag (most significant 2 bits out of 5)
-//!    4.2   replace_page (6 bits)
-//!    5.0   replace_byte (9 bits)
-//!    6.1   padding (make sure the 2 properties below hold)
+//!    4.0   tag (most significant 3 bits out of 5)
+//!    4.3   replace_page (6 bits)
+//!    5.1   replace_byte (9 bits)
+//!    6.2   padding (make sure the 2 properties below hold)
 //!    7.6   committed
 //!    7.7   complete (on a different word than `present`)
 //!    8.0   <end> (word-aligned)
@@ -203,6 +227,11 @@ pub struct StoreEntry<'a> {
 
     /// The data of the entry.
     pub data: &'a [u8],
+
+    /// Whether the data is sensitive.
+    ///
+    /// Sensitive data is overwritten with zeroes when the entry is deleted.
+    pub sensitive: bool,
 }
 
 /// Implements a configurable multi-set on top of any storage.
@@ -262,6 +291,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
                     StoreEntry {
                         tag: self.format.get_tag(entry),
                         data: self.format.get_data(entry),
+                        sensitive: self.format.is_sensitive(entry),
                     },
                 ))
             } else {
@@ -326,7 +356,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
         self.format.validate_entry(new)?;
         let mut old_index = old.index;
         // Find a slot.
-        let entry_len = self.replace_len(new.data.len());
+        let entry_len = self.replace_len(new.sensitive, new.data.len());
         let index = self.find_slot_for_write(entry_len, Some(&mut old_index))?;
         // Build a new entry replacing the old one.
         let entry = self.format.build_entry(Some(old_index), new);
@@ -360,17 +390,20 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
     /// Returns the byte cost of a replace operation.
     ///
     /// Computes the length in bytes that would be used in the storage if a replace operation is
-    /// executed provided the data of the new entry has `length` bytes.
-    pub fn replace_len(&self, length: usize) -> usize {
-        self.format.entry_size(IsReplace::Replace, length)
+    /// executed provided the data of the new entry has `length` bytes and whether this data is
+    /// sensitive.
+    pub fn replace_len(&self, sensitive: bool, length: usize) -> usize {
+        self.format
+            .entry_size(IsReplace::Replace, sensitive, length)
     }
 
     /// Returns the byte cost of an insert operation.
     ///
     /// Computes the length in bytes that would be used in the storage if an insert operation is
-    /// executed provided the data of the inserted entry has `length` bytes.
-    pub fn insert_len(&self, length: usize) -> usize {
-        self.format.entry_size(IsReplace::Insert, length)
+    /// executed provided the data of the inserted entry has `length` bytes and whether this data is
+    /// sensitive.
+    pub fn insert_len(&self, sensitive: bool, length: usize) -> usize {
+        self.format.entry_size(IsReplace::Insert, sensitive, length)
     }
 
     /// Returns the erase count of all pages.
@@ -410,8 +443,11 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
                 let entry_index = index;
                 let entry = self.read_entry(index);
                 index.byte += entry.len();
-                if !self.format.is_alive(entry) {
-                    // Skip deleted entries (or the page padding).
+                if !self.format.is_present(entry) {
+                    // Reached the end of the page.
+                } else if self.format.is_deleted(entry) {
+                    // Wipe sensitive data if needed.
+                    self.wipe_sensitive_data(entry_index);
                 } else if self.format.is_internal(entry) {
                     // Finish page compaction.
                     self.erase_page(entry_index);
@@ -449,6 +485,31 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
     /// The provided index must point to the beginning of an entry.
     fn delete_index(&mut self, index: Index) {
         self.update_word(index, |format, word| format.set_deleted(word));
+        self.wipe_sensitive_data(index);
+    }
+
+    /// Wipes the data of a sensitive entry.
+    ///
+    /// If the entry at the provided index is sensitive, overwrites the data with zeroes. Otherwise,
+    /// does nothing.
+    fn wipe_sensitive_data(&mut self, mut index: Index) {
+        let entry = self.read_entry(index);
+        debug_assert!(self.format.is_present(entry));
+        debug_assert!(self.format.is_deleted(entry));
+        if self.format.is_internal(entry) || !self.format.is_sensitive(entry) {
+            // No need to wipe the data.
+            return;
+        }
+        let gap = self.format.entry_gap(entry);
+        let data = gap.slice(entry);
+        if data.iter().all(|&byte| byte == 0x00) {
+            // The data is already wiped.
+            return;
+        }
+        index.byte += gap.start;
+        self.storage
+            .write_slice(index, &vec![0; gap.length])
+            .unwrap();
     }
 
     /// Finds a page with enough free space.
@@ -555,10 +616,13 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
         } else if self.format.is_internal(first_byte) {
             self.format.internal_entry_size()
         } else {
-            let header = self.read_slice(index, self.format.header_size());
+            // We don't know if the entry is sensitive or not, but it doesn't matter here. We just
+            // need to read the replace, sensitive, and length fields.
+            let header = self.read_slice(index, self.format.header_size(false));
             let replace = self.format.is_replace(header);
+            let sensitive = self.format.is_sensitive(header);
             let length = self.format.get_length(header);
-            self.format.entry_size(replace, length)
+            self.format.entry_size(replace, sensitive, length)
         };
         // Truncate the length to fit the page. This can only happen in case of corruption or
         // partial writes.
@@ -673,7 +737,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
         // Save the old page index and erase count to the new page.
         let erase_index = new_index;
         let erase_entry = self.format.build_erase_entry(old_page, erase_count);
-        self.storage.write_slice(new_index, &erase_entry).unwrap();
+        self.write_entry(new_index, &erase_entry);
         // Erase the page.
         self.erase_page(erase_index);
         // Increase generation.
@@ -727,6 +791,25 @@ impl<C: StoreConfig> Store<BufferStorage, C> {
     /// Erases and initializes a page with a given erase count.
     pub fn set_erase_count(&mut self, page: usize, erase_count: usize) {
         self.initialize_page(page, erase_count);
+    }
+
+    /// Returns whether all deleted sensitive entries have been wiped.
+    pub fn deleted_entries_are_wiped(&self) -> bool {
+        for (_, entry) in Iter::new(self) {
+            if !self.format.is_present(entry)
+                || !self.format.is_deleted(entry)
+                || self.format.is_internal(entry)
+                || !self.format.is_sensitive(entry)
+            {
+                continue;
+            }
+            let gap = self.format.entry_gap(entry);
+            let data = gap.slice(entry);
+            if !data.iter().all(|&byte| byte == 0x00) {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -843,7 +926,27 @@ mod tests {
         let tag = 0;
         let key = 1;
         let data = &[key, 2];
-        let entry = StoreEntry { tag, data };
+        let entry = StoreEntry {
+            tag,
+            data,
+            sensitive: false,
+        };
+        store.insert(entry).unwrap();
+        assert_eq!(store.iter().count(), 1);
+        assert_eq!(store.find_one(&key).unwrap().1, entry);
+    }
+
+    #[test]
+    fn insert_sensitive_ok() {
+        let mut store = new_store();
+        let tag = 0;
+        let key = 1;
+        let data = &[key, 4];
+        let entry = StoreEntry {
+            tag,
+            data,
+            sensitive: true,
+        };
         store.insert(entry).unwrap();
         assert_eq!(store.iter().count(), 1);
         assert_eq!(store.find_one(&key).unwrap().1, entry);
@@ -857,6 +960,7 @@ mod tests {
         let entry = StoreEntry {
             tag,
             data: &[key, 2],
+            sensitive: false,
         };
         store.insert(entry).unwrap();
         assert_eq!(store.find_all(&key).count(), 1);
@@ -864,6 +968,25 @@ mod tests {
         store.delete(index).unwrap();
         assert_eq!(store.find_all(&key).count(), 0);
         assert_eq!(store.iter().count(), 0);
+    }
+
+    #[test]
+    fn delete_sensitive_ok() {
+        let mut store = new_store();
+        let tag = 0;
+        let key = 1;
+        let entry = StoreEntry {
+            tag,
+            data: &[key, 2],
+            sensitive: true,
+        };
+        store.insert(entry).unwrap();
+        assert_eq!(store.find_all(&key).count(), 1);
+        let (index, _) = store.find_one(&key).unwrap();
+        store.delete(index).unwrap();
+        assert_eq!(store.find_all(&key).count(), 0);
+        assert_eq!(store.iter().count(), 0);
+        assert!(store.deleted_entries_are_wiped());
     }
 
     #[test]
@@ -875,6 +998,7 @@ mod tests {
             .insert(StoreEntry {
                 tag,
                 data: &[key, 0],
+                sensitive: false,
             })
             .is_ok()
         {
@@ -892,6 +1016,7 @@ mod tests {
             .insert(StoreEntry {
                 tag,
                 data: &[key, 0],
+                sensitive: false,
             })
             .is_ok()
         {
@@ -903,6 +1028,7 @@ mod tests {
             .insert(StoreEntry {
                 tag: 0,
                 data: &[key, 0],
+                sensitive: false,
             })
             .unwrap();
         for k in 1..=key {
@@ -916,7 +1042,11 @@ mod tests {
         let tag = 0;
         let key = 1;
         let data = &[key, 2];
-        let entry = StoreEntry { tag, data };
+        let entry = StoreEntry {
+            tag,
+            data,
+            sensitive: false,
+        };
         store.insert(entry).unwrap();
 
         // Reboot the store.
@@ -934,10 +1064,12 @@ mod tests {
         let old_entry = StoreEntry {
             tag,
             data: &[key, 2, 3, 4, 5, 6],
+            sensitive: false,
         };
         let new_entry = StoreEntry {
             tag,
             data: &[key, 7, 8, 9],
+            sensitive: false,
         };
         let mut delay = 0;
         loop {
@@ -973,6 +1105,7 @@ mod tests {
                 .insert(StoreEntry {
                     tag,
                     data: &[key, 0],
+                    sensitive: false,
                 })
                 .is_ok()
             {
@@ -983,7 +1116,14 @@ mod tests {
             let (index, _) = store.find_one(&1).unwrap();
             store.arm_snapshot(delay);
             store
-                .replace(index, StoreEntry { tag, data: &[1, 1] })
+                .replace(
+                    index,
+                    StoreEntry {
+                        tag,
+                        data: &[1, 1],
+                        sensitive: false,
+                    },
+                )
                 .unwrap();
             let (complete, store) = match store.get_snapshot() {
                 Err(_) => (true, store.get_storage()),
@@ -995,7 +1135,11 @@ mod tests {
                 assert_eq!(store.find_all(&k).count(), 1);
                 assert_eq!(
                     store.find_one(&k).unwrap().1,
-                    StoreEntry { tag, data: &[k, 0] }
+                    StoreEntry {
+                        tag,
+                        data: &[k, 0],
+                        sensitive: false,
+                    }
                 );
             }
             assert_eq!(store.find_all(&1).count(), 1);
@@ -1012,7 +1156,11 @@ mod tests {
     #[test]
     fn invalid_tag() {
         let mut store = new_store();
-        let entry = StoreEntry { tag: 1, data: &[] };
+        let entry = StoreEntry {
+            tag: 1,
+            data: &[],
+            sensitive: false,
+        };
         assert_eq!(store.insert(entry), Err(StoreError::InvalidTag));
     }
 
@@ -1022,6 +1170,7 @@ mod tests {
         let entry = StoreEntry {
             tag: 0,
             data: &[0; PAGE_SIZE],
+            sensitive: false,
         };
         assert_eq!(store.insert(entry), Err(StoreError::StoreFull));
     }

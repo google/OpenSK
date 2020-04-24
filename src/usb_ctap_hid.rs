@@ -166,6 +166,57 @@ pub fn recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
 ) -> Option<SendOrRecvStatus> {
+    #[cfg(feature = "verbose")]
+    writeln!(
+        Console::new(),
+        "Receiving packet with timeout of {}ms",
+        timeout_delay.ms(),
+    )
+    .unwrap();
+
+    let result = recv_with_timeout_detail(buf, timeout_delay);
+
+    #[cfg(feature = "verbose")]
+    {
+        if let Some(SendOrRecvStatus::Received) = result {
+            writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
+        }
+    }
+
+    result
+}
+
+// Same as send_or_recv, but with a timeout.
+// If the timeout elapses, return None.
+pub fn send_or_recv_with_timeout(
+    buf: &mut [u8; 64],
+    timeout_delay: Duration<isize>,
+) -> Option<SendOrRecvStatus> {
+    #[cfg(feature = "verbose")]
+    writeln!(
+        Console::new(),
+        "Sending packet with timeout of {}ms = {:02x?}",
+        timeout_delay.ms(),
+        buf as &[u8]
+    )
+    .unwrap();
+
+    let result = send_or_recv_with_timeout_detail(buf, timeout_delay);
+
+    #[cfg(feature = "verbose")]
+    {
+        if let Some(SendOrRecvStatus::Received) = result {
+            writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
+        }
+    }
+
+    result
+}
+
+fn recv_with_timeout_detail(
+    buf: &mut [u8; 64],
+    timeout_delay: Duration<isize>,
+) -> Option<SendOrRecvStatus> {
     let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf);
     if result.is_err() {
         return Some(SendOrRecvStatus::Error);
@@ -225,7 +276,7 @@ pub fn recv_with_timeout(
 
     // Cancel USB transaction if necessary.
     if status.get().is_none() {
-        #[cfg(feature = "debug_ctap")]
+        #[cfg(feature = "verbose")]
         writeln!(Console::new(), "Cancelling USB receive due to timeout").unwrap();
         let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
         match result_code {
@@ -249,9 +300,7 @@ pub fn recv_with_timeout(
     status.get()
 }
 
-// Same as send_or_recv, but with a timeout.
-// If the timeout elapses, return None.
-pub fn send_or_recv_with_timeout(
+fn send_or_recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
 ) -> Option<SendOrRecvStatus> {
@@ -317,7 +366,7 @@ pub fn send_or_recv_with_timeout(
 
     // Cancel USB transaction if necessary.
     if status.get().is_none() {
-        #[cfg(feature = "debug_ctap")]
+        #[cfg(feature = "verbose")]
         writeln!(Console::new(), "Cancelling USB transaction due to timeout").unwrap();
         let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
         match result_code {

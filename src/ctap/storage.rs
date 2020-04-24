@@ -198,6 +198,7 @@ impl PersistentStore {
                 .insert(StoreEntry {
                     tag: MASTER_KEYS,
                     data: &master_keys,
+                    sensitive: true,
                 })
                 .unwrap();
         }
@@ -206,6 +207,7 @@ impl PersistentStore {
                 .insert(StoreEntry {
                     tag: PIN_RETRIES,
                     data: &[MAX_PIN_RETRIES],
+                    sensitive: false,
                 })
                 .unwrap();
         }
@@ -245,6 +247,7 @@ impl PersistentStore {
         let new_entry = StoreEntry {
             tag: TAG_CREDENTIAL,
             data: &credential,
+            sensitive: true,
         };
         match old_entry {
             None => self.store.insert(new_entry)?,
@@ -299,6 +302,7 @@ impl PersistentStore {
                     .insert(StoreEntry {
                         tag: GLOBAL_SIGNATURE_COUNTER,
                         data: &buffer,
+                        sensitive: false,
                     })
                     .unwrap();
             }
@@ -312,6 +316,7 @@ impl PersistentStore {
                         StoreEntry {
                             tag: GLOBAL_SIGNATURE_COUNTER,
                             data: &buffer,
+                            sensitive: false,
                         },
                     )
                     .unwrap();
@@ -339,6 +344,7 @@ impl PersistentStore {
         let entry = StoreEntry {
             tag: PIN_HASH,
             data: pin_hash,
+            sensitive: true,
         };
         match self.store.find_one(&Key::PinHash) {
             None => self.store.insert(entry).unwrap(),
@@ -368,6 +374,7 @@ impl PersistentStore {
                 StoreEntry {
                     tag: PIN_RETRIES,
                     data: &[new_value],
+                    sensitive: false,
                 },
             )
             .unwrap();
@@ -381,6 +388,7 @@ impl PersistentStore {
                 StoreEntry {
                     tag: PIN_RETRIES,
                     data: &[MAX_PIN_RETRIES],
+                    sensitive: false,
                 },
             )
             .unwrap();
@@ -466,9 +474,9 @@ mod test {
         let storage = Storage::new(store, options);
         let store = embedded_flash::Store::new(storage, Config).unwrap();
         // We can replace 3 bytes with minimal overhead.
-        assert_eq!(store.replace_len(0), 2 * WORD_SIZE);
-        assert_eq!(store.replace_len(3), 2 * WORD_SIZE);
-        assert_eq!(store.replace_len(4), 3 * WORD_SIZE);
+        assert_eq!(store.replace_len(false, 0), 2 * WORD_SIZE);
+        assert_eq!(store.replace_len(false, 3), 3 * WORD_SIZE);
+        assert_eq!(store.replace_len(false, 4), 3 * WORD_SIZE);
     }
 
     #[test]

@@ -462,6 +462,8 @@ pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
 // here: https://www.iana.org/assignments/cose/cose.xhtml#algorithms
 // In fact, this is just used for compatibility with older specification versions.
 const ECDH_ALGORITHM: i64 = -25;
+// This is the identifier used by OpenSSH. To be compatible, we accept both.
+const ES256_ALGORITHM: i64 = -7;
 const EC2_KEY_TYPE: i64 = 2;
 const P_256_CURVE: i64 = 1;
 
@@ -497,7 +499,7 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         let algorithm = read_integer(ok_or_missing(cose_key.0.get(&cbor_int!(3)))?)?;
-        if algorithm != ECDH_ALGORITHM {
+        if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         let curve = read_integer(ok_or_missing(cose_key.0.get(&cbor_int!(-1)))?)?;

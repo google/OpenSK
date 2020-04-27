@@ -742,6 +742,14 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
+      "--ctap2-1",
+      action=RemoveConstAction,
+      const="with_ctap2_1",
+      dest="features",
+      help=("Compiles the OpenSK application with backward compatible "
+            "support for CTAP2.1 protocol."),
+  )
+  main_parser.add_argument(
       "--regen-keys",
       action="store_true",
       default=False,

@@ -23,15 +23,18 @@ pub mod status_code;
 mod storage;
 mod timed_permission;
 
+#[cfg(feature = "with_ctap2_1")]
+use self::command::MAX_CREDENTIAL_COUNT_IN_LIST;
 use self::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
-    AuthenticatorMakeCredentialParameters, Command, MAX_CREDENTIAL_COUNT_IN_LIST,
+    AuthenticatorMakeCredentialParameters, Command,
 };
+#[cfg(feature = "with_ctap2_1")]
+use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
-    AuthenticatorTransport, ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput,
-    PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
-    PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
-    SignatureAlgorithm,
+    ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, PackedAttestationStatement,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 use self::key_material::{AAGUID, ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
@@ -100,7 +103,9 @@ pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
 
-pub const CREDENTIAL_PARAMETER: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
+// We currently only support one algorithm for signatures: ES256.
+// This algorithm is requested in MakeCredential and advertized in GetInfo.
+pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::ES256,
 };
@@ -419,7 +424,7 @@ where
             }
         }
 
-        if !pub_key_cred_params.contains(&CREDENTIAL_PARAMETER) {
+        if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
 
@@ -757,6 +762,7 @@ where
             self.persistent_store.pin_hash().is_some(),
         );
         Ok(ResponseData::AuthenticatorGetInfo(
+            #[cfg(feature = "with_ctap2_1")]
             AuthenticatorGetInfoResponse {
                 versions: vec![
                     #[cfg(feature = "with_ctap1")]
@@ -770,13 +776,28 @@ where
                 pin_protocols: Some(vec![
                     CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
                 ]),
-                max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST,
+                max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 // You can use ENCRYPTED_CREDENTIAL_ID_SIZE here, but if your
                 // browser passes that value, it might be used to fingerprint.
                 max_credential_id_length: None,
                 transports: Some(vec![AuthenticatorTransport::Usb]),
-                algorithms: Some(vec![CREDENTIAL_PARAMETER]),
+                algorithms: Some(vec![ES256_CRED_PARAM]),
                 firmware_version: None,
+            },
+            #[cfg(not(feature = "with_ctap2_1"))]
+            AuthenticatorGetInfoResponse {
+                versions: vec![
+                    #[cfg(feature = "with_ctap1")]
+                    String::from(U2F_VERSION_STRING),
+                    String::from(FIDO2_VERSION_STRING),
+                ],
+                extensions: Some(vec![String::from("hmac-secret")]),
+                aaguid: *AAGUID,
+                options: Some(options_map),
+                max_msg_size: Some(1024),
+                pin_protocols: Some(vec![
+                    CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
+                ]),
             },
         ))
     }
@@ -1098,7 +1119,10 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID);
 
+        #[cfg(feature = "with_ctap2_1")]
         let mut expected_response = vec![0x00, 0xA8, 0x01];
+        #[cfg(not(feature = "with_ctap2_1"))]
+        let mut expected_response = vec![0x00, 0xA6, 0x01];
         // The difference here is a longer array of supported versions.
         #[cfg(not(feature = "with_ctap1"))]
         expected_response.extend(&[0x81, 0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30]);
@@ -1112,10 +1136,13 @@ mod test {
             0x03, 0x50,
         ]);
         expected_response.extend(AAGUID);
+        expected_response.extend(&[
+            0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
+            0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
+        ]);
+        #[cfg(feature = "with_ctap2_1")]
         expected_response.extend(
             [
-                0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
-                0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
                 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C, 0x67, 0x26,
                 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B,
                 0x65, 0x79,
@@ -1139,7 +1166,7 @@ mod test {
             user_display_name: None,
             user_icon: None,
         };
-        let pub_key_cred_params = vec![CREDENTIAL_PARAMETER];
+        let pub_key_cred_params = vec![ES256_CRED_PARAM];
         let options = MakeCredentialOptions {
             rk: true,
             uv: false,

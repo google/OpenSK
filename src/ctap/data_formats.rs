@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
 
+// https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
@@ -48,6 +49,7 @@ impl TryFrom<&cbor::Value> for PublicKeyCredentialRpEntity {
     }
 }
 
+// https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
@@ -94,16 +96,22 @@ impl From<PublicKeyCredentialUserEntity> for cbor::Value {
     }
 }
 
+// https://www.w3.org/TR/webauthn/#enumdef-publickeycredentialtype
 #[derive(Clone, PartialEq)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum PublicKeyCredentialType {
     PublicKey,
+    // This is the default for all strings not covered above.
+    // Unknown types should be ignored, instead of returning errors.
+    Unknown,
 }
 
 impl From<PublicKeyCredentialType> for cbor::Value {
     fn from(cred_type: PublicKeyCredentialType) -> Self {
         match cred_type {
             PublicKeyCredentialType::PublicKey => "public-key",
+            // We should never create this credential type.
+            PublicKeyCredentialType::Unknown => unreachable!(),
         }
         .into()
     }
@@ -116,11 +124,12 @@ impl TryFrom<&cbor::Value> for PublicKeyCredentialType {
         let cred_type_string = read_text_string(cbor_value)?;
         match &cred_type_string[..] {
             "public-key" => Ok(PublicKeyCredentialType::PublicKey),
-            _ => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            _ => Ok(PublicKeyCredentialType::Unknown),
         }
     }
 }
 
+// https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialparameters
 #[derive(PartialEq)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct PublicKeyCredentialParameter {
@@ -151,6 +160,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
     }
 }
 
+// https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub enum AuthenticatorTransport {
     Usb,
@@ -186,6 +196,7 @@ impl TryFrom<&cbor::Value> for AuthenticatorTransport {
     }
 }
 
+// https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
@@ -205,10 +216,11 @@ impl TryFrom<&cbor::Value> for PublicKeyCredentialDescriptor {
         let transports = match cred_desc_map.get(&cbor_text!("transports")) {
             Some(exclude_entry) => {
                 let transport_vec = read_array(exclude_entry)?;
-                let mut transports = vec![];
-                for transport_value in transport_vec {
-                    transports.push(AuthenticatorTransport::try_from(transport_value)?);
-                }
+                let transports = transport_vec
+                    .iter()
+                    .map(AuthenticatorTransport::try_from)
+                    .collect::<Result<Vec<AuthenticatorTransport>, Ctap2StatusCode>>(
+                )?;
                 Some(transports)
             }
             None => None,
@@ -379,6 +391,7 @@ impl TryFrom<&cbor::Value> for GetAssertionOptions {
     }
 }
 
+// https://www.w3.org/TR/webauthn/#packed-attestation
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct PackedAttestationStatement {
@@ -403,6 +416,9 @@ impl From<PackedAttestationStatement> for cbor::Value {
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum SignatureAlgorithm {
     ES256 = ecdsa::PubKey::ES256_ALGORITHM as isize,
+    // This is the default for all numbers not covered above.
+    // Unknown types should be ignored, instead of returning errors.
+    Unknown = 0,
 }
 
 impl TryFrom<&cbor::Value> for SignatureAlgorithm {
@@ -411,11 +427,12 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
         match read_integer(cbor_value)? {
             ecdsa::PubKey::ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
-            _ => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            _ => Ok(SignatureAlgorithm::Unknown),
         }
     }
 }
 
+// https://www.w3.org/TR/webauthn/#public-key-credential-source
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
@@ -679,6 +696,7 @@ mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
     use alloc::collections::BTreeMap;
+    use crypto::rng256::{Rng256, ThreadRng256};
 
     #[test]
     fn test_read_unsigned() {
@@ -990,6 +1008,26 @@ mod test {
         assert_eq!(credential_type, Ok(expected_credential_type));
         let created_cbor: cbor::Value = credential_type.unwrap().into();
         assert_eq!(created_cbor, cbor_credential_type);
+
+        let cbor_unknown_type = cbor_text!("unknown-type");
+        let unknown_type = PublicKeyCredentialType::try_from(&cbor_unknown_type);
+        let expected_unknown_type = PublicKeyCredentialType::Unknown;
+        assert_eq!(unknown_type, Ok(expected_unknown_type));
+    }
+
+    #[test]
+    fn test_from_into_signature_algorithm() {
+        let cbor_signature_algorithm = cbor_int!(ecdsa::PubKey::ES256_ALGORITHM);
+        let signature_algorithm = SignatureAlgorithm::try_from(&cbor_signature_algorithm);
+        let expected_signature_algorithm = SignatureAlgorithm::ES256;
+        assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
+        let created_cbor: cbor::Value = cbor_int!(signature_algorithm.unwrap() as i64);
+        assert_eq!(created_cbor, cbor_signature_algorithm);
+
+        let cbor_unknown_algorithm = cbor_int!(-1);
+        let unknown_algorithm = SignatureAlgorithm::try_from(&cbor_unknown_algorithm);
+        let expected_unknown_algorithm = SignatureAlgorithm::Unknown;
+        assert_eq!(unknown_algorithm, Ok(expected_unknown_algorithm));
     }
 
     #[test]
@@ -1004,6 +1042,23 @@ mod test {
         );
         let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
         assert_eq!(created_cbor, cbor_authenticator_transport);
+    }
+
+    #[test]
+    fn test_from_into_public_key_credential_parameter() {
+        let cbor_credential_parameter = cbor_map! {
+            "type" => "public-key",
+            "alg" => ecdsa::PubKey::ES256_ALGORITHM,
+        };
+        let credential_parameter =
+            PublicKeyCredentialParameter::try_from(&cbor_credential_parameter);
+        let expected_credential_parameter = PublicKeyCredentialParameter {
+            cred_type: PublicKeyCredentialType::PublicKey,
+            alg: SignatureAlgorithm::ES256,
+        };
+        assert_eq!(credential_parameter, Ok(expected_credential_parameter));
+        let created_cbor: cbor::Value = credential_parameter.unwrap().into();
+        assert_eq!(created_cbor, cbor_credential_parameter);
     }
 
     #[test]
@@ -1026,7 +1081,7 @@ mod test {
     }
 
     #[test]
-    fn test_from_extensions() {
+    fn test_from_into_extensions() {
         let cbor_extensions = cbor_map! {
             "the_answer" => 42,
         };
@@ -1036,6 +1091,53 @@ mod test {
             .0
             .insert("the_answer".to_string(), cbor_int!(42));
         assert_eq!(extensions, Ok(expected_extensions));
+        let created_cbor: cbor::Value = extensions.unwrap().into();
+        assert_eq!(created_cbor, cbor_extensions);
+    }
+
+    #[test]
+    fn test_from_into_get_assertion_hmac_secret_output() {
+        let cbor_output = cbor_bytes![vec![0xC0; 32]];
+        let output = GetAssertionHmacSecretOutput::try_from(&cbor_output);
+        let expected_output = GetAssertionHmacSecretOutput(vec![0xC0; 32]);
+        assert_eq!(output, Ok(expected_output));
+        let created_cbor: cbor::Value = output.unwrap().into();
+        assert_eq!(created_cbor, cbor_output);
+    }
+
+    #[test]
+    fn test_hmac_secret_extension() {
+        let cbor_extensions = cbor_map! {
+            "hmac-secret" => true,
+        };
+        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
+        assert!(extensions.has_make_credential_hmac_secret().unwrap());
+
+        let cbor_extensions = cbor_map! {
+            "hmac-secret" => false,
+        };
+        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
+        assert!(!extensions.has_make_credential_hmac_secret().unwrap());
+
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk.clone());
+        let cbor_extensions = cbor_map! {
+            "hmac-secret" => cbor_map! {
+                1 => cbor::Value::Map(cose_key.0.clone()),
+                2 => vec![0x02; 32],
+                3 => vec![0x03; 32],
+            },
+        };
+        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
+        let get_assertion_input = extensions.get_assertion_hmac_secret();
+        let expected_input = GetAssertionHmacSecretInput {
+            key_agreement: cose_key,
+            salt_enc: vec![0x02; 32],
+            salt_auth: vec![0x03; 32],
+        };
+        assert_eq!(get_assertion_input, Some(Ok(expected_input)));
     }
 
     #[test]
@@ -1087,8 +1189,6 @@ mod test {
 
     #[test]
     fn test_from_into_cose_key() {
-        use crypto::rng256::ThreadRng256;
-
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
@@ -1109,8 +1209,6 @@ mod test {
 
     #[test]
     fn test_credential_source_cbor_round_trip() {
-        use crypto::rng256::{Rng256, ThreadRng256};
-
         let mut rng = ThreadRng256 {};
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,

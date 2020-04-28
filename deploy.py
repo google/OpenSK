@@ -302,8 +302,7 @@ class OpenSKInstaller:
       # Need to update
       self.checked_command_output(
           ["rustup", "install", target_toolchain_fullstring])
-    self.checked_command_output(
-        ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+    self.checked_command_output(["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):

@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install tockloader pylint
+          pip install 'tockloader~=1.4' pylint
       - name: Register matcher
         run: echo ::add-matcher::./.github/python_matcher.json
       - name: Test code with pylint
@@ -39,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install yapf tockloader
+          pip install 'yapf>=0.30.0' tockloader
       - name: Test code formatting with yapf
         run: |
           echo ::add-matcher::./.github/python_matcher.json
-          yapf --style=chromium --recursive --exclude third_party --diff .
+          yapf --style=yapf --recursive --exclude third_party --diff .

@@ -310,13 +310,13 @@ class OpenSKInstaller:
       # Need to update
       rustup_install = ["rustup"]
       if self.args.verbose_build:
-        rustup_install.extend(["--verbose"])
+        rustup_install.extend("--verbose")
       rustup_install.extend(["install", target_toolchain_fullstring])
       self.checked_command(rustup_install)
 
     rustup_target = ["rustup"]
     if self.args.verbose_build:
-      rustup_target.extend(["--verbose"])
+      rustup_target.extend("--verbose")
     rustup_target.extend(
         ["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     self.checked_command(rustup_target)
@@ -368,7 +368,7 @@ class OpenSKInstaller:
     if is_example:
       command.extend(["--example", self.args.application])
     if self.args.verbose_build:
-      command.extend(["--verbose"])
+      command.extend("--verbose")
     self.checked_command(command, env=env)
     app_path = os.path.join("target", props.arch, "release")
     if is_example:
@@ -406,7 +406,7 @@ class OpenSKInstaller:
         "elf2tab", package_parameter, self.args.application, "-o", tab_filename
     ]
     if self.args.verbose_build:
-      elf2tab_args.extend(["--verbose"])
+      elf2tab_args.extend("--verbose")
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
@@ -698,7 +698,7 @@ if __name__ == "__main__":
       choices=("boards", "programmers"),
       default=None,
       dest="listing",
-      help=("List supported boards or programmers, 1 per line and then exit."),
+      help="List supported boards or programmers, 1 per line and then exit.",
   )
   action_group.add_argument(
       "--board",
@@ -740,7 +740,7 @@ if __name__ == "__main__":
       action="store_true",
       default=False,
       dest="verbose_build",
-      help=("Build everything in verbose mode."),
+      help="Build everything in verbose mode.",
   )
 
   main_parser.add_argument(

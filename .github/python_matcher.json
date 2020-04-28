@@ -5,17 +5,8 @@
             "pattern": [
                 {
                     "regexp": "^(?:---|\\+\\+\\+)\\s*([^\\s]*)\\s*\\((?:original|reformatted)\\)$",
-                    "file": 1
-                },
-                {
-                    "regexp": "^@@\\s*-(\\d+),(\\d+)\\s*\\+(\\d+),(\\d+)\\s*@@$",
-                    "line": 1,
-                    "column": 2
-                },
-                {
-                    "regexp": "^((?:\\s|\\+[^+]|\\-[^-]).*)$",
-                    "loop": true,
-                    "message": 1
+                    "file": 1,
+                    "message": "This file needs formating."
                 }
             ]
         },

@@ -524,9 +524,9 @@ class OpenSKInstaller:
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
-    if not tockloader.__version__.startswith("1.4"):
-      fatal(("Your version of tockloader is too old: found {}, expected "
-             "1.4.0.".format(tockloader.__version__)))
+    if not tockloader.__version__.startswith("1.4."):
+      fatal(("Your version of tockloader seems incompatible: found {}, "
+             "expected 1.4.x.".format(tockloader.__version__)))
 
     if self.args.programmer == "jlink":
       assert_mandatory_binary("JLinkExe")

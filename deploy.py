@@ -273,12 +273,7 @@ class OpenSKInstaller:
     stdout = None if self.args.verbose_build else subprocess.DEVNULL
     try:
       subprocess.run(
-          cmd,
-          stdout=stdout,
-          timeout=None,
-          check=True,
-          env=env,
-          cwd=cwd)
+          cmd, stdout=stdout, timeout=None, check=True, env=env, cwd=cwd)
     except subprocess.CalledProcessError as e:
       fatal("Failed to execute {}: {}".format(cmd[0], str(e)))
 
@@ -322,7 +317,8 @@ class OpenSKInstaller:
     rustup_target = ["rustup"]
     if self.args.verbose_build:
       rustup_target.extend(["--verbose"])
-    rustup_target.extend(["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+    rustup_target.extend(
+        ["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     self.checked_command(rustup_target)
     info("Rust toolchain up-to-date")
 

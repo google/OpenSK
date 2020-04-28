@@ -29,6 +29,7 @@ import sys
 
 import colorama
 from six.moves import input
+import tockloader
 from tockloader import tab
 from tockloader import tbfh
 from tockloader import tockloader as loader
@@ -252,12 +253,16 @@ class OpenSKInstaller:
         board=self.args.board,
         debug=False,
         force=False,
+        jlink_cmd="JLinkExe",
         jlink=self.args.programmer == "jlink",
         jlink_device=board.jlink_device,
         jlink_if=board.jlink_if,
         jlink_speed=1200,
         openocd=self.args.programmer == "openocd",
         openocd_board=board.openocd_board,
+        openocd_cmd="openocd",
+        openocd_commands=copy.copy(board.openocd_commands),
+        openocd_options=copy.copy(board.openocd_options),
         jtag=False,
         no_bootloader_entry=False,
         page_size=board.page_size,
@@ -399,7 +404,7 @@ class OpenSKInstaller:
     setattr(args, "make", False)
     setattr(args, "no_replace", False)
     tock = loader.TockLoader(args)
-    tock.open(args)
+    tock.open()
     tabs = [tab.TAB(tab_filename)]
     try:
       tock.install(tabs, replace="yes", erase=args.erase)
@@ -428,7 +433,7 @@ class OpenSKInstaller:
     args = copy.copy(self.tockloader_default_args)
     setattr(args, "address", board_props.app_address)
     tock = loader.TockLoader(args)
-    tock.open(args)
+    tock.open()
     try:
       tock.flash_binary(kernel, board_props.kernel_address)
     except TockLoaderException as e:
@@ -441,7 +446,7 @@ class OpenSKInstaller:
     args = copy.copy(self.tockloader_default_args)
     setattr(args, "address", board_props.padding_address)
     tock = loader.TockLoader(args)
-    tock.open(args)
+    tock.open()
     try:
       tock.flash_binary(padding, args.address)
     except TockLoaderException as e:
@@ -451,11 +456,14 @@ class OpenSKInstaller:
     args = copy.copy(self.tockloader_default_args)
     board_props = SUPPORTED_BOARDS[self.args.board]
     setattr(args, "app_address", board_props.app_address)
+    # Ensure we don't force erase all apps but only the apps starting
+    # at `board.app_address`. This makes sure we don't erase the padding.
+    setattr(args, "force", False)
     info("Erasing all installed applications")
     tock = loader.TockLoader(args)
-    tock.open(args)
+    tock.open()
     try:
-      tock.erase_apps(False)
+      tock.erase_apps()
     except TockLoaderException as e:
       # Erasing apps is not critical
       info(("A non-critical error occurred while erasing "
@@ -467,6 +475,7 @@ class OpenSKInstaller:
       return False
     args = copy.copy(self.tockloader_default_args)
     tock = loader.TockLoader(args)
+    tock.open()
     app_found = False
     with tock._start_communication_with_board():
       apps = [app.name for app in tock._extract_all_app_headers()]
@@ -515,6 +524,10 @@ class OpenSKInstaller:
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
+    if not tockloader.__version__.startswith("1.4"):
+      fatal(("Your version of tockloader is too old: found {}, expected "
+             "1.4.0.".format(tockloader.__version__)))
+
     if self.args.programmer == "jlink":
       assert_mandatory_binary("JLinkExe")
 

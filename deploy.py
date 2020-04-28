@@ -313,9 +313,17 @@ class OpenSKInstaller:
             target_toolchain[1] in current_version):
       info("Updating rust toolchain to {}".format("-".join(target_toolchain)))
       # Need to update
-      self.checked_command(["rustup", "install", target_toolchain_fullstring])
-    self.checked_command(
-        ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+      rustup_install = ["rustup"]
+      if self.args.verbose_build:
+        rustup_install.extend(["--verbose"])
+      rustup_install.extend(["install", target_toolchain_fullstring])
+      self.checked_command(rustup_install)
+
+    rustup_target = ["rustup"]
+    if self.args.verbose_build:
+      rustup_target.extend(["--verbose"])
+    rustup_target.extend(["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+    self.checked_command(rustup_target)
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):

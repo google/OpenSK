@@ -4,7 +4,7 @@
             "owner": "yapf-diff",
             "pattern": [
                 {
-                    "regexp": "^[+-]{3}\\s*([^\\s]*)\\s*\\((original|reformatted)\\)$",
+                    "regexp": "^(?:---|\\+\\+\\+)\\s*([^\\s]*)\\s*\\((?:original|reformatted)\\)$",
                     "file": 1
                 },
                 {
@@ -13,7 +13,7 @@
                     "column": 2
                 },
                 {
-                    "regexp": "^(\\s|\\+[^+]|\\-[^-]).*$",
+                    "regexp": "^((?:\\s|\\+[^+]|\\-[^-]).*)$",
                     "loop": true,
                     "message": 1
                 }

@@ -313,8 +313,7 @@ class OpenSKInstaller:
             target_toolchain[1] in current_version):
       info("Updating rust toolchain to {}".format("-".join(target_toolchain)))
       # Need to update
-      self.checked_command(
-          ["rustup", "install", target_toolchain_fullstring])
+      self.checked_command(["rustup", "install", target_toolchain_fullstring])
     self.checked_command(
         ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     info("Rust toolchain up-to-date")

@@ -251,6 +251,7 @@ class OpenSKInstaller:
     self.tockloader_default_args = argparse.Namespace(
         arch=board.arch,
         board=self.args.board,
+        bundle_apps=False,
         debug=False,
         force=False,
         jlink_cmd="JLinkExe",
@@ -268,6 +269,14 @@ class OpenSKInstaller:
         page_size=board.page_size,
         port=None,
     )
+
+  def checked_command(self, cmd, env=None, cwd=None):
+    stdout = None if self.args.verbose_build else subprocess.DEVNULL
+    try:
+      subprocess.run(
+          cmd, stdout=stdout, timeout=None, check=True, env=env, cwd=cwd)
+    except subprocess.CalledProcessError as e:
+      fatal("Failed to execute {}: {}".format(cmd[0], str(e)))
 
   def checked_command_output(self, cmd, env=None, cwd=None):
     cmd_output = ""
@@ -300,10 +309,18 @@ class OpenSKInstaller:
             target_toolchain[1] in current_version):
       info("Updating rust toolchain to {}".format("-".join(target_toolchain)))
       # Need to update
-      self.checked_command_output(
-          ["rustup", "install", target_toolchain_fullstring])
-    self.checked_command_output(
-        ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+      rustup_install = ["rustup"]
+      if self.args.verbose_build:
+        rustup_install.append("--verbose")
+      rustup_install.extend(["install", target_toolchain_fullstring])
+      self.checked_command(rustup_install)
+
+    rustup_target = ["rustup"]
+    if self.args.verbose_build:
+      rustup_target.append("--verbose")
+    rustup_target.extend(
+        ["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+    self.checked_command(rustup_target)
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):
@@ -312,7 +329,11 @@ class OpenSKInstaller:
     out_directory = os.path.join("third_party", "tock", "target", props.arch,
                                  "release")
     os.makedirs(out_directory, exist_ok=True)
-    self.checked_command_output(["make"], cwd=props.path)
+
+    env = os.environ.copy()
+    if self.args.verbose_build:
+      env["V"] = "1"
+    self.checked_command(["make"], cwd=props.path, env=env)
 
   def build_example(self):
     info("Building example {}".format(self.args.application))
@@ -347,7 +368,9 @@ class OpenSKInstaller:
     ]
     if is_example:
       command.extend(["--example", self.args.application])
-    self.checked_command_output(command, env=env)
+    if self.args.verbose_build:
+      command.append("--verbose")
+    self.checked_command(command, env=env)
     app_path = os.path.join("target", props.arch, "release")
     if is_example:
       app_path = os.path.join(app_path, "examples")
@@ -383,6 +406,8 @@ class OpenSKInstaller:
     elf2tab_args = [
         "elf2tab", package_parameter, self.args.application, "-o", tab_filename
     ]
+    if self.args.verbose_build:
+      elf2tab_args.append("--verbose")
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
@@ -392,7 +417,7 @@ class OpenSKInstaller:
         "--stack={}".format(STACK_SIZE), "--app-heap={}".format(APP_HEAP_SIZE),
         "--kernel-heap=1024", "--protected-region-size=64"
     ])
-    self.checked_command_output(elf2tab_args)
+    self.checked_command(elf2tab_args)
 
   def install_tab_file(self, tab_filename):
     assert self.args.application
@@ -616,14 +641,14 @@ class OpenSKInstaller:
 
       if self.args.programmer == "pyocd":
         info("Flashing HEX file")
-        self.checked_command_output([
+        self.checked_command([
             "pyocd", "flash", "--target={}".format(board_props.pyocd_target),
             "--format=hex", "--erase=auto", dest_file
         ])
       if self.args.programmer == "nordicdfu":
         info("Creating DFU package")
         dfu_pkg_file = "target/{}_dfu.zip".format(self.args.board)
-        self.checked_command_output([
+        self.checked_command([
             "nrfutil", "pkg", "generate", "--hw-version=52", "--sd-req=0",
             "--application-version=1", "--application={}".format(dest_file),
             dfu_pkg_file
@@ -674,7 +699,7 @@ if __name__ == "__main__":
       choices=("boards", "programmers"),
       default=None,
       dest="listing",
-      help=("List supported boards or programmers, 1 per line and then exit."),
+      help="List supported boards or programmers, 1 per line and then exit.",
   )
   action_group.add_argument(
       "--board",
@@ -710,6 +735,13 @@ if __name__ == "__main__":
       dest="tockos",
       help=("Only compiles and flash the application/example. "
             "Otherwise TockOS will also be bundled and flashed."),
+  )
+  main_parser.add_argument(
+      "--verbose-build",
+      action="store_true",
+      default=False,
+      dest="verbose_build",
+      help="Build everything in verbose mode.",
   )
 
   main_parser.add_argument(

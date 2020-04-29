@@ -4,9 +4,16 @@
             "owner": "yapf-diff",
             "pattern": [
                 {
-                    "regexp": "^(?:---|\\+\\+\\+)\\s*([^\\s]*)\\s*\\((?:original|reformatted)\\)$",
-                    "file": 1,
-                    "message": "This file needs formating."
+                    "regexp": "^---\\s*([^\\s]*)\\s*\\(original\\)$",
+                    "file": 1
+                },
+                {
+                    "regexp": "^\\+\\+\\+\\s*([^\\s]*)\\s*\\(reformatted\\)$",
+                    "message": 2
+                },
+                {
+                    "regexp": "^@@\\s*-(\\d+),(\\d+)\\s*\\+(\\d+),(\\d+)\\s*@@$",
+                    "line": 1
                 }
             ]
         },

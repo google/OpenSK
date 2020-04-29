@@ -315,8 +315,7 @@ class OpenSKInstaller:
     self.checked_command_output(["make"], cwd=props.path)
 
   def build_example(self):
-    info(
-        "Building example {}".format(self.args.application))
+    info("Building example {}".format(self.args.application))
     self._build_app_or_example(is_example=True)
 
   def build_opensk(self):
@@ -343,7 +342,8 @@ class OpenSKInstaller:
     env["RUSTFLAGS"] = " ".join(rust_flags)
 
     command = [
-        "cargo", "build", "--release", "--target={}".format(props.arch),
+        "cargo",
+        "build", "--release", "--target={}".format(props.arch),
         "--features={}".format(",".join(self.args.features))
     ]
     if is_example:

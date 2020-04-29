@@ -143,6 +143,7 @@ const PAGE_SIZE: usize = 0x1000;
 // 0x30000-0x3ffff: Padding
 // 0x40000-0xbffff: App
 // 0xc0000-0xfffff: Store
+#[cfg(not(any(test, feature = "ram_storage")))]
 const STORE_ADDR: usize = 0xC0000;
 const STORE_SIZE_LIMIT: usize = 0x40000;
 const STORE_SIZE: usize = NUM_PAGES * PAGE_SIZE;
@@ -154,6 +155,8 @@ impl PersistentStore {
     ///
     /// This should be at most one instance of persistent store per program lifetime.
     pub fn new(rng: &mut impl Rng256) -> PersistentStore {
+        // This should ideally be a compile-time assert, but Rust doesn't have native support.
+        assert!(STORE_SIZE <= STORE_SIZE_LIMIT);
         #[cfg(not(any(test, feature = "ram_storage")))]
         let storage = PersistentStore::new_prod_storage();
         #[cfg(any(test, feature = "ram_storage"))]
@@ -167,8 +170,6 @@ impl PersistentStore {
 
     #[cfg(not(any(test, feature = "ram_storage")))]
     fn new_prod_storage() -> Storage {
-        // This should ideally be a compile-time assert, but Rust doesn't have native support.
-        assert!(STORE_SIZE <= STORE_SIZE_LIMIT);
         let store = unsafe {
             // Safety: The store cannot alias because this function is called only once.
             core::slice::from_raw_parts_mut(STORE_ADDR as *mut u8, STORE_SIZE)

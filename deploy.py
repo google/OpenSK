@@ -342,8 +342,7 @@ class OpenSKInstaller:
     env["RUSTFLAGS"] = " ".join(rust_flags)
 
     command = [
-        "cargo",
-        "build", "--release", "--target={}".format(props.arch),
+        "cargo", "build", "--release", "--target={}".format(props.arch),
         "--features={}".format(",".join(self.args.features))
     ]
     if is_example:

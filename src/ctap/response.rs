@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "with_ctap2_1")]
+use super::data_formats::{AuthenticatorTransport, PublicKeyCredentialParameter};
 use super::data_formats::{
     CoseKey, PackedAttestationStatement, PublicKeyCredentialDescriptor,
     PublicKeyCredentialUserEntity,
@@ -102,16 +104,66 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct AuthenticatorGetInfoResponse {
-    // TODO(kaczmarczyck) add fields from 2.1
+    // TODO(kaczmarczyck) add maxAuthenticatorConfigLength and defaultCredProtect
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
     pub aaguid: [u8; 16],
     pub options: Option<BTreeMap<String, bool>>,
     pub max_msg_size: Option<u64>,
     pub pin_protocols: Option<Vec<u64>>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub max_credential_count_in_list: Option<u64>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub max_credential_id_length: Option<u64>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub transports: Option<Vec<AuthenticatorTransport>>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub algorithms: Option<Vec<PublicKeyCredentialParameter>>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub firmware_version: Option<u64>,
 }
 
 impl From<AuthenticatorGetInfoResponse> for cbor::Value {
+    #[cfg(feature = "with_ctap2_1")]
+    fn from(get_info_response: AuthenticatorGetInfoResponse) -> Self {
+        let AuthenticatorGetInfoResponse {
+            versions,
+            extensions,
+            aaguid,
+            options,
+            max_msg_size,
+            pin_protocols,
+            max_credential_count_in_list,
+            max_credential_id_length,
+            transports,
+            algorithms,
+            firmware_version,
+        } = get_info_response;
+
+        let options_cbor: Option<cbor::Value> = options.map(|options| {
+            let option_map: BTreeMap<_, _> = options
+                .into_iter()
+                .map(|(key, value)| (cbor_text!(key), cbor_bool!(value)))
+                .collect();
+            cbor_map_btree!(option_map)
+        });
+
+        cbor_map_options! {
+            0x01 => cbor_array_vec!(versions),
+            0x02 => extensions.map(|vec| cbor_array_vec!(vec)),
+            0x03 => &aaguid,
+            0x04 => options_cbor,
+            0x05 => max_msg_size,
+            0x06 => pin_protocols.map(|vec| cbor_array_vec!(vec)),
+            0x07 => max_credential_count_in_list,
+            0x08 => max_credential_id_length,
+            0x09 => transports.map(|vec| cbor_array_vec!(vec)),
+            0x0A => algorithms.map(|vec| cbor_array_vec!(vec)),
+            0x0E => firmware_version,
+        }
+    }
+
+    #[cfg(not(feature = "with_ctap2_1"))]
     fn from(get_info_response: AuthenticatorGetInfoResponse) -> Self {
         let AuthenticatorGetInfoResponse {
             versions,
@@ -131,12 +183,12 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
         });
 
         cbor_map_options! {
-            1 => cbor_array_vec!(versions),
-            2 => extensions.map(|vec| cbor_array_vec!(vec)),
-            3 => &aaguid,
-            4 => options_cbor,
-            5 => max_msg_size,
-            6 => pin_protocols.map(|vec| cbor_array_vec!(vec)),
+            0x01 => cbor_array_vec!(versions),
+            0x02 => extensions.map(|vec| cbor_array_vec!(vec)),
+            0x03 => &aaguid,
+            0x04 => options_cbor,
+            0x05 => max_msg_size,
+            0x06 => pin_protocols.map(|vec| cbor_array_vec!(vec)),
         }
     }
 }
@@ -168,6 +220,8 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
 #[cfg(test)]
 mod test {
     use super::super::data_formats::PackedAttestationStatement;
+    #[cfg(feature = "with_ctap2_1")]
+    use super::super::ES256_CRED_PARAM;
     use super::*;
 
     #[test]
@@ -228,12 +282,58 @@ mod test {
             options: None,
             max_msg_size: None,
             pin_protocols: None,
+            #[cfg(feature = "with_ctap2_1")]
+            max_credential_count_in_list: None,
+            #[cfg(feature = "with_ctap2_1")]
+            max_credential_id_length: None,
+            #[cfg(feature = "with_ctap2_1")]
+            transports: None,
+            #[cfg(feature = "with_ctap2_1")]
+            algorithms: None,
+            #[cfg(feature = "with_ctap2_1")]
+            firmware_version: None,
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
         let expected_cbor = cbor_map_options! {
-            1 => cbor_array_vec![vec!["FIDO_2_0"]],
-            3 => vec![0x00; 16],
+            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
+            0x03 => vec![0x00; 16],
+        };
+        assert_eq!(response_cbor, Some(expected_cbor));
+    }
+
+    #[test]
+    #[cfg(feature = "with_ctap2_1")]
+    fn test_get_info_optionals_into_cbor() {
+        let mut options_map = BTreeMap::new();
+        options_map.insert(String::from("rk"), true);
+        let get_info_response = AuthenticatorGetInfoResponse {
+            versions: vec!["FIDO_2_0".to_string()],
+            extensions: Some(vec!["extension".to_string()]),
+            aaguid: [0x00; 16],
+            options: Some(options_map),
+            max_msg_size: Some(1024),
+            pin_protocols: Some(vec![1]),
+            max_credential_count_in_list: Some(20),
+            max_credential_id_length: Some(256),
+            transports: Some(vec![AuthenticatorTransport::Usb]),
+            algorithms: Some(vec![ES256_CRED_PARAM]),
+            firmware_version: Some(0),
+        };
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorGetInfo(get_info_response).into();
+        let expected_cbor = cbor_map_options! {
+            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
+            0x02 => cbor_array_vec![vec!["extension"]],
+            0x03 => vec![0x00; 16],
+            0x04 => cbor_map! {"rk" => true},
+            0x05 => 1024,
+            0x06 => cbor_array_vec![vec![1]],
+            0x07 => 20,
+            0x08 => 256,
+            0x09 => cbor_array_vec![vec!["usb"]],
+            0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x0E => 0,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }

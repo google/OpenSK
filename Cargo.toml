@@ -25,6 +25,7 @@ std = ["cbor/std", "crypto/std", "crypto/derive_debug"]
 ram_storage = []
 verbose = ["debug_ctap"]
 with_ctap1 = ["crypto/with_ctap1"]
+with_ctap2_1 = []
 
 [dev-dependencies]
 elf2tab = "0.4.0"

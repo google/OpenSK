@@ -277,3 +277,39 @@ index 5abd2d84..5a726fdb 100644
 +        }
 +    }
 +}
+diff --git a/kernel/src/process.rs b/kernel/src/process.rs
+index eb00f274..35c19d15 100644
+--- a/kernel/src/process.rs
++++ b/kernel/src/process.rs
+@@ -1604,6 +1604,31 @@ impl<C: 'static + Chip> Process<'a, C> {
+             return Ok((None, 0));
+         }
+ 
++        // Allocate MPU region for storage.
++        const STORAGE_PTR: usize = 0xc0000;
++        const STORAGE_LEN: usize = 0x40000;
++        if chip
++            .mpu()
++            .allocate_region(
++                STORAGE_PTR as *const u8,
++                STORAGE_LEN,
++                STORAGE_LEN,
++                mpu::Permissions::ReadOnly,
++                &mut mpu_config,
++            )
++            .is_none()
++        {
++            if config::CONFIG.debug_load_processes {
++                debug!(
++                    "[!] flash=[{:#010X}:{:#010X}] process={:?} - couldn't allocate flash region",
++                    STORAGE_PTR,
++                    STORAGE_PTR + STORAGE_LEN,
++                    process_name
++                );
++            }
++            return Ok((None, 0));
++        }
++
+         // Determine how much space we need in the application's
+         // memory space just for kernel and grant state. We need to make
+         // sure we allocate enough memory just for that.

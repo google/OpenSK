@@ -13,15 +13,20 @@
 // limitations under the License.
 
 use super::data_formats::{
-    ok_or_missing, read_array, read_byte_string, read_integer, read_map, read_text_string,
-    read_unsigned, ClientPinSubCommand, CoseKey, Extensions, GetAssertionOptions,
-    MakeCredentialOptions, PublicKeyCredentialDescriptor, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+    ok_or_missing, read_array, read_byte_string, read_map, read_text_string, read_unsigned,
+    ClientPinSubCommand, CoseKey, Extensions, GetAssertionOptions, MakeCredentialOptions,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialUserEntity,
 };
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
+
+// Depending on your memory, you can use Some(n) to limit request sizes in
+// MakeCredential and GetAssertion. This affects allowList and excludeList.
+// You might also want to set the max credential size in process_get_info then.
+pub const MAX_CREDENTIAL_COUNT_IN_LIST: Option<usize> = None;
 
 // CTAP specification (version 20190130) section 6.1
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -106,7 +111,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub client_data_hash: Vec<u8>,
     pub rp: PublicKeyCredentialRpEntity,
     pub user: PublicKeyCredentialUserEntity,
-    pub pub_key_cred_params: Vec<(PublicKeyCredentialType, i64)>,
+    pub pub_key_cred_params: Vec<PublicKeyCredentialParameter>,
     pub exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
     pub extensions: Option<Extensions>,
     // Even though options are optional, we can use the default if not present.
@@ -132,23 +137,19 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         )?)?;
 
         let cred_param_vec = read_array(ok_or_missing(param_map.get(&cbor_unsigned!(4)))?)?;
-        let mut pub_key_cred_params = vec![];
-        for cred_param_map_value in cred_param_vec {
-            let cred_param_map = read_map(cred_param_map_value)?;
-            let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(
-                cred_param_map.get(&cbor_text!("type")),
-            )?)?;
-            let alg = read_integer(ok_or_missing(cred_param_map.get(&cbor_text!("alg")))?)?;
-            pub_key_cred_params.push((cred_type, alg));
-        }
+        let pub_key_cred_params = cred_param_vec
+            .iter()
+            .map(PublicKeyCredentialParameter::try_from)
+            .collect::<Result<Vec<PublicKeyCredentialParameter>, Ctap2StatusCode>>()?;
 
         let exclude_list = match param_map.get(&cbor_unsigned!(5)) {
             Some(entry) => {
                 let exclude_list_vec = read_array(entry)?;
-                let mut exclude_list = vec![];
-                for exclude_list_value in exclude_list_vec {
-                    exclude_list.push(PublicKeyCredentialDescriptor::try_from(exclude_list_value)?);
-                }
+                let exclude_list = exclude_list_vec
+                    .iter()
+                    .take(MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(exclude_list_vec.len()))
+                    .map(PublicKeyCredentialDescriptor::try_from)
+                    .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(exclude_list)
             }
             None => None,
@@ -216,10 +217,11 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
         let allow_list = match param_map.get(&cbor_unsigned!(3)) {
             Some(entry) => {
                 let allow_list_vec = read_array(entry)?;
-                let mut allow_list = vec![];
-                for allow_list_value in allow_list_vec {
-                    allow_list.push(PublicKeyCredentialDescriptor::try_from(allow_list_value)?);
-                }
+                let allow_list = allow_list_vec
+                    .iter()
+                    .take(MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(allow_list_vec.len()))
+                    .map(PublicKeyCredentialDescriptor::try_from)
+                    .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(allow_list)
             }
             None => None,
@@ -316,8 +318,10 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
 #[cfg(test)]
 mod test {
     use super::super::data_formats::{
-        AuthenticatorTransport, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+        AuthenticatorTransport, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
+        PublicKeyCredentialUserEntity,
     };
+    use super::super::ES256_CRED_PARAM;
     use super::*;
     use alloc::collections::BTreeMap;
 
@@ -336,10 +340,7 @@ mod test {
                 "displayName" => "bar",
                 "icon" => "example.com/foo/icon.png",
             },
-            4 => cbor_array![ cbor_map! {
-                "type" => "public-key",
-                "alg" => -7
-            } ],
+            4 => cbor_array![ES256_CRED_PARAM],
             5 => cbor_array![],
             8 => vec![0x12, 0x34],
             9 => 1,
@@ -362,7 +363,6 @@ mod test {
             user_display_name: Some("bar".to_string()),
             user_icon: Some("example.com/foo/icon.png".to_string()),
         };
-        let pub_key_cred_param = (PublicKeyCredentialType::PublicKey, -7);
         let options = MakeCredentialOptions {
             rk: false,
             uv: false,
@@ -371,7 +371,7 @@ mod test {
             client_data_hash,
             rp,
             user,
-            pub_key_cred_params: vec![pub_key_cred_param],
+            pub_key_cred_params: vec![ES256_CRED_PARAM],
             exclude_list: Some(vec![]),
             extensions: None,
             options,

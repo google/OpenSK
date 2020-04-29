@@ -251,6 +251,7 @@ class OpenSKInstaller:
     self.tockloader_default_args = argparse.Namespace(
         arch=board.arch,
         board=self.args.board,
+        bundle_apps=False,
         debug=False,
         force=False,
         jlink_cmd="JLinkExe",
@@ -784,6 +785,14 @@ if __name__ == "__main__":
       dest="features",
       help=("Compiles the OpenSK application without backward compatible "
             "support for U2F/CTAP1 protocol."),
+  )
+  main_parser.add_argument(
+      "--ctap2.1",
+      action=RemoveConstAction,
+      const="with_ctap2_1",
+      dest="features",
+      help=("Compiles the OpenSK application with backward compatible "
+            "support for CTAP2.1 protocol."),
   )
   main_parser.add_argument(
       "--regen-keys",

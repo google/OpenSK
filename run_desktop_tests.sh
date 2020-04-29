@@ -30,6 +30,7 @@ cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
 echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
+cargo check --release --target=thumbv7em-none-eabi --features with_ctap2_1
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
 cargo check --release --target=thumbv7em-none-eabi --features panic_console
 cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
@@ -86,4 +87,16 @@ then
 
   echo "Running unit tests on the desktop (debug mode + CTAP1)..."
   cargo test --features std,with_ctap1
+
+  echo "Running unit tests on the desktop (release mode + CTAP2.1)..."
+  cargo test --release --features std,with_ctap2_1
+
+  echo "Running unit tests on the desktop (debug mode + CTAP2.1)..."
+  cargo test --features std,with_ctap2_1
+
+  echo "Running unit tests on the desktop (release mode + CTAP1 + CTAP2.1)..."
+  cargo test --release --features std,with_ctap1,with_ctap2_1
+
+  echo "Running unit tests on the desktop (debug mode + CTAP1 + CTAP2.1)..."
+  cargo test --features std,with_ctap1,with_ctap2_1
 fi

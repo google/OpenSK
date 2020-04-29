@@ -755,7 +755,7 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
-      "--ctap2-1",
+      "--ctap2.1",
       action=RemoveConstAction,
       const="with_ctap2_1",
       dest="features",

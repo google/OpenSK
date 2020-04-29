@@ -111,7 +111,7 @@ impl From<PublicKeyCredentialType> for cbor::Value {
         match cred_type {
             PublicKeyCredentialType::PublicKey => "public-key",
             // We should never create this credential type.
-            PublicKeyCredentialType::Unknown => unreachable!(),
+            PublicKeyCredentialType::Unknown => "unknown",
         }
         .into()
     }

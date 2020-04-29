@@ -32,7 +32,7 @@ be FIDO Certified.
 We started adding features of the upcoming next version of the
 [CTAP2.1 specifications](https://fidoalliance.org/specs/fido2/fido-client-to-authenticator-protocol-v2.1-rd-20191217.html).
 The development is currently between 2.0 and 2.1, with updates hidden behind a feature flag.
-Please add the flag `shell --ctap2-1` to the deploy command to include them.
+Please add the flag `--ctap2.1` to the deploy command to include them.
 
 ### Cryptography
 

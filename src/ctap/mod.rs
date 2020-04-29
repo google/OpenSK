@@ -762,7 +762,6 @@ where
             self.persistent_store.pin_hash().is_some(),
         );
         Ok(ResponseData::AuthenticatorGetInfo(
-            #[cfg(feature = "with_ctap2_1")]
             AuthenticatorGetInfoResponse {
                 versions: vec![
                     #[cfg(feature = "with_ctap1")]
@@ -776,28 +775,18 @@ where
                 pin_protocols: Some(vec![
                     CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
                 ]),
+                #[cfg(feature = "with_ctap2_1")]
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 // You can use ENCRYPTED_CREDENTIAL_ID_SIZE here, but if your
                 // browser passes that value, it might be used to fingerprint.
+                #[cfg(feature = "with_ctap2_1")]
                 max_credential_id_length: None,
+                #[cfg(feature = "with_ctap2_1")]
                 transports: Some(vec![AuthenticatorTransport::Usb]),
+                #[cfg(feature = "with_ctap2_1")]
                 algorithms: Some(vec![ES256_CRED_PARAM]),
+                #[cfg(feature = "with_ctap2_1")]
                 firmware_version: None,
-            },
-            #[cfg(not(feature = "with_ctap2_1"))]
-            AuthenticatorGetInfoResponse {
-                versions: vec![
-                    #[cfg(feature = "with_ctap1")]
-                    String::from(U2F_VERSION_STRING),
-                    String::from(FIDO2_VERSION_STRING),
-                ],
-                extensions: Some(vec![String::from("hmac-secret")]),
-                aaguid: *AAGUID,
-                options: Some(options_map),
-                max_msg_size: Some(1024),
-                pin_protocols: Some(vec![
-                    CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
-                ]),
             },
         ))
     }

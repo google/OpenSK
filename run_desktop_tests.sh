@@ -93,4 +93,10 @@ then
 
   echo "Running unit tests on the desktop (debug mode + CTAP2.1)..."
   cargo test --features std,with_ctap2_1
+
+  echo "Running unit tests on the desktop (release mode + CTAP1 + CTAP2.1)..."
+  cargo test --release --features std,with_ctap1,with_ctap2_1
+
+  echo "Running unit tests on the desktop (debug mode + CTAP1 + CTAP2.1)..."
+  cargo test --features std,with_ctap1,with_ctap2_1
 fi

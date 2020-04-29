@@ -106,7 +106,7 @@ index 5abd2d84..5a726fdb 100644
              let word: u32 = (data[i + 0] as u32) << 0
                  | (data[i + 1] as u32) << 8
                  | (data[i + 2] as u32) << 16
-@@ -374,3 +386,178 @@ impl hil::flash::Flash for Nvmc {
+@@ -374,3 +386,170 @@ impl hil::flash::Flash for Nvmc {
          self.erase_page(page_number)
      }
  }
@@ -189,11 +189,7 @@ index 5abd2d84..5a726fdb 100644
 +    /// Fails with `EINVAL` if any of the following conditions does not hold:
 +    /// - `ptr` must be word-aligned.
 +    /// - `slice.len()` must be word-aligned.
-+    /// - The slice starting at `ptr` of length `slice.len()` must fit in a writeable flash region.
-+    fn write_slice(&self, appid: AppId, ptr: usize, slice: &[u8]) -> ReturnCode {
-+        if !appid.in_writeable_flash_region(ptr, slice.len()) {
-+            return ReturnCode::EINVAL;
-+        }
++    fn write_slice(&self, ptr: usize, slice: &[u8]) -> ReturnCode {
 +        if ptr & WORD_MASK != 0 || slice.len() & WORD_MASK != 0 {
 +            return ReturnCode::EINVAL;
 +        }
@@ -217,11 +213,7 @@ index 5abd2d84..5a726fdb 100644
 +    ///
 +    /// Fails with `EINVAL` if any of the following conditions does not hold:
 +    /// - `ptr` must be page-aligned.
-+    /// - The slice starting at `ptr` of length `PAGE_SIZE` must fit in a writeable flash region.
-+    fn erase_page(&self, appid: AppId, ptr: usize) -> ReturnCode {
-+        if !appid.in_writeable_flash_region(ptr, PAGE_SIZE) {
-+            return ReturnCode::EINVAL;
-+        }
++    fn erase_page(&self, ptr: usize) -> ReturnCode {
 +        if ptr & PAGE_MASK != 0 {
 +            return ReturnCode::EINVAL;
 +        }
@@ -257,11 +249,11 @@ index 5abd2d84..5a726fdb 100644
 +                        None => return ReturnCode::EINVAL,
 +                        Some(slice) => slice,
 +                    };
-+                    self.write_slice(appid, ptr, slice.as_ref())
++                    self.write_slice(ptr, slice.as_ref())
 +                })
 +                .unwrap_or_else(|err| err.into()),
 +
-+            (3, ptr) => self.erase_page(appid, ptr),
++            (3, ptr) => self.erase_page(ptr),
 +
 +            _ => ReturnCode::ENOSUPPORT,
 +        }
@@ -285,39 +277,3 @@ index 5abd2d84..5a726fdb 100644
 +        }
 +    }
 +}
-diff --git a/kernel/src/callback.rs b/kernel/src/callback.rs
-index c812e0bf..bd1613b3 100644
---- a/kernel/src/callback.rs
-+++ b/kernel/src/callback.rs
-@@ -130,6 +130,31 @@ impl AppId {
-             (start, end)
-         })
-     }
-+
-+    pub fn in_writeable_flash_region(&self, ptr: usize, len: usize) -> bool {
-+        self.kernel.process_map_or(false, *self, |process| {
-+            let ptr = match ptr.checked_sub(process.flash_start() as usize) {
-+                None => return false,
-+                Some(ptr) => ptr,
-+            };
-+            (0..process.number_writeable_flash_regions()).any(|i| {
-+                let (region_ptr, region_len) = process.get_writeable_flash_region(i);
-+                let region_ptr = region_ptr as usize;
-+                let region_len = region_len as usize;
-+                // We want to check the 2 following inequalities:
-+                // (1) `region_ptr <= ptr`
-+                // (2) `ptr + len <= region_ptr + region_len`
-+                // However, the second one may overflow written as is. We introduce a third
-+                // inequality to solve this issue:
-+                // (3) `len <= region_len`
-+                // Using this third inequality, we can rewrite the second one as:
-+                // (4) `ptr - region_ptr <= region_len - len`
-+                // This fourth inequality is equivalent to the second one but doesn't overflow when
-+                // the first and third inequalities hold.
-+                region_ptr <= ptr && len <= region_len && ptr - region_ptr <= region_len - len
-+            })
-+        })
-+    }
- }
- 
- /// Type to uniquely identify a callback subscription across all drivers.

@@ -251,6 +251,7 @@ class OpenSKInstaller:
     self.tockloader_default_args = argparse.Namespace(
         arch=board.arch,
         board=self.args.board,
+        bundle_apps=False,
         debug=False,
         force=False,
         jlink_cmd="JLinkExe",

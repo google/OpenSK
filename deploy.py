@@ -302,7 +302,8 @@ class OpenSKInstaller:
       # Need to update
       self.checked_command_output(
           ["rustup", "install", target_toolchain_fullstring])
-    self.checked_command_output(["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
+    self.checked_command_output(
+        ["rustup", "target", "add", SUPPORTED_BOARDS[self.args.board].arch])
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):
@@ -314,7 +315,8 @@ class OpenSKInstaller:
     self.checked_command_output(["make"], cwd=props.path)
 
   def build_example(self):
-    info("Building example {}".format(self.args.application))
+    info(
+        "Building example {}".format(self.args.application))
     self._build_app_or_example(is_example=True)
 
   def build_opensk(self):

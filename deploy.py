@@ -87,7 +87,7 @@ SUPPORTED_BOARDS = {
             page_size=4096,
             kernel_address=0,
             padding_address=0x30000,
-            app_ldscript="nrf52840dk_layout.ld",
+            app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
@@ -104,7 +104,7 @@ SUPPORTED_BOARDS = {
             page_size=4096,
             kernel_address=0,
             padding_address=0x30000,
-            app_ldscript="nrf52840dk_layout.ld",
+            app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
@@ -121,7 +121,7 @@ SUPPORTED_BOARDS = {
             page_size=4096,
             kernel_address=0x1000,
             padding_address=0x30000,
-            app_ldscript="nrf52840dk_layout.ld",
+            app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
@@ -138,7 +138,7 @@ SUPPORTED_BOARDS = {
             page_size=4096,
             kernel_address=0x1000,
             padding_address=0x30000,
-            app_ldscript="nrf52840dk_layout.ld",
+            app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
@@ -152,7 +152,7 @@ SUPPORTED_BOARDS = {
 
 # The STACK_SIZE value below must match the one used in the linker script
 # used by the board.
-# e.g. for Nordic nRF52840 boards the file is `nrf52840dk_layout.ld`.
+# e.g. for Nordic nRF52840 boards the file is `nrf52840_layout.ld`.
 STACK_SIZE = 0x4000
 
 # The following value must match the one used in the file

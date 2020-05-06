@@ -55,7 +55,7 @@ impl SyscallStorage {
     ///
     /// # Safety
     ///
-    /// The `storage` must be in a writeable flash region.
+    /// The `storage` must be readable.
     ///
     /// # Errors
     ///
@@ -74,14 +74,15 @@ impl SyscallStorage {
     /// # extern crate ctap2;
     /// # use ctap2::embedded_flash::SyscallStorage;
     /// # use ctap2::embedded_flash::StorageResult;
-    /// # const NUM_PAGES: usize = 1;
-    /// # const PAGE_SIZE: usize = 1;
-    /// #[link_section = ".app_state"]
-    /// static mut STORAGE: [u8; NUM_PAGES * PAGE_SIZE] = [0xff; NUM_PAGES * PAGE_SIZE];
+    /// # const STORAGE_ADDR: usize = 0x1000;
+    /// # const STORAGE_SIZE: usize = 0x1000;
     /// # fn foo() -> StorageResult<SyscallStorage> {
-    /// // This is safe because this is the only use of `STORAGE` in the whole program and this is
-    /// // called only once.
-    /// unsafe { SyscallStorage::new(&mut STORAGE) }
+    /// // This is safe because we create and use `storage` only once in the whole program.
+    /// let storage = unsafe {
+    ///     core::slice::from_raw_parts_mut(STORAGE_ADDR as *mut u8, STORAGE_SIZE)
+    /// };
+    /// // This is safe because `storage` is readable.
+    /// unsafe { SyscallStorage::new(storage) }
     /// # }
     /// ```
     pub unsafe fn new(storage: &'static mut [u8]) -> StorageResult<SyscallStorage> {

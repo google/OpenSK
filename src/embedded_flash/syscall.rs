@@ -24,6 +24,8 @@ mod command_nr {
         pub const PAGE_SIZE: usize = 1;
         pub const MAX_WORD_WRITES: usize = 2;
         pub const MAX_PAGE_ERASES: usize = 3;
+        pub const STORAGE_PTR: usize = 4;
+        pub const STORAGE_LEN: usize = 5;
     }
     pub const WRITE_SLICE: usize = 2;
     pub const ERASE_PAGE: usize = 3;
@@ -53,46 +55,31 @@ pub struct SyscallStorage {
 impl SyscallStorage {
     /// Provides access to the embedded flash if available.
     ///
-    /// # Safety
-    ///
-    /// The `storage` must be readable.
-    ///
     /// # Errors
     ///
     /// Returns `BadFlash` if any of the following conditions do not hold:
-    /// - The word size is not a power of two.
-    /// - The page size is not a power of two.
-    /// - The page size is not a multiple of the word size.
+    /// - The word size is a power of two.
+    /// - The page size is a power of two.
+    /// - The page size is a multiple of the word size.
+    /// - The storage is page-aligned.
     ///
-    /// Returns `NotAligned` if any of the following conditions do not hold:
-    /// - `storage` is page-aligned.
-    /// - `storage.len()` is a multiple of the page size.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # extern crate ctap2;
-    /// # use ctap2::embedded_flash::SyscallStorage;
-    /// # use ctap2::embedded_flash::StorageResult;
-    /// # const STORAGE_ADDR: usize = 0x1000;
-    /// # const STORAGE_SIZE: usize = 0x1000;
-    /// # fn foo() -> StorageResult<SyscallStorage> {
-    /// // This is safe because we create and use `storage` only once in the whole program.
-    /// let storage = unsafe {
-    ///     core::slice::from_raw_parts_mut(STORAGE_ADDR as *mut u8, STORAGE_SIZE)
-    /// };
-    /// // This is safe because `storage` is readable.
-    /// unsafe { SyscallStorage::new(storage) }
-    /// # }
-    /// ```
-    pub unsafe fn new(storage: &'static mut [u8]) -> StorageResult<SyscallStorage> {
+    /// Returns `OutOfBounds` the number of pages does not fit in the storage.
+    pub fn new(num_pages: usize) -> StorageResult<SyscallStorage> {
         let word_size = get_info(command_nr::get_info_nr::WORD_SIZE)?;
         let page_size = get_info(command_nr::get_info_nr::PAGE_SIZE)?;
         let max_word_writes = get_info(command_nr::get_info_nr::MAX_WORD_WRITES)?;
         let max_page_erases = get_info(command_nr::get_info_nr::MAX_PAGE_ERASES)?;
+        let storage_ptr = get_info(command_nr::get_info_nr::STORAGE_PTR)?;
+        let max_storage_len = get_info(command_nr::get_info_nr::STORAGE_LEN)?;
         if !word_size.is_power_of_two() || !page_size.is_power_of_two() {
             return Err(StorageError::BadFlash);
         }
+        let storage_len = num_pages * page_size;
+        if storage_len > max_storage_len {
+            return Err(StorageError::OutOfBounds);
+        }
+        let storage =
+            unsafe { core::slice::from_raw_parts_mut(storage_ptr as *mut u8, storage_len) };
         let syscall = SyscallStorage {
             word_size,
             page_size,
@@ -100,16 +87,10 @@ impl SyscallStorage {
             max_page_erases,
             storage,
         };
-        if !syscall.is_word_aligned(page_size) {
+        if !syscall.is_word_aligned(page_size) || !syscall.is_page_aligned(storage_ptr) {
             return Err(StorageError::BadFlash);
         }
-        if syscall.is_page_aligned(syscall.storage.as_ptr() as usize)
-            && syscall.is_page_aligned(syscall.storage.len())
-        {
-            Ok(syscall)
-        } else {
-            Err(StorageError::NotAligned)
-        }
+        Ok(syscall)
     }
 
     fn is_word_aligned(&self, x: usize) -> bool {

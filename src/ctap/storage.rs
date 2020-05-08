@@ -133,20 +133,6 @@ pub struct PersistentStore {
     store: embedded_flash::Store<Storage, Config>,
 }
 
-#[cfg(feature = "ram_storage")]
-const PAGE_SIZE: usize = 0x100;
-#[cfg(not(feature = "ram_storage"))]
-const PAGE_SIZE: usize = 0x1000;
-
-// We have the following layout:
-// 0x00000-0x2ffff: Tock
-// 0x30000-0x3ffff: Padding
-// 0x40000-0xbffff: App
-// 0xc0000-0xfffff: Store
-#[cfg(not(any(test, feature = "ram_storage")))]
-const STORE_ADDR: usize = 0xC0000;
-const STORE_SIZE: usize = NUM_PAGES * PAGE_SIZE;
-
 impl PersistentStore {
     /// Gives access to the persistent store.
     ///
@@ -167,19 +153,16 @@ impl PersistentStore {
 
     #[cfg(not(any(test, feature = "ram_storage")))]
     fn new_prod_storage() -> Storage {
-        let store = unsafe {
-            // Safety: The store cannot alias because this function is called only once.
-            core::slice::from_raw_parts_mut(STORE_ADDR as *mut u8, STORE_SIZE)
-        };
-        unsafe {
-            // Safety: The store is in a writeable flash region.
-            Storage::new(store).unwrap()
-        }
+        Storage::new(NUM_PAGES).unwrap()
     }
 
     #[cfg(any(test, feature = "ram_storage"))]
     fn new_test_storage() -> Storage {
-        let store = vec![0xff; STORE_SIZE].into_boxed_slice();
+        #[cfg(not(test))]
+        const PAGE_SIZE: usize = 0x100;
+        #[cfg(test)]
+        const PAGE_SIZE: usize = 0x1000;
+        let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
         let options = embedded_flash::BufferOptions {
             word_size: 4,
             page_size: PAGE_SIZE,

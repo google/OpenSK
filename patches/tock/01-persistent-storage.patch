@@ -42,7 +42,7 @@ index fe493727..105f7120 100644
  
      platform.pconsole.start();
 diff --git a/chips/nrf52/src/nvmc.rs b/chips/nrf52/src/nvmc.rs
-index 60fc2da8..77e7423d 100644
+index 60fc2da8..45c75f89 100644
 --- a/chips/nrf52/src/nvmc.rs
 +++ b/chips/nrf52/src/nvmc.rs
 @@ -3,6 +3,7 @@
@@ -126,7 +126,7 @@ index 60fc2da8..77e7423d 100644
              let word: u32 = (data[i + 0] as u32) << 0
                  | (data[i + 1] as u32) << 8
                  | (data[i + 2] as u32) << 16
-@@ -390,3 +422,178 @@ impl hil::flash::Flash for Nvmc {
+@@ -390,3 +422,186 @@ impl hil::flash::Flash for Nvmc {
          self.erase_page(page_number)
      }
  }
@@ -158,6 +158,8 @@ index 60fc2da8..77e7423d 100644
 +/// - COMMAND(1, 2): Get the maximum number of word writes between page erasures (always 2).
 +/// - COMMAND(1, 3): Get the maximum number page erasures in the lifetime of the flash (always
 +///     10000).
++/// - COMMAND(1, 4): Get the storage address (page-aligned).
++/// - COMMAND(1, 5): Get the storage length (page-aligned).
 +/// - COMMAND(2, ptr): Write the allow slice to the flash region starting at `ptr`.
 +///   - `ptr` must be word-aligned.
 +///   - The allow slice length must be word aligned.
@@ -267,6 +269,12 @@ index 60fc2da8..77e7423d 100644
 +            },
 +            (1, 3) => ReturnCode::SuccessWithValue {
 +                value: MAX_PAGE_ERASES,
++            },
++            (1, 4) => ReturnCode::SuccessWithValue {
++                value: STORAGE_PTR,
++            },
++            (1, 5) => ReturnCode::SuccessWithValue {
++                value: STORAGE_LEN,
 +            },
 +            (1, _) => ReturnCode::EINVAL,
 +

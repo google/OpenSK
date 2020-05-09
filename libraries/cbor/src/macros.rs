@@ -41,18 +41,30 @@ macro_rules! cbor_map_options {
     };
 
     ( $( $key:expr => $value:expr ),* ) => {
+        cbor_extend_map_options! (
+            ::alloc::collections::BTreeMap::<_, $crate::values::Value>::new(),
+            $( $key => $value, )*
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! cbor_extend_map_options {
+    // Add trailing comma if missing.
+    ( $initial:expr, $( $key:expr => $value:expr ),+ ) => {
+        cbor_extend_map_options! ( $initial, $($key => $value,)+ )
+    };
+
+    ( $initial:expr, $( $key:expr => $value:expr, )* ) => {
         {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValueOption};
-            let mut _map = ::alloc::collections::BTreeMap::<_, $crate::values::Value>::new();
+            let mut _map = $initial;
             $(
-            {
-                let opt: Option<$crate::values::Value> = $value.into_cbor_value_option();
-                if let Some(val) = opt {
+                if let Some(val) = $value.into_cbor_value_option() {
                     _map.insert($key.into_cbor_key(), val);
                 }
-            }
             )*
             $crate::values::Value::Map(_map)
         }

@@ -445,59 +445,83 @@ pub struct PublicKeyCredentialSource {
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub other_ui: Option<String>,
     pub cred_random: Option<Vec<u8>>,
+
+    /// Contains the unknown fields when parsing a CBOR value.
+    ///
+    /// Those fields could either be deleted fields from older versions (they should have reserved
+    /// tags) or fields from newer versions (the tags should not be reserved). If this is empty,
+    /// then the parsed credential is probably from the same version (but not necessarily).
+    pub unknown_fields: BTreeMap<cbor::KeyType, cbor::Value>,
+}
+
+// We simulate protocol buffers in CBOR with maps. Each field of a message is associated with a
+// unique tag, implemented with a CBOR unsigned key.
+#[repr(u64)]
+enum PublicKeyCredentialSourceField {
+    CredentialId = 0,
+    PrivateKey = 1,
+    RpId = 2,
+    UserHandle = 3,
+    OtherUi = 4,
+    CredRandom = 5,
+    // When a field is removed, its tag should be reserved and not used for new fields. We document
+    // those reserved tags below.
+    // Reserved tags: none.
+}
+
+impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
+    fn from(field: PublicKeyCredentialSourceField) -> cbor::KeyType {
+        (field as u64).into()
+    }
 }
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
-        let mut private_key = [0u8; 32];
+        use PublicKeyCredentialSourceField::*;
+        let mut private_key = [0; 32];
         credential.private_key.to_bytes(&mut private_key);
-        let other_ui = match credential.other_ui {
-            None => cbor_null!(),
-            Some(other_ui) => cbor_text!(other_ui),
-        };
-        let cred_random = match credential.cred_random {
-            None => cbor_null!(),
-            Some(cred_random) => cbor_bytes!(cred_random),
-        };
-        cbor_array! {
-            credential.credential_id,
-            private_key,
-            credential.rp_id,
-            credential.user_handle,
-            other_ui,
-            cred_random,
+        cbor_extend_map_options! {
+            credential.unknown_fields,
+            CredentialId => Some(credential.credential_id),
+            PrivateKey => Some(private_key.to_vec()),
+            RpId => Some(credential.rp_id),
+            UserHandle => Some(credential.user_handle),
+            OtherUi => credential.other_ui,
+            CredRandom => credential.cred_random
         }
     }
 }
 
-impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
-    type Error = Ctap2StatusCode;
+impl PublicKeyCredentialSource {
+    pub fn parse_cbor(cbor_value: cbor::Value) -> Option<PublicKeyCredentialSource> {
+        use PublicKeyCredentialSourceField::*;
+        let mut map = match cbor_value {
+            cbor::Value::Map(x) => x,
+            _ => return None,
+        };
 
-    fn try_from(cbor_value: cbor::Value) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
-        use cbor::{SimpleValue, Value};
-
-        let fields = read_array(&cbor_value)?;
-        if fields.len() != 6 {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
-        }
-        let credential_id = read_byte_string(&fields[0])?;
-        let private_key = read_byte_string(&fields[1])?;
+        let credential_id = read_byte_string(&map.remove(&CredentialId.into())?).ok()?;
+        let private_key = read_byte_string(&map.remove(&PrivateKey.into())?).ok()?;
         if private_key.len() != 32 {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
+            return None;
         }
-        let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
-        let rp_id = read_text_string(&fields[2])?;
-        let user_handle = read_byte_string(&fields[3])?;
-        let other_ui = match &fields[4] {
-            Value::Simple(SimpleValue::NullValue) => None,
-            cbor_value => Some(read_text_string(cbor_value)?),
-        };
-        let cred_random = match &fields[5] {
-            Value::Simple(SimpleValue::NullValue) => None,
-            cbor_value => Some(read_byte_string(cbor_value)?),
-        };
-        Ok(PublicKeyCredentialSource {
+        let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))?;
+        let rp_id = read_text_string(&map.remove(&RpId.into())?).ok()?;
+        let user_handle = read_byte_string(&map.remove(&UserHandle.into())?).ok()?;
+        let other_ui = map
+            .remove(&OtherUi.into())
+            .as_ref()
+            .map(read_text_string)
+            .transpose()
+            .ok()?;
+        let cred_random = map
+            .remove(&CredRandom.into())
+            .as_ref()
+            .map(read_byte_string)
+            .transpose()
+            .ok()?;
+        let unknown_fields = map;
+        Some(PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
             private_key,
@@ -505,6 +529,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             user_handle,
             other_ui,
             cred_random,
+            unknown_fields,
         })
     }
 }
@@ -1218,11 +1243,12 @@ mod test {
             user_handle: b"foo".to_vec(),
             other_ui: None,
             cred_random: None,
+            unknown_fields: BTreeMap::new(),
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
-            Ok(credential.clone())
+            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
+            Some(credential.clone())
         );
 
         let credential = PublicKeyCredentialSource {
@@ -1231,8 +1257,8 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
-            Ok(credential.clone())
+            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
+            Some(credential.clone())
         );
 
         let credential = PublicKeyCredentialSource {
@@ -1241,15 +1267,15 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
-            Ok(credential)
+            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
+            Some(credential)
         );
     }
 
     #[test]
     fn test_credential_source_invalid_cbor() {
-        assert!(PublicKeyCredentialSource::try_from(cbor_false!()).is_err());
-        assert!(PublicKeyCredentialSource::try_from(cbor_array!(false)).is_err());
-        assert!(PublicKeyCredentialSource::try_from(cbor_array!(b"foo".to_vec())).is_err());
+        assert!(PublicKeyCredentialSource::parse_cbor(cbor_false!()).is_none());
+        assert!(PublicKeyCredentialSource::parse_cbor(cbor_array!(false)).is_none());
+        assert!(PublicKeyCredentialSource::parse_cbor(cbor_array!(b"foo".to_vec())).is_none());
     }
 }

@@ -454,8 +454,8 @@ pub struct PublicKeyCredentialSource {
     pub unknown_fields: BTreeMap<cbor::KeyType, cbor::Value>,
 }
 
-// We simulate protocol buffers in CBOR with maps. Each field of a message is associated with a
-// unique tag, implemented with a CBOR unsigned key.
+// We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
+// is associated with a unique tag, implemented with a CBOR unsigned key.
 #[repr(u64)]
 enum PublicKeyCredentialSourceField {
     CredentialId = 0,

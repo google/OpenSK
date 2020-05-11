@@ -52,18 +52,18 @@ macro_rules! cbor_map_options {
 #[macro_export]
 macro_rules! extend_cbor_map_options {
     // Add trailing comma if missing.
-    ( &mut $initial:expr, $( $key:expr => $value:expr ),+ ) => {
-        extend_cbor_map_options! ( &mut $initial, $($key => $value,)+ )
+    ( &mut $map:expr, $( $key:expr => $value:expr ),+ ) => {
+        extend_cbor_map_options! ( &mut $map, $($key => $value,)+ )
     };
 
-    ( &mut $initial:expr, $( $key:expr => $value:expr, )* ) => {
+    ( &mut $map:expr, $( $key:expr => $value:expr, )* ) => {
         {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValueOption};
             $(
                 if let Some(val) = $value.into_cbor_value_option() {
-                    $initial.insert($key.into_cbor_key(), val);
+                    $map.insert($key.into_cbor_key(), val);
                 }
             )*
         }

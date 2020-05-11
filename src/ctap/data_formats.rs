@@ -480,15 +480,17 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
         use PublicKeyCredentialSourceField::*;
         let mut private_key = [0; 32];
         credential.private_key.to_bytes(&mut private_key);
-        cbor_extend_map_options! {
-            credential.unknown_fields,
+        let mut result = credential.unknown_fields;
+        extend_cbor_map_options! {
+            &mut result,
             CredentialId => Some(credential.credential_id),
             PrivateKey => Some(private_key.to_vec()),
             RpId => Some(credential.rp_id),
             UserHandle => Some(credential.user_handle),
             OtherUi => credential.other_ui,
             CredRandom => credential.cred_random
-        }
+        };
+        cbor::Value::Map(result)
     }
 }
 

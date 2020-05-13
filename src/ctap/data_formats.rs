@@ -433,6 +433,9 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
 }
 
 // https://www.w3.org/TR/webauthn/#public-key-credential-source
+//
+// Note that we only use the WebAuthn definition as an example. This data-structure is not specified
+// by FIDO. In particular we may choose how we serialize and deserialize it.
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
@@ -445,18 +448,10 @@ pub struct PublicKeyCredentialSource {
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub other_ui: Option<String>,
     pub cred_random: Option<Vec<u8>>,
-
-    /// Contains the unknown fields when parsing a CBOR value.
-    ///
-    /// Those fields could either be deleted fields from older versions (they should have reserved
-    /// tags) or fields from newer versions (the tags should not be reserved). If this is empty,
-    /// then the parsed credential is probably from the same version (but not necessarily).
-    pub unknown_fields: BTreeMap<cbor::KeyType, cbor::Value>,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
 // is associated with a unique tag, implemented with a CBOR unsigned key.
-#[repr(u64)]
 enum PublicKeyCredentialSourceField {
     CredentialId = 0,
     PrivateKey = 1,
@@ -480,50 +475,48 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
         use PublicKeyCredentialSourceField::*;
         let mut private_key = [0; 32];
         credential.private_key.to_bytes(&mut private_key);
-        let mut result = credential.unknown_fields;
-        extend_cbor_map_options! {
-            &mut result,
+        cbor_map_options! {
             CredentialId => Some(credential.credential_id),
             PrivateKey => Some(private_key.to_vec()),
             RpId => Some(credential.rp_id),
             UserHandle => Some(credential.user_handle),
             OtherUi => credential.other_ui,
             CredRandom => credential.cred_random
-        };
-        cbor::Value::Map(result)
+        }
     }
 }
 
-impl PublicKeyCredentialSource {
-    pub fn parse_cbor(cbor_value: cbor::Value) -> Option<PublicKeyCredentialSource> {
-        use PublicKeyCredentialSourceField::*;
-        let mut map = match cbor_value {
-            cbor::Value::Map(x) => x,
-            _ => return None,
-        };
+impl TryFrom<&cbor::Value> for PublicKeyCredentialSource {
+    type Error = Ctap2StatusCode;
 
-        let credential_id = read_byte_string(&map.remove(&CredentialId.into())?).ok()?;
-        let private_key = read_byte_string(&map.remove(&PrivateKey.into())?).ok()?;
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        use PublicKeyCredentialSourceField::*;
+        let map = read_map(cbor_value)?;
+        let credential_id = read_byte_string(ok_or_missing(map.get(&CredentialId.into()))?)?;
+        let private_key = read_byte_string(ok_or_missing(map.get(&PrivateKey.into()))?)?;
         if private_key.len() != 32 {
-            return None;
+            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
-        let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))?;
-        let rp_id = read_text_string(&map.remove(&RpId.into())?).ok()?;
-        let user_handle = read_byte_string(&map.remove(&UserHandle.into())?).ok()?;
-        let other_ui = map
-            .remove(&OtherUi.into())
-            .as_ref()
-            .map(read_text_string)
-            .transpose()
-            .ok()?;
+        let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
+        let rp_id = read_text_string(ok_or_missing(map.get(&RpId.into()))?)?;
+        let user_handle = read_byte_string(ok_or_missing(map.get(&UserHandle.into()))?)?;
+        let other_ui = map.get(&OtherUi.into()).map(read_text_string).transpose()?;
         let cred_random = map
-            .remove(&CredRandom.into())
-            .as_ref()
+            .get(&CredRandom.into())
             .map(read_byte_string)
-            .transpose()
-            .ok()?;
-        let unknown_fields = map;
-        Some(PublicKeyCredentialSource {
+            .transpose()?;
+        // We don't return whether there were unknown fields in the CBOR value. This means that
+        // deserialization is not injective. In particular deserialization is only an inverse of
+        // serialization at a given version of OpenSK. This is not a problem because:
+        // 1. When a field is deprecated, its tag is reserved and never reused in future versions,
+        //    including to be reintroduced with the same semantics. In other words, removing a field
+        //    is permanent.
+        // 2. OpenSK is never used with a more recent version of the storage. In particular, OpenSK
+        //    is never rolled-back.
+        // As a consequence, the unknown fields are only reserved fields and don't need to be
+        // preserved.
+        Ok(PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
             private_key,
@@ -531,7 +524,6 @@ impl PublicKeyCredentialSource {
             user_handle,
             other_ui,
             cred_random,
-            unknown_fields,
         })
     }
 }
@@ -1245,12 +1237,11 @@ mod test {
             user_handle: b"foo".to_vec(),
             other_ui: None,
             cred_random: None,
-            unknown_fields: BTreeMap::new(),
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
-            Some(credential.clone())
+            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
         );
 
         let credential = PublicKeyCredentialSource {
@@ -1259,8 +1250,8 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
-            Some(credential.clone())
+            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
         );
 
         let credential = PublicKeyCredentialSource {
@@ -1269,15 +1260,15 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::parse_cbor(cbor::Value::from(credential.clone())),
-            Some(credential)
+            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            Ok(credential)
         );
     }
 
     #[test]
     fn test_credential_source_invalid_cbor() {
-        assert!(PublicKeyCredentialSource::parse_cbor(cbor_false!()).is_none());
-        assert!(PublicKeyCredentialSource::parse_cbor(cbor_array!(false)).is_none());
-        assert!(PublicKeyCredentialSource::parse_cbor(cbor_array!(b"foo".to_vec())).is_none());
+        assert!(PublicKeyCredentialSource::try_from(&cbor_false!()).is_err());
+        assert!(PublicKeyCredentialSource::try_from(&cbor_array!(false)).is_err());
+        assert!(PublicKeyCredentialSource::try_from(&cbor_array!(b"foo".to_vec())).is_err());
     }
 }

@@ -335,7 +335,6 @@ where
             user_handle: vec![],
             other_ui: None,
             cred_random: None,
-            unknown_fields: BTreeMap::new(),
         })
     }
 
@@ -502,7 +501,6 @@ where
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_random,
-                unknown_fields: BTreeMap::new(),
             };
             self.persistent_store.store_credential(credential_source)?;
             random_id
@@ -1281,7 +1279,6 @@ mod test {
             user_handle: vec![],
             other_ui: None,
             cred_random: None,
-            unknown_fields: BTreeMap::new(),
         };
         assert!(ctap_state
             .persistent_store
@@ -1479,7 +1476,6 @@ mod test {
             user_handle: vec![],
             other_ui: None,
             cred_random: None,
-            unknown_fields: BTreeMap::new(),
         };
         assert!(ctap_state
             .persistent_store

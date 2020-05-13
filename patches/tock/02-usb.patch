@@ -14,7 +14,7 @@ diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src
 index 127c4f2f..a5847805 100644
 --- a/boards/nordic/nrf52840dk/src/main.rs
 +++ b/boards/nordic/nrf52840dk/src/main.rs
-@@ -236,6 +236,7 @@ pub unsafe fn reset_handler() {
+@@ -244,6 +244,7 @@ pub unsafe fn reset_handler() {
          FAULT_RESPONSE,
          nrf52840::uicr::Regulator0Output::DEFAULT,
          false,
@@ -70,7 +70,7 @@ index 105f7120..535e5cd8 100644
      chip: &'static nrf52::chip::NRF52<I>,
  ) {
      // Make non-volatile memory writable and activate the reset button
-@@ -415,6 +426,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -416,6 +427,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          )
      );
  
@@ -115,7 +115,7 @@ index 105f7120..535e5cd8 100644
      // Start all of the clocks. Low power operation will require a better
      // approach than this.
      nrf52::clock::CLOCK.low_stop();
-@@ -447,6 +496,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -440,6 +489,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          temp: temp,
          alarm: alarm,
          analog_comparator: analog_comparator,

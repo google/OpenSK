@@ -1,5 +1,33 @@
+diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
+index 44a6c1cc..2ebc2868 100644
+--- a/boards/nordic/nrf52840dk/src/main.rs
++++ b/boards/nordic/nrf52840dk/src/main.rs
+@@ -117,6 +117,11 @@ static mut APP_MEMORY: [u8; 0x3C000] = [0; 0x3C000];
+ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
+     [None, None, None, None, None, None, None, None];
+ 
++static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
++    address: 0xC0000,
++    size: 0x40000,
++}];
++
+ static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
+ 
+ /// Dummy buffer that causes the linker to reserve enough space for the stack.
+@@ -146,7 +151,10 @@ pub unsafe fn reset_handler() {
+         UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD))
+     };
+ 
+-    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
++    let board_kernel = static_init!(
++        kernel::Kernel,
++        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
++    );
+     let gpio = components::gpio::GpioComponent::new(board_kernel).finalize(
+         components::gpio_component_helper!(
+             &nrf52840::gpio::PORT[Pin::P1_01],
 diff --git a/boards/nordic/nrf52dk_base/src/lib.rs b/boards/nordic/nrf52dk_base/src/lib.rs
-index fe493727..105f7120 100644
+index 5dd4328e..b8867461 100644
 --- a/boards/nordic/nrf52dk_base/src/lib.rs
 +++ b/boards/nordic/nrf52dk_base/src/lib.rs
 @@ -104,6 +104,7 @@ pub struct Platform {
@@ -18,7 +46,7 @@ index fe493727..105f7120 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -405,6 +407,14 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -405,6 +407,15 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
      );
      nrf52::acomp::ACOMP.set_client(analog_comparator);
  
@@ -26,14 +54,15 @@ index fe493727..105f7120 100644
 +        nrf52::nvmc::SyscallDriver,
 +        nrf52::nvmc::SyscallDriver::new(
 +            &nrf52::nvmc::NVMC,
-+            board_kernel.create_grant(&memory_allocation_capability)
++            board_kernel.create_grant(&memory_allocation_capability),
++            board_kernel.storage_locations(),
 +        )
 +    );
 +
      // Start all of the clocks. Low power operation will require a better
      // approach than this.
      nrf52::clock::CLOCK.low_stop();
-@@ -439,6 +449,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -431,6 +442,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          analog_comparator: analog_comparator,
          nonvolatile_storage: nonvolatile_storage,
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
@@ -42,7 +71,7 @@ index fe493727..105f7120 100644
  
      platform.pconsole.start();
 diff --git a/chips/nrf52/src/nvmc.rs b/chips/nrf52/src/nvmc.rs
-index 60fc2da8..45c75f89 100644
+index 60fc2da8..6e59d197 100644
 --- a/chips/nrf52/src/nvmc.rs
 +++ b/chips/nrf52/src/nvmc.rs
 @@ -3,6 +3,7 @@
@@ -58,11 +87,11 @@ index 60fc2da8..45c75f89 100644
  use kernel::common::StaticRef;
  use kernel::hil;
 -use kernel::ReturnCode;
-+use kernel::{AppId, AppSlice, Callback, Driver, Grant, ReturnCode, Shared};
++use kernel::{AppId, AppSlice, Callback, Driver, Grant, ReturnCode, Shared, StorageLocation};
  
  use crate::deferred_call_tasks::DeferredCallTask;
  
-@@ -141,7 +142,33 @@ register_bitfields! [u32,
+@@ -141,7 +142,13 @@ register_bitfields! [u32,
  static DEFERRED_CALL: DeferredCall<DeferredCallTask> =
      unsafe { DeferredCall::new(DeferredCallTask::Nvmc) };
  
@@ -73,30 +102,10 @@ index 60fc2da8..45c75f89 100644
 +const MAX_PAGE_ERASES: usize = 10000;
 +const WORD_MASK: usize = WORD_SIZE - 1;
 +const PAGE_MASK: usize = PAGE_SIZE - 1;
-+
-+// The storage is currently static and readable by all processes. This will be fixed once Tock
-+// supports persistent storage outside the application flash (i.e. not the current writeable flash
-+// regions support).
-+const STORAGE_PTR: usize = 0xc0000;
-+const STORAGE_LEN: usize = 0x40000;
-+
-+fn in_storage(ptr: usize, len: usize) -> bool {
-+    // We want to check the 2 following inequalities:
-+    // (1) `STORAGE_PTR <= ptr`
-+    // (2) `ptr + len <= STORAGE_PTR + STORAGE_LEN`
-+    // However, the second one may overflow written as is. We introduce a third
-+    // inequality to solve this issue:
-+    // (3) `len <= STORAGE_LEN`
-+    // Using this third inequality, we can rewrite the second one as:
-+    // (4) `ptr - STORAGE_PTR <= STORAGE_LEN - len`
-+    // This fourth inequality is equivalent to the second one but doesn't overflow when
-+    // the first and third inequalities hold.
-+    STORAGE_PTR <= ptr && len <= STORAGE_LEN && ptr - STORAGE_PTR <= STORAGE_LEN - len
-+}
  
  /// This is a wrapper around a u8 array that is sized to a single page for the
  /// nrf. Users of this module must pass an object of this type to use the
-@@ -215,6 +242,11 @@ impl Nvmc {
+@@ -215,6 +222,11 @@ impl Nvmc {
          }
      }
  
@@ -108,7 +117,7 @@ index 60fc2da8..45c75f89 100644
      /// Configure the NVMC to allow writes to flash.
      pub fn configure_writeable(&self) {
          let regs = &*self.registers;
-@@ -230,7 +262,7 @@ impl Nvmc {
+@@ -230,7 +242,7 @@ impl Nvmc {
          let regs = &*self.registers;
          regs.config.write(Configuration::WEN::Een);
          while !self.is_ready() {}
@@ -117,7 +126,7 @@ index 60fc2da8..45c75f89 100644
          while !self.is_ready() {}
      }
  
-@@ -322,7 +354,7 @@ impl Nvmc {
+@@ -322,7 +334,7 @@ impl Nvmc {
          // Put the NVMC in write mode.
          regs.config.write(Configuration::WEN::Wen);
  
@@ -126,7 +135,7 @@ index 60fc2da8..45c75f89 100644
              let word: u32 = (data[i + 0] as u32) << 0
                  | (data[i + 1] as u32) << 8
                  | (data[i + 2] as u32) << 16
-@@ -390,3 +422,186 @@ impl hil::flash::Flash for Nvmc {
+@@ -390,3 +402,217 @@ impl hil::flash::Flash for Nvmc {
          self.erase_page(page_number)
      }
  }
@@ -158,8 +167,9 @@ index 60fc2da8..45c75f89 100644
 +/// - COMMAND(1, 2): Get the maximum number of word writes between page erasures (always 2).
 +/// - COMMAND(1, 3): Get the maximum number page erasures in the lifetime of the flash (always
 +///     10000).
-+/// - COMMAND(1, 4): Get the storage address (page-aligned).
-+/// - COMMAND(1, 5): Get the storage length (page-aligned).
++/// - COMMAND(1, 4): The number of storage locations.
++/// - COMMAND(1, 5, i): Get the address of the i-th storage location (page-aligned).
++/// - COMMAND(1, 6, i): Get the size of the i-th storage location (page-aligned).
 +/// - COMMAND(2, ptr): Write the allow slice to the flash region starting at `ptr`.
 +///   - `ptr` must be word-aligned.
 +///   - The allow slice length must be word aligned.
@@ -172,6 +182,7 @@ index 60fc2da8..45c75f89 100644
 +pub struct SyscallDriver {
 +    nvmc: &'static Nvmc,
 +    apps: Grant<App>,
++    storage_locations: &'static [StorageLocation],
 +}
 +
 +pub const DRIVER_NUM: usize = 0x50003;
@@ -183,8 +194,16 @@ index 60fc2da8..45c75f89 100644
 +}
 +
 +impl SyscallDriver {
-+    pub fn new(nvmc: &'static Nvmc, apps: Grant<App>) -> SyscallDriver {
-+        SyscallDriver { nvmc, apps }
++    pub fn new(
++        nvmc: &'static Nvmc,
++        apps: Grant<App>,
++        storage_locations: &'static [StorageLocation],
++    ) -> SyscallDriver {
++        SyscallDriver {
++            nvmc,
++            apps,
++            storage_locations,
++        }
 +    }
 +}
 +
@@ -194,6 +213,24 @@ index 60fc2da8..45c75f89 100644
 +}
 +
 +impl SyscallDriver {
++    fn in_storage_locations(&self, ptr: usize, len: usize) -> bool {
++        self.storage_locations.iter().any(|storage_location| {
++            let storage_ptr = storage_location.address;
++            let storage_len = storage_location.size;
++            // We want to check the 2 following inequalities:
++            // (1) `storage_ptr <= ptr`
++            // (2) `ptr + len <= storage_ptr + storage_len`
++            // However, the second one may overflow written as is. We introduce a third
++            // inequality to solve this issue:
++            // (3) `len <= storage_len`
++            // Using this third inequality, we can rewrite the second one as:
++            // (4) `ptr - storage_ptr <= storage_len - len`
++            // This fourth inequality is equivalent to the second one but doesn't overflow when
++            // the first and third inequalities hold.
++            storage_ptr <= ptr && len <= storage_len && ptr - storage_ptr <= storage_len - len
++        })
++    }
++
 +    /// Writes a word-aligned slice at a word-aligned address.
 +    ///
 +    /// Words are written only if necessary, i.e. if writing the new value would change the current
@@ -213,7 +250,7 @@ index 60fc2da8..45c75f89 100644
 +    /// - `slice.len()` must be word-aligned.
 +    /// - The slice starting at `ptr` of length `slice.len()` must fit in the storage.
 +    fn write_slice(&self, ptr: usize, slice: &[u8]) -> ReturnCode {
-+        if !in_storage(ptr, slice.len()) {
++        if !self.in_storage_locations(ptr, slice.len()) {
 +            return ReturnCode::EINVAL;
 +        }
 +        if ptr & WORD_MASK != 0 || slice.len() & WORD_MASK != 0 {
@@ -241,7 +278,7 @@ index 60fc2da8..45c75f89 100644
 +    /// - `ptr` must be page-aligned.
 +    /// - The slice starting at `ptr` of length `PAGE_SIZE` must fit in the storage.
 +    fn erase_page(&self, ptr: usize) -> ReturnCode {
-+        if !in_storage(ptr, PAGE_SIZE) {
++        if !self.in_storage_locations(ptr, PAGE_SIZE) {
 +            return ReturnCode::EINVAL;
 +        }
 +        if ptr & PAGE_MASK != 0 {
@@ -258,8 +295,8 @@ index 60fc2da8..45c75f89 100644
 +        ReturnCode::ENOSUPPORT
 +    }
 +
-+    fn command(&self, cmd: usize, arg: usize, _: usize, appid: AppId) -> ReturnCode {
-+        match (cmd, arg) {
++    fn command(&self, cmd: usize, arg0: usize, arg1: usize, appid: AppId) -> ReturnCode {
++        match (cmd, arg0) {
 +            (0, _) => ReturnCode::SUCCESS,
 +
 +            (1, 0) => ReturnCode::SuccessWithValue { value: WORD_SIZE },
@@ -271,10 +308,13 @@ index 60fc2da8..45c75f89 100644
 +                value: MAX_PAGE_ERASES,
 +            },
 +            (1, 4) => ReturnCode::SuccessWithValue {
-+                value: STORAGE_PTR,
++                value: self.storage_locations.len(),
 +            },
-+            (1, 5) => ReturnCode::SuccessWithValue {
-+                value: STORAGE_LEN,
++            (1, 5) if arg1 < self.storage_locations.len() => ReturnCode::SuccessWithValue {
++                value: self.storage_locations[arg1].address,
++            },
++            (1, 6) if arg1 < self.storage_locations.len() => ReturnCode::SuccessWithValue {
++                value: self.storage_locations[arg1].size,
 +            },
 +            (1, _) => ReturnCode::EINVAL,
 +
@@ -313,35 +353,48 @@ index 60fc2da8..45c75f89 100644
 +        }
 +    }
 +}
+diff --git a/kernel/src/lib.rs b/kernel/src/lib.rs
+index ebe8052a..a6dcd278 100644
+--- a/kernel/src/lib.rs
++++ b/kernel/src/lib.rs
+@@ -47,7 +47,7 @@ pub use crate::platform::systick::SysTick;
+ pub use crate::platform::{mpu, Chip, Platform};
+ pub use crate::platform::{ClockInterface, NoClockControl, NO_CLOCK_CONTROL};
+ pub use crate::returncode::ReturnCode;
+-pub use crate::sched::Kernel;
++pub use crate::sched::{Kernel, StorageLocation};
+ 
+ // Export only select items from the process module. To remove the name conflict
+ // this cannot be called `process`, so we use a shortened version. These
 diff --git a/kernel/src/process.rs b/kernel/src/process.rs
-index eb00f274..663c2422 100644
+index eb00f274..268a270d 100644
 --- a/kernel/src/process.rs
 +++ b/kernel/src/process.rs
 @@ -1604,6 +1604,33 @@ impl<C: 'static + Chip> Process<'a, C> {
              return Ok((None, 0));
          }
  
-+        // Allocate MPU region for storage. The storage is currently static and readable by all
-+        // processes. This will be fixed once Tock supports persistent storage outside the
-+        // application flash (i.e. not the current writeable flash regions support).
-+        const STORAGE_PTR: usize = 0xc0000;
-+        const STORAGE_LEN: usize = 0x40000;
-+        if chip
-+            .mpu()
-+            .allocate_region(
-+                STORAGE_PTR as *const u8,
-+                STORAGE_LEN,
-+                STORAGE_LEN,
-+                mpu::Permissions::ReadOnly,
-+                &mut mpu_config,
-+            )
-+            .is_none()
-+        {
++        // Allocate MPU region for the storage locations. The storage locations are currently
++        // readable by all processes due to lack of stable app id.
++        for storage_location in kernel.storage_locations() {
++            if chip
++                .mpu()
++                .allocate_region(
++                    storage_location.address as *const u8,
++                    storage_location.size,
++                    storage_location.size,
++                    mpu::Permissions::ReadOnly,
++                    &mut mpu_config,
++                )
++                .is_some()
++            {
++                continue;
++            }
 +            if config::CONFIG.debug_load_processes {
 +                debug!(
 +                    "[!] flash=[{:#010X}:{:#010X}] process={:?} - couldn't allocate flash region",
-+                    STORAGE_PTR,
-+                    STORAGE_PTR + STORAGE_LEN,
++                    storage_location.address,
++                    storage_location.address + storage_location.size,
 +                    process_name
 +                );
 +            }
@@ -351,3 +404,57 @@ index eb00f274..663c2422 100644
          // Determine how much space we need in the application's
          // memory space just for kernel and grant state. We need to make
          // sure we allocate enough memory just for that.
+diff --git a/kernel/src/sched.rs b/kernel/src/sched.rs
+index fbd68319..43cce76f 100644
+--- a/kernel/src/sched.rs
++++ b/kernel/src/sched.rs
+@@ -24,6 +24,12 @@ const KERNEL_TICK_DURATION_US: u32 = 10000;
+ /// Skip re-scheduling a process if its quanta is nearly exhausted
+ const MIN_QUANTA_THRESHOLD_US: u32 = 500;
+ 
++/// Represents a storage location in flash.
++pub struct StorageLocation {
++    pub address: usize,
++    pub size: usize,
++}
++
+ /// Main object for the kernel. Each board will need to create one.
+ pub struct Kernel {
+     /// How many "to-do" items exist at any given time. These include
+@@ -33,6 +39,9 @@ pub struct Kernel {
+     /// This holds a pointer to the static array of Process pointers.
+     processes: &'static [Option<&'static dyn process::ProcessType>],
+ 
++    /// List of storage locations.
++    storage_locations: &'static [StorageLocation],
++
+     /// A counter which keeps track of how many process identifiers have been
+     /// created. This is used to create new unique identifiers for processes.
+     process_identifier_max: Cell<usize>,
+@@ -51,9 +60,17 @@ pub struct Kernel {
+ 
+ impl Kernel {
+     pub fn new(processes: &'static [Option<&'static dyn process::ProcessType>]) -> Kernel {
++        Kernel::new_with_storage(processes, &[])
++    }
++
++    pub fn new_with_storage(
++        processes: &'static [Option<&'static dyn process::ProcessType>],
++        storage_locations: &'static [StorageLocation],
++    ) -> Kernel {
+         Kernel {
+             work: Cell::new(0),
+             processes: processes,
++            storage_locations: storage_locations,
+             process_identifier_max: Cell::new(0),
+             grant_counter: Cell::new(0),
+             grants_finalized: Cell::new(false),
+@@ -599,4 +616,8 @@ impl Kernel {
+         }
+         systick.reset();
+     }
++
++    pub fn storage_locations(&self) -> &'static [StorageLocation] {
++        self.storage_locations
++    }
+ }

@@ -161,7 +161,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -197,7 +197,7 @@ impl TryFrom<&cbor::Value> for AuthenticatorTransport {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
     pub key_id: Vec<u8>,
@@ -291,6 +291,14 @@ impl Extensions {
         self.0
             .get("hmac-secret")
             .map(GetAssertionHmacSecretInput::try_from)
+    }
+
+    pub fn make_credential_cred_protect_policy(
+        &self,
+    ) -> Option<Result<CredentialProtectionPolicy, Ctap2StatusCode>> {
+        self.0
+            .get("credProtect")
+            .map(CredentialProtectionPolicy::try_from)
     }
 }
 
@@ -432,6 +440,27 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     }
 }
 
+#[derive(Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub enum CredentialProtectionPolicy {
+    UserVerificationOptional = 0x01,
+    UserVerificationOptionalWithCredentialIdList = 0x02,
+    UserVerificationRequired = 0x03,
+}
+
+impl TryFrom<&cbor::Value> for CredentialProtectionPolicy {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match read_integer(cbor_value)? {
+            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
+            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+        }
+    }
+}
+
 // https://www.w3.org/TR/webauthn/#public-key-credential-source
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -445,6 +474,7 @@ pub struct PublicKeyCredentialSource {
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub other_ui: Option<String>,
     pub cred_random: Option<Vec<u8>>,
+    pub cred_protect_policy: Option<CredentialProtectionPolicy>,
 }
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
@@ -459,6 +489,10 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             None => cbor_null!(),
             Some(cred_random) => cbor_bytes!(cred_random),
         };
+        let cred_protect_policy = match credential.cred_protect_policy {
+            None => cbor_null!(),
+            Some(cred_protect_policy) => cbor_int!(cred_protect_policy as i64),
+        };
         cbor_array! {
             credential.credential_id,
             private_key,
@@ -466,6 +500,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             credential.user_handle,
             other_ui,
             cred_random,
+            cred_protect_policy,
         }
     }
 }
@@ -477,7 +512,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         use cbor::{SimpleValue, Value};
 
         let fields = read_array(&cbor_value)?;
-        if fields.len() != 6 {
+        if fields.len() != 7 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let credential_id = read_byte_string(&fields[0])?;
@@ -497,6 +532,10 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             Value::Simple(SimpleValue::NullValue) => None,
             cbor_value => Some(read_byte_string(cbor_value)?),
         };
+        let cred_protect_policy = match &fields[6] {
+            Value::Simple(SimpleValue::NullValue) => None,
+            cbor_value => Some(CredentialProtectionPolicy::try_from(cbor_value)?),
+        };
         Ok(PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
@@ -505,7 +544,17 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             user_handle,
             other_ui,
             cred_random,
+            cred_protect_policy,
         })
+    }
+}
+
+impl PublicKeyCredentialSource {
+    // Relying parties do not need to provide the credential ID in an allow_list if true.
+    pub fn is_discoverable(&self) -> bool {
+        self.cred_protect_policy.is_none()
+            || self.cred_protect_policy
+                == Some(CredentialProtectionPolicy::UserVerificationOptional)
     }
 }
 
@@ -1031,6 +1080,21 @@ mod test {
     }
 
     #[test]
+    fn test_from_into_cred_protection_policy() {
+        let cbor_policy = cbor_int!(CredentialProtectionPolicy::UserVerificationOptional as i64);
+        let policy = CredentialProtectionPolicy::try_from(&cbor_policy);
+        let expected_policy = CredentialProtectionPolicy::UserVerificationOptional;
+        assert_eq!(policy, Ok(expected_policy));
+        let created_cbor: cbor::Value = cbor_int!(policy.unwrap() as i64);
+        assert_eq!(created_cbor, cbor_policy);
+
+        let cbor_policy_error = cbor_int!(-1);
+        let policy_error = CredentialProtectionPolicy::try_from(&cbor_policy_error);
+        let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
+        assert_eq!(policy_error, expected_error);
+    }
+
+    #[test]
     fn test_from_into_authenticator_transport() {
         let cbor_authenticator_transport = cbor_text!("usb");
         let authenticator_transport =
@@ -1141,6 +1205,18 @@ mod test {
     }
 
     #[test]
+    fn test_cred_protect_extension() {
+        let cbor_extensions = cbor_map! {
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired as i64,
+        };
+        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
+        assert_eq!(
+            extensions.make_credential_cred_protect_policy(),
+            Some(Ok(CredentialProtectionPolicy::UserVerificationRequired))
+        );
+    }
+
+    #[test]
     fn test_from_make_credential_options() {
         let cbor_make_options = cbor_map! {
             "rk" => true,
@@ -1218,6 +1294,7 @@ mod test {
             user_handle: b"foo".to_vec(),
             other_ui: None,
             cred_random: None,
+            cred_protect_policy: None,
         };
 
         assert_eq!(
@@ -1237,6 +1314,16 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             cred_random: Some(vec![0x00; 32]),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             ..credential
         };
 

@@ -32,9 +32,10 @@ use self::command::{
 #[cfg(feature = "with_ctap2_1")]
 use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
-    ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, PackedAttestationStatement,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    ClientPinSubCommand, CoseKey, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
+    PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+    SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 use self::key_material::{AAGUID, ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
@@ -109,6 +110,10 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::ES256,
 };
+// You can change this value to one of the following for more privacy.
+// - Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList)
+// - Some(CredentialProtectionPolicy::UserVerificationRequired)
+const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
 
 fn check_pin_auth(hmac_key: &[u8], hmac_contents: &[u8], pin_auth: &[u8]) -> bool {
     if pin_auth.len() != PIN_AUTH_LENGTH {
@@ -430,12 +435,19 @@ where
         }
 
         let (use_hmac_extension, cred_protect_policy) = if let Some(extensions) = extensions {
-            (
-                extensions.has_make_credential_hmac_secret()?,
-                extensions
-                    .make_credential_cred_protect_policy()
-                    .transpose()?,
-            )
+            let mut cred_protect = extensions
+                .make_credential_cred_protect_policy()
+                .transpose()?;
+            if cred_protect
+                .as_ref()
+                .unwrap_or(&CredentialProtectionPolicy::UserVerificationOptional)
+                > DEFAULT_CRED_PROTECT
+                    .as_ref()
+                    .unwrap_or(&CredentialProtectionPolicy::UserVerificationOptional)
+            {
+                cred_protect = DEFAULT_CRED_PROTECT;
+            }
+            (extensions.has_make_credential_hmac_secret()?, cred_protect)
         } else {
             (false, None)
         };
@@ -812,6 +824,7 @@ where
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 #[cfg(feature = "with_ctap2_1")]
                 algorithms: Some(vec![ES256_CRED_PARAM]),
+                default_cred_protect: DEFAULT_CRED_PROTECT,
                 #[cfg(feature = "with_ctap2_1")]
                 firmware_version: None,
             },
@@ -1116,8 +1129,8 @@ where
 #[cfg(test)]
 mod test {
     use super::data_formats::{
-        CredentialProtectionPolicy, Extensions, GetAssertionOptions, MakeCredentialOptions,
-        PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+        Extensions, GetAssertionOptions, MakeCredentialOptions, PublicKeyCredentialRpEntity,
+        PublicKeyCredentialUserEntity,
     };
     use super::*;
     use crypto::rng256::ThreadRng256;

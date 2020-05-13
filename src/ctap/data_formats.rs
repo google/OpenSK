@@ -440,7 +440,7 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, PartialOrd)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,

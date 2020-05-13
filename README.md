@@ -99,6 +99,9 @@ a few things you can personalize:
 4.  Depending on your available flash storage, choose an appropriate maximum
     number of supported residential keys and number of pages in
     `ctap/storage.rs`.
+5.  Change the default level for the credProtect extension. Resident credentials
+    become undiscoverable without user verification. This helps privacy, but
+    can make usage less comfortable for less important credentials.
 
 ### 3D printed enclosure
 

@@ -473,7 +473,7 @@ impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
         use PublicKeyCredentialSourceField::*;
-        let mut private_key = [0; 32];
+        let mut private_key = [0u8; 32];
         credential.private_key.to_bytes(&mut private_key);
         cbor_map_options! {
             CredentialId => Some(credential.credential_id),

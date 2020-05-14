@@ -18,9 +18,9 @@ const LED1_R_PIN: Pin = Pin::P0_23;
 const LED1_G_PIN: Pin = Pin::P0_22;
 const LED1_B_PIN: Pin = Pin::P0_24;
 
-// The nRF52840 Dongle button
-const BUTTON_PIN: Pin = Pin::P0_18;
-const BUTTON_RST_PIN: Pin = Pin::P0_02;
+// The nRF52840 MDK USB Dongle button
+const BUTTON_PIN: Pin = Pin::P1_00;
+const BUTTON_RST_PIN: Pin = Pin::P0_18;
 
 const UART_RTS: Option<Pin> = Some(Pin::P0_21);
 const UART_TXD: Pin = Pin::P0_20;

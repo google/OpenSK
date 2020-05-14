@@ -25,9 +25,6 @@ mod command_nr {
         pub const PAGE_SIZE: usize = 1;
         pub const MAX_WORD_WRITES: usize = 2;
         pub const MAX_PAGE_ERASES: usize = 3;
-        pub const STORAGE_CNT: usize = 4;
-        pub const STORAGE_PTR: usize = 5;
-        pub const STORAGE_LEN: usize = 6;
     }
     pub const WRITE_SLICE: usize = 2;
     pub const ERASE_PAGE: usize = 3;
@@ -37,8 +34,23 @@ mod allow_nr {
     pub const WRITE_SLICE: usize = 0;
 }
 
+mod memop_nr {
+    pub const STORAGE_CNT: u32 = 12;
+    pub const STORAGE_PTR: u32 = 13;
+    pub const STORAGE_LEN: u32 = 14;
+}
+
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
     let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg) };
+    if code < 0 {
+        Err(StorageError::KernelError { code })
+    } else {
+        Ok(code as usize)
+    }
+}
+
+fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
+    let code = unsafe { syscalls::memop(nr, arg) };
     if code < 0 {
         Err(StorageError::KernelError { code })
     } else {
@@ -82,9 +94,9 @@ impl SyscallStorage {
         {
             return Err(StorageError::BadFlash);
         }
-        for i in 0..get_info(command_nr::get_info_nr::STORAGE_CNT, 0)? {
-            let storage_ptr = get_info(command_nr::get_info_nr::STORAGE_PTR, i)?;
-            let max_storage_len = get_info(command_nr::get_info_nr::STORAGE_LEN, i)?;
+        for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
+            let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
+            let max_storage_len = memop(memop_nr::STORAGE_LEN, i)?;
             if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(max_storage_len) {
                 return Err(StorageError::BadFlash);
             }
@@ -154,7 +166,8 @@ impl Storage for SyscallStorage {
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
-        let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, 0) };
+        let code =
+            unsafe { syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len()) };
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
@@ -165,7 +178,7 @@ impl Storage for SyscallStorage {
         let index = Index { page, byte: 0 };
         let length = self.page_size();
         let ptr = self.read_slice(index, length)?.as_ptr() as usize;
-        let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, 0) };
+        let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length) };
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }

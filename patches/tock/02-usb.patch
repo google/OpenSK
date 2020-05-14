@@ -62,7 +62,7 @@ index 105f7120..535e5cd8 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -157,6 +167,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -176,6 +186,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
      app_fault_response: kernel::procs::FaultResponse,
      reg_vout: Regulator0Output,
      nfc_as_gpios: bool,
@@ -70,7 +70,7 @@ index 105f7120..535e5cd8 100644
      chip: &'static nrf52::chip::NRF52<I>,
  ) {
      // Make non-volatile memory writable and activate the reset button
-@@ -416,6 +427,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -434,6 +445,44 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          )
      );
  
@@ -115,7 +115,7 @@ index 105f7120..535e5cd8 100644
      // Start all of the clocks. Low power operation will require a better
      // approach than this.
      nrf52::clock::CLOCK.low_stop();
-@@ -440,6 +489,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
+@@ -458,6 +507,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
          temp: temp,
          alarm: alarm,
          analog_comparator: analog_comparator,

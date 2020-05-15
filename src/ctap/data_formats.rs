@@ -486,25 +486,28 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
     }
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialSource {
+impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         use PublicKeyCredentialSourceField::*;
-        let map = read_map(cbor_value)?;
-        let credential_id = read_byte_string(ok_or_missing(map.get(&CredentialId.into()))?)?;
-        let private_key = read_byte_string(ok_or_missing(map.get(&PrivateKey.into()))?)?;
+        let mut map = extract_map(cbor_value)?;
+        let credential_id = extract_byte_string(ok_or_missing(map.remove(&CredentialId.into()))?)?;
+        let private_key = extract_byte_string(ok_or_missing(map.remove(&PrivateKey.into()))?)?;
         if private_key.len() != 32 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
             .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
-        let rp_id = read_text_string(ok_or_missing(map.get(&RpId.into()))?)?;
-        let user_handle = read_byte_string(ok_or_missing(map.get(&UserHandle.into()))?)?;
-        let other_ui = map.get(&OtherUi.into()).map(read_text_string).transpose()?;
+        let rp_id = extract_text_string(ok_or_missing(map.remove(&RpId.into()))?)?;
+        let user_handle = extract_byte_string(ok_or_missing(map.remove(&UserHandle.into()))?)?;
+        let other_ui = map
+            .remove(&OtherUi.into())
+            .map(extract_text_string)
+            .transpose()?;
         let cred_random = map
-            .get(&CredRandom.into())
-            .map(read_byte_string)
+            .remove(&CredRandom.into())
+            .map(extract_byte_string)
             .transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
@@ -671,11 +674,25 @@ pub fn read_byte_string(cbor_value: &cbor::Value) -> Result<Vec<u8>, Ctap2Status
     }
 }
 
+fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::ByteString(byte_string)) => Ok(byte_string),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
 pub(super) fn read_text_string(cbor_value: &cbor::Value) -> Result<String, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => {
             Ok(text_string.to_string())
         }
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
+fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => Ok(text_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
@@ -696,6 +713,15 @@ pub(super) fn read_map(
     }
 }
 
+fn extract_map(
+    cbor_value: cbor::Value,
+) -> Result<BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::Map(map) => Ok(map),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
 pub(super) fn read_bool(cbor_value: &cbor::Value) -> Result<bool, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Simple(cbor::SimpleValue::FalseValue) => Ok(false),
@@ -704,9 +730,7 @@ pub(super) fn read_bool(cbor_value: &cbor::Value) -> Result<bool, Ctap2StatusCod
     }
 }
 
-pub(super) fn ok_or_missing(
-    value_option: Option<&cbor::Value>,
-) -> Result<&cbor::Value, Ctap2StatusCode> {
+pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
     value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
 }
 
@@ -1240,7 +1264,7 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
             Ok(credential.clone())
         );
 
@@ -1250,7 +1274,7 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
             Ok(credential.clone())
         );
 
@@ -1260,15 +1284,15 @@ mod test {
         };
 
         assert_eq!(
-            PublicKeyCredentialSource::try_from(&cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
             Ok(credential)
         );
     }
 
     #[test]
     fn test_credential_source_invalid_cbor() {
-        assert!(PublicKeyCredentialSource::try_from(&cbor_false!()).is_err());
-        assert!(PublicKeyCredentialSource::try_from(&cbor_array!(false)).is_err());
-        assert!(PublicKeyCredentialSource::try_from(&cbor_array!(b"foo".to_vec())).is_err());
+        assert!(PublicKeyCredentialSource::try_from(cbor_false!()).is_err());
+        assert!(PublicKeyCredentialSource::try_from(cbor_array!(false)).is_err());
+        assert!(PublicKeyCredentialSource::try_from(cbor_array!(b"foo".to_vec())).is_err());
     }
 }

@@ -18,7 +18,7 @@ use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::PIN_AUTH_LENGTH;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::convert::TryFrom;
+use core::convert::TryInto;
 use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError, StoreIndex};
 
 #[cfg(any(test, feature = "ram_storage"))]
@@ -420,7 +420,8 @@ impl From<StoreError> for Ctap2StatusCode {
 }
 
 fn deserialize_credential(data: &[u8]) -> Option<PublicKeyCredentialSource> {
-    PublicKeyCredentialSource::try_from(&cbor::read(data).ok()?).ok()
+    let cbor = cbor::read(data).ok()?;
+    cbor.try_into().ok()
 }
 
 fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>, Ctap2StatusCode> {

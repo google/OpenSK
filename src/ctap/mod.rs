@@ -438,12 +438,9 @@ where
             let mut cred_protect = extensions
                 .make_credential_cred_protect_policy()
                 .transpose()?;
-            if cred_protect
-                .as_ref()
-                .unwrap_or(&CredentialProtectionPolicy::UserVerificationOptional)
-                > DEFAULT_CRED_PROTECT
-                    .as_ref()
-                    .unwrap_or(&CredentialProtectionPolicy::UserVerificationOptional)
+            if cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
+                < DEFAULT_CRED_PROTECT
+                    .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             {
                 cred_protect = DEFAULT_CRED_PROTECT;
             }
@@ -704,15 +701,7 @@ where
             found_credentials
         } else {
             // TODO(kaczmarczyck) use GetNextAssertion
-            let found_credentials = self.persistent_store.filter_credential(&rp_id);
-            if has_uv {
-                found_credentials
-            } else {
-                found_credentials
-                    .into_iter()
-                    .filter(|cred| cred.is_discoverable())
-                    .collect()
-            }
+            self.persistent_store.filter_credential(&rp_id, !has_uv)
         };
 
         let credential = if let Some(credential) = credentials.first() {
@@ -1213,6 +1202,31 @@ mod test {
         }
     }
 
+    fn create_make_credential_parameters_with_exclude_list(
+        excluded_credential_id: &[u8],
+    ) -> AuthenticatorMakeCredentialParameters {
+        let excluded_credential_descriptor = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: excluded_credential_id.to_vec(),
+            transports: None,
+        };
+        let exclude_list = Some(vec![excluded_credential_descriptor]);
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.exclude_list = exclude_list;
+        make_credential_params
+    }
+
+    fn create_make_credential_parameters_with_cred_protect_policy(
+        policy: CredentialProtectionPolicy,
+    ) -> AuthenticatorMakeCredentialParameters {
+        let mut extension_map = BTreeMap::new();
+        extension_map.insert("credProtect".to_string(), cbor_int!(policy as i64));
+        let extensions = Some(Extensions::new(extension_map));
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.extensions = extensions;
+        make_credential_params
+    }
+
     #[test]
     fn test_residential_process_make_credential() {
         let mut rng = ThreadRng256 {};
@@ -1311,9 +1325,11 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
 
         let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
         let excluded_credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: excluded_credential_id.clone(),
+            credential_id: excluded_credential_id,
             private_key: excluded_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
@@ -1326,17 +1342,8 @@ mod test {
             .store_credential(excluded_credential_source)
             .is_ok());
 
-        let excluded_credential_descriptor = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: excluded_credential_id,
-            transports: None,
-        };
-        let exclude_list = Some(vec![excluded_credential_descriptor]);
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.exclude_list = exclude_list;
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
-
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
@@ -1346,53 +1353,50 @@ mod test {
     #[test]
     fn test_process_make_credential_credential_with_cred_protect() {
         let mut rng = ThreadRng256 {};
-        let excluded_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
 
-        let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
-        let mut excluded_credential_source = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: excluded_credential_id.clone(),
-            private_key: excluded_private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![],
-            other_ui: None,
-            cred_random: None,
-            cred_protect_policy: Some(
-                CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
-            ),
-        };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(excluded_credential_source.clone())
-            .is_ok());
-
-        let excluded_credential_descriptor = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: excluded_credential_id,
-            transports: None,
-        };
-        let exclude_list = Some(vec![excluded_credential_descriptor.clone()]);
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.exclude_list = exclude_list;
+        let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
+        let make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert!(make_credential_response.is_ok());
 
+        let stored_credential = ctap_state
+            .persistent_store
+            .filter_credential("example.com", false)
+            .pop()
+            .unwrap();
+        let credential_id = stored_credential.credential_id;
+        assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
+
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
         );
 
-        excluded_credential_source.cred_protect_policy =
-            Some(CredentialProtectionPolicy::UserVerificationRequired);
-        assert!(ctap_state
+        let test_policy = CredentialProtectionPolicy::UserVerificationRequired;
+        let make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert!(make_credential_response.is_ok());
+
+        let stored_credential = ctap_state
             .persistent_store
-            .store_credential(excluded_credential_source)
-            .is_ok());
-        let exclude_list = Some(vec![excluded_credential_descriptor]);
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.exclude_list = exclude_list;
+            .filter_credential("example.com", false)
+            .pop()
+            .unwrap();
+        let credential_id = stored_credential.credential_id;
+        assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
+
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());

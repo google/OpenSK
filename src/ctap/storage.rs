@@ -269,7 +269,11 @@ impl PersistentStore {
         Ok(())
     }
 
-    pub fn filter_credential(&self, rp_id: &str) -> Vec<PublicKeyCredentialSource> {
+    pub fn filter_credential(
+        &self,
+        rp_id: &str,
+        check_cred_protect: bool,
+    ) -> Vec<PublicKeyCredentialSource> {
         self.store
             .find_all(&Key::Credential {
                 rp_id: Some(rp_id.into()),
@@ -282,6 +286,7 @@ impl PersistentStore {
                 debug_assert!(credential.is_some());
                 credential
             })
+            .filter(|cred| !check_cred_protect || cred.is_discoverable())
             .collect()
     }
 
@@ -549,7 +554,7 @@ mod test {
             .is_ok());
         assert_eq!(persistent_store.count_credentials(), 1);
         assert_eq!(
-            &persistent_store.filter_credential("example.com"),
+            &persistent_store.filter_credential("example.com", false),
             &[expected_credential]
         );
 
@@ -597,7 +602,7 @@ mod test {
             .store_credential(credential_source2)
             .is_ok());
 
-        let filtered_credentials = persistent_store.filter_credential("example.com");
+        let filtered_credentials = persistent_store.filter_credential("example.com", false);
         assert_eq!(filtered_credentials.len(), 2);
         assert!(
             (filtered_credentials[0].credential_id == id0
@@ -605,6 +610,30 @@ mod test {
                 || (filtered_credentials[1].credential_id == id0
                     && filtered_credentials[0].credential_id == id1)
         );
+    }
+
+    #[test]
+    fn test_filter_with_cred_protect() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        assert_eq!(persistent_store.count_credentials(), 0);
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x00],
+            other_ui: None,
+            cred_random: None,
+            cred_protect_policy: Some(
+                CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
+            ),
+        };
+        assert!(persistent_store.store_credential(credential).is_ok());
+
+        let no_credential = persistent_store.filter_credential("example.com", true);
+        assert_eq!(no_credential, vec![]);
     }
 
     #[test]

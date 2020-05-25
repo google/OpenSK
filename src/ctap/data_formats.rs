@@ -440,7 +440,7 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,
@@ -1077,6 +1077,22 @@ mod test {
         let unknown_algorithm = SignatureAlgorithm::try_from(&cbor_unknown_algorithm);
         let expected_unknown_algorithm = SignatureAlgorithm::Unknown;
         assert_eq!(unknown_algorithm, Ok(expected_unknown_algorithm));
+    }
+
+    #[test]
+    fn test_cred_protection_policy_order() {
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptional
+                < CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
+        );
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptional
+                < CredentialProtectionPolicy::UserVerificationRequired
+        );
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
+                < CredentialProtectionPolicy::UserVerificationRequired
+        );
     }
 
     #[test]

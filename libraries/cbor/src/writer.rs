@@ -36,7 +36,7 @@ impl<'a> Writer<'a> {
             return false;
         }
         match value {
-            Value::KeyValue(KeyType::Unsigned(unsigned)) => self.start_item(0, unsigned as u64),
+            Value::KeyValue(KeyType::Unsigned(unsigned)) => self.start_item(0, unsigned),
             Value::KeyValue(KeyType::Negative(negative)) => {
                 self.start_item(1, -(negative + 1) as u64)
             }

@@ -433,6 +433,9 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
 }
 
 // https://www.w3.org/TR/webauthn/#public-key-credential-source
+//
+// Note that we only use the WebAuthn definition as an example. This data-structure is not specified
+// by FIDO. In particular we may choose how we serialize and deserialize it.
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
@@ -447,25 +450,38 @@ pub struct PublicKeyCredentialSource {
     pub cred_random: Option<Vec<u8>>,
 }
 
+// We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
+// is associated with a unique tag, implemented with a CBOR unsigned key.
+enum PublicKeyCredentialSourceField {
+    CredentialId = 0,
+    PrivateKey = 1,
+    RpId = 2,
+    UserHandle = 3,
+    OtherUi = 4,
+    CredRandom = 5,
+    // When a field is removed, its tag should be reserved and not used for new fields. We document
+    // those reserved tags below.
+    // Reserved tags: none.
+}
+
+impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
+    fn from(field: PublicKeyCredentialSourceField) -> cbor::KeyType {
+        (field as u64).into()
+    }
+}
+
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
+        use PublicKeyCredentialSourceField::*;
         let mut private_key = [0u8; 32];
         credential.private_key.to_bytes(&mut private_key);
-        let other_ui = match credential.other_ui {
-            None => cbor_null!(),
-            Some(other_ui) => cbor_text!(other_ui),
-        };
-        let cred_random = match credential.cred_random {
-            None => cbor_null!(),
-            Some(cred_random) => cbor_bytes!(cred_random),
-        };
-        cbor_array! {
-            credential.credential_id,
-            private_key,
-            credential.rp_id,
-            credential.user_handle,
-            other_ui,
-            cred_random,
+        cbor_map_options! {
+            CredentialId => Some(credential.credential_id),
+            PrivateKey => Some(private_key.to_vec()),
+            RpId => Some(credential.rp_id),
+            UserHandle => Some(credential.user_handle),
+            OtherUi => credential.other_ui,
+            CredRandom => credential.cred_random
         }
     }
 }
@@ -473,30 +489,36 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
 impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
-        use cbor::{SimpleValue, Value};
-
-        let fields = read_array(&cbor_value)?;
-        if fields.len() != 6 {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
-        }
-        let credential_id = read_byte_string(&fields[0])?;
-        let private_key = read_byte_string(&fields[1])?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        use PublicKeyCredentialSourceField::*;
+        let mut map = extract_map(cbor_value)?;
+        let credential_id = extract_byte_string(ok_or_missing(map.remove(&CredentialId.into()))?)?;
+        let private_key = extract_byte_string(ok_or_missing(map.remove(&PrivateKey.into()))?)?;
         if private_key.len() != 32 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
             .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
-        let rp_id = read_text_string(&fields[2])?;
-        let user_handle = read_byte_string(&fields[3])?;
-        let other_ui = match &fields[4] {
-            Value::Simple(SimpleValue::NullValue) => None,
-            cbor_value => Some(read_text_string(cbor_value)?),
-        };
-        let cred_random = match &fields[5] {
-            Value::Simple(SimpleValue::NullValue) => None,
-            cbor_value => Some(read_byte_string(cbor_value)?),
-        };
+        let rp_id = extract_text_string(ok_or_missing(map.remove(&RpId.into()))?)?;
+        let user_handle = extract_byte_string(ok_or_missing(map.remove(&UserHandle.into()))?)?;
+        let other_ui = map
+            .remove(&OtherUi.into())
+            .map(extract_text_string)
+            .transpose()?;
+        let cred_random = map
+            .remove(&CredRandom.into())
+            .map(extract_byte_string)
+            .transpose()?;
+        // We don't return whether there were unknown fields in the CBOR value. This means that
+        // deserialization is not injective. In particular deserialization is only an inverse of
+        // serialization at a given version of OpenSK. This is not a problem because:
+        // 1. When a field is deprecated, its tag is reserved and never reused in future versions,
+        //    including to be reintroduced with the same semantics. In other words, removing a field
+        //    is permanent.
+        // 2. OpenSK is never used with a more recent version of the storage. In particular, OpenSK
+        //    is never rolled-back.
+        // As a consequence, the unknown fields are only reserved fields and don't need to be
+        // preserved.
         Ok(PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
@@ -652,11 +674,25 @@ pub fn read_byte_string(cbor_value: &cbor::Value) -> Result<Vec<u8>, Ctap2Status
     }
 }
 
+fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::ByteString(byte_string)) => Ok(byte_string),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
 pub(super) fn read_text_string(cbor_value: &cbor::Value) -> Result<String, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => {
             Ok(text_string.to_string())
         }
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
+fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => Ok(text_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
@@ -677,6 +713,15 @@ pub(super) fn read_map(
     }
 }
 
+fn extract_map(
+    cbor_value: cbor::Value,
+) -> Result<BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::Map(map) => Ok(map),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
 pub(super) fn read_bool(cbor_value: &cbor::Value) -> Result<bool, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Simple(cbor::SimpleValue::FalseValue) => Ok(false),
@@ -685,9 +730,7 @@ pub(super) fn read_bool(cbor_value: &cbor::Value) -> Result<bool, Ctap2StatusCod
     }
 }
 
-pub(super) fn ok_or_missing(
-    value_option: Option<&cbor::Value>,
-) -> Result<&cbor::Value, Ctap2StatusCode> {
+pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
     value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
 }
 

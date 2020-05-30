@@ -60,6 +60,10 @@ OpenSKBoard = collections.namedtuple(
         "app_ldscript",
         # Flash address at which the app should be written
         "app_address",
+        # Flash address of the storage
+        "storage_address",
+        # Size of the storage
+        "storage_size",
         # Target name for flashing the board using pyOCD
         "pyocd_target",
         # The cfg file in OpenOCD board folder
@@ -89,6 +93,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -106,6 +112,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -123,6 +131,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -140,6 +150,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -493,6 +505,40 @@ class OpenSKInstaller:
       info(("A non-critical error occurred while erasing "
             "apps: {}".format(str(e))))
 
+  def clear_storage(self):
+    if self.args.programmer == "none":
+      return 0
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    storage = bytes([0xFF] * board_props.storage_size)
+    # Use tockloader if possible
+    if self.args.programmer in ("jlink", "openocd"):
+      info("Erasing the persistent storage")
+      tock = loader.TockLoader(self.tockloader_default_args)
+      tock.open()
+      try:
+        tock.flash_binary(storage, board_props.storage_address)
+      except TockLoaderException as e:
+        fatal("Couldn't erase the persistent storage: {}".format(str(e)))
+      return 0
+    # Create an intelhex file otherwise
+    info("Creating the persistent storage HEX file")
+    # pylint: disable=g-import-not-at-top,import-outside-toplevel
+    import intelhex
+    storage_hex = intelhex.IntelHex()
+    storage_hex.frombytes(storage, offset=board_props.storage_address)
+    os.makedirs("target", exist_ok=True)
+    storage_file = "target/{}_storage.hex".format(self.args.board)
+    storage_hex.tofile(storage_file, format="hex")
+    # Flash the intelhex file
+    info("Flashing the persistent storage HEX file")
+    if self.args.programmer == "pyocd":
+      self.checked_command([
+          "pyocd", "flash", "--target={}".format(board_props.pyocd_target),
+          "--format=hex", "--erase=auto", storage_file
+      ])
+      return 0
+    fatal("Programmer {} is not supported.".format(self.args.programmer))
+
   # pylint: disable=protected-access
   def verify_flashed_app(self, expected_app):
     if self.args.programmer not in ("jlink", "openocd"):
@@ -594,7 +640,8 @@ class OpenSKInstaller:
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
-    if not self.args.tockos and not self.args.application:
+    if not (self.args.tockos or self.args.application or
+            self.args.clear_storage):
       info("Nothing to do.")
       return 0
 
@@ -609,6 +656,10 @@ class OpenSKInstaller:
       info("No application selected.")
     else:
       self.build_example()
+
+    # Erase persistent storage
+    if self.args.clear_storage:
+      self.clear_storage()
 
     # Flashing
     board_props = SUPPORTED_BOARDS[self.args.board]
@@ -716,6 +767,14 @@ if __name__ == "__main__":
       dest="clear_apps",
       help=("When installing an application, previously installed "
             "applications won't be erased from the board."),
+  )
+  main_parser.add_argument(
+      "--clear-storage",
+      action="store_true",
+      default=False,
+      dest="clear_storage",
+      help=("Erases the persistent storage when installing an application. "
+            "All stored data will be permanently lost."),
   )
   main_parser.add_argument(
       "--programmer",

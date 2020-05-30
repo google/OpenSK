@@ -14,6 +14,7 @@
 
 use crate::crypto::rng256::Rng256;
 use crate::ctap::data_formats::PublicKeyCredentialSource;
+use crate::ctap::key_material;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::PIN_AUTH_LENGTH;
 use alloc::string::String;
@@ -56,9 +57,14 @@ const GLOBAL_SIGNATURE_COUNTER: usize = 1;
 const MASTER_KEYS: usize = 2;
 const PIN_HASH: usize = 3;
 const PIN_RETRIES: usize = 4;
-const NUM_TAGS: usize = 5;
+const ATTESTATION_PRIVATE_KEY: usize = 5;
+const ATTESTATION_CERTIFICATE: usize = 6;
+const AAGUID: usize = 7;
+const NUM_TAGS: usize = 8;
 
 const MAX_PIN_RETRIES: u8 = 6;
+const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
+const AAGUID_LENGTH: usize = 16;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
@@ -73,6 +79,9 @@ enum Key {
     MasterKeys,
     PinHash,
     PinRetries,
+    AttestationPrivateKey,
+    AttestationCertificate,
+    Aaguid,
 }
 
 pub struct MasterKeys<'a> {
@@ -124,6 +133,9 @@ impl StoreConfig for Config {
             MASTER_KEYS => add(Key::MasterKeys),
             PIN_HASH => add(Key::PinHash),
             PIN_RETRIES => add(Key::PinRetries),
+            ATTESTATION_PRIVATE_KEY => add(Key::AttestationPrivateKey),
+            ATTESTATION_CERTIFICATE => add(Key::AttestationCertificate),
+            AAGUID => add(Key::Aaguid),
             _ => debug_assert!(false),
         }
     }
@@ -207,6 +219,33 @@ impl PersistentStore {
                 .insert(StoreEntry {
                     tag: PIN_RETRIES,
                     data: &[MAX_PIN_RETRIES],
+                    sensitive: false,
+                })
+                .unwrap();
+        }
+        if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
+            self.store
+                .insert(StoreEntry {
+                    tag: ATTESTATION_PRIVATE_KEY,
+                    data: key_material::ATTESTATION_PRIVATE_KEY,
+                    sensitive: false,
+                })
+                .unwrap();
+        }
+        if self.store.find_one(&Key::AttestationCertificate).is_none() {
+            self.store
+                .insert(StoreEntry {
+                    tag: ATTESTATION_CERTIFICATE,
+                    data: key_material::ATTESTATION_CERTIFICATE,
+                    sensitive: false,
+                })
+                .unwrap();
+        }
+        if self.store.find_one(&Key::Aaguid).is_none() {
+            self.store
+                .insert(StoreEntry {
+                    tag: AAGUID,
+                    data: key_material::AAGUID,
                     sensitive: false,
                 })
                 .unwrap();
@@ -394,10 +433,44 @@ impl PersistentStore {
             .unwrap();
     }
 
+    pub fn attestation_private_key(
+        &self,
+    ) -> Result<&[u8; ATTESTATION_PRIVATE_KEY_LENGTH], Ctap2StatusCode> {
+        let (_, entry) = self
+            .store
+            .find_one(&Key::AttestationPrivateKey)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        let data = entry.data;
+        if data.len() != ATTESTATION_PRIVATE_KEY_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(array_ref!(data, 0, ATTESTATION_PRIVATE_KEY_LENGTH))
+    }
+
+    pub fn attestation_certificate(&self) -> Result<Vec<u8>, Ctap2StatusCode> {
+        let (_, entry) = self
+            .store
+            .find_one(&Key::AttestationCertificate)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        Ok(entry.data.to_vec())
+    }
+
+    pub fn aaguid(&self) -> Result<&[u8; AAGUID_LENGTH], Ctap2StatusCode> {
+        let (_, entry) = self
+            .store
+            .find_one(&Key::Aaguid)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        let data = entry.data;
+        if data.len() != AAGUID_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(array_ref!(data, 0, AAGUID_LENGTH))
+    }
+
     pub fn reset(&mut self, rng: &mut impl Rng256) {
         loop {
             let index = {
-                let mut iter = self.store.iter();
+                let mut iter = self.store.iter().filter(|(_, entry)| should_reset(entry));
                 match iter.next() {
                     None => break,
                     Some((index, _)) => index,
@@ -416,6 +489,13 @@ impl From<StoreError> for Ctap2StatusCode {
             StoreError::InvalidTag => unreachable!(),
             StoreError::InvalidPrecondition => unreachable!(),
         }
+    }
+}
+
+fn should_reset<'a>(entry: &StoreEntry<'a>) -> bool {
+    match entry.tag {
+        ATTESTATION_PRIVATE_KEY | ATTESTATION_CERTIFICATE | AAGUID => false,
+        _ => true,
     }
 }
 
@@ -695,5 +775,34 @@ mod test {
         // Resetting the pin retries resets the pin retries.
         persistent_store.reset_pin_retries();
         assert_eq!(persistent_store.pin_retries(), MAX_PIN_RETRIES);
+    }
+
+    #[test]
+    fn test_persistent_keys() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        // The persistent keys are initialized on a fresh store.
+        assert_eq!(
+            persistent_store.attestation_private_key().unwrap(),
+            key_material::ATTESTATION_PRIVATE_KEY
+        );
+        assert_eq!(
+            persistent_store.attestation_certificate().unwrap(),
+            key_material::ATTESTATION_CERTIFICATE
+        );
+        assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
+
+        // The persistent keys stay initialized and preserve their value after a reset.
+        persistent_store.reset(&mut rng);
+        assert_eq!(
+            persistent_store.attestation_private_key().unwrap(),
+            key_material::ATTESTATION_PRIVATE_KEY
+        );
+        assert_eq!(
+            persistent_store.attestation_certificate().unwrap(),
+            key_material::ATTESTATION_CERTIFICATE
+        );
+        assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
     }
 }

@@ -523,8 +523,8 @@ class OpenSKInstaller:
     if self.args.programmer == "pyocd":
       self.checked_command([
           "pyocd", "erase", "--target={}".format(board_props.pyocd_target),
-          "--sector={}+{}".format(board_props.storage_address,
-                                  board_props.storage_size)
+          "--sector", "{}+{}".format(board_props.storage_address,
+                                     board_props.storage_size)
       ])
       return 0
     fatal("Programmer {} is not supported.".format(self.args.programmer))

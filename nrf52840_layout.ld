@@ -3,8 +3,10 @@
  */
 
 MEMORY {
-  /* The application region is 64 bytes (0x40) */
-  FLASH (rx) : ORIGIN = 0x00040040, LENGTH = 0x000BFFC0
+  /* The application region is 64 bytes (0x40) and we reserve 0x40000 at the end
+   * of the flash for the persistent storage.
+   */
+  FLASH (rx) : ORIGIN = 0x00040040, LENGTH = 0x0007FFC0
   SRAM (rwx) : ORIGIN = 0x20020000, LENGTH = 128K
 }
 

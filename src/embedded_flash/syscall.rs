@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{Index, Storage, StorageError, StorageResult};
+use alloc::vec::Vec;
 use libtock::syscalls;
 
 const DRIVER_NUMBER: usize = 0x50003;
@@ -33,8 +34,23 @@ mod allow_nr {
     pub const WRITE_SLICE: usize = 0;
 }
 
-fn get_info(nr: usize) -> StorageResult<usize> {
-    let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, 0) };
+mod memop_nr {
+    pub const STORAGE_CNT: u32 = 12;
+    pub const STORAGE_PTR: u32 = 13;
+    pub const STORAGE_LEN: u32 = 14;
+}
+
+fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
+    let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg) };
+    if code < 0 {
+        Err(StorageError::KernelError { code })
+    } else {
+        Ok(code as usize)
+    }
+}
+
+fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
+    let code = unsafe { syscalls::memop(nr, arg) };
     if code < 0 {
         Err(StorageError::KernelError { code })
     } else {
@@ -45,70 +61,56 @@ fn get_info(nr: usize) -> StorageResult<usize> {
 pub struct SyscallStorage {
     word_size: usize,
     page_size: usize,
+    num_pages: usize,
     max_word_writes: usize,
     max_page_erases: usize,
-    storage: &'static mut [u8],
+    storage_locations: Vec<&'static [u8]>,
 }
 
 impl SyscallStorage {
     /// Provides access to the embedded flash if available.
     ///
-    /// # Safety
-    ///
-    /// The `storage` must be in a writeable flash region.
-    ///
     /// # Errors
     ///
     /// Returns `BadFlash` if any of the following conditions do not hold:
-    /// - The word size is not a power of two.
-    /// - The page size is not a power of two.
-    /// - The page size is not a multiple of the word size.
+    /// - The word size is a power of two.
+    /// - The page size is a power of two.
+    /// - The page size is a multiple of the word size.
+    /// - The storage is page-aligned.
     ///
-    /// Returns `NotAligned` if any of the following conditions do not hold:
-    /// - `storage` is page-aligned.
-    /// - `storage.len()` is a multiple of the page size.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # extern crate ctap2;
-    /// # use ctap2::embedded_flash::SyscallStorage;
-    /// # use ctap2::embedded_flash::StorageResult;
-    /// # const NUM_PAGES: usize = 1;
-    /// # const PAGE_SIZE: usize = 1;
-    /// #[link_section = ".app_state"]
-    /// static mut STORAGE: [u8; NUM_PAGES * PAGE_SIZE] = [0xff; NUM_PAGES * PAGE_SIZE];
-    /// # fn foo() -> StorageResult<SyscallStorage> {
-    /// // This is safe because this is the only use of `STORAGE` in the whole program and this is
-    /// // called only once.
-    /// unsafe { SyscallStorage::new(&mut STORAGE) }
-    /// # }
-    /// ```
-    pub unsafe fn new(storage: &'static mut [u8]) -> StorageResult<SyscallStorage> {
-        let word_size = get_info(command_nr::get_info_nr::WORD_SIZE)?;
-        let page_size = get_info(command_nr::get_info_nr::PAGE_SIZE)?;
-        let max_word_writes = get_info(command_nr::get_info_nr::MAX_WORD_WRITES)?;
-        let max_page_erases = get_info(command_nr::get_info_nr::MAX_PAGE_ERASES)?;
-        if !word_size.is_power_of_two() || !page_size.is_power_of_two() {
-            return Err(StorageError::BadFlash);
-        }
-        let syscall = SyscallStorage {
-            word_size,
-            page_size,
-            max_word_writes,
-            max_page_erases,
-            storage,
+    /// Returns `OutOfBounds` the number of pages does not fit in the storage.
+    pub fn new(mut num_pages: usize) -> StorageResult<SyscallStorage> {
+        let mut syscall = SyscallStorage {
+            word_size: get_info(command_nr::get_info_nr::WORD_SIZE, 0)?,
+            page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
+            num_pages,
+            max_word_writes: get_info(command_nr::get_info_nr::MAX_WORD_WRITES, 0)?,
+            max_page_erases: get_info(command_nr::get_info_nr::MAX_PAGE_ERASES, 0)?,
+            storage_locations: Vec::new(),
         };
-        if !syscall.is_word_aligned(page_size) {
+        if !syscall.word_size.is_power_of_two()
+            || !syscall.page_size.is_power_of_two()
+            || !syscall.is_word_aligned(syscall.page_size)
+        {
             return Err(StorageError::BadFlash);
         }
-        if syscall.is_page_aligned(syscall.storage.as_ptr() as usize)
-            && syscall.is_page_aligned(syscall.storage.len())
-        {
-            Ok(syscall)
-        } else {
-            Err(StorageError::NotAligned)
+        for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
+            let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
+            let max_storage_len = memop(memop_nr::STORAGE_LEN, i)?;
+            if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(max_storage_len) {
+                return Err(StorageError::BadFlash);
+            }
+            let storage_len = core::cmp::min(num_pages * syscall.page_size, max_storage_len);
+            num_pages -= storage_len / syscall.page_size;
+            syscall
+                .storage_locations
+                .push(unsafe { core::slice::from_raw_parts(storage_ptr as *mut u8, storage_len) });
         }
+        if num_pages > 0 {
+            // The storage locations don't have enough pages.
+            return Err(StorageError::OutOfBounds);
+        }
+        Ok(syscall)
     }
 
     fn is_word_aligned(&self, x: usize) -> bool {
@@ -130,7 +132,7 @@ impl Storage for SyscallStorage {
     }
 
     fn num_pages(&self) -> usize {
-        self.storage.len() / self.page_size
+        self.num_pages
     }
 
     fn max_word_writes(&self) -> usize {
@@ -142,14 +144,15 @@ impl Storage for SyscallStorage {
     }
 
     fn read_slice(&self, index: Index, length: usize) -> StorageResult<&[u8]> {
-        Ok(&self.storage[index.range(length, self)?])
+        let start = index.range(length, self)?.start;
+        find_slice(&self.storage_locations, start, length)
     }
 
     fn write_slice(&mut self, index: Index, value: &[u8]) -> StorageResult<()> {
         if !self.is_word_aligned(index.byte) || !self.is_word_aligned(value.len()) {
             return Err(StorageError::NotAligned);
         }
-        let range = index.range(value.len(), self)?;
+        let ptr = self.read_slice(index, value.len())?.as_ptr() as usize;
         let code = unsafe {
             syscalls::allow_ptr(
                 DRIVER_NUMBER,
@@ -163,14 +166,8 @@ impl Storage for SyscallStorage {
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
-        let code = unsafe {
-            syscalls::command(
-                DRIVER_NUMBER,
-                command_nr::WRITE_SLICE,
-                self.storage[range].as_ptr() as usize,
-                0,
-            )
-        };
+        let code =
+            unsafe { syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len()) };
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
@@ -178,18 +175,59 @@ impl Storage for SyscallStorage {
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
-        let range = Index { page, byte: 0 }.range(self.page_size(), self)?;
-        let code = unsafe {
-            syscalls::command(
-                DRIVER_NUMBER,
-                command_nr::ERASE_PAGE,
-                self.storage[range].as_ptr() as usize,
-                0,
-            )
-        };
+        let index = Index { page, byte: 0 };
+        let length = self.page_size();
+        let ptr = self.read_slice(index, length)?.as_ptr() as usize;
+        let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length) };
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
         Ok(())
+    }
+}
+
+fn find_slice<'a>(
+    slices: &'a [&'a [u8]],
+    mut start: usize,
+    length: usize,
+) -> StorageResult<&'a [u8]> {
+    for slice in slices {
+        if start >= slice.len() {
+            start -= slice.len();
+            continue;
+        }
+        if start + length > slice.len() {
+            break;
+        }
+        return Ok(&slice[start..][..length]);
+    }
+    Err(StorageError::OutOfBounds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_slice_ok() {
+        assert_eq!(
+            find_slice(&[&[1, 2, 3, 4]], 0, 4).ok(),
+            Some(&[1u8, 2, 3, 4] as &[u8])
+        );
+        assert_eq!(
+            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 1, 2).ok(),
+            Some(&[2u8, 3] as &[u8])
+        );
+        assert_eq!(
+            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 4, 2).ok(),
+            Some(&[5u8, 6] as &[u8])
+        );
+        assert_eq!(
+            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 4, 0).ok(),
+            Some(&[] as &[u8])
+        );
+        assert!(find_slice(&[], 0, 1).is_err());
+        assert!(find_slice(&[&[1, 2, 3, 4], &[5, 6]], 6, 0).is_err());
+        assert!(find_slice(&[&[1, 2, 3, 4], &[5, 6]], 3, 2).is_err());
     }
 }

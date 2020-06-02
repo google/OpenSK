@@ -225,32 +225,16 @@ impl PersistentStore {
         // The following 3 entries are meant to be written by vendor-specific commands.
         if USE_BATCH_ATTESTATION {
             if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
-                self.store
-                    .insert(StoreEntry {
-                        tag: ATTESTATION_PRIVATE_KEY,
-                        data: key_material::ATTESTATION_PRIVATE_KEY,
-                        sensitive: false,
-                    })
+                self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
                     .unwrap();
             }
             if self.store.find_one(&Key::AttestationCertificate).is_none() {
-                self.store
-                    .insert(StoreEntry {
-                        tag: ATTESTATION_CERTIFICATE,
-                        data: key_material::ATTESTATION_CERTIFICATE,
-                        sensitive: false,
-                    })
+                self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
                     .unwrap();
             }
         }
         if self.store.find_one(&Key::Aaguid).is_none() {
-            self.store
-                .insert(StoreEntry {
-                    tag: AAGUID,
-                    data: key_material::AAGUID,
-                    sensitive: false,
-                })
-                .unwrap();
+            self.set_aaguid(key_material::AAGUID).unwrap();
         }
     }
 
@@ -448,12 +432,44 @@ impl PersistentStore {
         Ok(Some(array_ref!(data, 0, ATTESTATION_PRIVATE_KEY_LENGTH)))
     }
 
+    pub fn set_attestation_private_key(
+        &mut self,
+        attestation_private_key: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH],
+    ) -> Result<(), Ctap2StatusCode> {
+        let entry = StoreEntry {
+            tag: ATTESTATION_PRIVATE_KEY,
+            data: attestation_private_key,
+            sensitive: false,
+        };
+        match self.store.find_one(&Key::AttestationPrivateKey) {
+            None => self.store.insert(entry)?,
+            Some((index, _)) => self.store.replace(index, entry)?,
+        }
+        Ok(())
+    }
+
     pub fn attestation_certificate(&self) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
         let data = match self.store.find_one(&Key::AttestationCertificate) {
             None => return Ok(None),
             Some((_, entry)) => entry.data,
         };
         Ok(Some(data.to_vec()))
+    }
+
+    pub fn set_attestation_certificate(
+        &mut self,
+        attestation_certificate: &[u8],
+    ) -> Result<(), Ctap2StatusCode> {
+        let entry = StoreEntry {
+            tag: ATTESTATION_CERTIFICATE,
+            data: attestation_certificate,
+            sensitive: false,
+        };
+        match self.store.find_one(&Key::AttestationCertificate) {
+            None => self.store.insert(entry)?,
+            Some((index, _)) => self.store.replace(index, entry)?,
+        }
+        Ok(())
     }
 
     pub fn aaguid(&self) -> Result<&[u8; AAGUID_LENGTH], Ctap2StatusCode> {
@@ -466,6 +482,19 @@ impl PersistentStore {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         Ok(array_ref!(data, 0, AAGUID_LENGTH))
+    }
+
+    pub fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> Result<(), Ctap2StatusCode> {
+        let entry = StoreEntry {
+            tag: AAGUID,
+            data: aaguid,
+            sensitive: false,
+        };
+        match self.store.find_one(&Key::Aaguid) {
+            None => self.store.insert(entry)?,
+            Some((index, _)) => self.store.replace(index, entry)?,
+        }
+        Ok(())
     }
 
     pub fn reset(&mut self, rng: &mut impl Rng256) {
@@ -783,25 +812,33 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // The persistent keys are initialized on a fresh store.
-        assert_eq!(
-            persistent_store.attestation_private_key().unwrap(),
-            key_material::ATTESTATION_PRIVATE_KEY
-        );
-        assert_eq!(
-            persistent_store.attestation_certificate().unwrap(),
-            key_material::ATTESTATION_CERTIFICATE
-        );
+        // Make sure the attestation are absent. There is no batch attestation in tests.
+        assert!(persistent_store
+            .attestation_private_key()
+            .unwrap()
+            .is_none());
+        assert!(persistent_store
+            .attestation_certificate()
+            .unwrap()
+            .is_none());
+
+        // Make sure the persistent keys are initialized.
+        persistent_store
+            .set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
+            .unwrap();
+        persistent_store
+            .set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
+            .unwrap();
         assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
         persistent_store.reset(&mut rng);
         assert_eq!(
-            persistent_store.attestation_private_key().unwrap(),
+            persistent_store.attestation_private_key().unwrap().unwrap(),
             key_material::ATTESTATION_PRIVATE_KEY
         );
         assert_eq!(
-            persistent_store.attestation_certificate().unwrap(),
+            persistent_store.attestation_certificate().unwrap().unwrap(),
             key_material::ATTESTATION_CERTIFICATE
         );
         assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);

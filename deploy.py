@@ -508,11 +508,11 @@ class OpenSKInstaller:
   def clear_storage(self):
     if self.args.programmer == "none":
       return 0
+    info("Erasing the persistent storage")
     board_props = SUPPORTED_BOARDS[self.args.board]
-    storage = bytes([0xFF] * board_props.storage_size)
     # Use tockloader if possible
     if self.args.programmer in ("jlink", "openocd"):
-      info("Erasing the persistent storage")
+      storage = bytes([0xFF] * board_props.storage_size)
       tock = loader.TockLoader(self.tockloader_default_args)
       tock.open()
       try:
@@ -520,21 +520,11 @@ class OpenSKInstaller:
       except TockLoaderException as e:
         fatal("Couldn't erase the persistent storage: {}".format(str(e)))
       return 0
-    # Create an intelhex file otherwise
-    info("Creating the persistent storage HEX file")
-    # pylint: disable=g-import-not-at-top,import-outside-toplevel
-    import intelhex
-    storage_hex = intelhex.IntelHex()
-    storage_hex.frombytes(storage, offset=board_props.storage_address)
-    os.makedirs("target", exist_ok=True)
-    storage_file = "target/{}_storage.hex".format(self.args.board)
-    storage_hex.tofile(storage_file, format="hex")
-    # Flash the intelhex file
-    info("Flashing the persistent storage HEX file")
     if self.args.programmer == "pyocd":
       self.checked_command([
-          "pyocd", "flash", "--target={}".format(board_props.pyocd_target),
-          "--format=hex", "--erase=auto", storage_file
+          "pyocd", "erase", "--target={}".format(board_props.pyocd_target),
+          "--sector {}+{}".format(board_props.storage_address,
+                                  board_props.storage_size)
       ])
       return 0
     fatal("Programmer {} is not supported.".format(self.args.programmer))

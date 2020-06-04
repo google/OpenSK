@@ -60,6 +60,10 @@ OpenSKBoard = collections.namedtuple(
         "app_ldscript",
         # Flash address at which the app should be written
         "app_address",
+        # Flash address of the storage
+        "storage_address",
+        # Size of the storage
+        "storage_size",
         # Target name for flashing the board using pyOCD
         "pyocd_target",
         # The cfg file in OpenOCD board folder
@@ -89,6 +93,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -106,6 +112,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -123,6 +131,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -140,6 +150,8 @@ SUPPORTED_BOARDS = {
             padding_address=0x30000,
             app_ldscript="nrf52840_layout.ld",
             app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
             pyocd_target="nrf52840",
             openocd_board="nordic_nrf52840_dongle.cfg",
             openocd_options=[],
@@ -392,19 +404,18 @@ class OpenSKInstaller:
     assert self.args.application
     info("Generating Tock TAB file for application/example {}".format(
         self.args.application))
-    package_parameter = "-n"
     elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
-        " ", maxsplit=1)[1]
-    # Starting from v0.5.0-dev the parameter changed.
-    # Current pyblished crate is 0.4.0 but we don't want developers
-    # running the HEAD from github to be stuck
-    if "0.5.0-dev" in elf2tab_ver:
-      package_parameter = "--package-name"
+        "\n", maxsplit=1)[0]
+    if elf2tab_ver != "elf2tab 0.5.0":
+      error(
+          ("Detected unsupported elf2tab version {!a}. The following "
+           "commands may fail. Please use 0.5.0 instead.").format(elf2tab_ver))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
     elf2tab_args = [
-        "elf2tab", package_parameter, self.args.application, "-o", tab_filename
+        "elf2tab", "--deterministic", "--package-name", self.args.application,
+        "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
@@ -493,6 +504,30 @@ class OpenSKInstaller:
       # Erasing apps is not critical
       info(("A non-critical error occurred while erasing "
             "apps: {}".format(str(e))))
+
+  def clear_storage(self):
+    if self.args.programmer == "none":
+      return 0
+    info("Erasing the persistent storage")
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    # Use tockloader if possible
+    if self.args.programmer in ("jlink", "openocd"):
+      storage = bytes([0xFF] * board_props.storage_size)
+      tock = loader.TockLoader(self.tockloader_default_args)
+      tock.open()
+      try:
+        tock.flash_binary(storage, board_props.storage_address)
+      except TockLoaderException as e:
+        fatal("Couldn't erase the persistent storage: {}".format(str(e)))
+      return 0
+    if self.args.programmer == "pyocd":
+      self.checked_command([
+          "pyocd", "erase", "--target={}".format(board_props.pyocd_target),
+          "--sector", "{}+{}".format(board_props.storage_address,
+                                     board_props.storage_size)
+      ])
+      return 0
+    fatal("Programmer {} is not supported.".format(self.args.programmer))
 
   # pylint: disable=protected-access
   def verify_flashed_app(self, expected_app):
@@ -595,7 +630,8 @@ class OpenSKInstaller:
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
-    if not self.args.tockos and not self.args.application:
+    if not (self.args.tockos or self.args.application or
+            self.args.clear_storage):
       info("Nothing to do.")
       return 0
 
@@ -610,6 +646,10 @@ class OpenSKInstaller:
       info("No application selected.")
     else:
       self.build_example()
+
+    # Erase persistent storage
+    if self.args.clear_storage:
+      self.clear_storage()
 
     # Flashing
     board_props = SUPPORTED_BOARDS[self.args.board]
@@ -717,6 +757,14 @@ if __name__ == "__main__":
       dest="clear_apps",
       help=("When installing an application, previously installed "
             "applications won't be erased from the board."),
+  )
+  main_parser.add_argument(
+      "--clear-storage",
+      action="store_true",
+      default=False,
+      dest="clear_storage",
+      help=("Erases the persistent storage when installing an application. "
+            "All stored data will be permanently lost."),
   )
   main_parser.add_argument(
       "--programmer",

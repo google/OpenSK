@@ -71,18 +71,6 @@ SECTIONS {
         . = ALIGN(32);
     } > FLASH =0xFF
 
-    /* App state section. Used for persistent app data.
-     * We put this first because this is what libtock-c does. They provide the
-     * following explanation: if the app code changes but the persistent data
-     * doesn't, the app_state can be preserved.
-     */
-    .wfr.app_state :
-    {
-        . = ALIGN(4K);
-        KEEP (*(.app_state))
-        . = ALIGN(4K);
-    } > FLASH =0xFFFFFFFF
-
     /* Text section, Code! */
     .text :
     {

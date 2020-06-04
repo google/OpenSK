@@ -448,6 +448,19 @@ pub enum CredentialProtectionPolicy {
     UserVerificationRequired = 0x03,
 }
 
+impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match extract_integer(cbor_value)? {
+            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
+            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+        }
+    }
+}
+
 impl TryFrom<&cbor::Value> for CredentialProtectionPolicy {
     type Error = Ctap2StatusCode;
 
@@ -512,8 +525,8 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             RpId => Some(credential.rp_id),
             UserHandle => Some(credential.user_handle),
             OtherUi => credential.other_ui,
-            CredRandom => credential.cred_random
-            CredProtectPolicy => credential.cred_protect_policy.map(|p| p as i64)
+            CredRandom => credential.cred_random,
+            CredProtectPolicy => credential.cred_protect_policy.map(|p| p as i64),
         }
     }
 }
@@ -709,6 +722,20 @@ pub(super) fn read_integer(cbor_value: &cbor::Value) -> Result<i64, Ctap2StatusC
             }
         }
         cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(*signed),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
+fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => {
+            if unsigned <= core::i64::MAX as u64 {
+                Ok(unsigned as i64)
+            } else {
+                Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+            }
+        }
+        cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(signed),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }

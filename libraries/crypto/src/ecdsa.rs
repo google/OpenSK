@@ -22,6 +22,8 @@ use super::{Hash256, HashBlockSize64Bytes};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
+pub use super::ec::int256::NBYTES;
+
 #[derive(Clone, PartialEq)]
 #[cfg_attr(feature = "derive_debug", derive(Debug))]
 pub struct SecKey {
@@ -140,7 +142,7 @@ impl SecKey {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8; 32]) -> Option<SecKey> {
+    pub fn from_bytes(bytes: &[u8; NBYTES]) -> Option<SecKey> {
         let k = NonZeroExponentP256::from_int_checked(Int256::from_bin(bytes));
         // The branching here is fine because all this reveals is whether the key was invalid.
         if bool::from(k.is_none()) {
@@ -150,7 +152,7 @@ impl SecKey {
         Some(SecKey { k })
     }
 
-    pub fn to_bytes(&self, bytes: &mut [u8; 32]) {
+    pub fn to_bytes(&self, bytes: &mut [u8; NBYTES]) {
         self.k.to_int().to_bin(bytes);
     }
 }

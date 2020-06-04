@@ -62,7 +62,7 @@ const AAGUID: usize = 7;
 const NUM_TAGS: usize = 8;
 
 const MAX_PIN_RETRIES: u8 = 6;
-const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
+const ATTESTATION_PRIVATE_KEY_LENGTH: usize = crypto::ecdsa::NBYTES;
 const AAGUID_LENGTH: usize = 16;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]

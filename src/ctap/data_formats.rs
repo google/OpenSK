@@ -155,13 +155,13 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
     fn from(cred_param: PublicKeyCredentialParameter) -> Self {
         cbor_map_options! {
             "type" => cred_param.cred_type,
-            "alg" => cred_param.alg as i64,
+            "alg" => cred_param.alg,
         }
     }
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -197,7 +197,7 @@ impl TryFrom<&cbor::Value> for AuthenticatorTransport {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
     pub key_id: Vec<u8>,
@@ -291,6 +291,14 @@ impl Extensions {
         self.0
             .get("hmac-secret")
             .map(GetAssertionHmacSecretInput::try_from)
+    }
+
+    pub fn make_credential_cred_protect_policy(
+        &self,
+    ) -> Option<Result<CredentialProtectionPolicy, Ctap2StatusCode>> {
+        self.0
+            .get("credProtect")
+            .map(CredentialProtectionPolicy::try_from)
     }
 }
 
@@ -421,6 +429,12 @@ pub enum SignatureAlgorithm {
     Unknown = 0,
 }
 
+impl From<SignatureAlgorithm> for cbor::Value {
+    fn from(alg: SignatureAlgorithm) -> Self {
+        (alg as i64).into()
+    }
+}
+
 impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     type Error = Ctap2StatusCode;
 
@@ -428,6 +442,46 @@ impl TryFrom<&cbor::Value> for SignatureAlgorithm {
         match read_integer(cbor_value)? {
             ecdsa::PubKey::ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
             _ => Ok(SignatureAlgorithm::Unknown),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub enum CredentialProtectionPolicy {
+    UserVerificationOptional = 0x01,
+    UserVerificationOptionalWithCredentialIdList = 0x02,
+    UserVerificationRequired = 0x03,
+}
+
+impl From<CredentialProtectionPolicy> for cbor::Value {
+    fn from(policy: CredentialProtectionPolicy) -> Self {
+        (policy as i64).into()
+    }
+}
+
+impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match extract_integer(cbor_value)? {
+            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
+            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+        }
+    }
+}
+
+impl TryFrom<&cbor::Value> for CredentialProtectionPolicy {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match read_integer(cbor_value)? {
+            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
+            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
     }
 }
@@ -448,6 +502,7 @@ pub struct PublicKeyCredentialSource {
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub other_ui: Option<String>,
     pub cred_random: Option<Vec<u8>>,
+    pub cred_protect_policy: Option<CredentialProtectionPolicy>,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
@@ -459,6 +514,7 @@ enum PublicKeyCredentialSourceField {
     UserHandle = 3,
     OtherUi = 4,
     CredRandom = 5,
+    CredProtectPolicy = 6,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags: none.
@@ -481,7 +537,8 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             RpId => Some(credential.rp_id),
             UserHandle => Some(credential.user_handle),
             OtherUi => credential.other_ui,
-            CredRandom => credential.cred_random
+            CredRandom => credential.cred_random,
+            CredProtectPolicy => credential.cred_protect_policy,
         }
     }
 }
@@ -509,6 +566,10 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             .remove(&CredRandom.into())
             .map(extract_byte_string)
             .transpose()?;
+        let cred_protect_policy = map
+            .remove(&CredProtectPolicy.into())
+            .map(CredentialProtectionPolicy::try_from)
+            .transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
         // serialization at a given version of OpenSK. This is not a problem because:
@@ -527,7 +588,17 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             user_handle,
             other_ui,
             cred_random,
+            cred_protect_policy,
         })
+    }
+}
+
+impl PublicKeyCredentialSource {
+    // Relying parties do not need to provide the credential ID in an allow_list if true.
+    pub fn is_discoverable(&self) -> bool {
+        self.cred_protect_policy.is_none()
+            || self.cred_protect_policy
+                == Some(CredentialProtectionPolicy::UserVerificationOptional)
     }
 }
 
@@ -663,6 +734,20 @@ pub(super) fn read_integer(cbor_value: &cbor::Value) -> Result<i64, Ctap2StatusC
             }
         }
         cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(*signed),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
+    }
+}
+
+fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
+    match cbor_value {
+        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => {
+            if unsigned <= core::i64::MAX as u64 {
+                Ok(unsigned as i64)
+            } else {
+                Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+            }
+        }
+        cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(signed),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
@@ -1064,13 +1149,44 @@ mod test {
         let signature_algorithm = SignatureAlgorithm::try_from(&cbor_signature_algorithm);
         let expected_signature_algorithm = SignatureAlgorithm::ES256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
-        let created_cbor: cbor::Value = cbor_int!(signature_algorithm.unwrap() as i64);
+        let created_cbor = cbor::Value::from(signature_algorithm.unwrap());
         assert_eq!(created_cbor, cbor_signature_algorithm);
 
         let cbor_unknown_algorithm = cbor_int!(-1);
         let unknown_algorithm = SignatureAlgorithm::try_from(&cbor_unknown_algorithm);
         let expected_unknown_algorithm = SignatureAlgorithm::Unknown;
         assert_eq!(unknown_algorithm, Ok(expected_unknown_algorithm));
+    }
+
+    #[test]
+    fn test_cred_protection_policy_order() {
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptional
+                < CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
+        );
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptional
+                < CredentialProtectionPolicy::UserVerificationRequired
+        );
+        assert!(
+            CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
+                < CredentialProtectionPolicy::UserVerificationRequired
+        );
+    }
+
+    #[test]
+    fn test_from_into_cred_protection_policy() {
+        let cbor_policy = cbor::Value::from(CredentialProtectionPolicy::UserVerificationOptional);
+        let policy = CredentialProtectionPolicy::try_from(&cbor_policy);
+        let expected_policy = CredentialProtectionPolicy::UserVerificationOptional;
+        assert_eq!(policy, Ok(expected_policy));
+        let created_cbor = cbor::Value::from(policy.unwrap());
+        assert_eq!(created_cbor, cbor_policy);
+
+        let cbor_policy_error = cbor_int!(-1);
+        let policy_error = CredentialProtectionPolicy::try_from(&cbor_policy_error);
+        let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
+        assert_eq!(policy_error, expected_error);
     }
 
     #[test]
@@ -1184,6 +1300,18 @@ mod test {
     }
 
     #[test]
+    fn test_cred_protect_extension() {
+        let cbor_extensions = cbor_map! {
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+        };
+        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
+        assert_eq!(
+            extensions.make_credential_cred_protect_policy(),
+            Some(Ok(CredentialProtectionPolicy::UserVerificationRequired))
+        );
+    }
+
+    #[test]
     fn test_from_make_credential_options() {
         let cbor_make_options = cbor_map! {
             "rk" => true,
@@ -1261,6 +1389,7 @@ mod test {
             user_handle: b"foo".to_vec(),
             other_ui: None,
             cred_random: None,
+            cred_protect_policy: None,
         };
 
         assert_eq!(
@@ -1280,6 +1409,16 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             cred_random: Some(vec![0x00; 32]),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             ..credential
         };
 

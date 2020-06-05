@@ -99,6 +99,10 @@ a few things you can personalize:
 4.  Depending on your available flash storage, choose an appropriate maximum
     number of supported residential keys and number of pages in
     `ctap/storage.rs`.
+5.  Change the default level for the credProtect extension in `ctap/mod.rs`.
+    When changing the default, resident credentials become undiscoverable without
+    user verification. This helps privacy, but can make usage less comfortable
+    for credentials that need less protection.
 
 ### 3D printed enclosure
 

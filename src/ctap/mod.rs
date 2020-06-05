@@ -522,7 +522,7 @@ where
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_random,
-                cred_protect_policy: cred_protect_policy.clone(),
+                cred_protect_policy,
             };
             self.persistent_store.store_credential(credential_source)?;
             random_id
@@ -547,7 +547,7 @@ where
             let hmac_secret_output = if use_hmac_extension { Some(true) } else { None };
             let extensions = cbor_map_options! {
                 "hmac-secret" => hmac_secret_output,
-                "credProtect" => cred_protect_policy.map(|policy| policy as i64),
+                "credProtect" => cred_protect_policy,
             };
             if !cbor::write(extensions, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
@@ -1220,7 +1220,7 @@ mod test {
         policy: CredentialProtectionPolicy,
     ) -> AuthenticatorMakeCredentialParameters {
         let mut extension_map = BTreeMap::new();
-        extension_map.insert("credProtect".to_string(), cbor_int!(policy as i64));
+        extension_map.insert("credProtect".to_string(), cbor::Value::from(policy));
         let extensions = Some(Extensions::new(extension_map));
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;

@@ -155,7 +155,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
     fn from(cred_param: PublicKeyCredentialParameter) -> Self {
         cbor_map_options! {
             "type" => cred_param.cred_type,
-            "alg" => cred_param.alg as i64,
+            "alg" => cred_param.alg,
         }
     }
 }
@@ -429,6 +429,12 @@ pub enum SignatureAlgorithm {
     Unknown = 0,
 }
 
+impl From<SignatureAlgorithm> for cbor::Value {
+    fn from(alg: SignatureAlgorithm) -> Self {
+        (alg as i64).into()
+    }
+}
+
 impl TryFrom<&cbor::Value> for SignatureAlgorithm {
     type Error = Ctap2StatusCode;
 
@@ -446,6 +452,12 @@ pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,
     UserVerificationOptionalWithCredentialIdList = 0x02,
     UserVerificationRequired = 0x03,
+}
+
+impl From<CredentialProtectionPolicy> for cbor::Value {
+    fn from(policy: CredentialProtectionPolicy) -> Self {
+        (policy as i64).into()
+    }
 }
 
 impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
@@ -526,7 +538,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             UserHandle => Some(credential.user_handle),
             OtherUi => credential.other_ui,
             CredRandom => credential.cred_random,
-            CredProtectPolicy => credential.cred_protect_policy.map(|p| p as i64),
+            CredProtectPolicy => credential.cred_protect_policy,
         }
     }
 }
@@ -1137,7 +1149,7 @@ mod test {
         let signature_algorithm = SignatureAlgorithm::try_from(&cbor_signature_algorithm);
         let expected_signature_algorithm = SignatureAlgorithm::ES256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
-        let created_cbor: cbor::Value = cbor_int!(signature_algorithm.unwrap() as i64);
+        let created_cbor = cbor::Value::from(signature_algorithm.unwrap());
         assert_eq!(created_cbor, cbor_signature_algorithm);
 
         let cbor_unknown_algorithm = cbor_int!(-1);
@@ -1164,11 +1176,11 @@ mod test {
 
     #[test]
     fn test_from_into_cred_protection_policy() {
-        let cbor_policy = cbor_int!(CredentialProtectionPolicy::UserVerificationOptional as i64);
+        let cbor_policy = cbor::Value::from(CredentialProtectionPolicy::UserVerificationOptional);
         let policy = CredentialProtectionPolicy::try_from(&cbor_policy);
         let expected_policy = CredentialProtectionPolicy::UserVerificationOptional;
         assert_eq!(policy, Ok(expected_policy));
-        let created_cbor: cbor::Value = cbor_int!(policy.unwrap() as i64);
+        let created_cbor = cbor::Value::from(policy.unwrap());
         assert_eq!(created_cbor, cbor_policy);
 
         let cbor_policy_error = cbor_int!(-1);
@@ -1290,7 +1302,7 @@ mod test {
     #[test]
     fn test_cred_protect_extension() {
         let cbor_extensions = cbor_map! {
-            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired as i64,
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
         };
         let extensions = Extensions::try_from(&cbor_extensions).unwrap();
         assert_eq!(

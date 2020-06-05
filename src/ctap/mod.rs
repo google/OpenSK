@@ -435,6 +435,7 @@ where
         }
 
         let (use_hmac_extension, cred_protect_policy) = if let Some(extensions) = extensions {
+            let has_hmac_secret = extensions.has_make_credential_hmac_secret()?;
             let mut cred_protect = extensions
                 .make_credential_cred_protect_policy()
                 .transpose()?;
@@ -444,7 +445,7 @@ where
             {
                 cred_protect = DEFAULT_CRED_PROTECT;
             }
-            (extensions.has_make_credential_hmac_secret()?, cred_protect)
+            (has_hmac_secret, cred_protect)
         } else {
             (false, None)
         };

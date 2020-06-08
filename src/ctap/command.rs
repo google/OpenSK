@@ -14,9 +14,9 @@
 
 use super::data_formats::{
     extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
-    ok_or_missing, ClientPinSubCommand, CoseKey, Extensions, GetAssertionOptions,
-    MakeCredentialOptions, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
-    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+    ok_or_missing, ClientPinSubCommand, CoseKey, GetAssertionExtensions, GetAssertionOptions,
+    MakeCredentialExtensions, MakeCredentialOptions, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameter, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
 };
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
@@ -113,7 +113,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub user: PublicKeyCredentialUserEntity,
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameter>,
     pub exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<Extensions>,
+    pub extensions: Option<MakeCredentialExtensions>,
     // Even though options are optional, we can use the default if not present.
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
@@ -159,7 +159,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 
         let extensions = param_map
             .remove(&cbor_unsigned!(6))
-            .map(Extensions::try_from)
+            .map(MakeCredentialExtensions::try_from)
             .transpose()?;
 
         let options = match param_map.remove(&cbor_unsigned!(7)) {
@@ -199,7 +199,7 @@ pub struct AuthenticatorGetAssertionParameters {
     pub rp_id: String,
     pub client_data_hash: Vec<u8>,
     pub allow_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<Extensions>,
+    pub extensions: Option<GetAssertionExtensions>,
     // Even though options are optional, we can use the default if not present.
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
@@ -233,7 +233,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
 
         let extensions = param_map
             .remove(&cbor_unsigned!(4))
-            .map(Extensions::try_from)
+            .map(GetAssertionExtensions::try_from)
             .transpose()?;
 
         let options = match param_map.remove(&cbor_unsigned!(5)) {

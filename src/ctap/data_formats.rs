@@ -14,7 +14,7 @@
 
 use super::status_code::Ctap2StatusCode;
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
@@ -243,66 +243,51 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub struct Extensions(BTreeMap<String, cbor::Value>);
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+pub struct MakeCredentialExtensions {
+    pub hmac_secret: bool,
+    pub cred_protect: Option<CredentialProtectionPolicy>,
+}
 
-impl TryFrom<cbor::Value> for Extensions {
+impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut extensions = BTreeMap::new();
-        for (extension_key, extension_value) in extract_map(cbor_value)? {
-            if let cbor::KeyType::TextString(extension_key_string) = extension_key {
-                extensions.insert(extension_key_string.to_string(), extension_value.clone());
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
-            }
-        }
-        Ok(Extensions(extensions))
-    }
-}
-
-impl From<Extensions> for cbor::Value {
-    fn from(extensions: Extensions) -> Self {
-        cbor_map_btree!(extensions
-            .0
-            .into_iter()
-            .map(|(key, value)| (cbor_text!(key), value))
-            .collect())
-    }
-}
-
-impl Extensions {
-    #[cfg(test)]
-    pub fn new(extension_map: BTreeMap<String, cbor::Value>) -> Self {
-        Extensions(extension_map)
-    }
-
-    pub fn has_make_credential_hmac_secret(&self) -> Result<bool, Ctap2StatusCode> {
-        self.0
-            .get("hmac-secret")
-            .map(|b| extract_bool(b.clone()))
-            .unwrap_or(Ok(false))
-    }
-
-    pub fn get_assertion_hmac_secret(
-        mut self,
-    ) -> Option<Result<GetAssertionHmacSecretInput, Ctap2StatusCode>> {
-        self.0
-            .remove("hmac-secret")
-            .map(GetAssertionHmacSecretInput::try_from)
-    }
-
-    pub fn make_credential_cred_protect_policy(
-        mut self,
-    ) -> Option<Result<CredentialProtectionPolicy, Ctap2StatusCode>> {
-        self.0
-            .remove("credProtect")
+        let mut extensions_map = extract_map(cbor_value)?;
+        let hmac_secret = extensions_map
+            .remove(&cbor_text!("hmac-secret"))
+            .map(extract_bool)
+            .unwrap_or(Ok(false))?;
+        let cred_protect = extensions_map
+            .remove(&cbor_text!("credProtect"))
             .map(CredentialProtectionPolicy::try_from)
+            .transpose()?;
+        Ok(Self {
+            hmac_secret,
+            cred_protect,
+        })
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+pub struct GetAssertionExtensions {
+    pub hmac_secret: Option<GetAssertionHmacSecretInput>,
+}
+
+impl TryFrom<cbor::Value> for GetAssertionExtensions {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut extensions_map = extract_map(cbor_value)?;
+        let hmac_secret = extensions_map
+            .remove(&cbor_text!("hmac-secret"))
+            .map(GetAssertionHmacSecretInput::try_from)
+            .transpose()?;
+        Ok(Self { hmac_secret })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -318,29 +303,10 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
         let salt_enc = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(2)))?)?;
         let salt_auth = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(3)))?)?;
         Ok(Self {
-            key_agreement: CoseKey(cose_key.clone()),
+            key_agreement: CoseKey(cose_key),
             salt_enc,
             salt_auth,
         })
-    }
-}
-
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub struct GetAssertionHmacSecretOutput(Vec<u8>);
-
-impl From<GetAssertionHmacSecretOutput> for cbor::Value {
-    fn from(message: GetAssertionHmacSecretOutput) -> cbor::Value {
-        cbor_bytes!(message.0)
-    }
-}
-
-impl TryFrom<cbor::Value> for GetAssertionHmacSecretOutput {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        Ok(GetAssertionHmacSecretOutput(extract_byte_string(
-            cbor_value,
-        )?))
     }
 }
 
@@ -594,7 +560,7 @@ impl PublicKeyCredentialSource {
 // TODO(kaczmarczyck) we could decide to split this data type up
 // It depends on the algorithm though, I think.
 // So before creating a mess, this is my workaround.
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
 
 // This is the algorithm specifier that is supposed to be used in a COSE key
@@ -1191,44 +1157,21 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_extensions() {
-        let cbor_extensions = cbor_map! {
-            "the_answer" => 42,
-        };
-        let extensions = Extensions::try_from(cbor_extensions.clone());
-        let mut expected_extensions = Extensions(BTreeMap::new());
-        expected_extensions
-            .0
-            .insert("the_answer".to_string(), cbor_int!(42));
-        assert_eq!(extensions, Ok(expected_extensions));
-        let created_cbor: cbor::Value = extensions.unwrap().into();
-        assert_eq!(created_cbor, cbor_extensions);
-    }
-
-    #[test]
-    fn test_from_into_get_assertion_hmac_secret_output() {
-        let cbor_output: cbor::Value = cbor_bytes![vec![0xC0; 32]];
-        let output = GetAssertionHmacSecretOutput::try_from(cbor_output.clone());
-        let expected_output = GetAssertionHmacSecretOutput(vec![0xC0; 32]);
-        assert_eq!(output, Ok(expected_output));
-        let created_cbor: cbor::Value = output.unwrap().into();
-        assert_eq!(created_cbor, cbor_output);
-    }
-
-    #[test]
-    fn test_hmac_secret_extension() {
+    fn test_from_make_credential_extensions() {
         let cbor_extensions = cbor_map! {
             "hmac-secret" => true,
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
         };
-        let extensions = Extensions::try_from(cbor_extensions).unwrap();
-        assert!(extensions.has_make_credential_hmac_secret().unwrap());
-
-        let cbor_extensions = cbor_map! {
-            "hmac-secret" => false,
+        let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
+        let expected_extensions = MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
         };
-        let extensions = Extensions::try_from(cbor_extensions).unwrap();
-        assert!(!extensions.has_make_credential_hmac_secret().unwrap());
+        assert_eq!(extensions, Ok(expected_extensions));
+    }
 
+    #[test]
+    fn test_from_get_assertion_extensions() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
@@ -1240,26 +1183,16 @@ mod test {
                 3 => vec![0x03; 32],
             },
         };
-        let extensions = Extensions::try_from(cbor_extensions).unwrap();
-        let get_assertion_input = extensions.get_assertion_hmac_secret();
+        let extensions = GetAssertionExtensions::try_from(cbor_extensions);
         let expected_input = GetAssertionHmacSecretInput {
             key_agreement: cose_key,
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 32],
         };
-        assert_eq!(get_assertion_input, Some(Ok(expected_input)));
-    }
-
-    #[test]
-    fn test_cred_protect_extension() {
-        let cbor_extensions = cbor_map! {
-            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+        let expected_extensions = GetAssertionExtensions {
+            hmac_secret: Some(expected_input),
         };
-        let extensions = Extensions::try_from(cbor_extensions).unwrap();
-        assert_eq!(
-            extensions.make_credential_cred_protect_policy(),
-            Some(Ok(CredentialProtectionPolicy::UserVerificationRequired))
-        );
+        assert_eq!(extensions, Ok(expected_extensions));
     }
 
     #[test]

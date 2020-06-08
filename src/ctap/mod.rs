@@ -435,17 +435,14 @@ where
         }
 
         let (use_hmac_extension, cred_protect_policy) = if let Some(extensions) = extensions {
-            let has_hmac_secret = extensions.has_make_credential_hmac_secret()?;
-            let mut cred_protect = extensions
-                .make_credential_cred_protect_policy()
-                .transpose()?;
+            let mut cred_protect = extensions.cred_protect;
             if cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
                 < DEFAULT_CRED_PROTECT
                     .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             {
                 cred_protect = DEFAULT_CRED_PROTECT;
             }
-            (has_hmac_secret, cred_protect)
+            (extensions.hmac_secret, cred_protect)
         } else {
             (false, None)
         };
@@ -546,11 +543,11 @@ where
         auth_data.extend(cose_key);
         if has_extension_output {
             let hmac_secret_output = if use_hmac_extension { Some(true) } else { None };
-            let extensions = cbor_map_options! {
+            let extensions_output = cbor_map_options! {
                 "hmac-secret" => hmac_secret_output,
                 "credProtect" => cred_protect_policy,
             };
-            if !cbor::write(extensions, &mut auth_data) {
+            if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
             }
         }
@@ -640,11 +637,8 @@ where
             }
         }
 
-        let get_assertion_hmac_secret_input = match extensions {
-            Some(extensions) => extensions.get_assertion_hmac_secret().transpose()?,
-            None => None,
-        };
-        if get_assertion_hmac_secret_input.is_some() && !options.up {
+        let hmac_secret_input = extensions.map(|e| e.hmac_secret).flatten();
+        if hmac_secret_input.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
         }
@@ -674,7 +668,7 @@ where
         if options.up {
             flags |= UP_FLAG;
         }
-        if get_assertion_hmac_secret_input.is_some() {
+        if hmac_secret_input.is_some() {
             flags |= ED_FLAG;
         }
 
@@ -721,12 +715,12 @@ where
 
         let mut auth_data = self.generate_auth_data(&rp_id_hash, flags);
         // Process extensions.
-        if let Some(get_assertion_hmac_secret_input) = get_assertion_hmac_secret_input {
+        if let Some(hmac_secret_input) = hmac_secret_input {
             let GetAssertionHmacSecretInput {
                 key_agreement,
                 salt_enc,
                 salt_auth,
-            } = get_assertion_hmac_secret_input;
+            } = hmac_secret_input;
             let pk: crypto::ecdh::PubKey = CoseKey::try_into(key_agreement)?;
             let shared_secret = self.key_agreement_key.exchange_x_sha256(&pk);
             // HMAC-secret does the same 16 byte truncated check.
@@ -741,10 +735,10 @@ where
                 None => return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION),
             };
 
-            let extensions = cbor_map! {
+            let extensions_output = cbor_map! {
                 "hmac-secret" => encrypted_output,
             };
-            if !cbor::write(extensions, &mut auth_data) {
+            if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
             }
         }
@@ -1119,8 +1113,8 @@ where
 #[cfg(test)]
 mod test {
     use super::data_formats::{
-        Extensions, GetAssertionOptions, MakeCredentialOptions, PublicKeyCredentialRpEntity,
-        PublicKeyCredentialUserEntity,
+        GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions,
+        MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
     use super::*;
     use crypto::rng256::ThreadRng256;
@@ -1220,9 +1214,10 @@ mod test {
     fn create_make_credential_parameters_with_cred_protect_policy(
         policy: CredentialProtectionPolicy,
     ) -> AuthenticatorMakeCredentialParameters {
-        let mut extension_map = BTreeMap::new();
-        extension_map.insert("credProtect".to_string(), cbor::Value::from(policy));
-        let extensions = Some(Extensions::new(extension_map));
+        let extensions = Some(MakeCredentialExtensions {
+            hmac_secret: false,
+            cred_protect: Some(policy),
+        });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         make_credential_params
@@ -1409,9 +1404,10 @@ mod test {
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
 
-        let mut extension_map = BTreeMap::new();
-        extension_map.insert("hmac-secret".to_string(), cbor_bool!(true));
-        let extensions = Some(Extensions::new(extension_map));
+        let extensions = Some(MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: None,
+        });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
@@ -1521,9 +1517,10 @@ mod test {
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
 
-        let mut extension_map = BTreeMap::new();
-        extension_map.insert("hmac-secret".to_string(), cbor_bool!(true));
-        let make_extensions = Some(Extensions::new(extension_map));
+        let make_extensions = Some(MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: None,
+        });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = make_extensions;
         assert!(ctap_state
@@ -1531,15 +1528,15 @@ mod test {
             .is_ok());
 
         let pk = sk.genpk();
-        let hmac_secret_parameters = cbor_map! {
-            1 => cbor::Value::Map(CoseKey::from(pk).0),
-            2 => vec![0; 32],
-            3 => vec![0; 16],
+        let hmac_secret_input = GetAssertionHmacSecretInput {
+            key_agreement: CoseKey::from(pk),
+            salt_enc: vec![0x02; 32],
+            salt_auth: vec![0x03; 32],
         };
-        let mut extension_map = BTreeMap::new();
-        extension_map.insert("hmac-secret".to_string(), hmac_secret_parameters);
+        let get_extensions = Some(GetAssertionExtensions {
+            hmac_secret: Some(hmac_secret_input),
+        });
 
-        let get_extensions = Some(Extensions::new(extension_map));
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
             client_data_hash: vec![0xCD],

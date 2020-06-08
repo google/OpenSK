@@ -1531,7 +1531,7 @@ mod test {
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: CoseKey::from(pk),
             salt_enc: vec![0x02; 32],
-            salt_auth: vec![0x03; 32],
+            salt_auth: vec![0x03; 16],
         };
         let get_extensions = Some(GetAssertionExtensions {
             hmac_secret: Some(hmac_secret_input),

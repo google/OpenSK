@@ -256,8 +256,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
         let mut extensions_map = extract_map(cbor_value)?;
         let hmac_secret = extensions_map
             .remove(&cbor_text!("hmac-secret"))
-            .map(extract_bool)
-            .unwrap_or(Ok(false))?;
+            .map_or(Ok(false), extract_bool)?;
         let cred_protect = extensions_map
             .remove(&cbor_text!("credProtect"))
             .map(CredentialProtectionPolicy::try_from)
@@ -1066,7 +1065,7 @@ mod test {
         let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
         let expected_signature_algorithm = SignatureAlgorithm::ES256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
-        let created_cbor = cbor::Value::from(signature_algorithm.unwrap());
+        let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
         assert_eq!(created_cbor, cbor_signature_algorithm);
 
         let cbor_unknown_algorithm: cbor::Value = cbor_int!(-1);
@@ -1093,11 +1092,11 @@ mod test {
 
     #[test]
     fn test_from_into_cred_protection_policy() {
-        let cbor_policy = cbor::Value::from(CredentialProtectionPolicy::UserVerificationOptional);
+        let cbor_policy: cbor::Value = CredentialProtectionPolicy::UserVerificationOptional.into();
         let policy = CredentialProtectionPolicy::try_from(cbor_policy.clone());
         let expected_policy = CredentialProtectionPolicy::UserVerificationOptional;
         assert_eq!(policy, Ok(expected_policy));
-        let created_cbor = cbor::Value::from(policy.unwrap());
+        let created_cbor: cbor::Value = policy.unwrap().into();
         assert_eq!(created_cbor, cbor_policy);
 
         let cbor_policy_error: cbor::Value = cbor_int!(-1);
@@ -1180,14 +1179,14 @@ mod test {
             "hmac-secret" => cbor_map! {
                 1 => cbor::Value::Map(cose_key.0.clone()),
                 2 => vec![0x02; 32],
-                3 => vec![0x03; 32],
+                3 => vec![0x03; 16],
             },
         };
         let extensions = GetAssertionExtensions::try_from(cbor_extensions);
         let expected_input = GetAssertionHmacSecretInput {
             key_agreement: cose_key,
             salt_enc: vec![0x02; 32],
-            salt_auth: vec![0x03; 32],
+            salt_auth: vec![0x03; 16],
         };
         let expected_extensions = GetAssertionExtensions {
             hmac_secret: Some(expected_input),

@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::values::{KeyType, Value};
+use alloc::collections::btree_map;
+use core::cmp::Ordering;
+use core::iter::Peekable;
+
 /// This macro generates code to extract multiple values from a `BTreeMap<KeyType, Value>` at once
 /// in an optimized manner, consuming the input map.
 ///
@@ -65,37 +70,45 @@ macro_rules! read_cbor_map {
         #[cfg(test)]
         test_ordered_keys!($( $key, )+);
 
-        use $crate::values::{IntoCborKey, KeyType, Value};
-        use ::core::cmp::Ordering;
-        use ::core::iter::Peekable;
-        use ::alloc::collections::btree_map::IntoIter;
+        use $crate::values::{IntoCborKey, Value};
+        use $crate::macros::read_cbor_map_peek_value;
 
-        let mut it: Peekable<IntoIter<KeyType, Value>> = $map.into_iter().peekable();
+        let mut it = $map.into_iter().peekable();
         $(
-            let $variable: Option<Value> = {
-                let needle: KeyType = $key.into_cbor_key();
-                loop {
-                    match it.peek() {
-                        None => break None,
-                        Some(item) => {
-                            let key: &KeyType = &item.0;
-                            match key.cmp(&needle) {
-                                Ordering::Less => {
-                                    it.next();
-                                    continue
-                                },
-                                Ordering::Equal => {
-                                    let value: Value = it.next().unwrap().1;
-                                    break Some(value)
-                                },
-                                Ordering::Greater => break None,
-                            }
-                        }
-                    }
-                }
-            };
+        let $variable: Option<Value> = read_cbor_map_peek_value(&mut it, $key.into_cbor_key());
         )+
     };
+}
+
+/// This function is an internal detail of the `read_cbor_map!` macro, but has public visibility so
+/// that users of the macro can use it.
+///
+/// The logic is separated into its own function to reduce binary size, as otherwise the logic
+/// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
+/// CTAP2 application of OpenSK.
+pub fn read_cbor_map_peek_value(
+    it: &mut Peekable<btree_map::IntoIter<KeyType, Value>>,
+    needle: KeyType,
+) -> Option<Value> {
+    loop {
+        match it.peek() {
+            None => return None,
+            Some(item) => {
+                let key: &KeyType = &item.0;
+                match key.cmp(&needle) {
+                    Ordering::Less => {
+                        it.next();
+                        continue;
+                    }
+                    Ordering::Equal => {
+                        let value: Value = it.next().unwrap().1;
+                        return Some(value);
+                    }
+                    Ordering::Greater => return None,
+                }
+            }
+        }
+    }
 }
 
 #[macro_export]

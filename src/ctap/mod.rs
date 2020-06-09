@@ -368,8 +368,10 @@ where
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
                     Command::AuthenticatorReset => self.process_reset(cid),
+                    #[cfg(feature = "with_ctap2_1")]
+                    Command::AuthenticatorSelection => self.process_selection(cid),
                     // TODO(kaczmarczyck) implement GetNextAssertion and FIDO 2.1 commands
-                    _ => unimplemented!(),
+                    _ => self.process_unknown_command(),
                 };
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
@@ -1092,6 +1094,16 @@ where
             );
         }
         Ok(ResponseData::AuthenticatorReset)
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    fn process_selection(&self, cid: ChannelID) -> Result<ResponseData, Ctap2StatusCode> {
+        (self.check_user_presence)(cid)?;
+        Ok(ResponseData::AuthenticatorSelection)
+    }
+
+    fn process_unknown_command(&self) -> Result<ResponseData, Ctap2StatusCode> {
+        Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
     }
 
     pub fn generate_auth_data(&self, rp_id_hash: &[u8], flag_byte: u8) -> Vec<u8> {

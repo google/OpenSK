@@ -13,6 +13,68 @@
 // limitations under the License.
 
 #[macro_export]
+macro_rules! read_cbor_map {
+    ( $map:expr, $( $variable:ident @ $key:expr, )+ ) => {
+        // A pre-requisite for this algorithm to work is that the keys to extract from the map are
+        // sorted.
+        #[cfg(test)]
+        test_ordered_keys!($( $key, )+);
+
+        use $crate::values::{KeyType, Value};
+        use ::core::cmp::Ordering;
+        use ::core::iter::Peekable;
+        use ::alloc::collections::btree_map::IntoIter;
+
+        let mut it: Peekable<IntoIter<KeyType, Value>> = $map.into_iter().peekable();
+        $(
+            let $variable: Option<Value> = {
+                let needle: KeyType = $key;
+                loop {
+                    match it.peek() {
+                        None => break None,
+                        Some(item) => {
+                            let key: &KeyType = &item.0;
+                            match key.cmp(&needle) {
+                                Ordering::Less => {
+                                    it.next();
+                                    continue
+                                },
+                                Ordering::Equal => {
+                                    let value: Value = it.next().unwrap().1;
+                                    break Some(value)
+                                },
+                                Ordering::Greater => break None,
+                            }
+                        }
+                    }
+                }
+            };
+        )+
+    };
+}
+
+#[macro_export]
+macro_rules! test_ordered_keys {
+    // Last key
+    ( $key:expr, ) => {
+    };
+
+    ( $key1:expr, $key2:expr, $( $keys:expr, )* ) => {
+        {
+            let k1: $crate::values::KeyType = $key1;
+            let k2: $crate::values::KeyType = $key2;
+            assert!(
+                k1 < k2,
+                "{:?} < {:?} failed. The read_cbor_map! macro requires keys in sorted order.",
+                k1,
+                k2,
+            );
+        }
+        test_ordered_keys!($key2, $( $keys, )*);
+    };
+}
+
+#[macro_export]
 macro_rules! cbor_map {
     // trailing comma case
     ( $( $key:expr => $value:expr, )+ ) => {
@@ -496,5 +558,94 @@ mod test {
                 .collect(),
         );
         assert_eq!(a, b);
+    }
+
+    fn extract_map(cbor_value: Value) -> BTreeMap<KeyType, Value> {
+        match cbor_value {
+            Value::Map(map) => map,
+            _ => panic!("Expected CBOR map."),
+        }
+    }
+
+    #[test]
+    fn test_read_cbor_map_simple() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+        };
+
+        read_cbor_map! {
+            extract_map(map),
+            x1 @ cbor_unsigned!(1),
+            x2 @ cbor_unsigned!(2),
+        };
+
+        assert_eq!(x1, Some(cbor_unsigned!(10)));
+        assert_eq!(x2, Some(cbor_unsigned!(20)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_read_cbor_map_unordered() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+        };
+
+        read_cbor_map! {
+            extract_map(map),
+            _x2 @ cbor_unsigned!(2),
+            _x1 @ cbor_unsigned!(1),
+        };
+    }
+
+    #[test]
+    fn test_read_cbor_map_partial() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+            3 => 30,
+            4 => 40,
+            5 => 50,
+            6 => 60,
+            7 => 70,
+            8 => 80,
+            9 => 90,
+        };
+
+        read_cbor_map! {
+            extract_map(map),
+            x3 @ cbor_unsigned!(3),
+            x7 @ cbor_unsigned!(7),
+        };
+
+        assert_eq!(x3, Some(cbor_unsigned!(30)));
+        assert_eq!(x7, Some(cbor_unsigned!(70)));
+    }
+
+    #[test]
+    fn test_read_cbor_map_missing() {
+        let map = cbor_map! {
+            1 => 10,
+            3 => 30,
+            4 => 40,
+        };
+
+        read_cbor_map! {
+            extract_map(map),
+            x0 @ cbor_unsigned!(0),
+            x1 @ cbor_unsigned!(1),
+            x2 @ cbor_unsigned!(2),
+            x3 @ cbor_unsigned!(3),
+            x4 @ cbor_unsigned!(4),
+            x5 @ cbor_unsigned!(5),
+        };
+
+        assert_eq!(x0, None);
+        assert_eq!(x1, Some(cbor_unsigned!(10)));
+        assert_eq!(x2, None);
+        assert_eq!(x3, Some(cbor_unsigned!(30)));
+        assert_eq!(x4, Some(cbor_unsigned!(40)));
+        assert_eq!(x5, None);
     }
 }

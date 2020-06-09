@@ -36,5 +36,7 @@ jobs:
           name: reproduced-${{ matrix.os }}
           path: reproducible/reproduced.tar
 
+      - name: Comparing binary sizes
+        run: git diff --no-index reproducible/reference_elf2tab_${{ matrix.os }}.txt reproducible/elf2tab.txt
       - name: Comparing cryptographic hashes
         run: git diff --no-index reproducible/reference_binaries_${{ matrix.os }}.sha256sum reproducible/binaries.sha256sum

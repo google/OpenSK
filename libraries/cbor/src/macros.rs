@@ -40,8 +40,8 @@
 /// #     let map = alloc::collections::BTreeMap::new();
 /// read_cbor_map! {
 ///     map,
-///     x @ cbor_unsigned!(1),
-///     y @ cbor_unsigned!(2),
+///     x @ 1,
+///     y @ 2,
 /// };
 /// # }
 /// ```
@@ -65,7 +65,7 @@ macro_rules! read_cbor_map {
         #[cfg(test)]
         test_ordered_keys!($( $key, )+);
 
-        use $crate::values::{KeyType, Value};
+        use $crate::values::{IntoCborKey, KeyType, Value};
         use ::core::cmp::Ordering;
         use ::core::iter::Peekable;
         use ::alloc::collections::btree_map::IntoIter;
@@ -73,7 +73,7 @@ macro_rules! read_cbor_map {
         let mut it: Peekable<IntoIter<KeyType, Value>> = $map.into_iter().peekable();
         $(
             let $variable: Option<Value> = {
-                let needle: KeyType = $key;
+                let needle: KeyType = $key.into_cbor_key();
                 loop {
                     match it.peek() {
                         None => break None,
@@ -106,8 +106,9 @@ macro_rules! test_ordered_keys {
 
     ( $key1:expr, $key2:expr, $( $keys:expr, )* ) => {
         {
-            let k1: $crate::values::KeyType = $key1;
-            let k2: $crate::values::KeyType = $key2;
+            use $crate::values::{IntoCborKey, KeyType};
+            let k1: KeyType = $key1.into_cbor_key();
+            let k2: KeyType = $key2.into_cbor_key();
             assert!(
                 k1 < k2,
                 "{:?} < {:?} failed. The read_cbor_map! macro requires keys in sorted order.",
@@ -621,8 +622,8 @@ mod test {
 
         read_cbor_map! {
             extract_map(map),
-            x1 @ cbor_unsigned!(1),
-            x2 @ cbor_unsigned!(2),
+            x1 @ 1,
+            x2 @ 2,
         };
 
         assert_eq!(x1, Some(cbor_unsigned!(10)));
@@ -639,8 +640,8 @@ mod test {
 
         read_cbor_map! {
             extract_map(map),
-            _x2 @ cbor_unsigned!(2),
-            _x1 @ cbor_unsigned!(1),
+            _x2 @ 2,
+            _x1 @ 1,
         };
     }
 
@@ -660,8 +661,8 @@ mod test {
 
         read_cbor_map! {
             extract_map(map),
-            x3 @ cbor_unsigned!(3),
-            x7 @ cbor_unsigned!(7),
+            x3 @ 3,
+            x7 @ 7,
         };
 
         assert_eq!(x3, Some(cbor_unsigned!(30)));
@@ -678,12 +679,12 @@ mod test {
 
         read_cbor_map! {
             extract_map(map),
-            x0 @ cbor_unsigned!(0),
-            x1 @ cbor_unsigned!(1),
-            x2 @ cbor_unsigned!(2),
-            x3 @ cbor_unsigned!(3),
-            x4 @ cbor_unsigned!(4),
-            x5 @ cbor_unsigned!(5),
+            x0 @ 0,
+            x1 @ 1,
+            x2 @ 2,
+            x3 @ 3,
+            x4 @ 4,
+            x5 @ 5,
         };
 
         assert_eq!(x0, None);

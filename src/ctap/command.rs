@@ -126,15 +126,15 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
             extract_map(cbor_value)?,
-            client_data_hash @ cbor_unsigned!(1),
-            rp @ cbor_unsigned!(2),
-            user @ cbor_unsigned!(3),
-            cred_param_vec @ cbor_unsigned!(4),
-            exclude_list @ cbor_unsigned!(5),
-            extensions @ cbor_unsigned!(6),
-            options @ cbor_unsigned!(7),
-            pin_uv_auth_param @ cbor_unsigned!(8),
-            pin_uv_auth_protocol @ cbor_unsigned!(9),
+            client_data_hash @ 1,
+            rp @ 2,
+            user @ 3,
+            cred_param_vec @ 4,
+            exclude_list @ 5,
+            extensions @ 6,
+            options @ 7,
+            pin_uv_auth_param @ 8,
+            pin_uv_auth_protocol @ 9,
         };
 
         let client_data_hash = extract_byte_string(ok_or_missing(client_data_hash)?)?;
@@ -208,13 +208,13 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
             extract_map(cbor_value)?,
-            rp_id @ cbor_unsigned!(1),
-            client_data_hash @ cbor_unsigned!(2),
-            allow_list @ cbor_unsigned!(3),
-            extensions @ cbor_unsigned!(4),
-            options @ cbor_unsigned!(5),
-            pin_uv_auth_param @ cbor_unsigned!(6),
-            pin_uv_auth_protocol @ cbor_unsigned!(7),
+            rp_id @ 1,
+            client_data_hash @ 2,
+            allow_list @ 3,
+            extensions @ 4,
+            options @ 5,
+            pin_uv_auth_param @ 6,
+            pin_uv_auth_protocol @ 7,
         };
 
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
@@ -277,12 +277,12 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
             extract_map(cbor_value)?,
-            pin_protocol @ cbor_unsigned!(1),
-            sub_command @ cbor_unsigned!(2),
-            key_agreement @ cbor_unsigned!(3),
-            pin_auth @ cbor_unsigned!(4),
-            new_pin_enc @ cbor_unsigned!(5),
-            pin_hash_enc @ cbor_unsigned!(6),
+            pin_protocol @ 1,
+            sub_command @ 2,
+            key_agreement @ 3,
+            pin_auth @ 4,
+            new_pin_enc @ 5,
+            pin_hash_enc @ 6,
         };
 
         let pin_protocol = extract_unsigned(ok_or_missing(pin_protocol)?)?;

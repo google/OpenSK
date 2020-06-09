@@ -12,6 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// This macro generates code to extract multiple values from a `BTreeMap<KeyType, Value>` at once
+/// in an optimized manner, consuming the input map.
+///
+/// It takes as input a `BTreeMap` as well as a list of identifiers and keys, and generates code
+/// that assigns the corresponding values to new variables using the given identifiers. Each of
+/// these variables has type `Option<Value>`, to account for the case where keys aren't found.
+///
+/// **Important:** Keys passed to the `read_cbor_map!` macro **must be sorted** in increasing order.
+/// If not, the algorithm can yield incorrect results, such a assigning `None` to a variable even if
+/// the corresponding key existed in the map. **No runtime checks** are made for this in the
+/// `read_cbor_map!` macro, in order to avoid overhead at runtime. However, assertions that keys are
+/// sorted are added in `cfg(test)` mode, so that unit tests can verify ahead of time that the keys
+/// are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can change at
+/// runtime.
+///
+/// Semantically, provided that the keys are sorted as specified above, the following two snippets
+/// of code are equivalent, but the `read_cbor_map!` version is more optimized, as it doesn't
+/// re-balance the `BTreeMap` for each key, contrary to the `BTreeMap::remove` operations.
+///
+/// ```rust
+/// # extern crate alloc;
+/// # #[macro_use]
+/// # extern crate cbor;
+/// #
+/// # fn main() {
+/// #     let map = alloc::collections::BTreeMap::new();
+/// read_cbor_map! {
+///     map,
+///     x @ cbor_unsigned!(1),
+///     y @ cbor_unsigned!(2),
+/// };
+/// # }
+/// ```
+///
+/// ```rust
+/// # extern crate alloc;
+/// # #[macro_use]
+/// # extern crate cbor;
+/// #
+/// # fn main() {
+/// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
+/// let x: Option<cbor::Value> = map.remove(&cbor_unsigned!(1));
+/// let y: Option<cbor::Value> = map.remove(&cbor_unsigned!(2));
+/// # }
+/// ```
 #[macro_export]
 macro_rules! read_cbor_map {
     ( $map:expr, $( $variable:ident @ $key:expr, )+ ) => {

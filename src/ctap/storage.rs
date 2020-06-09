@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::crypto::rng256::Rng256;
-use crate::ctap::data_formats::PublicKeyCredentialSource;
+use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, PIN_AUTH_LENGTH, USE_BATCH_ATTESTATION};
 use alloc::string::String;
@@ -228,6 +228,7 @@ impl PersistentStore {
         &self,
         rp_id: &str,
         credential_id: &[u8],
+        check_cred_protect: bool,
     ) -> Option<PublicKeyCredentialSource> {
         let key = Key::Credential {
             rp_id: Some(rp_id.into()),
@@ -238,7 +239,16 @@ impl PersistentStore {
         debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
         let result = deserialize_credential(entry.data);
         debug_assert!(result.is_some());
-        result
+        if check_cred_protect
+            && result.as_ref().map_or(false, |cred| {
+                cred.cred_protect_policy
+                    == Some(CredentialProtectionPolicy::UserVerificationRequired)
+            })
+        {
+            None
+        } else {
+            result
+        }
     }
 
     pub fn store_credential(
@@ -270,7 +280,11 @@ impl PersistentStore {
         Ok(())
     }
 
-    pub fn filter_credential(&self, rp_id: &str) -> Vec<PublicKeyCredentialSource> {
+    pub fn filter_credential(
+        &self,
+        rp_id: &str,
+        check_cred_protect: bool,
+    ) -> Vec<PublicKeyCredentialSource> {
         self.store
             .find_all(&Key::Credential {
                 rp_id: Some(rp_id.into()),
@@ -283,6 +297,7 @@ impl PersistentStore {
                 debug_assert!(credential.is_some());
                 credential
             })
+            .filter(|cred| !check_cred_protect || cred.is_discoverable())
             .collect()
     }
 
@@ -550,6 +565,7 @@ mod test {
             user_handle,
             other_ui: None,
             cred_random: None,
+            cred_protect_policy: None,
         }
     }
 
@@ -634,7 +650,7 @@ mod test {
             .is_ok());
         assert_eq!(persistent_store.count_credentials(), 1);
         assert_eq!(
-            &persistent_store.filter_credential("example.com"),
+            &persistent_store.filter_credential("example.com", false),
             &[expected_credential]
         );
 
@@ -682,7 +698,7 @@ mod test {
             .store_credential(credential_source2)
             .is_ok());
 
-        let filtered_credentials = persistent_store.filter_credential("example.com");
+        let filtered_credentials = persistent_store.filter_credential("example.com", false);
         assert_eq!(filtered_credentials.len(), 2);
         assert!(
             (filtered_credentials[0].credential_id == id0
@@ -690,6 +706,30 @@ mod test {
                 || (filtered_credentials[1].credential_id == id0
                     && filtered_credentials[0].credential_id == id1)
         );
+    }
+
+    #[test]
+    fn test_filter_with_cred_protect() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        assert_eq!(persistent_store.count_credentials(), 0);
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x00],
+            other_ui: None,
+            cred_random: None,
+            cred_protect_policy: Some(
+                CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
+            ),
+        };
+        assert!(persistent_store.store_credential(credential).is_ok());
+
+        let no_credential = persistent_store.filter_credential("example.com", true);
+        assert_eq!(no_credential, vec![]);
     }
 
     #[test]
@@ -708,9 +748,9 @@ mod test {
             .store_credential(credential_source1)
             .is_ok());
 
-        let no_credential = persistent_store.find_credential("another.example.com", &id0);
+        let no_credential = persistent_store.find_credential("another.example.com", &id0, false);
         assert_eq!(no_credential, None);
-        let found_credential = persistent_store.find_credential("example.com", &id0);
+        let found_credential = persistent_store.find_credential("example.com", &id0, false);
         let expected_credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: id0,
@@ -719,8 +759,31 @@ mod test {
             user_handle: vec![0x00],
             other_ui: None,
             cred_random: None,
+            cred_protect_policy: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
+    }
+
+    #[test]
+    fn test_find_with_cred_protect() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        assert_eq!(persistent_store.count_credentials(), 0);
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x00],
+            other_ui: None,
+            cred_random: None,
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
+        };
+        assert!(persistent_store.store_credential(credential).is_ok());
+
+        let no_credential = persistent_store.find_credential("example.com", &vec![0x00], true);
+        assert_eq!(no_credential, None);
     }
 
     #[test]

@@ -15,7 +15,7 @@
 #[cfg(feature = "with_ctap2_1")]
 use super::data_formats::{AuthenticatorTransport, PublicKeyCredentialParameter};
 use super::data_formats::{
-    CoseKey, PackedAttestationStatement, PublicKeyCredentialDescriptor,
+    CoseKey, CredentialProtectionPolicy, PackedAttestationStatement, PublicKeyCredentialDescriptor,
     PublicKeyCredentialUserEntity,
 };
 use alloc::collections::BTreeMap;
@@ -119,6 +119,7 @@ pub struct AuthenticatorGetInfoResponse {
     pub transports: Option<Vec<AuthenticatorTransport>>,
     #[cfg(feature = "with_ctap2_1")]
     pub algorithms: Option<Vec<PublicKeyCredentialParameter>>,
+    pub default_cred_protect: Option<CredentialProtectionPolicy>,
     #[cfg(feature = "with_ctap2_1")]
     pub firmware_version: Option<u64>,
 }
@@ -137,6 +138,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             max_credential_id_length,
             transports,
             algorithms,
+            default_cred_protect,
             firmware_version,
         } = get_info_response;
 
@@ -159,6 +161,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x08 => max_credential_id_length,
             0x09 => transports.map(|vec| cbor_array_vec!(vec)),
             0x0A => algorithms.map(|vec| cbor_array_vec!(vec)),
+            0x0C => default_cred_protect.map(|p| p as u64),
             0x0E => firmware_version,
         }
     }
@@ -172,6 +175,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             options,
             max_msg_size,
             pin_protocols,
+            default_cred_protect,
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
@@ -189,6 +193,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x04 => options_cbor,
             0x05 => max_msg_size,
             0x06 => pin_protocols.map(|vec| cbor_array_vec!(vec)),
+            0x0C => default_cred_protect.map(|p| p as u64),
         }
     }
 }
@@ -290,6 +295,7 @@ mod test {
             transports: None,
             #[cfg(feature = "with_ctap2_1")]
             algorithms: None,
+            default_cred_protect: None,
             #[cfg(feature = "with_ctap2_1")]
             firmware_version: None,
         };
@@ -318,6 +324,7 @@ mod test {
             max_credential_id_length: Some(256),
             transports: Some(vec![AuthenticatorTransport::Usb]),
             algorithms: Some(vec![ES256_CRED_PARAM]),
+            default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
             firmware_version: Some(0),
         };
         let response_cbor: Option<cbor::Value> =
@@ -333,6 +340,7 @@ mod test {
             0x08 => 256,
             0x09 => cbor_array_vec![vec!["usb"]],
             0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x0C => CredentialProtectionPolicy::UserVerificationRequired as u64,
             0x0E => 0,
         };
         assert_eq!(response_cbor, Some(expected_cbor));

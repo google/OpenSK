@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use super::data_formats::{
-    ok_or_missing, read_array, read_byte_string, read_map, read_text_string, read_unsigned,
-    ClientPinSubCommand, CoseKey, Extensions, GetAssertionOptions, MakeCredentialOptions,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialUserEntity,
+    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
+    ok_or_missing, ClientPinSubCommand, CoseKey, GetAssertionExtensions, GetAssertionOptions,
+    MakeCredentialExtensions, MakeCredentialOptions, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameter, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
 };
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
@@ -113,7 +113,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub user: PublicKeyCredentialUserEntity,
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameter>,
     pub exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<Extensions>,
+    pub extensions: Option<MakeCredentialExtensions>,
     // Even though options are optional, we can use the default if not present.
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
@@ -124,30 +124,32 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let param_map = read_map(&cbor_value)?;
+        let mut param_map = extract_map(cbor_value)?;
 
-        let client_data_hash = read_byte_string(ok_or_missing(param_map.get(&cbor_unsigned!(1)))?)?;
+        let client_data_hash =
+            extract_byte_string(ok_or_missing(param_map.remove(&cbor_unsigned!(1)))?)?;
 
         let rp = PublicKeyCredentialRpEntity::try_from(ok_or_missing(
-            param_map.get(&cbor_unsigned!(2)),
+            param_map.remove(&cbor_unsigned!(2)),
         )?)?;
 
         let user = PublicKeyCredentialUserEntity::try_from(ok_or_missing(
-            param_map.get(&cbor_unsigned!(3)),
+            param_map.remove(&cbor_unsigned!(3)),
         )?)?;
 
-        let cred_param_vec = read_array(ok_or_missing(param_map.get(&cbor_unsigned!(4)))?)?;
+        let cred_param_vec = extract_array(ok_or_missing(param_map.remove(&cbor_unsigned!(4)))?)?;
         let pub_key_cred_params = cred_param_vec
-            .iter()
+            .into_iter()
             .map(PublicKeyCredentialParameter::try_from)
             .collect::<Result<Vec<PublicKeyCredentialParameter>, Ctap2StatusCode>>()?;
 
-        let exclude_list = match param_map.get(&cbor_unsigned!(5)) {
+        let exclude_list = match param_map.remove(&cbor_unsigned!(5)) {
             Some(entry) => {
-                let exclude_list_vec = read_array(entry)?;
+                let exclude_list_vec = extract_array(entry)?;
+                let list_len = MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(exclude_list_vec.len());
                 let exclude_list = exclude_list_vec
-                    .iter()
-                    .take(MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(exclude_list_vec.len()))
+                    .into_iter()
+                    .take(list_len)
                     .map(PublicKeyCredentialDescriptor::try_from)
                     .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(exclude_list)
@@ -156,11 +158,11 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         };
 
         let extensions = param_map
-            .get(&cbor_unsigned!(6))
-            .map(Extensions::try_from)
+            .remove(&cbor_unsigned!(6))
+            .map(MakeCredentialExtensions::try_from)
             .transpose()?;
 
-        let options = match param_map.get(&cbor_unsigned!(7)) {
+        let options = match param_map.remove(&cbor_unsigned!(7)) {
             Some(entry) => MakeCredentialOptions::try_from(entry)?,
             None => MakeCredentialOptions {
                 rk: false,
@@ -169,13 +171,13 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         };
 
         let pin_uv_auth_param = param_map
-            .get(&cbor_unsigned!(8))
-            .map(read_byte_string)
+            .remove(&cbor_unsigned!(8))
+            .map(extract_byte_string)
             .transpose()?;
 
         let pin_uv_auth_protocol = param_map
-            .get(&cbor_unsigned!(9))
-            .map(read_unsigned)
+            .remove(&cbor_unsigned!(9))
+            .map(extract_unsigned)
             .transpose()?;
 
         Ok(AuthenticatorMakeCredentialParameters {
@@ -197,7 +199,7 @@ pub struct AuthenticatorGetAssertionParameters {
     pub rp_id: String,
     pub client_data_hash: Vec<u8>,
     pub allow_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<Extensions>,
+    pub extensions: Option<GetAssertionExtensions>,
     // Even though options are optional, we can use the default if not present.
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
@@ -208,18 +210,20 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let param_map = read_map(&cbor_value)?;
+        let mut param_map = extract_map(cbor_value)?;
 
-        let rp_id = read_text_string(ok_or_missing(param_map.get(&cbor_unsigned!(1)))?)?;
+        let rp_id = extract_text_string(ok_or_missing(param_map.remove(&cbor_unsigned!(1)))?)?;
 
-        let client_data_hash = read_byte_string(ok_or_missing(param_map.get(&cbor_unsigned!(2)))?)?;
+        let client_data_hash =
+            extract_byte_string(ok_or_missing(param_map.remove(&cbor_unsigned!(2)))?)?;
 
-        let allow_list = match param_map.get(&cbor_unsigned!(3)) {
+        let allow_list = match param_map.remove(&cbor_unsigned!(3)) {
             Some(entry) => {
-                let allow_list_vec = read_array(entry)?;
+                let allow_list_vec = extract_array(entry)?;
+                let list_len = MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(allow_list_vec.len());
                 let allow_list = allow_list_vec
-                    .iter()
-                    .take(MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(allow_list_vec.len()))
+                    .into_iter()
+                    .take(list_len)
                     .map(PublicKeyCredentialDescriptor::try_from)
                     .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(allow_list)
@@ -228,11 +232,11 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
         };
 
         let extensions = param_map
-            .get(&cbor_unsigned!(4))
-            .map(Extensions::try_from)
+            .remove(&cbor_unsigned!(4))
+            .map(GetAssertionExtensions::try_from)
             .transpose()?;
 
-        let options = match param_map.get(&cbor_unsigned!(5)) {
+        let options = match param_map.remove(&cbor_unsigned!(5)) {
             Some(entry) => GetAssertionOptions::try_from(entry)?,
             None => GetAssertionOptions {
                 up: true,
@@ -241,13 +245,13 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
         };
 
         let pin_uv_auth_param = param_map
-            .get(&cbor_unsigned!(6))
-            .map(read_byte_string)
+            .remove(&cbor_unsigned!(6))
+            .map(extract_byte_string)
             .transpose()?;
 
         let pin_uv_auth_protocol = param_map
-            .get(&cbor_unsigned!(7))
-            .map(read_unsigned)
+            .remove(&cbor_unsigned!(7))
+            .map(extract_unsigned)
             .transpose()?;
 
         Ok(AuthenticatorGetAssertionParameters {
@@ -276,32 +280,32 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let param_map = read_map(&cbor_value)?;
+        let mut param_map = extract_map(cbor_value)?;
 
-        let pin_protocol = read_unsigned(ok_or_missing(param_map.get(&cbor_unsigned!(1)))?)?;
+        let pin_protocol = extract_unsigned(ok_or_missing(param_map.remove(&cbor_unsigned!(1)))?)?;
 
         let sub_command =
-            ClientPinSubCommand::try_from(ok_or_missing(param_map.get(&cbor_unsigned!(2)))?)?;
+            ClientPinSubCommand::try_from(ok_or_missing(param_map.remove(&cbor_unsigned!(2)))?)?;
 
         let key_agreement = param_map
-            .get(&cbor_unsigned!(3))
-            .map(read_map)
+            .remove(&cbor_unsigned!(3))
+            .map(extract_map)
             .transpose()?
-            .map(|x| CoseKey(x.clone()));
+            .map(|x| CoseKey(x));
 
         let pin_auth = param_map
-            .get(&cbor_unsigned!(4))
-            .map(read_byte_string)
+            .remove(&cbor_unsigned!(4))
+            .map(extract_byte_string)
             .transpose()?;
 
         let new_pin_enc = param_map
-            .get(&cbor_unsigned!(5))
-            .map(read_byte_string)
+            .remove(&cbor_unsigned!(5))
+            .map(extract_byte_string)
             .transpose()?;
 
         let pin_hash_enc = param_map
-            .get(&cbor_unsigned!(6))
-            .map(read_byte_string)
+            .remove(&cbor_unsigned!(6))
+            .map(extract_byte_string)
             .transpose()?;
 
         Ok(AuthenticatorClientPinParameters {

@@ -530,27 +530,32 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use PublicKeyCredentialSourceField::*;
-        let mut map = extract_map(cbor_value)?;
-        let credential_id = extract_byte_string(ok_or_missing(map.remove(&CredentialId.into()))?)?;
-        let private_key = extract_byte_string(ok_or_missing(map.remove(&PrivateKey.into()))?)?;
+        use PublicKeyCredentialSourceField::{
+            CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
+        };
+        read_cbor_map! {
+            extract_map(cbor_value)?,
+            credential_id @ CredentialId,
+            private_key @ PrivateKey,
+            rp_id @ RpId,
+            user_handle @ UserHandle,
+            other_ui @ OtherUi,
+            cred_random @ CredRandom,
+            cred_protect_policy @ CredProtectPolicy,
+        };
+
+        let credential_id = extract_byte_string(ok_or_missing(credential_id)?)?;
+        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
         if private_key.len() != 32 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
             .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
-        let rp_id = extract_text_string(ok_or_missing(map.remove(&RpId.into()))?)?;
-        let user_handle = extract_byte_string(ok_or_missing(map.remove(&UserHandle.into()))?)?;
-        let other_ui = map
-            .remove(&OtherUi.into())
-            .map(extract_text_string)
-            .transpose()?;
-        let cred_random = map
-            .remove(&CredRandom.into())
-            .map(extract_byte_string)
-            .transpose()?;
-        let cred_protect_policy = map
-            .remove(&CredProtectPolicy.into())
+        let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
+        let user_handle = extract_byte_string(ok_or_missing(user_handle)?)?;
+        let other_ui = other_ui.map(extract_text_string).transpose()?;
+        let cred_random = cred_random.map(extract_byte_string).transpose()?;
+        let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that

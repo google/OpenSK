@@ -24,6 +24,6 @@ echo "----------------------------------------" >> reproducible/elf2tab.txt
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum third_party/tock/target/thumbv7em-none-eabi/release/$BOARD.bin >> reproducible/binaries.sha256sum
 tar -rvf reproducible/reproduced.tar third_party/tock/target/thumbv7em-none-eabi/release/$BOARD.bin
 
-./deploy.py --verbose-build --board=$BOARD --opensk --programmer=none --elf2tab-output reproducible/elf2tab.txt
+./deploy.py --verbose-build --board=$BOARD --opensk --programmer=none --elf2tab-output=reproducible/elf2tab.txt
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/${BOARD}_merged.hex >> reproducible/binaries.sha256sum
 tar -rvf reproducible/reproduced.tar target/${BOARD}_merged.hex

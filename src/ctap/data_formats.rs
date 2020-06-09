@@ -14,7 +14,7 @@
 
 use super::status_code::Ctap2StatusCode;
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
@@ -27,19 +27,19 @@ pub struct PublicKeyCredentialRpEntity {
     pub rp_icon: Option<String>,
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialRpEntity {
+impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let rp_map = read_map(cbor_value)?;
-        let rp_id = read_text_string(ok_or_missing(rp_map.get(&cbor_text!("id")))?)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut rp_map = extract_map(cbor_value)?;
+        let rp_id = extract_text_string(ok_or_missing(rp_map.remove(&cbor_text!("id")))?)?;
         let rp_name = rp_map
-            .get(&cbor_text!("name"))
-            .map(read_text_string)
+            .remove(&cbor_text!("name"))
+            .map(extract_text_string)
             .transpose()?;
         let rp_icon = rp_map
-            .get(&cbor_text!("icon"))
-            .map(read_text_string)
+            .remove(&cbor_text!("icon"))
+            .map(extract_text_string)
             .transpose()?;
         Ok(Self {
             rp_id,
@@ -58,23 +58,23 @@ pub struct PublicKeyCredentialUserEntity {
     pub user_icon: Option<String>,
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialUserEntity {
+impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let user_map = read_map(cbor_value)?;
-        let user_id = read_byte_string(ok_or_missing(user_map.get(&cbor_text!("id")))?)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut user_map = extract_map(cbor_value)?;
+        let user_id = extract_byte_string(ok_or_missing(user_map.remove(&cbor_text!("id")))?)?;
         let user_name = user_map
-            .get(&cbor_text!("name"))
-            .map(read_text_string)
+            .remove(&cbor_text!("name"))
+            .map(extract_text_string)
             .transpose()?;
         let user_display_name = user_map
-            .get(&cbor_text!("displayName"))
-            .map(read_text_string)
+            .remove(&cbor_text!("displayName"))
+            .map(extract_text_string)
             .transpose()?;
         let user_icon = user_map
-            .get(&cbor_text!("icon"))
-            .map(read_text_string)
+            .remove(&cbor_text!("icon"))
+            .map(extract_text_string)
             .transpose()?;
         Ok(Self {
             user_id,
@@ -117,11 +117,11 @@ impl From<PublicKeyCredentialType> for cbor::Value {
     }
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialType {
+impl TryFrom<cbor::Value> for PublicKeyCredentialType {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let cred_type_string = read_text_string(cbor_value)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let cred_type_string = extract_text_string(cbor_value)?;
         match &cred_type_string[..] {
             "public-key" => Ok(PublicKeyCredentialType::PublicKey),
             _ => Ok(PublicKeyCredentialType::Unknown),
@@ -137,16 +137,17 @@ pub struct PublicKeyCredentialParameter {
     pub alg: SignatureAlgorithm,
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialParameter {
+impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let cred_param_map = read_map(cbor_value)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut cred_param_map = extract_map(cbor_value)?;
         let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(
-            cred_param_map.get(&cbor_text!("type")),
+            cred_param_map.remove(&cbor_text!("type")),
         )?)?;
-        let alg =
-            SignatureAlgorithm::try_from(ok_or_missing(cred_param_map.get(&cbor_text!("alg")))?)?;
+        let alg = SignatureAlgorithm::try_from(ok_or_missing(
+            cred_param_map.remove(&cbor_text!("alg")),
+        )?)?;
         Ok(Self { cred_type, alg })
     }
 }
@@ -181,11 +182,11 @@ impl From<AuthenticatorTransport> for cbor::Value {
     }
 }
 
-impl TryFrom<&cbor::Value> for AuthenticatorTransport {
+impl TryFrom<cbor::Value> for AuthenticatorTransport {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let transport_string = read_text_string(cbor_value)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let transport_string = extract_text_string(cbor_value)?;
         match &transport_string[..] {
             "usb" => Ok(AuthenticatorTransport::Usb),
             "nfc" => Ok(AuthenticatorTransport::Nfc),
@@ -204,23 +205,22 @@ pub struct PublicKeyCredentialDescriptor {
     pub transports: Option<Vec<AuthenticatorTransport>>,
 }
 
-impl TryFrom<&cbor::Value> for PublicKeyCredentialDescriptor {
+impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let cred_desc_map = read_map(cbor_value)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut cred_desc_map = extract_map(cbor_value)?;
         let key_type = PublicKeyCredentialType::try_from(ok_or_missing(
-            cred_desc_map.get(&cbor_text!("type")),
+            cred_desc_map.remove(&cbor_text!("type")),
         )?)?;
-        let key_id = read_byte_string(ok_or_missing(cred_desc_map.get(&cbor_text!("id")))?)?;
-        let transports = match cred_desc_map.get(&cbor_text!("transports")) {
+        let key_id = extract_byte_string(ok_or_missing(cred_desc_map.remove(&cbor_text!("id")))?)?;
+        let transports = match cred_desc_map.remove(&cbor_text!("transports")) {
             Some(exclude_entry) => {
-                let transport_vec = read_array(exclude_entry)?;
+                let transport_vec = extract_array(exclude_entry)?;
                 let transports = transport_vec
-                    .iter()
+                    .into_iter()
                     .map(AuthenticatorTransport::try_from)
-                    .collect::<Result<Vec<AuthenticatorTransport>, Ctap2StatusCode>>(
-                )?;
+                    .collect::<Result<Vec<AuthenticatorTransport>, Ctap2StatusCode>>()?;
                 Some(transports)
             }
             None => None,
@@ -243,102 +243,69 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub struct Extensions(BTreeMap<String, cbor::Value>);
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+pub struct MakeCredentialExtensions {
+    pub hmac_secret: bool,
+    pub cred_protect: Option<CredentialProtectionPolicy>,
+}
 
-impl TryFrom<&cbor::Value> for Extensions {
+impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut extensions = BTreeMap::new();
-        for (extension_key, extension_value) in read_map(cbor_value)? {
-            if let cbor::KeyType::TextString(extension_key_string) = extension_key {
-                extensions.insert(extension_key_string.to_string(), extension_value.clone());
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
-            }
-        }
-        Ok(Extensions(extensions))
-    }
-}
-
-impl From<Extensions> for cbor::Value {
-    fn from(extensions: Extensions) -> Self {
-        cbor_map_btree!(extensions
-            .0
-            .into_iter()
-            .map(|(key, value)| (cbor_text!(key), value))
-            .collect())
-    }
-}
-
-impl Extensions {
-    #[cfg(test)]
-    pub fn new(extension_map: BTreeMap<String, cbor::Value>) -> Self {
-        Extensions(extension_map)
-    }
-
-    pub fn has_make_credential_hmac_secret(&self) -> Result<bool, Ctap2StatusCode> {
-        self.0
-            .get("hmac-secret")
-            .map(read_bool)
-            .unwrap_or(Ok(false))
-    }
-
-    pub fn get_assertion_hmac_secret(
-        &self,
-    ) -> Option<Result<GetAssertionHmacSecretInput, Ctap2StatusCode>> {
-        self.0
-            .get("hmac-secret")
-            .map(GetAssertionHmacSecretInput::try_from)
-    }
-
-    pub fn make_credential_cred_protect_policy(
-        &self,
-    ) -> Option<Result<CredentialProtectionPolicy, Ctap2StatusCode>> {
-        self.0
-            .get("credProtect")
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut extensions_map = extract_map(cbor_value)?;
+        let hmac_secret = extensions_map
+            .remove(&cbor_text!("hmac-secret"))
+            .map_or(Ok(false), extract_bool)?;
+        let cred_protect = extensions_map
+            .remove(&cbor_text!("credProtect"))
             .map(CredentialProtectionPolicy::try_from)
+            .transpose()?;
+        Ok(Self {
+            hmac_secret,
+            cred_protect,
+        })
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+pub struct GetAssertionExtensions {
+    pub hmac_secret: Option<GetAssertionHmacSecretInput>,
+}
+
+impl TryFrom<cbor::Value> for GetAssertionExtensions {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut extensions_map = extract_map(cbor_value)?;
+        let hmac_secret = extensions_map
+            .remove(&cbor_text!("hmac-secret"))
+            .map(GetAssertionHmacSecretInput::try_from)
+            .transpose()?;
+        Ok(Self { hmac_secret })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
     pub salt_auth: Vec<u8>,
 }
 
-impl TryFrom<&cbor::Value> for GetAssertionHmacSecretInput {
+impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let input_map = read_map(cbor_value)?;
-        let cose_key = read_map(ok_or_missing(input_map.get(&cbor_unsigned!(1)))?)?;
-        let salt_enc = read_byte_string(ok_or_missing(input_map.get(&cbor_unsigned!(2)))?)?;
-        let salt_auth = read_byte_string(ok_or_missing(input_map.get(&cbor_unsigned!(3)))?)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut input_map = extract_map(cbor_value)?;
+        let cose_key = extract_map(ok_or_missing(input_map.remove(&cbor_unsigned!(1)))?)?;
+        let salt_enc = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(2)))?)?;
+        let salt_auth = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(3)))?)?;
         Ok(Self {
-            key_agreement: CoseKey(cose_key.clone()),
+            key_agreement: CoseKey(cose_key),
             salt_enc,
             salt_auth,
         })
-    }
-}
-
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub struct GetAssertionHmacSecretOutput(Vec<u8>);
-
-impl From<GetAssertionHmacSecretOutput> for cbor::Value {
-    fn from(message: GetAssertionHmacSecretOutput) -> cbor::Value {
-        cbor_bytes!(message.0)
-    }
-}
-
-impl TryFrom<&cbor::Value> for GetAssertionHmacSecretOutput {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        Ok(GetAssertionHmacSecretOutput(read_byte_string(cbor_value)?))
     }
 }
 
@@ -349,22 +316,22 @@ pub struct MakeCredentialOptions {
     pub uv: bool,
 }
 
-impl TryFrom<&cbor::Value> for MakeCredentialOptions {
+impl TryFrom<cbor::Value> for MakeCredentialOptions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let options_map = read_map(cbor_value)?;
-        let rk = match options_map.get(&cbor_text!("rk")) {
-            Some(options_entry) => read_bool(options_entry)?,
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut options_map = extract_map(cbor_value)?;
+        let rk = match options_map.remove(&cbor_text!("rk")) {
+            Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
-        if let Some(options_entry) = options_map.get(&cbor_text!("up")) {
-            if !read_bool(options_entry)? {
+        if let Some(options_entry) = options_map.remove(&cbor_text!("up")) {
+            if !extract_bool(options_entry)? {
                 return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
             }
         }
-        let uv = match options_map.get(&cbor_text!("uv")) {
-            Some(options_entry) => read_bool(options_entry)?,
+        let uv = match options_map.remove(&cbor_text!("uv")) {
+            Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
         Ok(Self { rk, uv })
@@ -377,22 +344,22 @@ pub struct GetAssertionOptions {
     pub uv: bool,
 }
 
-impl TryFrom<&cbor::Value> for GetAssertionOptions {
+impl TryFrom<cbor::Value> for GetAssertionOptions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let options_map = read_map(cbor_value)?;
-        if let Some(options_entry) = options_map.get(&cbor_text!("rk")) {
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let mut options_map = extract_map(cbor_value)?;
+        if let Some(options_entry) = options_map.remove(&cbor_text!("rk")) {
             // This is only for returning the correct status code.
-            read_bool(options_entry)?;
+            extract_bool(options_entry)?;
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
         }
-        let up = match options_map.get(&cbor_text!("up")) {
-            Some(options_entry) => read_bool(options_entry)?,
+        let up = match options_map.remove(&cbor_text!("up")) {
+            Some(options_entry) => extract_bool(options_entry)?,
             None => true,
         };
-        let uv = match options_map.get(&cbor_text!("uv")) {
-            Some(options_entry) => read_bool(options_entry)?,
+        let uv = match options_map.remove(&cbor_text!("uv")) {
+            Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
         Ok(Self { up, uv })
@@ -435,11 +402,11 @@ impl From<SignatureAlgorithm> for cbor::Value {
     }
 }
 
-impl TryFrom<&cbor::Value> for SignatureAlgorithm {
+impl TryFrom<cbor::Value> for SignatureAlgorithm {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        match read_integer(cbor_value)? {
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match extract_integer(cbor_value)? {
             ecdsa::PubKey::ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
             _ => Ok(SignatureAlgorithm::Unknown),
         }
@@ -465,19 +432,6 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         match extract_integer(cbor_value)? {
-            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
-            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
-            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
-            _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-        }
-    }
-}
-
-impl TryFrom<&cbor::Value> for CredentialProtectionPolicy {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        match read_integer(cbor_value)? {
             0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
             0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
             0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
@@ -605,7 +559,7 @@ impl PublicKeyCredentialSource {
 // TODO(kaczmarczyck) we could decide to split this data type up
 // It depends on the algorithm though, I think.
 // So before creating a mess, this is my workaround.
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
 
 // This is the algorithm specifier that is supposed to be used in a COSE key
@@ -645,23 +599,24 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     type Error = Ctap2StatusCode;
 
     fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
-        let key_type = read_integer(ok_or_missing(cose_key.0.get(&cbor_int!(1)))?)?;
+        let mut cose_map = cose_key.0;
+        let key_type = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(1)))?)?;
         if key_type != EC2_KEY_TYPE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let algorithm = read_integer(ok_or_missing(cose_key.0.get(&cbor_int!(3)))?)?;
+        let algorithm = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(3)))?)?;
         if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let curve = read_integer(ok_or_missing(cose_key.0.get(&cbor_int!(-1)))?)?;
+        let curve = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(-1)))?)?;
         if curve != P_256_CURVE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let x_bytes = read_byte_string(ok_or_missing(cose_key.0.get(&cbor_int!(-2)))?)?;
+        let x_bytes = extract_byte_string(ok_or_missing(cose_map.remove(&cbor_int!(-2)))?)?;
         if x_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let y_bytes = read_byte_string(ok_or_missing(cose_key.0.get(&cbor_int!(-3)))?)?;
+        let y_bytes = extract_byte_string(ok_or_missing(cose_map.remove(&cbor_int!(-3)))?)?;
         if y_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
@@ -698,11 +653,11 @@ impl From<ClientPinSubCommand> for cbor::Value {
     }
 }
 
-impl TryFrom<&cbor::Value> for ClientPinSubCommand {
+impl TryFrom<cbor::Value> for ClientPinSubCommand {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: &cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let subcommand_int = read_unsigned(cbor_value)?;
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
             0x01 => Ok(ClientPinSubCommand::GetPinRetries),
             0x02 => Ok(ClientPinSubCommand::GetKeyAgreement),
@@ -717,28 +672,14 @@ impl TryFrom<&cbor::Value> for ClientPinSubCommand {
     }
 }
 
-pub(super) fn read_unsigned(cbor_value: &cbor::Value) -> Result<u64, Ctap2StatusCode> {
+pub(super) fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => Ok(*unsigned),
+        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => Ok(unsigned),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn read_integer(cbor_value: &cbor::Value) -> Result<i64, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => {
-            if *unsigned <= core::i64::MAX as u64 {
-                Ok(*unsigned as i64)
-            } else {
-                Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-            }
-        }
-        cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(*signed),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
-}
-
-fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
+pub(super) fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => {
             if unsigned <= core::i64::MAX as u64 {
@@ -752,53 +693,28 @@ fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
     }
 }
 
-pub fn read_byte_string(cbor_value: &cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::ByteString(byte_string)) => Ok(byte_string.to_vec()),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
-}
-
-fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
+pub fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::KeyValue(cbor::KeyType::ByteString(byte_string)) => Ok(byte_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn read_text_string(cbor_value: &cbor::Value) -> Result<String, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => {
-            Ok(text_string.to_string())
-        }
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
-}
-
-fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
+pub(super) fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => Ok(text_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn read_array(cbor_value: &cbor::Value) -> Result<&Vec<cbor::Value>, Ctap2StatusCode> {
+pub(super) fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Array(array) => Ok(array),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn read_map(
-    cbor_value: &cbor::Value,
-) -> Result<&BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Map(map) => Ok(map),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
-}
-
-fn extract_map(
+pub(super) fn extract_map(
     cbor_value: cbor::Value,
 ) -> Result<BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
     match cbor_value {
@@ -807,7 +723,7 @@ fn extract_map(
     }
 }
 
-pub(super) fn read_bool(cbor_value: &cbor::Value) -> Result<bool, Ctap2StatusCode> {
+pub(super) fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Simple(cbor::SimpleValue::FalseValue) => Ok(false),
         cbor::Value::Simple(cbor::SimpleValue::TrueValue) => Ok(true),
@@ -827,192 +743,192 @@ mod test {
     use crypto::rng256::{Rng256, ThreadRng256};
 
     #[test]
-    fn test_read_unsigned() {
-        assert_eq!(read_unsigned(&cbor_int!(123)), Ok(123));
+    fn test_extract_unsigned() {
+        assert_eq!(extract_unsigned(cbor_int!(123)), Ok(123));
         assert_eq!(
-            read_unsigned(&cbor_bool!(true)),
+            extract_unsigned(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_text!("foo")),
+            extract_unsigned(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_bytes_lit!(b"bar")),
+            extract_unsigned(cbor_bytes_lit!(b"bar")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_array![]),
+            extract_unsigned(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_map! {}),
+            extract_unsigned(cbor_map! {}),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
 
     #[test]
-    fn test_read_unsigned_limits() {
+    fn test_extract_unsigned_limits() {
         assert_eq!(
-            read_unsigned(&cbor_unsigned!(std::u64::MAX)),
+            extract_unsigned(cbor_unsigned!(std::u64::MAX)),
             Ok(std::u64::MAX)
         );
         assert_eq!(
-            read_unsigned(&cbor_unsigned!((std::i64::MAX as u64) + 1)),
+            extract_unsigned(cbor_unsigned!((std::i64::MAX as u64) + 1)),
             Ok((std::i64::MAX as u64) + 1)
         );
         assert_eq!(
-            read_unsigned(&cbor_int!(std::i64::MAX)),
+            extract_unsigned(cbor_int!(std::i64::MAX)),
             Ok(std::i64::MAX as u64)
         );
-        assert_eq!(read_unsigned(&cbor_int!(123)), Ok(123));
-        assert_eq!(read_unsigned(&cbor_int!(1)), Ok(1));
-        assert_eq!(read_unsigned(&cbor_int!(0)), Ok(0));
+        assert_eq!(extract_unsigned(cbor_int!(123)), Ok(123));
+        assert_eq!(extract_unsigned(cbor_int!(1)), Ok(1));
+        assert_eq!(extract_unsigned(cbor_int!(0)), Ok(0));
         assert_eq!(
-            read_unsigned(&cbor_int!(-1)),
+            extract_unsigned(cbor_int!(-1)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_int!(-123)),
+            extract_unsigned(cbor_int!(-123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_unsigned(&cbor_int!(std::i64::MIN)),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-    }
-
-    #[test]
-    fn test_read_integer() {
-        assert_eq!(read_integer(&cbor_int!(123)), Ok(123));
-        assert_eq!(read_integer(&cbor_int!(-123)), Ok(-123));
-        assert_eq!(
-            read_integer(&cbor_bool!(true)),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-        assert_eq!(
-            read_integer(&cbor_text!("foo")),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-        assert_eq!(
-            read_integer(&cbor_bytes_lit!(b"bar")),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-        assert_eq!(
-            read_integer(&cbor_array![]),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-        assert_eq!(
-            read_integer(&cbor_map! {}),
+            extract_unsigned(cbor_int!(std::i64::MIN)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
 
     #[test]
-    fn test_read_integer_limits() {
+    fn test_extract_integer() {
+        assert_eq!(extract_integer(cbor_int!(123)), Ok(123));
+        assert_eq!(extract_integer(cbor_int!(-123)), Ok(-123));
         assert_eq!(
-            read_integer(&cbor_unsigned!(std::u64::MAX)),
+            extract_integer(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_integer(&cbor_unsigned!((std::i64::MAX as u64) + 1)),
+            extract_integer(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_integer(&cbor_int!(std::i64::MAX)), Ok(std::i64::MAX));
-        assert_eq!(read_integer(&cbor_int!(123)), Ok(123));
-        assert_eq!(read_integer(&cbor_int!(1)), Ok(1));
-        assert_eq!(read_integer(&cbor_int!(0)), Ok(0));
-        assert_eq!(read_integer(&cbor_int!(-1)), Ok(-1));
-        assert_eq!(read_integer(&cbor_int!(-123)), Ok(-123));
-        assert_eq!(read_integer(&cbor_int!(std::i64::MIN)), Ok(std::i64::MIN));
+        assert_eq!(
+            extract_integer(cbor_bytes_lit!(b"bar")),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(
+            extract_integer(cbor_array![]),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(
+            extract_integer(cbor_map! {}),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
     }
 
     #[test]
-    fn test_read_byte_string() {
+    fn test_extract_integer_limits() {
         assert_eq!(
-            read_byte_string(&cbor_int!(123)),
+            extract_integer(cbor_unsigned!(std::u64::MAX)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_byte_string(&cbor_bool!(true)),
+            extract_integer(cbor_unsigned!((std::i64::MAX as u64) + 1)),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(extract_integer(cbor_int!(std::i64::MAX)), Ok(std::i64::MAX));
+        assert_eq!(extract_integer(cbor_int!(123)), Ok(123));
+        assert_eq!(extract_integer(cbor_int!(1)), Ok(1));
+        assert_eq!(extract_integer(cbor_int!(0)), Ok(0));
+        assert_eq!(extract_integer(cbor_int!(-1)), Ok(-1));
+        assert_eq!(extract_integer(cbor_int!(-123)), Ok(-123));
+        assert_eq!(extract_integer(cbor_int!(std::i64::MIN)), Ok(std::i64::MIN));
+    }
+
+    #[test]
+    fn test_extract_byte_string() {
+        assert_eq!(
+            extract_byte_string(cbor_int!(123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_byte_string(&cbor_text!("foo")),
+            extract_byte_string(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_byte_string(&cbor_bytes_lit!(b"")), Ok(Vec::new()));
         assert_eq!(
-            read_byte_string(&cbor_bytes_lit!(b"bar")),
+            extract_byte_string(cbor_text!("foo")),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(extract_byte_string(cbor_bytes_lit!(b"")), Ok(Vec::new()));
+        assert_eq!(
+            extract_byte_string(cbor_bytes_lit!(b"bar")),
             Ok(b"bar".to_vec())
         );
         assert_eq!(
-            read_byte_string(&cbor_array![]),
+            extract_byte_string(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_byte_string(&cbor_map! {}),
+            extract_byte_string(cbor_map! {}),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
 
     #[test]
-    fn test_read_text_string() {
+    fn test_extract_text_string() {
         assert_eq!(
-            read_text_string(&cbor_int!(123)),
+            extract_text_string(cbor_int!(123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_text_string(&cbor_bool!(true)),
+            extract_text_string(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_text_string(&cbor_text!("")), Ok(String::new()));
+        assert_eq!(extract_text_string(cbor_text!("")), Ok(String::new()));
         assert_eq!(
-            read_text_string(&cbor_text!("foo")),
+            extract_text_string(cbor_text!("foo")),
             Ok(String::from("foo"))
         );
         assert_eq!(
-            read_text_string(&cbor_bytes_lit!(b"bar")),
+            extract_text_string(cbor_bytes_lit!(b"bar")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_text_string(&cbor_array![]),
+            extract_text_string(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_text_string(&cbor_map! {}),
+            extract_text_string(cbor_map! {}),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
 
     #[test]
-    fn test_read_array() {
+    fn test_extract_array() {
         assert_eq!(
-            read_array(&cbor_int!(123)),
+            extract_array(cbor_int!(123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_array(&cbor_bool!(true)),
+            extract_array(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_array(&cbor_text!("foo")),
+            extract_array(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_array(&cbor_bytes_lit!(b"bar")),
+            extract_array(cbor_bytes_lit!(b"bar")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_array(&cbor_array![]), Ok(&Vec::new()));
+        assert_eq!(extract_array(cbor_array![]), Ok(Vec::new()));
         assert_eq!(
-            read_array(&cbor_array![
+            extract_array(cbor_array![
                 123,
                 cbor_null!(),
                 "foo",
                 cbor_array![],
                 cbor_map! {},
             ]),
-            Ok(&vec![
+            Ok(vec![
                 cbor_int!(123),
                 cbor_null!(),
                 cbor_text!("foo"),
@@ -1021,41 +937,41 @@ mod test {
             ])
         );
         assert_eq!(
-            read_array(&cbor_map! {}),
+            extract_array(cbor_map! {}),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
 
     #[test]
-    fn test_read_map() {
+    fn test_extract_map() {
         assert_eq!(
-            read_map(&cbor_int!(123)),
+            extract_map(cbor_int!(123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_map(&cbor_bool!(true)),
+            extract_map(cbor_bool!(true)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_map(&cbor_text!("foo")),
+            extract_map(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_map(&cbor_bytes_lit!(b"bar")),
+            extract_map(cbor_bytes_lit!(b"bar")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_map(&cbor_array![]),
+            extract_map(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_map(&cbor_map! {}), Ok(&BTreeMap::new()));
+        assert_eq!(extract_map(cbor_map! {}), Ok(BTreeMap::new()));
         assert_eq!(
-            read_map(&cbor_map! {
+            extract_map(cbor_map! {
                 1 => cbor_false!(),
                 "foo" => b"bar",
                 b"bin" => -42,
             }),
-            Ok(&[
+            Ok([
                 (cbor_unsigned!(1), cbor_false!()),
                 (cbor_text!("foo"), cbor_bytes_lit!(b"bar")),
                 (cbor_bytes_lit!(b"bin"), cbor_int!(-42)),
@@ -1067,27 +983,27 @@ mod test {
     }
 
     #[test]
-    fn test_read_bool() {
+    fn test_extract_bool() {
         assert_eq!(
-            read_bool(&cbor_int!(123)),
+            extract_bool(cbor_int!(123)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(read_bool(&cbor_bool!(true)), Ok(true));
-        assert_eq!(read_bool(&cbor_bool!(false)), Ok(false));
+        assert_eq!(extract_bool(cbor_bool!(true)), Ok(true));
+        assert_eq!(extract_bool(cbor_bool!(false)), Ok(false));
         assert_eq!(
-            read_bool(&cbor_text!("foo")),
-            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-        );
-        assert_eq!(
-            read_bool(&cbor_bytes_lit!(b"bar")),
+            extract_bool(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_bool(&cbor_array![]),
+            extract_bool(cbor_bytes_lit!(b"bar")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            read_bool(&cbor_map! {}),
+            extract_bool(cbor_array![]),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(
+            extract_bool(cbor_map! {}),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
@@ -1099,7 +1015,7 @@ mod test {
             "name" => "Example",
             "icon" => "example.com/icon.png",
         };
-        let rp_entity = PublicKeyCredentialRpEntity::try_from(&cbor_rp_entity);
+        let rp_entity = PublicKeyCredentialRpEntity::try_from(cbor_rp_entity);
         let expected_rp_entity = PublicKeyCredentialRpEntity {
             rp_id: "example.com".to_string(),
             rp_name: Some("Example".to_string()),
@@ -1116,7 +1032,7 @@ mod test {
             "displayName" => "bar",
             "icon" => "example.com/foo/icon.png",
         };
-        let user_entity = PublicKeyCredentialUserEntity::try_from(&cbor_user_entity);
+        let user_entity = PublicKeyCredentialUserEntity::try_from(cbor_user_entity.clone());
         let expected_user_entity = PublicKeyCredentialUserEntity {
             user_id: vec![0x1D, 0x1D, 0x1D, 0x1D],
             user_name: Some("foo".to_string()),
@@ -1130,30 +1046,30 @@ mod test {
 
     #[test]
     fn test_from_into_public_key_credential_type() {
-        let cbor_credential_type = cbor_text!("public-key");
-        let credential_type = PublicKeyCredentialType::try_from(&cbor_credential_type);
+        let cbor_credential_type: cbor::Value = cbor_text!("public-key");
+        let credential_type = PublicKeyCredentialType::try_from(cbor_credential_type.clone());
         let expected_credential_type = PublicKeyCredentialType::PublicKey;
         assert_eq!(credential_type, Ok(expected_credential_type));
         let created_cbor: cbor::Value = credential_type.unwrap().into();
         assert_eq!(created_cbor, cbor_credential_type);
 
-        let cbor_unknown_type = cbor_text!("unknown-type");
-        let unknown_type = PublicKeyCredentialType::try_from(&cbor_unknown_type);
+        let cbor_unknown_type: cbor::Value = cbor_text!("unknown-type");
+        let unknown_type = PublicKeyCredentialType::try_from(cbor_unknown_type);
         let expected_unknown_type = PublicKeyCredentialType::Unknown;
         assert_eq!(unknown_type, Ok(expected_unknown_type));
     }
 
     #[test]
     fn test_from_into_signature_algorithm() {
-        let cbor_signature_algorithm = cbor_int!(ecdsa::PubKey::ES256_ALGORITHM);
-        let signature_algorithm = SignatureAlgorithm::try_from(&cbor_signature_algorithm);
+        let cbor_signature_algorithm: cbor::Value = cbor_int!(ecdsa::PubKey::ES256_ALGORITHM);
+        let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
         let expected_signature_algorithm = SignatureAlgorithm::ES256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
-        let created_cbor = cbor::Value::from(signature_algorithm.unwrap());
+        let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
         assert_eq!(created_cbor, cbor_signature_algorithm);
 
-        let cbor_unknown_algorithm = cbor_int!(-1);
-        let unknown_algorithm = SignatureAlgorithm::try_from(&cbor_unknown_algorithm);
+        let cbor_unknown_algorithm: cbor::Value = cbor_int!(-1);
+        let unknown_algorithm = SignatureAlgorithm::try_from(cbor_unknown_algorithm);
         let expected_unknown_algorithm = SignatureAlgorithm::Unknown;
         assert_eq!(unknown_algorithm, Ok(expected_unknown_algorithm));
     }
@@ -1176,24 +1092,24 @@ mod test {
 
     #[test]
     fn test_from_into_cred_protection_policy() {
-        let cbor_policy = cbor::Value::from(CredentialProtectionPolicy::UserVerificationOptional);
-        let policy = CredentialProtectionPolicy::try_from(&cbor_policy);
+        let cbor_policy: cbor::Value = CredentialProtectionPolicy::UserVerificationOptional.into();
+        let policy = CredentialProtectionPolicy::try_from(cbor_policy.clone());
         let expected_policy = CredentialProtectionPolicy::UserVerificationOptional;
         assert_eq!(policy, Ok(expected_policy));
-        let created_cbor = cbor::Value::from(policy.unwrap());
+        let created_cbor: cbor::Value = policy.unwrap().into();
         assert_eq!(created_cbor, cbor_policy);
 
-        let cbor_policy_error = cbor_int!(-1);
-        let policy_error = CredentialProtectionPolicy::try_from(&cbor_policy_error);
+        let cbor_policy_error: cbor::Value = cbor_int!(-1);
+        let policy_error = CredentialProtectionPolicy::try_from(cbor_policy_error);
         let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
         assert_eq!(policy_error, expected_error);
     }
 
     #[test]
     fn test_from_into_authenticator_transport() {
-        let cbor_authenticator_transport = cbor_text!("usb");
+        let cbor_authenticator_transport: cbor::Value = cbor_text!("usb");
         let authenticator_transport =
-            AuthenticatorTransport::try_from(&cbor_authenticator_transport);
+            AuthenticatorTransport::try_from(cbor_authenticator_transport.clone());
         let expected_authenticator_transport = AuthenticatorTransport::Usb;
         assert_eq!(
             authenticator_transport,
@@ -1210,7 +1126,7 @@ mod test {
             "alg" => ecdsa::PubKey::ES256_ALGORITHM,
         };
         let credential_parameter =
-            PublicKeyCredentialParameter::try_from(&cbor_credential_parameter);
+            PublicKeyCredentialParameter::try_from(cbor_credential_parameter.clone());
         let expected_credential_parameter = PublicKeyCredentialParameter {
             cred_type: PublicKeyCredentialType::PublicKey,
             alg: SignatureAlgorithm::ES256,
@@ -1228,7 +1144,7 @@ mod test {
             "transports" => cbor_array!["usb"],
         };
         let credential_descriptor =
-            PublicKeyCredentialDescriptor::try_from(&cbor_credential_descriptor);
+            PublicKeyCredentialDescriptor::try_from(cbor_credential_descriptor.clone());
         let expected_credential_descriptor = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
             key_id: vec![0x2D, 0x2D, 0x2D, 0x2D],
@@ -1240,44 +1156,21 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_extensions() {
-        let cbor_extensions = cbor_map! {
-            "the_answer" => 42,
-        };
-        let extensions = Extensions::try_from(&cbor_extensions);
-        let mut expected_extensions = Extensions(BTreeMap::new());
-        expected_extensions
-            .0
-            .insert("the_answer".to_string(), cbor_int!(42));
-        assert_eq!(extensions, Ok(expected_extensions));
-        let created_cbor: cbor::Value = extensions.unwrap().into();
-        assert_eq!(created_cbor, cbor_extensions);
-    }
-
-    #[test]
-    fn test_from_into_get_assertion_hmac_secret_output() {
-        let cbor_output = cbor_bytes![vec![0xC0; 32]];
-        let output = GetAssertionHmacSecretOutput::try_from(&cbor_output);
-        let expected_output = GetAssertionHmacSecretOutput(vec![0xC0; 32]);
-        assert_eq!(output, Ok(expected_output));
-        let created_cbor: cbor::Value = output.unwrap().into();
-        assert_eq!(created_cbor, cbor_output);
-    }
-
-    #[test]
-    fn test_hmac_secret_extension() {
+    fn test_from_make_credential_extensions() {
         let cbor_extensions = cbor_map! {
             "hmac-secret" => true,
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
         };
-        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
-        assert!(extensions.has_make_credential_hmac_secret().unwrap());
-
-        let cbor_extensions = cbor_map! {
-            "hmac-secret" => false,
+        let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
+        let expected_extensions = MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
         };
-        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
-        assert!(!extensions.has_make_credential_hmac_secret().unwrap());
+        assert_eq!(extensions, Ok(expected_extensions));
+    }
 
+    #[test]
+    fn test_from_get_assertion_extensions() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
@@ -1286,29 +1179,19 @@ mod test {
             "hmac-secret" => cbor_map! {
                 1 => cbor::Value::Map(cose_key.0.clone()),
                 2 => vec![0x02; 32],
-                3 => vec![0x03; 32],
+                3 => vec![0x03; 16],
             },
         };
-        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
-        let get_assertion_input = extensions.get_assertion_hmac_secret();
+        let extensions = GetAssertionExtensions::try_from(cbor_extensions);
         let expected_input = GetAssertionHmacSecretInput {
             key_agreement: cose_key,
             salt_enc: vec![0x02; 32],
-            salt_auth: vec![0x03; 32],
+            salt_auth: vec![0x03; 16],
         };
-        assert_eq!(get_assertion_input, Some(Ok(expected_input)));
-    }
-
-    #[test]
-    fn test_cred_protect_extension() {
-        let cbor_extensions = cbor_map! {
-            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+        let expected_extensions = GetAssertionExtensions {
+            hmac_secret: Some(expected_input),
         };
-        let extensions = Extensions::try_from(&cbor_extensions).unwrap();
-        assert_eq!(
-            extensions.make_credential_cred_protect_policy(),
-            Some(Ok(CredentialProtectionPolicy::UserVerificationRequired))
-        );
+        assert_eq!(extensions, Ok(expected_extensions));
     }
 
     #[test]
@@ -1317,7 +1200,7 @@ mod test {
             "rk" => true,
             "uv" => false,
         };
-        let make_options = MakeCredentialOptions::try_from(&cbor_make_options);
+        let make_options = MakeCredentialOptions::try_from(cbor_make_options);
         let expected_make_options = MakeCredentialOptions {
             rk: true,
             uv: false,
@@ -1331,7 +1214,7 @@ mod test {
             "up" => true,
             "uv" => false,
         };
-        let get_assertion = GetAssertionOptions::try_from(&cbor_get_assertion);
+        let get_assertion = GetAssertionOptions::try_from(cbor_get_assertion);
         let expected_get_assertion = GetAssertionOptions {
             up: true,
             uv: false,
@@ -1370,8 +1253,8 @@ mod test {
 
     #[test]
     fn test_from_into_client_pin_sub_command() {
-        let cbor_sub_command = cbor_int!(0x01);
-        let sub_command = ClientPinSubCommand::try_from(&cbor_sub_command);
+        let cbor_sub_command: cbor::Value = cbor_int!(0x01);
+        let sub_command = ClientPinSubCommand::try_from(cbor_sub_command.clone());
         let expected_sub_command = ClientPinSubCommand::GetPinRetries;
         assert_eq!(sub_command, Ok(expected_sub_command));
         let created_cbor: cbor::Value = sub_command.unwrap().into();

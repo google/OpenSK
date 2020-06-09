@@ -430,8 +430,7 @@ class OpenSKInstaller:
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
-      with open(self.args.elf2tab_output, 'a') as f:
-        f.write(output)
+      self.args.elf2tab_output.write(output)
     else:
       self.checked_command(elf2tab_args)
 
@@ -869,6 +868,7 @@ if __name__ == "__main__":
   main_parser.add_argument(
       "--elf2tab-output",
       metavar="FILE",
+      type=argparse.FileType("a"),
       dest="elf2tab_output",
       default=None,
       help=("When set, the output of elf2tab is appended to this file."),

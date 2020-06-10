@@ -2,7 +2,7 @@ diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_
 index 9a8dccfd..ad3e69b8 100644
 --- a/boards/nordic/nrf52840_dongle/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle/src/main.rs
-@@ -144,6 +144,7 @@ pub unsafe fn reset_handler() {
+@@ -152,6 +152,7 @@ pub unsafe fn reset_handler() {
          FAULT_RESPONSE,
          nrf52840::uicr::Regulator0Output::V3_0,
          false,

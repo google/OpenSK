@@ -1,3 +1,31 @@
+diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
+index 040f4d3a..f6e1069c 100644
+--- a/boards/nordic/nrf52840_dongle/src/main.rs
++++ b/boards/nordic/nrf52840_dongle/src/main.rs
+@@ -49,6 +49,11 @@ static mut APP_MEMORY: [u8; 0x3C000] = [0; 0x3C000];
+ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
+     [None, None, None, None, None, None, None, None];
+ 
++static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
++    address: 0xC0000,
++    size: 0x40000,
++}];
++
+ // Static reference to chip for panic dumps
+ static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
+ 
+@@ -63,7 +68,10 @@ pub unsafe fn reset_handler() {
+     // Loads relocations and clears BSS
+     nrf52840::init();
+ 
+-    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
++    let board_kernel = static_init!(
++        kernel::Kernel,
++        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
++    );
+     // GPIOs
+     let gpio = components::gpio::GpioComponent::new(board_kernel).finalize(
+         components::gpio_component_helper!(
 diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
 index 44a6c1cc..2ebc2868 100644
 --- a/boards/nordic/nrf52840dk/src/main.rs

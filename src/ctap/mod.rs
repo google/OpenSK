@@ -1715,6 +1715,18 @@ mod test {
     }
 
     #[test]
+    fn test_process_unknown_command() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        // This command does not exist.
+        let reset_reponse = ctap_state.process_command(&[0xDF], DUMMY_CHANNEL_ID);
+        let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
+        assert_eq!(reset_reponse, expected_response);
+    }
+
+    #[test]
     fn test_encrypt_decrypt_credential() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());

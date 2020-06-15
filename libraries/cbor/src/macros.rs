@@ -44,9 +44,10 @@ use core::iter::Peekable;
 /// # fn main() {
 /// #     let map = alloc::collections::BTreeMap::new();
 /// read_cbor_map! {
-///     map,
-///     x @ 1,
-///     y @ 2,
+///     let {
+///         1 => x,
+///         2 => y,
+///     } = map;
 /// };
 /// # }
 /// ```
@@ -64,7 +65,7 @@ use core::iter::Peekable;
 /// ```
 #[macro_export]
 macro_rules! read_cbor_map {
-    ( $map:expr, $( $variable:ident @ $key:expr, )+ ) => {
+    ( let { $( $key:expr => $variable:ident, )+ } = $map:expr; ) => {
         // A pre-requisite for this algorithm to work is that the keys to extract from the map are
         // sorted.
         #[cfg(test)]
@@ -98,7 +99,6 @@ pub fn read_cbor_map_peek_value(
                 match key.cmp(&needle) {
                     Ordering::Less => {
                         it.next();
-                        continue;
                     }
                     Ordering::Equal => {
                         let value: Value = it.next().unwrap().1;
@@ -634,9 +634,10 @@ mod test {
         };
 
         read_cbor_map! {
-            extract_map(map),
-            x1 @ 1,
-            x2 @ 2,
+            let {
+                1 => x1,
+                2 => x2,
+            } = extract_map(map);
         };
 
         assert_eq!(x1, Some(cbor_unsigned!(10)));
@@ -652,9 +653,10 @@ mod test {
         };
 
         read_cbor_map! {
-            extract_map(map),
-            _x2 @ 2,
-            _x1 @ 1,
+            let {
+                2 => _x2,
+                1 => _x1,
+            } = extract_map(map);
         };
     }
 
@@ -673,9 +675,10 @@ mod test {
         };
 
         read_cbor_map! {
-            extract_map(map),
-            x3 @ 3,
-            x7 @ 7,
+            let {
+                3 => x3,
+                7 => x7,
+            } = extract_map(map);
         };
 
         assert_eq!(x3, Some(cbor_unsigned!(30)));
@@ -691,13 +694,14 @@ mod test {
         };
 
         read_cbor_map! {
-            extract_map(map),
-            x0 @ 0,
-            x1 @ 1,
-            x2 @ 2,
-            x3 @ 3,
-            x4 @ 4,
-            x5 @ 5,
+            let {
+                0 => x0,
+                1 => x1,
+                2 => x2,
+                3 => x3,
+                4 => x4,
+                5 => x5,
+            } = extract_map(map);
         };
 
         assert_eq!(x0, None);

@@ -32,10 +32,11 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            rp_id @ "id",
-            rp_icon @ "icon",
-            rp_name @ "name",
+            let {
+                "id" => rp_id,
+                "icon" => rp_icon,
+                "name" => rp_name,
+            } = extract_map(cbor_value)?;
         };
 
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
@@ -64,11 +65,12 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            user_id @ "id",
-            user_icon @ "icon",
-            user_name @ "name",
-            user_display_name @ "displayName",
+            let {
+                "id" => user_id,
+                "icon" => user_icon,
+                "name" => user_name,
+                "displayName" => user_display_name,
+            } = extract_map(cbor_value)?;
         };
 
         let user_id = extract_byte_string(ok_or_missing(user_id)?)?;
@@ -142,9 +144,10 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            alg @ "alg",
-            cred_type @ "type",
+            let {
+                "alg" => alg,
+                "type" => cred_type,
+            } = extract_map(cbor_value)?;
         };
 
         let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(cred_type)?)?;
@@ -211,10 +214,11 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            key_id @ "id",
-            key_type @ "type",
-            transports @ "transports",
+            let {
+                "id" => key_id,
+                "type" => key_type,
+                "transports" => transports,
+            } = extract_map(cbor_value)?;
         };
 
         let key_type = PublicKeyCredentialType::try_from(ok_or_missing(key_type)?)?;
@@ -260,9 +264,10 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            cred_protect @ "credProtect",
-            hmac_secret @ "hmac-secret",
+            let {
+                "credProtect" => cred_protect,
+                "hmac-secret" => hmac_secret,
+            } = extract_map(cbor_value)?;
         };
 
         let hmac_secret = hmac_secret.map_or(Ok(false), extract_bool)?;
@@ -286,8 +291,9 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            hmac_secret @ "hmac-secret",
+            let {
+                "hmac-secret" => hmac_secret,
+            } = extract_map(cbor_value)?;
         };
 
         let hmac_secret = hmac_secret
@@ -309,10 +315,11 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            cose_key @ 1,
-            salt_enc @ 2,
-            salt_auth @ 3,
+            let {
+                1 => cose_key,
+                2 => salt_enc,
+                3 => salt_auth,
+            } = extract_map(cbor_value)?;
         };
 
         let cose_key = extract_map(ok_or_missing(cose_key)?)?;
@@ -338,10 +345,11 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            rk @ "rk",
-            up @ "up",
-            uv @ "uv",
+            let {
+                "rk" => rk,
+                "up" => up,
+                "uv" => uv,
+            } = extract_map(cbor_value)?;
         };
 
         let rk = match rk {
@@ -372,10 +380,11 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            rk @ "rk",
-            up @ "up",
-            uv @ "uv",
+            let {
+                "rk" => rk,
+                "up" => up,
+                "uv" => uv,
+            } = extract_map(cbor_value)?;
         };
 
         if let Some(options_entry) = rk {
@@ -534,14 +543,15 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
         };
         read_cbor_map! {
-            extract_map(cbor_value)?,
-            credential_id @ CredentialId,
-            private_key @ PrivateKey,
-            rp_id @ RpId,
-            user_handle @ UserHandle,
-            other_ui @ OtherUi,
-            cred_random @ CredRandom,
-            cred_protect_policy @ CredProtectPolicy,
+            let {
+                CredentialId => credential_id,
+                PrivateKey => private_key,
+                RpId => rp_id,
+                UserHandle => user_handle,
+                OtherUi => other_ui,
+                CredRandom => cred_random,
+                CredProtectPolicy => cred_protect_policy,
+            } = extract_map(cbor_value)?;
         };
 
         let credential_id = extract_byte_string(ok_or_missing(credential_id)?)?;
@@ -634,12 +644,13 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
 
     fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
         read_cbor_map! {
-            cose_key.0,
-            key_type @ 1,
-            algorithm @ 3,
-            curve @ -1,
-            x_bytes @ -2,
-            y_bytes @ -3,
+            let {
+                1 => key_type,
+                3 => algorithm,
+                -1 => curve,
+                -2 => x_bytes,
+                -3 => y_bytes,
+            } = cose_key.0;
         };
 
         let key_type = extract_integer(ok_or_missing(key_type)?)?;

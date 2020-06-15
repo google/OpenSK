@@ -46,7 +46,7 @@ use core::iter::Peekable;
 /// read_cbor_map! {
 ///     let {
 ///         1 => x,
-///         2 => y,
+///         "key" => y,
 ///     } = map;
 /// };
 /// # }
@@ -59,8 +59,9 @@ use core::iter::Peekable;
 /// #
 /// # fn main() {
 /// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
-/// let x: Option<cbor::Value> = map.remove(&cbor_unsigned!(1));
-/// let y: Option<cbor::Value> = map.remove(&cbor_unsigned!(2));
+/// use cbor::values::IntoCborKey;
+/// let x: Option<cbor::Value> = map.remove(&1.into_cbor_key());
+/// let y: Option<cbor::Value> = map.remove(&"key".into_cbor_key());
 /// # }
 /// ```
 #[macro_export]

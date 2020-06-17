@@ -3,3 +3,8 @@ Cargo.lock
 
 # Prevent people from commiting sensitive files.
 crypto_data/
+
+# Temporary files.
+reproducible/binaries.sha256sum
+reproducible/elf2tab.txt
+reproducible/reproduced.tar

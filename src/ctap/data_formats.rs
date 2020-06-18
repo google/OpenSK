@@ -176,11 +176,12 @@ pub enum AuthenticatorTransport {
 
 impl From<AuthenticatorTransport> for cbor::Value {
     fn from(transport: AuthenticatorTransport) -> Self {
+        use AuthenticatorTransport::*;
         match transport {
-            AuthenticatorTransport::Usb => "usb",
-            AuthenticatorTransport::Nfc => "nfc",
-            AuthenticatorTransport::Ble => "ble",
-            AuthenticatorTransport::Internal => "internal",
+            Usb => "usb",
+            Nfc => "nfc",
+            Ble => "ble",
+            Internal => "internal",
         }
         .into()
     }
@@ -190,12 +191,13 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        use AuthenticatorTransport::*;
         let transport_string = extract_text_string(cbor_value)?;
         match &transport_string[..] {
-            "usb" => Ok(AuthenticatorTransport::Usb),
-            "nfc" => Ok(AuthenticatorTransport::Nfc),
-            "ble" => Ok(AuthenticatorTransport::Ble),
-            "internal" => Ok(AuthenticatorTransport::Internal),
+            "usb" => Ok(Usb),
+            "nfc" => Ok(Nfc),
+            "ble" => Ok(Ble),
+            "internal" => Ok(Internal),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
     }
@@ -469,10 +471,11 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        use CredentialProtectionPolicy::*;
         match extract_integer(cbor_value)? {
-            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
-            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
-            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
+            0x01 => Ok(UserVerificationOptional),
+            0x02 => Ok(UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(UserVerificationRequired),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
     }
@@ -683,27 +686,18 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
 
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub enum ClientPinSubCommand {
-    GetPinRetries,
-    GetKeyAgreement,
-    SetPin,
-    ChangePin,
-    GetPinUvAuthTokenUsingPin,
-    GetPinUvAuthTokenUsingUv,
-    GetUvRetries,
+    GetPinRetries = 0x01,
+    GetKeyAgreement = 0x02,
+    SetPin = 0x03,
+    ChangePin = 0x04,
+    GetPinUvAuthTokenUsingPin = 0x05,
+    GetPinUvAuthTokenUsingUv = 0x06,
+    GetUvRetries = 0x07,
 }
 
 impl From<ClientPinSubCommand> for cbor::Value {
     fn from(subcommand: ClientPinSubCommand) -> Self {
-        match subcommand {
-            ClientPinSubCommand::GetPinRetries => 0x01,
-            ClientPinSubCommand::GetKeyAgreement => 0x02,
-            ClientPinSubCommand::SetPin => 0x03,
-            ClientPinSubCommand::ChangePin => 0x04,
-            ClientPinSubCommand::GetPinUvAuthTokenUsingPin => 0x05,
-            ClientPinSubCommand::GetPinUvAuthTokenUsingUv => 0x06,
-            ClientPinSubCommand::GetUvRetries => 0x07,
-        }
-        .into()
+        (subcommand as u64).into()
     }
 }
 
@@ -711,16 +705,19 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        use ClientPinSubCommand::*;
         let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
-            0x01 => Ok(ClientPinSubCommand::GetPinRetries),
-            0x02 => Ok(ClientPinSubCommand::GetKeyAgreement),
-            0x03 => Ok(ClientPinSubCommand::SetPin),
-            0x04 => Ok(ClientPinSubCommand::ChangePin),
-            0x05 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPin),
-            0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUv),
-            0x07 => Ok(ClientPinSubCommand::GetUvRetries),
-            // TODO(kaczmarczyck) what is the correct status code for this error?
+            0x01 => Ok(GetPinRetries),
+            0x02 => Ok(GetKeyAgreement),
+            0x03 => Ok(SetPin),
+            0x04 => Ok(ChangePin),
+            0x05 => Ok(GetPinUvAuthTokenUsingPin),
+            0x06 => Ok(GetPinUvAuthTokenUsingUv),
+            0x07 => Ok(GetUvRetries),
+            #[cfg(feature = "with_ctap2_1")]
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+            #[cfg(not(feature = "with_ctap2_1"))]
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
         }
     }

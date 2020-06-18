@@ -32,6 +32,10 @@ pub enum Ctap2StatusCode {
     CTAP2_ERR_MISSING_PARAMETER = 0x14,
     CTAP2_ERR_LIMIT_EXCEEDED = 0x15,
     CTAP2_ERR_UNSUPPORTED_EXTENSION = 0x16,
+    #[cfg(feature = "with_ctap2_1")]
+    CTAP2_ERR_FP_DATABASE_FULL = 0x17,
+    #[cfg(feature = "with_ctap2_1")]
+    CTAP2_ERR_PC_STORAGE_FULL = 0x18,
     CTAP2_ERR_CREDENTIAL_EXCLUDED = 0x19,
     CTAP2_ERR_PROCESSING = 0x21,
     CTAP2_ERR_INVALID_CREDENTIAL = 0x22,
@@ -60,6 +64,10 @@ pub enum Ctap2StatusCode {
     CTAP2_ERR_ACTION_TIMEOUT = 0x3A,
     CTAP2_ERR_UP_REQUIRED = 0x3B,
     CTAP2_ERR_UV_BLOCKED = 0x3C,
+    #[cfg(feature = "with_ctap2_1")]
+    CTAP2_ERR_INTEGRITY_FAILURE = 0x3D,
+    #[cfg(feature = "with_ctap2_1")]
+    CTAP2_ERR_INVALID_SUBCOMMAND = 0x3E,
     CTAP1_ERR_OTHER = 0x7F,
     CTAP2_ERR_SPEC_LAST = 0xDF,
     CTAP2_ERR_EXTENSION_FIRST = 0xE0,

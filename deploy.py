@@ -428,7 +428,11 @@ class OpenSKInstaller:
         "--stack={}".format(STACK_SIZE), "--app-heap={}".format(APP_HEAP_SIZE),
         "--kernel-heap=1024", "--protected-region-size=64"
     ])
-    self.checked_command(elf2tab_args)
+    if self.args.elf2tab_output:
+      output = self.checked_command_output(elf2tab_args)
+      self.args.elf2tab_output.write(output)
+    else:
+      self.checked_command(elf2tab_args)
 
   def install_tab_file(self, tab_filename):
     assert self.args.application
@@ -859,6 +863,15 @@ if __name__ == "__main__":
       dest="features",
       help=("Compiles and installs the OpenSK application without persistent "
             "storage (i.e. unplugging the key will reset the key)."),
+  )
+
+  main_parser.add_argument(
+      "--elf2tab-output",
+      metavar="FILE",
+      type=argparse.FileType("a"),
+      dest="elf2tab_output",
+      default=None,
+      help=("When set, the output of elf2tab is appended to this file."),
   )
 
   apps_group = main_parser.add_mutually_exclusive_group(required=True)

@@ -16,6 +16,7 @@
 set -ex
 
 rm -f reproducible/binaries.sha256sum
+rm -f reproducible/elf2tab.txt
 
 echo "Creating reproducible/reproduced.tar"
 touch empty_file

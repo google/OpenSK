@@ -278,6 +278,14 @@ pub struct AuthenticatorClientPinParameters {
     pub pin_auth: Option<Vec<u8>>,
     pub new_pin_enc: Option<Vec<u8>>,
     pub pin_hash_enc: Option<Vec<u8>>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub min_pin_length: Option<u64>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub min_pin_length_rp_ids: Option<Vec<String>>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub permissions: Option<u8>,
+    #[cfg(feature = "with_ctap2_1")]
+    pub permissions_rp_id: Option<String>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
@@ -305,6 +313,39 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;
 
+        // TODO(kaczmarczyck) merge with new map destructuring (and use hex!)
+        #[cfg(feature = "with_ctap2_1")]
+        let min_pin_length = param_map
+            .remove(&cbor_unsigned!(7))
+            .map(extract_unsigned)
+            .transpose()?;
+
+        #[cfg(feature = "with_ctap2_1")]
+        let min_pin_length_rp_ids = match param_map.remove(&cbor_unsigned!(8)) {
+            Some(entry) => Some(
+                extract_array(entry)?
+                    .into_iter()
+                    .map(extract_text_string)
+                    .collect::<Result<Vec<String>, Ctap2StatusCode>>()?,
+            ),
+            None => None,
+        };
+
+        #[cfg(feature = "with_ctap2_1")]
+        // We expect a bit field of 8 bits, and drop everything else.
+        // This means we ignore extensions in future versions.
+        let permissions = param_map
+            .remove(&cbor_unsigned!(9))
+            .map(extract_unsigned)
+            .transpose()?
+            .map(|p| p as u8);
+
+        #[cfg(feature = "with_ctap2_1")]
+        let permissions_rp_id = param_map
+            .remove(&cbor_unsigned!(10))
+            .map(extract_text_string)
+            .transpose()?;
+
         Ok(AuthenticatorClientPinParameters {
             pin_protocol,
             sub_command,
@@ -312,6 +353,14 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             pin_auth,
             new_pin_enc,
             pin_hash_enc,
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length,
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length_rp_ids,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions_rp_id,
         })
     }
 }
@@ -434,6 +483,9 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
+        // TODO(kaczmarczyck) inline the #cfg when the ICE is resolved:
+        // https://github.com/rust-lang/rust/issues/73663
+        #[cfg(not(feature = "with_ctap2_1"))]
         let cbor_value = cbor_map! {
             1 => 1,
             2 => ClientPinSubCommand::GetPinRetries,
@@ -441,6 +493,19 @@ mod test {
             4 => vec! [0xBB],
             5 => vec! [0xCC],
             6 => vec! [0xDD],
+        };
+        #[cfg(feature = "with_ctap2_1")]
+        let cbor_value = cbor_map! {
+            1 => 1,
+            2 => ClientPinSubCommand::GetPinRetries,
+            3 => cbor_map!{},
+            4 => vec! [0xBB],
+            5 => vec! [0xCC],
+            6 => vec! [0xDD],
+            7 => 4,
+            8 => cbor_array!["example.com"],
+            9 => 0x03,
+            10 => "example.com",
         };
         let returned_pin_protocol_parameters =
             AuthenticatorClientPinParameters::try_from(cbor_value).unwrap();
@@ -452,6 +517,14 @@ mod test {
             pin_auth: Some(vec![0xBB]),
             new_pin_enc: Some(vec![0xCC]),
             pin_hash_enc: Some(vec![0xDD]),
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length: Some(4),
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
+            #[cfg(feature = "with_ctap2_1")]
+            permissions: Some(0x03),
+            #[cfg(feature = "with_ctap2_1")]
+            permissions_rp_id: Some("example.com".to_string()),
         };
 
         assert_eq!(

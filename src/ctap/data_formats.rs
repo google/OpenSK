@@ -690,9 +690,15 @@ pub enum ClientPinSubCommand {
     GetKeyAgreement = 0x02,
     SetPin = 0x03,
     ChangePin = 0x04,
-    GetPinUvAuthTokenUsingPin = 0x05,
-    GetPinUvAuthTokenUsingUv = 0x06,
+    GetPinToken = 0x05,
+    #[cfg(feature = "with_ctap2_1")]
+    GetPinUvAuthTokenUsingUvWithPermissions = 0x06,
+    #[cfg(feature = "with_ctap2_1")]
     GetUvRetries = 0x07,
+    #[cfg(feature = "with_ctap2_1")]
+    SetMinPinLength = 0x08,
+    #[cfg(feature = "with_ctap2_1")]
+    GetPinUvAuthTokenUsingPinWithPermissions = 0x09,
 }
 
 impl From<ClientPinSubCommand> for cbor::Value {
@@ -712,9 +718,15 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
             0x02 => Ok(GetKeyAgreement),
             0x03 => Ok(SetPin),
             0x04 => Ok(ChangePin),
-            0x05 => Ok(GetPinUvAuthTokenUsingPin),
-            0x06 => Ok(GetPinUvAuthTokenUsingUv),
+            0x05 => Ok(GetPinToken),
+            #[cfg(feature = "with_ctap2_1")]
+            0x06 => Ok(GetPinUvAuthTokenUsingUvWithPermissions),
+            #[cfg(feature = "with_ctap2_1")]
             0x07 => Ok(GetUvRetries),
+            #[cfg(feature = "with_ctap2_1")]
+            0x08 => Ok(SetMinPinLength),
+            #[cfg(feature = "with_ctap2_1")]
+            0x09 => Ok(GetPinUvAuthTokenUsingPinWithPermissions),
             #[cfg(feature = "with_ctap2_1")]
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
             #[cfg(not(feature = "with_ctap2_1"))]

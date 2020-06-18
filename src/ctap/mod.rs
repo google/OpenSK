@@ -849,6 +849,7 @@ where
             }
         }
         if pin.len() < 4 || pin.len() == PIN_PADDED_LENGTH {
+            // TODO(kaczmarczyck) check 4 code point minimum instead
             return false;
         }
         let mut pin_hash = [0; 16];
@@ -973,7 +974,7 @@ where
         Ok(())
     }
 
-    fn process_get_pin_uv_auth_token_using_pin(
+    fn process_get_pin_token(
         &mut self,
         key_agreement: CoseKey,
         pin_hash_enc: Vec<u8>,
@@ -1007,7 +1008,8 @@ where
         })
     }
 
-    fn process_get_pin_uv_auth_token_using_uv(
+    #[cfg(feature = "with_ctap2_1")]
+    fn process_get_pin_uv_auth_token_using_uv_with_permissions(
         &self,
         _: CoseKey,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
@@ -1019,8 +1021,40 @@ where
         })
     }
 
+    #[cfg(feature = "with_ctap2_1")]
     fn process_get_uv_retries(&self) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         // User verifications is only supported through PIN currently.
+        Ok(AuthenticatorClientPinResponse {
+            key_agreement: None,
+            pin_token: None,
+            retries: Some(0),
+        })
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    fn process_set_min_pin_length(
+        &mut self,
+        _min_pin_length: u64,
+        _min_pin_length_rp_ids: Vec<String>,
+        _pin_auth: Vec<u8>,
+    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+        // TODO
+        Ok(AuthenticatorClientPinResponse {
+            key_agreement: None,
+            pin_token: None,
+            retries: Some(0),
+        })
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    fn process_get_pin_uv_auth_token_using_pin_with_permissions(
+        &mut self,
+        _key_agreement: CoseKey,
+        _pin_hash_enc: Vec<u8>,
+        _permissions: u8,
+        _permissions_rp_id: String,
+    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+        // TODO
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_token: None,
@@ -1039,6 +1073,14 @@ where
             pin_auth,
             new_pin_enc,
             pin_hash_enc,
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length,
+            #[cfg(feature = "with_ctap2_1")]
+            min_pin_length_rp_ids,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions_rp_id,
         } = client_pin_params;
 
         if pin_protocol != 1 {
@@ -1065,18 +1107,37 @@ where
                 )?;
                 None
             }
-            ClientPinSubCommand::GetPinUvAuthTokenUsingPin => {
-                Some(self.process_get_pin_uv_auth_token_using_pin(
+            ClientPinSubCommand::GetPinToken => Some(self.process_get_pin_token(
+                key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                pin_hash_enc.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+            )?),
+            #[cfg(feature = "with_ctap2_1")]
+            ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions => Some(
+                self.process_get_pin_uv_auth_token_using_uv_with_permissions(
+                    key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?,
+            ),
+            #[cfg(feature = "with_ctap2_1")]
+            ClientPinSubCommand::GetUvRetries => Some(self.process_get_uv_retries()?),
+            #[cfg(feature = "with_ctap2_1")]
+            ClientPinSubCommand::SetMinPinLength => {
+                self.process_set_min_pin_length(
+                    min_pin_length.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                    min_pin_length_rp_ids.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                    pin_auth.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?;
+                None
+            }
+            #[cfg(feature = "with_ctap2_1")]
+            ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => {
+                self.process_get_pin_uv_auth_token_using_pin_with_permissions(
                     key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                     pin_hash_enc.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?)
+                    permissions.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                    permissions_rp_id.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?;
+                None
             }
-            ClientPinSubCommand::GetPinUvAuthTokenUsingUv => {
-                Some(self.process_get_pin_uv_auth_token_using_uv(
-                    key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?)
-            }
-            ClientPinSubCommand::GetUvRetries => Some(self.process_get_uv_retries()?),
         };
         Ok(ResponseData::AuthenticatorClientPin(response))
     }

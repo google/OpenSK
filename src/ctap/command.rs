@@ -124,7 +124,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => client_data_hash,
                 2 => rp,
@@ -207,7 +207,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => rp_id,
                 2 => client_data_hash,
@@ -277,7 +277,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => pin_protocol,
                 2 => sub_command,

@@ -31,7 +31,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "id" => rp_id,
                 "icon" => rp_icon,
@@ -64,7 +64,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "id" => user_id,
                 "icon" => user_icon,
@@ -143,7 +143,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "alg" => alg,
                 "type" => cred_type,
@@ -213,7 +213,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "id" => key_id,
                 "type" => key_type,
@@ -263,7 +263,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "credProtect" => cred_protect,
                 "hmac-secret" => hmac_secret,
@@ -290,7 +290,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "hmac-secret" => hmac_secret,
             } = extract_map(cbor_value)?;
@@ -314,7 +314,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => cose_key,
                 2 => salt_enc,
@@ -344,7 +344,7 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "rk" => rk,
                 "up" => up,
@@ -379,7 +379,7 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 "rk" => rk,
                 "up" => up,
@@ -542,7 +542,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         use PublicKeyCredentialSourceField::{
             CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
         };
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 CredentialId => credential_id,
                 PrivateKey => private_key,
@@ -643,7 +643,7 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     type Error = Ctap2StatusCode;
 
     fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => key_type,
                 3 => algorithm,

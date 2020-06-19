@@ -24,16 +24,16 @@ use core::iter::Peekable;
 /// that assigns the corresponding values to new variables using the given identifiers. Each of
 /// these variables has type `Option<Value>`, to account for the case where keys aren't found.
 ///
-/// **Important:** Keys passed to the `read_cbor_map!` macro **must be sorted** in increasing order.
-/// If not, the algorithm can yield incorrect results, such a assigning `None` to a variable even if
-/// the corresponding key existed in the map. **No runtime checks** are made for this in the
-/// `read_cbor_map!` macro, in order to avoid overhead at runtime. However, assertions that keys are
-/// sorted are added in `cfg(test)` mode, so that unit tests can verify ahead of time that the keys
-/// are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can change at
-/// runtime.
+/// **Important:** Keys passed to the `destructure_cbor_map!` macro **must be sorted** in increasing
+/// order. If not, the algorithm can yield incorrect results, such a assigning `None` to a variable
+/// even if the corresponding key existed in the map. **No runtime checks** are made for this in the
+/// `destructure_cbor_map!` macro, in order to avoid overhead at runtime. However, assertions that
+/// keys are sorted are added in `cfg(test)` mode, so that unit tests can verify ahead of time that
+/// the keys are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can
+/// change at runtime.
 ///
 /// Semantically, provided that the keys are sorted as specified above, the following two snippets
-/// of code are equivalent, but the `read_cbor_map!` version is more optimized, as it doesn't
+/// of code are equivalent, but the `destructure_cbor_map!` version is more optimized, as it doesn't
 /// re-balance the `BTreeMap` for each key, contrary to the `BTreeMap::remove` operations.
 ///
 /// ```rust
@@ -43,7 +43,7 @@ use core::iter::Peekable;
 /// #
 /// # fn main() {
 /// #     let map = alloc::collections::BTreeMap::new();
-/// read_cbor_map! {
+/// destructure_cbor_map! {
 ///     let {
 ///         1 => x,
 ///         "key" => y,
@@ -65,7 +65,7 @@ use core::iter::Peekable;
 /// # }
 /// ```
 #[macro_export]
-macro_rules! read_cbor_map {
+macro_rules! destructure_cbor_map {
     ( let { $( $key:expr => $variable:ident, )+ } = $map:expr; ) => {
         // A pre-requisite for this algorithm to work is that the keys to extract from the map are
         // sorted.
@@ -73,22 +73,22 @@ macro_rules! read_cbor_map {
         test_ordered_keys!($( $key, )+);
 
         use $crate::values::{IntoCborKey, Value};
-        use $crate::macros::read_cbor_map_peek_value;
+        use $crate::macros::destructure_cbor_map_peek_value;
 
         let mut it = $map.into_iter().peekable();
         $(
-        let $variable: Option<Value> = read_cbor_map_peek_value(&mut it, $key.into_cbor_key());
+        let $variable: Option<Value> = destructure_cbor_map_peek_value(&mut it, $key.into_cbor_key());
         )+
     };
 }
 
-/// This function is an internal detail of the `read_cbor_map!` macro, but has public visibility so
-/// that users of the macro can use it.
+/// This function is an internal detail of the `destructure_cbor_map!` macro, but has public
+/// visibility so that users of the macro can use it.
 ///
 /// The logic is separated into its own function to reduce binary size, as otherwise the logic
 /// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
 /// CTAP2 application of OpenSK.
-pub fn read_cbor_map_peek_value(
+pub fn destructure_cbor_map_peek_value(
     it: &mut Peekable<btree_map::IntoIter<KeyType, Value>>,
     needle: KeyType,
 ) -> Option<Value> {
@@ -125,7 +125,7 @@ macro_rules! test_ordered_keys {
             let k2: KeyType = $key2.into_cbor_key();
             assert!(
                 k1 < k2,
-                "{:?} < {:?} failed. The read_cbor_map! macro requires keys in sorted order.",
+                "{:?} < {:?} failed. The destructure_cbor_map! macro requires keys in sorted order.",
                 k1,
                 k2,
             );
@@ -628,13 +628,13 @@ mod test {
     }
 
     #[test]
-    fn test_read_cbor_map_simple() {
+    fn test_destructure_cbor_map_simple() {
         let map = cbor_map! {
             1 => 10,
             2 => 20,
         };
 
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 1 => x1,
                 2 => x2,
@@ -647,13 +647,13 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn test_read_cbor_map_unordered() {
+    fn test_destructure_cbor_map_unordered() {
         let map = cbor_map! {
             1 => 10,
             2 => 20,
         };
 
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 2 => _x2,
                 1 => _x1,
@@ -662,7 +662,7 @@ mod test {
     }
 
     #[test]
-    fn test_read_cbor_map_partial() {
+    fn test_destructure_cbor_map_partial() {
         let map = cbor_map! {
             1 => 10,
             2 => 20,
@@ -675,7 +675,7 @@ mod test {
             9 => 90,
         };
 
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 3 => x3,
                 7 => x7,
@@ -687,14 +687,14 @@ mod test {
     }
 
     #[test]
-    fn test_read_cbor_map_missing() {
+    fn test_destructure_cbor_map_missing() {
         let map = cbor_map! {
             1 => 10,
             3 => 30,
             4 => 40,
         };
 
-        read_cbor_map! {
+        destructure_cbor_map! {
             let {
                 0 => x0,
                 1 => x1,

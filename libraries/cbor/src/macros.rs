@@ -68,13 +68,22 @@ use core::iter::Peekable;
 macro_rules! destructure_cbor_map {
     ( let { $( $key:expr => $variable:ident, )+ } = $map:expr; ) => {
         // A pre-requisite for this algorithm to work is that the keys to extract from the map are
-        // sorted.
+        // sorted - the behavior is unspecified if the keys are not sorted.
+        // Therefore, in test mode we add assertions that the keys are indeed sorted.
         #[cfg(test)]
-        test_ordered_keys!($( $key, )+);
+        assert_sorted_keys!($( $key, )+);
 
         use $crate::values::{IntoCborKey, Value};
         use $crate::macros::destructure_cbor_map_peek_value;
 
+        // This algorithm first converts the map into a peekable iterator - whose items are sorted
+        // in strictly increasing order of keys. Then, the repeated calls to the "peek value"
+        // helper function will consume this iterator and yield values (or `None`) when reaching
+        // the keys to extract.
+        //
+        // This is where the pre-requisite that keys to extract are sorted is important: the
+        // algorithm does a single linear scan over the iterator and therefore keys to extract have
+        // to come in the same order (i.e. sorted).
         let mut it = $map.into_iter().peekable();
         $(
         let $variable: Option<Value> = destructure_cbor_map_peek_value(&mut it, $key.into_cbor_key());
@@ -84,6 +93,11 @@ macro_rules! destructure_cbor_map {
 
 /// This function is an internal detail of the `destructure_cbor_map!` macro, but has public
 /// visibility so that users of the macro can use it.
+///
+/// Given a peekable iterator of key-value pairs sorted in strictly increasing key order and a
+/// needle key, this function consumes all items whose key compares less than or equal to the
+/// needle, and returns `Some(value)` if the needle was present as the key in the iterator and
+/// `None` otherwise.
 ///
 /// The logic is separated into its own function to reduce binary size, as otherwise the logic
 /// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
@@ -113,7 +127,7 @@ pub fn destructure_cbor_map_peek_value(
 }
 
 #[macro_export]
-macro_rules! test_ordered_keys {
+macro_rules! assert_sorted_keys {
     // Last key
     ( $key:expr, ) => {
     };
@@ -130,7 +144,7 @@ macro_rules! test_ordered_keys {
                 k2,
             );
         }
-        test_ordered_keys!($key2, $( $keys, )*);
+        assert_sorted_keys!($key2, $( $keys, )*);
     };
 }
 
@@ -647,13 +661,15 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn test_destructure_cbor_map_unordered() {
+    fn test_destructure_cbor_map_unsorted() {
         let map = cbor_map! {
             1 => 10,
             2 => 20,
         };
 
         destructure_cbor_map! {
+            // The keys are not sorted here, which violates the precondition of
+            // destructure_cbor_map. An assertion should catch that and make the test panic.
             let {
                 2 => _x2,
                 1 => _x1,

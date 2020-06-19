@@ -523,7 +523,7 @@ impl From<StoreError> for Ctap2StatusCode {
     }
 }
 
-fn should_reset<'a>(entry: &StoreEntry<'a>) -> bool {
+fn should_reset(entry: &StoreEntry<'_>) -> bool {
     match entry.tag {
         ATTESTATION_PRIVATE_KEY | ATTESTATION_CERTIFICATE | AAGUID => false,
         _ => true,

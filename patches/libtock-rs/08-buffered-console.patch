@@ -6,7 +6,7 @@ index ecd7ad1..ae1b826 100644
      pub const SHARE_BUFFER: usize = 1;
  }
  
-+const BUFFER_SIZE: usize = 64;
++const BUFFER_SIZE: usize = 1024;
 +
  pub struct Console {
 -    allow_buffer: [u8; 64],

@@ -38,7 +38,6 @@ use self::data_formats::{
     SignatureAlgorithm,
 };
 use self::hid::ChannelID;
-use self::key_material::{AAGUID, ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
 use self::response::{
     AuthenticatorClientPinResponse, AuthenticatorGetAssertionResponse,
     AuthenticatorGetInfoResponse, AuthenticatorMakeCredentialResponse, ResponseData,
@@ -529,7 +528,7 @@ where
         };
 
         let mut auth_data = self.generate_auth_data(&rp_id_hash, flags);
-        auth_data.extend(AAGUID);
+        auth_data.extend(self.persistent_store.aaguid()?);
         // The length is fixed to 0x20 or 0x70 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG);
@@ -554,18 +553,25 @@ where
 
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
-        let (signature, x5c) = if USE_BATCH_ATTESTATION {
-            let attestation_key =
-                crypto::ecdsa::SecKey::from_bytes(ATTESTATION_PRIVATE_KEY).unwrap();
-            (
-                attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
-                Some(vec![ATTESTATION_CERTIFICATE.to_vec()]),
-            )
-        } else {
-            (
+        // We currently use the presence of the attestation private key in the persistent storage to
+        // decide whether batch attestation is needed.
+        let (signature, x5c) = match self.persistent_store.attestation_private_key()? {
+            Some(attestation_private_key) => {
+                let attestation_key =
+                    crypto::ecdsa::SecKey::from_bytes(attestation_private_key).unwrap();
+                let attestation_certificate = self
+                    .persistent_store
+                    .attestation_certificate()?
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                (
+                    attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
+                    Some(vec![attestation_certificate]),
+                )
+            }
+            None => (
                 sk.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
                 None,
-            )
+            ),
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,
@@ -792,7 +798,7 @@ where
                     String::from(FIDO2_VERSION_STRING),
                 ],
                 extensions: Some(vec![String::from("hmac-secret")]),
-                aaguid: *AAGUID,
+                aaguid: *self.persistent_store.aaguid()?,
                 options: Some(options_map),
                 max_msg_size: Some(1024),
                 pin_protocols: Some(vec![
@@ -1148,7 +1154,7 @@ mod test {
             0x02, 0x81, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
             0x03, 0x50,
         ]);
-        expected_response.extend(AAGUID);
+        expected_response.extend(ctap_state.persistent_store.aaguid().unwrap());
         expected_response.extend(&[
             0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
             0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
@@ -1247,7 +1253,7 @@ mod test {
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00, 0x00,
                 ];
-                expected_auth_data.extend(AAGUID);
+                expected_auth_data.extend(ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, 0x20]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],
@@ -1284,7 +1290,7 @@ mod test {
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00, 0x00,
                 ];
-                expected_auth_data.extend(AAGUID);
+                expected_auth_data.extend(ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, ENCRYPTED_CREDENTIAL_ID_SIZE as u8]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],
@@ -1427,7 +1433,7 @@ mod test {
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00, 0x00,
                 ];
-                expected_auth_data.extend(AAGUID);
+                expected_auth_data.extend(ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, 0x20]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],

@@ -31,6 +31,8 @@ pub enum ResponseData {
     AuthenticatorGetInfo(AuthenticatorGetInfoResponse),
     AuthenticatorClientPin(Option<AuthenticatorClientPinResponse>),
     AuthenticatorReset,
+    #[cfg(feature = "with_ctap2_1")]
+    AuthenticatorSelection,
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -43,6 +45,8 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorClientPin(Some(data)) => Some(data.into()),
             ResponseData::AuthenticatorClientPin(None) => None,
             ResponseData::AuthenticatorReset => None,
+            #[cfg(feature = "with_ctap2_1")]
+            ResponseData::AuthenticatorSelection => None,
         }
     }
 }
@@ -370,6 +374,13 @@ mod test {
     #[test]
     fn test_reset_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorReset.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_selection_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
         assert_eq!(response_cbor, None);
     }
 }

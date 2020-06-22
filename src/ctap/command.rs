@@ -37,6 +37,8 @@ pub enum Command {
     AuthenticatorClientPin(AuthenticatorClientPinParameters),
     AuthenticatorReset,
     AuthenticatorGetNextAssertion,
+    #[cfg(feature = "with_ctap2_1")]
+    AuthenticatorSelection,
     // TODO(kaczmarczyck) implement FIDO 2.1 commands (see below consts)
 }
 
@@ -100,6 +102,11 @@ impl Command {
             Command::AUTHENTICATOR_GET_NEXT_ASSERTION => {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorGetNextAssertion)
+            }
+            #[cfg(feature = "with_ctap2_1")]
+            Command::AUTHENTICATOR_SELECTION => {
+                // Parameters are ignored.
+                Ok(Command::AuthenticatorSelection)
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
@@ -473,5 +480,13 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_GET_NEXT_ASSERTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorGetNextAssertion));
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_deserialize_selection() {
+        let cbor_bytes = [Command::AUTHENTICATOR_SELECTION];
+        let command = Command::deserialize(&cbor_bytes);
+        assert_eq!(command, Ok(Command::AuthenticatorSelection));
     }
 }

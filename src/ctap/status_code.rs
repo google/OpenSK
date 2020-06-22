@@ -67,5 +67,11 @@ pub enum Ctap2StatusCode {
     // CTAP2_ERR_VENDOR_FIRST = 0xF0,
     CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG = 0xF0,
     CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR = 0xF1,
+
+    /// An internal invariant is broken.
+    ///
+    /// This type of error is unexpected and the current state is undefined.
+    CTAP2_ERR_VENDOR_INTERNAL_ERROR = 0xF2,
+
     CTAP2_ERR_VENDOR_LAST = 0xFF,
 }

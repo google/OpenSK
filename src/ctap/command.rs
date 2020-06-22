@@ -136,7 +136,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
                 8 => pin_uv_auth_param,
                 9 => pin_uv_auth_protocol,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let client_data_hash = extract_byte_string(ok_or_missing(client_data_hash)?)?;
         let rp = PublicKeyCredentialRpEntity::try_from(ok_or_missing(rp)?)?;
@@ -217,7 +217,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
                 6 => pin_uv_auth_param,
                 7 => pin_uv_auth_protocol,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
         let client_data_hash = extract_byte_string(ok_or_missing(client_data_hash)?)?;
@@ -286,7 +286,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
                 5 => new_pin_enc,
                 6 => pin_hash_enc,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let pin_protocol = extract_unsigned(ok_or_missing(pin_protocol)?)?;
         let sub_command = ClientPinSubCommand::try_from(ok_or_missing(sub_command)?)?;

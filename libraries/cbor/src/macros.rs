@@ -48,7 +48,7 @@ use core::iter::Peekable;
 ///         1 => x,
 ///         "key" => y,
 ///     } = map;
-/// };
+/// }
 /// # }
 /// ```
 ///
@@ -653,7 +653,7 @@ mod test {
                 1 => x1,
                 2 => x2,
             } = extract_map(map);
-        };
+        }
 
         assert_eq!(x1, Some(cbor_unsigned!(10)));
         assert_eq!(x2, Some(cbor_unsigned!(20)));
@@ -674,7 +674,7 @@ mod test {
                 2 => _x2,
                 1 => _x1,
             } = extract_map(map);
-        };
+        }
     }
 
     #[test]
@@ -696,7 +696,7 @@ mod test {
                 3 => x3,
                 7 => x7,
             } = extract_map(map);
-        };
+        }
 
         assert_eq!(x3, Some(cbor_unsigned!(30)));
         assert_eq!(x7, Some(cbor_unsigned!(70)));
@@ -719,7 +719,7 @@ mod test {
                 4 => x4,
                 5 => x5,
             } = extract_map(map);
-        };
+        }
 
         assert_eq!(x0, None);
         assert_eq!(x1, Some(cbor_unsigned!(10)));

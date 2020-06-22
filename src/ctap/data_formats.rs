@@ -37,7 +37,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
                 "icon" => rp_icon,
                 "name" => rp_name,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
         let rp_name = rp_name.map(extract_text_string).transpose()?;
@@ -71,7 +71,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
                 "name" => user_name,
                 "displayName" => user_display_name,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let user_id = extract_byte_string(ok_or_missing(user_id)?)?;
         let user_name = user_name.map(extract_text_string).transpose()?;
@@ -148,7 +148,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
                 "alg" => alg,
                 "type" => cred_type,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(cred_type)?)?;
         let alg = SignatureAlgorithm::try_from(ok_or_missing(alg)?)?;
@@ -219,7 +219,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
                 "type" => key_type,
                 "transports" => transports,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let key_type = PublicKeyCredentialType::try_from(ok_or_missing(key_type)?)?;
         let key_id = extract_byte_string(ok_or_missing(key_id)?)?;
@@ -268,7 +268,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
                 "credProtect" => cred_protect,
                 "hmac-secret" => hmac_secret,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let hmac_secret = hmac_secret.map_or(Ok(false), extract_bool)?;
         let cred_protect = cred_protect
@@ -294,7 +294,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
             let {
                 "hmac-secret" => hmac_secret,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let hmac_secret = hmac_secret
             .map(GetAssertionHmacSecretInput::try_from)
@@ -320,7 +320,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
                 2 => salt_enc,
                 3 => salt_auth,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let cose_key = extract_map(ok_or_missing(cose_key)?)?;
         let salt_enc = extract_byte_string(ok_or_missing(salt_enc)?)?;
@@ -350,7 +350,7 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
                 "up" => up,
                 "uv" => uv,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let rk = match rk {
             Some(options_entry) => extract_bool(options_entry)?,
@@ -385,7 +385,7 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
                 "up" => up,
                 "uv" => uv,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         if let Some(options_entry) = rk {
             // This is only for returning the correct status code.
@@ -552,7 +552,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 CredRandom => cred_random,
                 CredProtectPolicy => cred_protect_policy,
             } = extract_map(cbor_value)?;
-        };
+        }
 
         let credential_id = extract_byte_string(ok_or_missing(credential_id)?)?;
         let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
@@ -651,7 +651,7 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
                 -2 => x_bytes,
                 -3 => y_bytes,
             } = cose_key.0;
-        };
+        }
 
         let key_type = extract_integer(ok_or_missing(key_type)?)?;
         if key_type != EC2_KEY_TYPE {

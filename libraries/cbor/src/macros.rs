@@ -12,6 +12,142 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::values::{KeyType, Value};
+use alloc::collections::btree_map;
+use core::cmp::Ordering;
+use core::iter::Peekable;
+
+/// This macro generates code to extract multiple values from a `BTreeMap<KeyType, Value>` at once
+/// in an optimized manner, consuming the input map.
+///
+/// It takes as input a `BTreeMap` as well as a list of identifiers and keys, and generates code
+/// that assigns the corresponding values to new variables using the given identifiers. Each of
+/// these variables has type `Option<Value>`, to account for the case where keys aren't found.
+///
+/// **Important:** Keys passed to the `destructure_cbor_map!` macro **must be sorted** in increasing
+/// order. If not, the algorithm can yield incorrect results, such a assigning `None` to a variable
+/// even if the corresponding key existed in the map. **No runtime checks** are made for this in the
+/// `destructure_cbor_map!` macro, in order to avoid overhead at runtime. However, assertions that
+/// keys are sorted are added in `cfg(test)` mode, so that unit tests can verify ahead of time that
+/// the keys are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can
+/// change at runtime.
+///
+/// Semantically, provided that the keys are sorted as specified above, the following two snippets
+/// of code are equivalent, but the `destructure_cbor_map!` version is more optimized, as it doesn't
+/// re-balance the `BTreeMap` for each key, contrary to the `BTreeMap::remove` operations.
+///
+/// ```rust
+/// # extern crate alloc;
+/// # #[macro_use]
+/// # extern crate cbor;
+/// #
+/// # fn main() {
+/// #     let map = alloc::collections::BTreeMap::new();
+/// destructure_cbor_map! {
+///     let {
+///         1 => x,
+///         "key" => y,
+///     } = map;
+/// }
+/// # }
+/// ```
+///
+/// ```rust
+/// # extern crate alloc;
+/// # #[macro_use]
+/// # extern crate cbor;
+/// #
+/// # fn main() {
+/// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
+/// use cbor::values::IntoCborKey;
+/// let x: Option<cbor::Value> = map.remove(&1.into_cbor_key());
+/// let y: Option<cbor::Value> = map.remove(&"key".into_cbor_key());
+/// # }
+/// ```
+#[macro_export]
+macro_rules! destructure_cbor_map {
+    ( let { $( $key:expr => $variable:ident, )+ } = $map:expr; ) => {
+        // A pre-requisite for this algorithm to work is that the keys to extract from the map are
+        // sorted - the behavior is unspecified if the keys are not sorted.
+        // Therefore, in test mode we add assertions that the keys are indeed sorted.
+        #[cfg(test)]
+        assert_sorted_keys!($( $key, )+);
+
+        use $crate::values::{IntoCborKey, Value};
+        use $crate::macros::destructure_cbor_map_peek_value;
+
+        // This algorithm first converts the map into a peekable iterator - whose items are sorted
+        // in strictly increasing order of keys. Then, the repeated calls to the "peek value"
+        // helper function will consume this iterator and yield values (or `None`) when reaching
+        // the keys to extract.
+        //
+        // This is where the pre-requisite that keys to extract are sorted is important: the
+        // algorithm does a single linear scan over the iterator and therefore keys to extract have
+        // to come in the same order (i.e. sorted).
+        let mut it = $map.into_iter().peekable();
+        $(
+        let $variable: Option<Value> = destructure_cbor_map_peek_value(&mut it, $key.into_cbor_key());
+        )+
+    };
+}
+
+/// This function is an internal detail of the `destructure_cbor_map!` macro, but has public
+/// visibility so that users of the macro can use it.
+///
+/// Given a peekable iterator of key-value pairs sorted in strictly increasing key order and a
+/// needle key, this function consumes all items whose key compares less than or equal to the
+/// needle, and returns `Some(value)` if the needle was present as the key in the iterator and
+/// `None` otherwise.
+///
+/// The logic is separated into its own function to reduce binary size, as otherwise the logic
+/// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
+/// CTAP2 application of OpenSK.
+pub fn destructure_cbor_map_peek_value(
+    it: &mut Peekable<btree_map::IntoIter<KeyType, Value>>,
+    needle: KeyType,
+) -> Option<Value> {
+    loop {
+        match it.peek() {
+            None => return None,
+            Some(item) => {
+                let key: &KeyType = &item.0;
+                match key.cmp(&needle) {
+                    Ordering::Less => {
+                        it.next();
+                    }
+                    Ordering::Equal => {
+                        let value: Value = it.next().unwrap().1;
+                        return Some(value);
+                    }
+                    Ordering::Greater => return None,
+                }
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! assert_sorted_keys {
+    // Last key
+    ( $key:expr, ) => {
+    };
+
+    ( $key1:expr, $key2:expr, $( $keys:expr, )* ) => {
+        {
+            use $crate::values::{IntoCborKey, KeyType};
+            let k1: KeyType = $key1.into_cbor_key();
+            let k2: KeyType = $key2.into_cbor_key();
+            assert!(
+                k1 < k2,
+                "{:?} < {:?} failed. The destructure_cbor_map! macro requires keys in sorted order.",
+                k1,
+                k2,
+            );
+        }
+        assert_sorted_keys!($key2, $( $keys, )*);
+    };
+}
+
 #[macro_export]
 macro_rules! cbor_map {
     // trailing comma case
@@ -496,5 +632,100 @@ mod test {
                 .collect(),
         );
         assert_eq!(a, b);
+    }
+
+    fn extract_map(cbor_value: Value) -> BTreeMap<KeyType, Value> {
+        match cbor_value {
+            Value::Map(map) => map,
+            _ => panic!("Expected CBOR map."),
+        }
+    }
+
+    #[test]
+    fn test_destructure_cbor_map_simple() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+        };
+
+        destructure_cbor_map! {
+            let {
+                1 => x1,
+                2 => x2,
+            } = extract_map(map);
+        }
+
+        assert_eq!(x1, Some(cbor_unsigned!(10)));
+        assert_eq!(x2, Some(cbor_unsigned!(20)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_destructure_cbor_map_unsorted() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+        };
+
+        destructure_cbor_map! {
+            // The keys are not sorted here, which violates the precondition of
+            // destructure_cbor_map. An assertion should catch that and make the test panic.
+            let {
+                2 => _x2,
+                1 => _x1,
+            } = extract_map(map);
+        }
+    }
+
+    #[test]
+    fn test_destructure_cbor_map_partial() {
+        let map = cbor_map! {
+            1 => 10,
+            2 => 20,
+            3 => 30,
+            4 => 40,
+            5 => 50,
+            6 => 60,
+            7 => 70,
+            8 => 80,
+            9 => 90,
+        };
+
+        destructure_cbor_map! {
+            let {
+                3 => x3,
+                7 => x7,
+            } = extract_map(map);
+        }
+
+        assert_eq!(x3, Some(cbor_unsigned!(30)));
+        assert_eq!(x7, Some(cbor_unsigned!(70)));
+    }
+
+    #[test]
+    fn test_destructure_cbor_map_missing() {
+        let map = cbor_map! {
+            1 => 10,
+            3 => 30,
+            4 => 40,
+        };
+
+        destructure_cbor_map! {
+            let {
+                0 => x0,
+                1 => x1,
+                2 => x2,
+                3 => x3,
+                4 => x4,
+                5 => x5,
+            } = extract_map(map);
+        }
+
+        assert_eq!(x0, None);
+        assert_eq!(x1, Some(cbor_unsigned!(10)));
+        assert_eq!(x2, None);
+        assert_eq!(x3, Some(cbor_unsigned!(30)));
+        assert_eq!(x4, Some(cbor_unsigned!(40)));
+        assert_eq!(x5, None);
     }
 }

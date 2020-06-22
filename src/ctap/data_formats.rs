@@ -31,16 +31,18 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut rp_map = extract_map(cbor_value)?;
-        let rp_id = extract_text_string(ok_or_missing(rp_map.remove(&cbor_text!("id")))?)?;
-        let rp_name = rp_map
-            .remove(&cbor_text!("name"))
-            .map(extract_text_string)
-            .transpose()?;
-        let rp_icon = rp_map
-            .remove(&cbor_text!("icon"))
-            .map(extract_text_string)
-            .transpose()?;
+        destructure_cbor_map! {
+            let {
+                "id" => rp_id,
+                "icon" => rp_icon,
+                "name" => rp_name,
+            } = extract_map(cbor_value)?;
+        }
+
+        let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
+        let rp_name = rp_name.map(extract_text_string).transpose()?;
+        let rp_icon = rp_icon.map(extract_text_string).transpose()?;
+
         Ok(Self {
             rp_id,
             rp_name,
@@ -62,20 +64,20 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut user_map = extract_map(cbor_value)?;
-        let user_id = extract_byte_string(ok_or_missing(user_map.remove(&cbor_text!("id")))?)?;
-        let user_name = user_map
-            .remove(&cbor_text!("name"))
-            .map(extract_text_string)
-            .transpose()?;
-        let user_display_name = user_map
-            .remove(&cbor_text!("displayName"))
-            .map(extract_text_string)
-            .transpose()?;
-        let user_icon = user_map
-            .remove(&cbor_text!("icon"))
-            .map(extract_text_string)
-            .transpose()?;
+        destructure_cbor_map! {
+            let {
+                "id" => user_id,
+                "icon" => user_icon,
+                "name" => user_name,
+                "displayName" => user_display_name,
+            } = extract_map(cbor_value)?;
+        }
+
+        let user_id = extract_byte_string(ok_or_missing(user_id)?)?;
+        let user_name = user_name.map(extract_text_string).transpose()?;
+        let user_display_name = user_display_name.map(extract_text_string).transpose()?;
+        let user_icon = user_icon.map(extract_text_string).transpose()?;
+
         Ok(Self {
             user_id,
             user_name,
@@ -141,13 +143,15 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut cred_param_map = extract_map(cbor_value)?;
-        let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(
-            cred_param_map.remove(&cbor_text!("type")),
-        )?)?;
-        let alg = SignatureAlgorithm::try_from(ok_or_missing(
-            cred_param_map.remove(&cbor_text!("alg")),
-        )?)?;
+        destructure_cbor_map! {
+            let {
+                "alg" => alg,
+                "type" => cred_type,
+            } = extract_map(cbor_value)?;
+        }
+
+        let cred_type = PublicKeyCredentialType::try_from(ok_or_missing(cred_type)?)?;
+        let alg = SignatureAlgorithm::try_from(ok_or_missing(alg)?)?;
         Ok(Self { cred_type, alg })
     }
 }
@@ -209,12 +213,17 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut cred_desc_map = extract_map(cbor_value)?;
-        let key_type = PublicKeyCredentialType::try_from(ok_or_missing(
-            cred_desc_map.remove(&cbor_text!("type")),
-        )?)?;
-        let key_id = extract_byte_string(ok_or_missing(cred_desc_map.remove(&cbor_text!("id")))?)?;
-        let transports = match cred_desc_map.remove(&cbor_text!("transports")) {
+        destructure_cbor_map! {
+            let {
+                "id" => key_id,
+                "type" => key_type,
+                "transports" => transports,
+            } = extract_map(cbor_value)?;
+        }
+
+        let key_type = PublicKeyCredentialType::try_from(ok_or_missing(key_type)?)?;
+        let key_id = extract_byte_string(ok_or_missing(key_id)?)?;
+        let transports = match transports {
             Some(exclude_entry) => {
                 let transport_vec = extract_array(exclude_entry)?;
                 let transports = transport_vec
@@ -225,6 +234,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
             }
             None => None,
         };
+
         Ok(Self {
             key_type,
             key_id,
@@ -253,12 +263,15 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut extensions_map = extract_map(cbor_value)?;
-        let hmac_secret = extensions_map
-            .remove(&cbor_text!("hmac-secret"))
-            .map_or(Ok(false), extract_bool)?;
-        let cred_protect = extensions_map
-            .remove(&cbor_text!("credProtect"))
+        destructure_cbor_map! {
+            let {
+                "credProtect" => cred_protect,
+                "hmac-secret" => hmac_secret,
+            } = extract_map(cbor_value)?;
+        }
+
+        let hmac_secret = hmac_secret.map_or(Ok(false), extract_bool)?;
+        let cred_protect = cred_protect
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
         Ok(Self {
@@ -277,9 +290,13 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut extensions_map = extract_map(cbor_value)?;
-        let hmac_secret = extensions_map
-            .remove(&cbor_text!("hmac-secret"))
+        destructure_cbor_map! {
+            let {
+                "hmac-secret" => hmac_secret,
+            } = extract_map(cbor_value)?;
+        }
+
+        let hmac_secret = hmac_secret
             .map(GetAssertionHmacSecretInput::try_from)
             .transpose()?;
         Ok(Self { hmac_secret })
@@ -297,10 +314,17 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut input_map = extract_map(cbor_value)?;
-        let cose_key = extract_map(ok_or_missing(input_map.remove(&cbor_unsigned!(1)))?)?;
-        let salt_enc = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(2)))?)?;
-        let salt_auth = extract_byte_string(ok_or_missing(input_map.remove(&cbor_unsigned!(3)))?)?;
+        destructure_cbor_map! {
+            let {
+                1 => cose_key,
+                2 => salt_enc,
+                3 => salt_auth,
+            } = extract_map(cbor_value)?;
+        }
+
+        let cose_key = extract_map(ok_or_missing(cose_key)?)?;
+        let salt_enc = extract_byte_string(ok_or_missing(salt_enc)?)?;
+        let salt_auth = extract_byte_string(ok_or_missing(salt_auth)?)?;
         Ok(Self {
             key_agreement: CoseKey(cose_key),
             salt_enc,
@@ -320,17 +344,24 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut options_map = extract_map(cbor_value)?;
-        let rk = match options_map.remove(&cbor_text!("rk")) {
+        destructure_cbor_map! {
+            let {
+                "rk" => rk,
+                "up" => up,
+                "uv" => uv,
+            } = extract_map(cbor_value)?;
+        }
+
+        let rk = match rk {
             Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
-        if let Some(options_entry) = options_map.remove(&cbor_text!("up")) {
+        if let Some(options_entry) = up {
             if !extract_bool(options_entry)? {
                 return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
             }
         }
-        let uv = match options_map.remove(&cbor_text!("uv")) {
+        let uv = match uv {
             Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
@@ -348,17 +379,24 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        let mut options_map = extract_map(cbor_value)?;
-        if let Some(options_entry) = options_map.remove(&cbor_text!("rk")) {
+        destructure_cbor_map! {
+            let {
+                "rk" => rk,
+                "up" => up,
+                "uv" => uv,
+            } = extract_map(cbor_value)?;
+        }
+
+        if let Some(options_entry) = rk {
             // This is only for returning the correct status code.
             extract_bool(options_entry)?;
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
         }
-        let up = match options_map.remove(&cbor_text!("up")) {
+        let up = match up {
             Some(options_entry) => extract_bool(options_entry)?,
             None => true,
         };
-        let uv = match options_map.remove(&cbor_text!("uv")) {
+        let uv = match uv {
             Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
@@ -501,27 +539,33 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use PublicKeyCredentialSourceField::*;
-        let mut map = extract_map(cbor_value)?;
-        let credential_id = extract_byte_string(ok_or_missing(map.remove(&CredentialId.into()))?)?;
-        let private_key = extract_byte_string(ok_or_missing(map.remove(&PrivateKey.into()))?)?;
+        use PublicKeyCredentialSourceField::{
+            CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
+        };
+        destructure_cbor_map! {
+            let {
+                CredentialId => credential_id,
+                PrivateKey => private_key,
+                RpId => rp_id,
+                UserHandle => user_handle,
+                OtherUi => other_ui,
+                CredRandom => cred_random,
+                CredProtectPolicy => cred_protect_policy,
+            } = extract_map(cbor_value)?;
+        }
+
+        let credential_id = extract_byte_string(ok_or_missing(credential_id)?)?;
+        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
         if private_key.len() != 32 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
             .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
-        let rp_id = extract_text_string(ok_or_missing(map.remove(&RpId.into()))?)?;
-        let user_handle = extract_byte_string(ok_or_missing(map.remove(&UserHandle.into()))?)?;
-        let other_ui = map
-            .remove(&OtherUi.into())
-            .map(extract_text_string)
-            .transpose()?;
-        let cred_random = map
-            .remove(&CredRandom.into())
-            .map(extract_byte_string)
-            .transpose()?;
-        let cred_protect_policy = map
-            .remove(&CredProtectPolicy.into())
+        let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
+        let user_handle = extract_byte_string(ok_or_missing(user_handle)?)?;
+        let other_ui = other_ui.map(extract_text_string).transpose()?;
+        let cred_random = cred_random.map(extract_byte_string).transpose()?;
+        let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
@@ -599,27 +643,37 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     type Error = Ctap2StatusCode;
 
     fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
-        let mut cose_map = cose_key.0;
-        let key_type = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(1)))?)?;
+        destructure_cbor_map! {
+            let {
+                1 => key_type,
+                3 => algorithm,
+                -1 => curve,
+                -2 => x_bytes,
+                -3 => y_bytes,
+            } = cose_key.0;
+        }
+
+        let key_type = extract_integer(ok_or_missing(key_type)?)?;
         if key_type != EC2_KEY_TYPE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let algorithm = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(3)))?)?;
+        let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
         if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let curve = extract_integer(ok_or_missing(cose_map.remove(&cbor_int!(-1)))?)?;
+        let curve = extract_integer(ok_or_missing(curve)?)?;
         if curve != P_256_CURVE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        let x_bytes = extract_byte_string(ok_or_missing(cose_map.remove(&cbor_int!(-2)))?)?;
+        let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
         if x_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let y_bytes = extract_byte_string(ok_or_missing(cose_map.remove(&cbor_int!(-3)))?)?;
+        let y_bytes = extract_byte_string(ok_or_missing(y_bytes)?)?;
         if y_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
+
         let x_array_ref = array_ref![x_bytes.as_slice(), 0, ecdh::NBYTES];
         let y_array_ref = array_ref![y_bytes.as_slice(), 0, ecdh::NBYTES];
         ecdh::PubKey::from_coordinates(x_array_ref, y_array_ref)

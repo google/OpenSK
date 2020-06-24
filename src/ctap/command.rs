@@ -292,6 +292,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        #[cfg(not(feature = "with_ctap2_1"))]
         destructure_cbor_map! {
             let {
                 1 => pin_protocol,
@@ -300,6 +301,21 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
                 4 => pin_auth,
                 5 => new_pin_enc,
                 6 => pin_hash_enc,
+            } = extract_map(cbor_value)?;
+        }
+        #[cfg(feature = "with_ctap2_1")]
+        destructure_cbor_map! {
+            let {
+                1 => pin_protocol,
+                2 => sub_command,
+                3 => key_agreement,
+                4 => pin_auth,
+                5 => new_pin_enc,
+                6 => pin_hash_enc,
+                7 => min_pin_length,
+                8 => min_pin_length_rp_ids,
+                9 => permissions,
+                10 => permissions_rp_id,
             } = extract_map(cbor_value)?;
         }
 
@@ -312,16 +328,10 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;
-
-        // TODO(kaczmarczyck) merge with new map destructuring (and use hex!)
         #[cfg(feature = "with_ctap2_1")]
-        let min_pin_length = param_map
-            .remove(&cbor_unsigned!(7))
-            .map(extract_unsigned)
-            .transpose()?;
-
+        let min_pin_length = min_pin_length.map(extract_unsigned).transpose()?;
         #[cfg(feature = "with_ctap2_1")]
-        let min_pin_length_rp_ids = match param_map.remove(&cbor_unsigned!(8)) {
+        let min_pin_length_rp_ids = match min_pin_length_rp_ids {
             Some(entry) => Some(
                 extract_array(entry)?
                     .into_iter()
@@ -330,21 +340,15 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             ),
             None => None,
         };
-
         #[cfg(feature = "with_ctap2_1")]
         // We expect a bit field of 8 bits, and drop everything else.
         // This means we ignore extensions in future versions.
-        let permissions = param_map
-            .remove(&cbor_unsigned!(9))
+        let permissions = permissions
             .map(extract_unsigned)
             .transpose()?
             .map(|p| p as u8);
-
         #[cfg(feature = "with_ctap2_1")]
-        let permissions_rp_id = param_map
-            .remove(&cbor_unsigned!(10))
-            .map(extract_text_string)
-            .transpose()?;
+        let permissions_rp_id = permissions_rp_id.map(extract_text_string).transpose()?;
 
         Ok(AuthenticatorClientPinParameters {
             pin_protocol,

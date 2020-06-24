@@ -14,8 +14,9 @@
 
 use crate::crypto::rng256::Rng256;
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
+use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::{key_material, PIN_AUTH_LENGTH, USE_BATCH_ATTESTATION};
+use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
@@ -809,7 +810,6 @@ mod test {
 
     #[test]
     fn test_pin_hash() {
-        use crate::ctap::PIN_AUTH_LENGTH;
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 

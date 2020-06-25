@@ -1,15 +1,52 @@
+// Copyright 2020 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use regex::Regex;
 use std::io::{BufRead, Write};
 use std::thread::sleep;
 use std::time::Duration;
 
+/// An allocation or deallocation event.
 struct Event {
+    /// Whether this even is an allocation (true) or a deallocation (false).
     is_alloc: bool,
+    /// The start address of the (de)allocated block, in bytes.
     start: usize,
+    /// The length of the (de)allocated block, in bytes.
     len: usize,
 }
 
 fn main() {
+    /// The following regex matches lines looking like the following from OpenSK's output. Such
+    /// lines are printed to the console when the `--debug-allocations` feature is enabled in the
+    /// deploy script.
+    ///
+    /// ```
+    /// alloc[256, 1] = 0x2002410c (2 ptrs, 384 bytes)
+    /// dealloc[256, 1] = 0x2002410c (1 ptrs, 512 bytes)
+    /// ```
+    ///
+    /// The two integers between square brackets after the (de)alloc keywords represent the length
+    /// and alignement of the allocated block, respectively. The integer serialized in hexadecimal
+    /// after the equal sign represents the starting address of the allocated block. The two
+    /// integers within parentheses represent statistics about the total number of allocated blocks
+    /// and the total number of allocated bytes after the (de)allocation operation, respectively.
+    ///
+    /// This regex captures three elements, in this order.
+    /// - The keyword to know whether this operation is an allocation or a deallocation.
+    /// - The length of the allocated block.
+    /// - The starting address of the allocated block.
     let re = Regex::new(r"^(alloc|dealloc)\[(\d+), \d+\] = 0x([0-9a-f]+) \(\d+ ptrs, \d+ bytes\)$")
         .unwrap();
 

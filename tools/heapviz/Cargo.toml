@@ -1,0 +1,12 @@
+[package]
+name = "heapviz"
+version = "0.1.0"
+authors = [
+  "Guillaume Endignoux <guillaumee@google.com>",
+]
+license = "Apache-2.0"
+edition = "2018"
+
+[dependencies]
+ncurses = "5.99.0"
+regex = "1"

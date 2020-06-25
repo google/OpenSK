@@ -26,6 +26,8 @@ cd ../..
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
+echo "Checking that heapviz tool builds properly..."
+cargo build --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi

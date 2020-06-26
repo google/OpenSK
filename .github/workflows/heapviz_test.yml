@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
+      - name: Install ncurses
+        run: sudo apt-get install libncurses-dev
 
       - name: Check heapviz tool
         uses: actions-rs/cargo@v1

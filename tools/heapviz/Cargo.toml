@@ -9,5 +9,6 @@ edition = "2018"
 
 [dependencies]
 clap = "2.33.1"
+lazy_static = "1.4.0"
 ncurses = "5.99.0"
 regex = "1"

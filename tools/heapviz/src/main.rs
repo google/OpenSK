@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use clap::{App, Arg};
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -59,6 +60,7 @@ fn parse_cli() -> Config {
 }
 
 /// An allocation or deallocation event.
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct Event {
     /// Whether this even is an allocation (true) or a deallocation (false).
     is_alloc: bool,
@@ -68,16 +70,14 @@ struct Event {
     len: usize,
 }
 
-fn main() {
-    let config = parse_cli();
-
+fn parse_event(line: &str) -> Option<Event> {
     // The following regex matches lines looking like the following from OpenSK's output. Such lines
     // are printed to the console when the `--debug-allocations` feature is enabled in the deploy
     // script.
     //
     // ```
-    // alloc[256, 1] = 0x2002410c (2 ptrs, 384 bytes)
-    // dealloc[256, 1] = 0x2002410c (1 ptrs, 512 bytes)
+    // alloc[256, 1] = 0x2002401c (2 ptrs, 384 bytes)
+    // dealloc[64, 1] = 0x2002410c (1 ptrs, 512 bytes)
     // ```
     //
     // The two integers between square brackets after the (de)alloc keywords represent the length
@@ -90,20 +90,31 @@ fn main() {
     // - The keyword to know whether this operation is an allocation or a deallocation.
     // - The length of the allocated block.
     // - The starting address of the allocated block.
-    let re = Regex::new(r"^(alloc|dealloc)\[(\d+), \d+\] = 0x([0-9a-f]+) \(\d+ ptrs, \d+ bytes\)$")
-        .unwrap();
+    lazy_static! {
+        static ref RE: Regex =
+            Regex::new(r"^(alloc|dealloc)\[(\d+), \d+\] = 0x([0-9a-f]+) \(\d+ ptrs, \d+ bytes\)$")
+                .unwrap();
+    }
+
+    RE.captures(line).map(|caps| {
+        let typ = caps.get(1).unwrap().as_str();
+        let len = caps.get(2).unwrap().as_str().parse::<usize>().unwrap();
+        let start = usize::from_str_radix(&caps.get(3).unwrap().as_str(), 16).unwrap();
+        Event {
+            is_alloc: typ == "alloc",
+            start,
+            len,
+        }
+    })
+}
+
+fn main() {
+    let config = parse_cli();
 
     let mut events = Vec::new();
     for line in BufReader::new(config.logfile).lines() {
-        if let Some(caps) = re.captures(&line.unwrap()) {
-            let typ = caps.get(1).unwrap().as_str();
-            let len = caps.get(2).unwrap().as_str().parse::<usize>().unwrap();
-            let start = usize::from_str_radix(&caps.get(3).unwrap().as_str(), 16).unwrap();
-            events.push(Event {
-                is_alloc: typ == "alloc",
-                start,
-                len,
-            });
+        if let Some(event) = parse_event(&line.unwrap()) {
+            events.push(event);
         }
     }
 
@@ -164,4 +175,43 @@ fn main() {
     }
 
     ncurses::endwin();
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_event_alloc() {
+        assert_eq!(
+            parse_event("alloc[256, 1] = 0x2002401c (2 ptrs, 384 bytes)"),
+            Some(Event {
+                is_alloc: true,
+                start: 0x2002401c,
+                len: 256,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_event_dealloc() {
+        assert_eq!(
+            parse_event("dealloc[64, 1] = 0x2002410c (1 ptrs, 512 bytes)"),
+            Some(Event {
+                is_alloc: false,
+                start: 0x2002410c,
+                len: 64,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_event_none() {
+        assert_eq!(
+            parse_event(
+                "NRF52 HW INFO: Variant: AAD0, Part: N52840, Package: QI, Ram: K256, Flash: K1024"
+            ),
+            None
+        );
+    }
 }

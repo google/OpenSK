@@ -8,7 +8,7 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  cbor_test:
+  heapviz_test:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
@@ -17,16 +17,16 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --manifest-path tool/heapviz/Cargo.toml
+          args: --manifest-path tools/heapviz/Cargo.toml
 
       - name: Unit testing of heapviz tool (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path tool/heapviz/Cargo.toml
+          args: --manifest-path tools/heapviz/Cargo.toml
 
       - name: Unit testing of heapviz tool (release mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path tool/heapviz/Cargo.toml --release
+          args: --manifest-path tools/heapviz/Cargo.toml --release

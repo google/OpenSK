@@ -279,7 +279,7 @@ pub struct AuthenticatorClientPinParameters {
     pub new_pin_enc: Option<Vec<u8>>,
     pub pin_hash_enc: Option<Vec<u8>>,
     #[cfg(feature = "with_ctap2_1")]
-    pub min_pin_length: Option<u64>,
+    pub min_pin_length: Option<u8>,
     #[cfg(feature = "with_ctap2_1")]
     pub min_pin_length_rp_ids: Option<Vec<String>>,
     #[cfg(feature = "with_ctap2_1")]
@@ -329,7 +329,10 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;
         #[cfg(feature = "with_ctap2_1")]
-        let min_pin_length = min_pin_length.map(extract_unsigned).transpose()?;
+        let min_pin_length = min_pin_length
+            .map(extract_unsigned)
+            .transpose()?
+            .map(|m| m as u8);
         #[cfg(feature = "with_ctap2_1")]
         let min_pin_length_rp_ids = match min_pin_length_rp_ids {
             Some(entry) => Some(

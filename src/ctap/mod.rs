@@ -730,6 +730,8 @@ where
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 default_cred_protect: DEFAULT_CRED_PROTECT,
                 #[cfg(feature = "with_ctap2_1")]
+                min_pin_length: self.persistent_store.min_pin_length(),
+                #[cfg(feature = "with_ctap2_1")]
                 firmware_version: None,
             },
         ))
@@ -812,7 +814,7 @@ mod test {
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID);
 
         #[cfg(feature = "with_ctap2_1")]
-        let mut expected_response = vec![0x00, 0xA8, 0x01];
+        let mut expected_response = vec![0x00, 0xA9, 0x01];
         #[cfg(not(feature = "with_ctap2_1"))]
         let mut expected_response = vec![0x00, 0xA6, 0x01];
         // The difference here is a longer array of supported versions.
@@ -837,7 +839,7 @@ mod test {
             [
                 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C, 0x67, 0x26,
                 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B,
-                0x65, 0x79,
+                0x65, 0x79, 0x0D, 0x04,
             ]
             .iter(),
         );

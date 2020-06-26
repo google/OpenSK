@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use crate::crypto::rng256::Rng256;
+#[cfg(feature = "with_ctap2_1")]
+use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
@@ -20,7 +22,7 @@ use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
-use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError, StoreIndex};
+use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 
 #[cfg(any(test, feature = "ram_storage"))]
 type Storage = embedded_flash::BufferStorage;
@@ -60,11 +62,25 @@ const PIN_RETRIES: usize = 4;
 const ATTESTATION_PRIVATE_KEY: usize = 5;
 const ATTESTATION_CERTIFICATE: usize = 6;
 const AAGUID: usize = 7;
+#[cfg(not(feature = "with_ctap2_1"))]
 const NUM_TAGS: usize = 8;
+#[cfg(feature = "with_ctap2_1")]
+const MIN_PIN_LENGTH: usize = 8;
+#[cfg(feature = "with_ctap2_1")]
+const MIN_PIN_LENGTH_RP_IDS: usize = 9;
+#[cfg(feature = "with_ctap2_1")]
+const NUM_TAGS: usize = 10;
 
 const MAX_PIN_RETRIES: u8 = 6;
 const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 const AAGUID_LENGTH: usize = 16;
+#[cfg(feature = "with_ctap2_1")]
+const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
+#[cfg(feature = "with_ctap2_1")]
+const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
+// TODO(kaczmarczyck) Check whether this constant is necessary, or replace it accordingly.
+#[cfg(feature = "with_ctap2_1")]
+const _MAX_RP_IDS_LENGTH: usize = 8;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
@@ -82,6 +98,10 @@ enum Key {
     AttestationPrivateKey,
     AttestationCertificate,
     Aaguid,
+    #[cfg(feature = "with_ctap2_1")]
+    MinPinLength,
+    #[cfg(feature = "with_ctap2_1")]
+    MinPinLengthRpIds,
 }
 
 pub struct MasterKeys<'a> {
@@ -136,6 +156,10 @@ impl StoreConfig for Config {
             ATTESTATION_PRIVATE_KEY => add(Key::AttestationPrivateKey),
             ATTESTATION_CERTIFICATE => add(Key::AttestationCertificate),
             AAGUID => add(Key::Aaguid),
+            #[cfg(feature = "with_ctap2_1")]
+            MIN_PIN_LENGTH => add(Key::MinPinLength),
+            #[cfg(feature = "with_ctap2_1")]
+            MIN_PIN_LENGTH_RP_IDS => add(Key::MinPinLengthRpIds),
             _ => debug_assert!(false),
         }
     }
@@ -197,15 +221,6 @@ impl PersistentStore {
                     tag: MASTER_KEYS,
                     data: &master_keys,
                     sensitive: true,
-                })
-                .unwrap();
-        }
-        if self.store.find_one(&Key::PinRetries).is_none() {
-            self.store
-                .insert(StoreEntry {
-                    tag: PIN_RETRIES,
-                    data: &[MAX_PIN_RETRIES],
-                    sensitive: false,
                 })
                 .unwrap();
         }
@@ -381,44 +396,110 @@ impl PersistentStore {
         }
     }
 
-    fn pin_retries_entry(&self) -> (StoreIndex, u8) {
-        let (index, entry) = self.store.find_one(&Key::PinRetries).unwrap();
-        let data = entry.data;
-        debug_assert_eq!(data.len(), 1);
-        (index, data[0])
-    }
-
     pub fn pin_retries(&self) -> u8 {
-        self.pin_retries_entry().1
+        self.store
+            .find_one(&Key::PinRetries)
+            .map_or(MAX_PIN_RETRIES, |(_, entry)| entry.data[0])
     }
 
     pub fn decr_pin_retries(&mut self) {
-        let (index, old_value) = self.pin_retries_entry();
-        let new_value = old_value.saturating_sub(1);
-        self.store
-            .replace(
-                index,
-                StoreEntry {
-                    tag: PIN_RETRIES,
-                    data: &[new_value],
-                    sensitive: false,
-                },
-            )
-            .unwrap();
+        match self.store.find_one(&Key::PinRetries) {
+            None => {
+                self.store
+                    .insert(StoreEntry {
+                        tag: PIN_RETRIES,
+                        data: &[MAX_PIN_RETRIES.saturating_sub(1)],
+                        sensitive: false,
+                    })
+                    .unwrap();
+            }
+            Some((index, entry)) => {
+                debug_assert_eq!(entry.data.len(), 1);
+                let new_value = entry.data[0].saturating_sub(1);
+                self.store
+                    .replace(
+                        index,
+                        StoreEntry {
+                            tag: PIN_RETRIES,
+                            data: &[new_value],
+                            sensitive: false,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
     }
 
     pub fn reset_pin_retries(&mut self) {
-        let (index, _) = self.pin_retries_entry();
+        if let Some((index, _)) = self.store.find_one(&Key::PinRetries) {
+            self.store.delete(index).unwrap();
+        }
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    pub fn min_pin_length(&self) -> u8 {
         self.store
-            .replace(
-                index,
-                StoreEntry {
-                    tag: PIN_RETRIES,
-                    data: &[MAX_PIN_RETRIES],
-                    sensitive: false,
-                },
-            )
-            .unwrap();
+            .find_one(&Key::MinPinLength)
+            .map_or(DEFAULT_MIN_PIN_LENGTH, |(_, entry)| entry.data[0])
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    pub fn set_min_pin_length(&mut self, min_pin_length: u8) {
+        let entry = StoreEntry {
+            tag: MIN_PIN_LENGTH,
+            data: &[min_pin_length],
+            sensitive: false,
+        };
+        match self.store.find_one(&Key::MinPinLength) {
+            None => {
+                self.store.insert(entry).unwrap();
+            }
+            Some((index, _)) => {
+                self.store.replace(index, entry).unwrap();
+            }
+        }
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    pub fn _min_pin_length_rp_ids(&self) -> Vec<String> {
+        let rp_ids = self
+            .store
+            .find_one(&Key::MinPinLengthRpIds)
+            .map_or(Some(_DEFAULT_MIN_PIN_LENGTH_RP_IDS), |(_, entry)| {
+                _deserialize_min_pin_length_rp_ids(entry.data)
+            });
+        debug_assert!(rp_ids.is_some());
+        rp_ids.unwrap_or(vec![])
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    pub fn _set_min_pin_length_rp_ids(
+        &mut self,
+        min_pin_length_rp_ids: Vec<String>,
+    ) -> Result<(), Ctap2StatusCode> {
+        let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
+        for rp_id in _DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+            if !min_pin_length_rp_ids.contains(&rp_id) {
+                min_pin_length_rp_ids.push(rp_id);
+            }
+        }
+        if min_pin_length_rp_ids.len() > _MAX_RP_IDS_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
+        }
+        let entry = StoreEntry {
+            tag: MIN_PIN_LENGTH_RP_IDS,
+            data: &_serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
+            sensitive: false,
+        };
+        match self.store.find_one(&Key::MinPinLengthRpIds) {
+            None => {
+                self.store.insert(entry).unwrap();
+            }
+            Some((index, _)) => {
+                self.store.replace(index, entry).unwrap();
+            }
+        }
+        Ok(())
     }
 
     pub fn attestation_private_key(
@@ -541,7 +622,28 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
     if cbor::write(credential.into(), &mut data) {
         Ok(data)
     } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CREDENTIAL)
+        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR)
+    }
+}
+
+#[cfg(feature = "with_ctap2_1")]
+fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
+    let cbor = cbor::read(data).ok()?;
+    extract_array(cbor)
+        .ok()?
+        .into_iter()
+        .map(extract_text_string)
+        .collect::<Result<Vec<String>, Ctap2StatusCode>>()
+        .ok()
+}
+
+#[cfg(feature = "with_ctap2_1")]
+fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
+    let mut data = Vec::new();
+    if cbor::write(cbor_array_vec!(rp_ids), &mut data) {
+        Ok(data)
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR)
     }
 }
 
@@ -891,5 +993,69 @@ mod test {
             key_material::ATTESTATION_CERTIFICATE
         );
         assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_min_pin_length() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        // The minimum PIN lenght is initially at the default.
+        assert_eq!(persistent_store.min_pin_length(), DEFAULT_MIN_PIN_LENGTH);
+
+        // Changes by the setter are reflected by the getter..
+        let new_min_pin_length = 8;
+        persistent_store.set_min_pin_length(new_min_pin_length);
+        assert_eq!(persistent_store.min_pin_length(), new_min_pin_length);
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_min_pin_length_rp_ids() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        // The minimum PIN lenght is initially at the default.
+        assert_eq!(
+            persistent_store._min_pin_length_rp_ids(),
+            _DEFAULT_MIN_PIN_LENGTH_RP_IDS
+        );
+
+        // Changes by the setter are reflected by the getter..
+        let rp_ids = vec![String::from("example.com")];
+        assert_eq!(
+            persistent_store._set_min_pin_length_rp_ids(rp_ids.clone()),
+            Ok(())
+        );
+        assert_eq!(persistent_store._min_pin_length_rp_ids(), rp_ids);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_credential() {
+        let mut rng = ThreadRng256 {};
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x00],
+            other_ui: None,
+            cred_random: None,
+            cred_protect_policy: None,
+        };
+        let serialized = serialize_credential(credential.clone()).unwrap();
+        let reconstructed = deserialize_credential(&serialized).unwrap();
+        assert_eq!(credential, reconstructed);
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_serialize_deserialize_min_pin_length_rp_ids() {
+        let rp_ids = vec![String::from("example.com")];
+        let serialized = _serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
+        let reconstructed = _deserialize_min_pin_length_rp_ids(&serialized).unwrap();
+        assert_eq!(rp_ids, reconstructed);
     }
 }

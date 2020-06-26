@@ -17,6 +17,7 @@ use super::data_formats::{ClientPinSubCommand, CoseKey, GetAssertionHmacSecretIn
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
+#[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
@@ -101,7 +102,6 @@ fn encrypt_hmac_secret_output(
     Ok(encrypted_output)
 }
 
-/// Checks if the decrypted PIN satisfies the PIN policy and stores it persistently.
 fn check_and_store_new_pin(
     persistent_store: &mut PersistentStore,
     aes_dec_key: &crypto::aes256::DecryptionKey,
@@ -127,7 +127,11 @@ fn check_and_store_new_pin(
             }
         }
     }
-    if pin.len() < 4 || pin.len() == PIN_PADDED_LENGTH {
+    #[cfg(feature = "with_ctap2_1")]
+    let min_pin_length = persistent_store.min_pin_length() as usize;
+    #[cfg(not(feature = "with_ctap2_1"))]
+    let min_pin_length = 4;
+    if pin.len() < min_pin_length || pin.len() == PIN_PADDED_LENGTH {
         // TODO(kaczmarczyck) check 4 code point minimum instead
         // TODO(kaczmarczyck) check last byte == 0x00
         return false;
@@ -141,7 +145,7 @@ fn check_and_store_new_pin(
 pub struct PinProtocolV1 {
     key_agreement_key: crypto::ecdh::SecKey,
     pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
-    consecutive_pin_mismatches: u64,
+    consecutive_pin_mismatches: u8,
 }
 
 impl PinProtocolV1 {
@@ -341,31 +345,69 @@ impl PinProtocolV1 {
     #[cfg(feature = "with_ctap2_1")]
     fn process_set_min_pin_length(
         &mut self,
-        _min_pin_length: u64,
-        _min_pin_length_rp_ids: Vec<String>,
-        _pin_auth: Vec<u8>,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
-        // TODO
-        Ok(AuthenticatorClientPinResponse {
-            key_agreement: None,
-            pin_token: None,
-            retries: Some(0),
-        })
+        persistent_store: &mut PersistentStore,
+        min_pin_length: u8,
+        min_pin_length_rp_ids: Option<Vec<String>>,
+        pin_auth: Option<Vec<u8>>,
+    ) -> Result<(), Ctap2StatusCode> {
+        if min_pin_length_rp_ids.is_some() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+        }
+        if persistent_store.pin_hash().is_some() {
+            match pin_auth {
+                Some(pin_auth) => {
+                    // TODO(kaczmarczyck) not mentioned, but maybe useful?
+                    // if persistent_store.pin_retries() == 0 {
+                    //     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
+                    // }
+                    if self.consecutive_pin_mismatches >= 3 {
+                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
+                    }
+                    let mut message = vec![0xFF; 32];
+                    message.extend(&[0x06, 0x08]);
+                    message.extend(&[min_pin_length as u8, 0x00, 0x00, 0x00]);
+                    // TODO(kaczmarczyck) commented code is useful for the extension
+                    // if !cbor::write(cbor_array_vec!(min_pin_length_rp_ids), &mut message) {
+                    //     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
+                    // }
+                    if !check_pin_auth(&self.pin_uv_auth_token, &message, &pin_auth) {
+                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
+                    }
+                }
+                None => return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+            };
+        }
+        if min_pin_length < persistent_store.min_pin_length() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
+        }
+        persistent_store.set_min_pin_length(min_pin_length);
+        // if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
+        //     persistent_store.set_min_pin_length_rp_ids(min_pin_length_rp_ids)?;
+        // }
+        Ok(())
     }
 
     #[cfg(feature = "with_ctap2_1")]
     fn process_get_pin_uv_auth_token_using_pin_with_permissions(
         &mut self,
-        _key_agreement: CoseKey,
-        _pin_hash_enc: Vec<u8>,
-        _permissions: u8,
-        _permissions_rp_id: String,
+        rng: &mut impl Rng256,
+        persistent_store: &mut PersistentStore,
+        key_agreement: CoseKey,
+        pin_hash_enc: Vec<u8>,
+        permissions: u8,
+        _permissions_rp_id: Option<String>,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+        if permissions == 0 {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+
+        // TODO(kaczmarczyck) split the implementation to omit the unnecessary token generation
+        self.process_get_pin_token(rng, persistent_store, key_agreement, pin_hash_enc)?;
         // TODO
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_token: None,
-            retries: Some(0),
+            retries: None,
         })
     }
 
@@ -441,22 +483,24 @@ impl PinProtocolV1 {
             #[cfg(feature = "with_ctap2_1")]
             ClientPinSubCommand::SetMinPinLength => {
                 self.process_set_min_pin_length(
+                    persistent_store,
                     min_pin_length.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                    min_pin_length_rp_ids.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                    pin_auth.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                    min_pin_length_rp_ids,
+                    pin_auth,
                 )?;
                 None
             }
             #[cfg(feature = "with_ctap2_1")]
-            ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => {
+            ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_pin_with_permissions(
+                    rng,
+                    persistent_store,
                     key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                     pin_hash_enc.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                     permissions.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                    permissions_rp_id.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?;
-                None
-            }
+                    permissions_rp_id,
+                )?,
+            ),
         };
         Ok(ResponseData::AuthenticatorClientPin(response))
     }
@@ -742,6 +786,40 @@ mod test {
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_process_set_min_pin_length() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let min_pin_length = 8;
+        pin_protocol_v1.pin_uv_auth_token = [0x55; PIN_TOKEN_LENGTH];
+        let pin_auth = vec![
+            0x94, 0x86, 0xEF, 0x4C, 0xB3, 0x84, 0x2C, 0x85, 0x72, 0x02, 0xBF, 0xE4, 0x36, 0x22,
+            0xFE, 0xC9,
+        ];
+        // TODO(kaczmarczyck) implement test for the min PIN length extension
+        let response = pin_protocol_v1.process_set_min_pin_length(
+            &mut persistent_store,
+            min_pin_length,
+            None,
+            Some(pin_auth.clone()),
+        );
+        assert_eq!(response, Ok(()));
+        assert_eq!(persistent_store.min_pin_length(), min_pin_length);
+        let response = pin_protocol_v1.process_set_min_pin_length(
+            &mut persistent_store,
+            7,
+            None,
+            Some(pin_auth),
+        );
+        assert_eq!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
+        );
+        assert_eq!(persistent_store.min_pin_length(), min_pin_length);
     }
 
     #[test]

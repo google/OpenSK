@@ -125,6 +125,8 @@ pub struct AuthenticatorGetInfoResponse {
     pub algorithms: Option<Vec<PublicKeyCredentialParameter>>,
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
     #[cfg(feature = "with_ctap2_1")]
+    pub min_pin_length: u8,
+    #[cfg(feature = "with_ctap2_1")]
     pub firmware_version: Option<u64>,
 }
 
@@ -143,6 +145,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             transports,
             algorithms,
             default_cred_protect,
+            min_pin_length,
             firmware_version,
         } = get_info_response;
 
@@ -166,6 +169,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x09 => transports.map(|vec| cbor_array_vec!(vec)),
             0x0A => algorithms.map(|vec| cbor_array_vec!(vec)),
             0x0C => default_cred_protect.map(|p| p as u64),
+            0x0D => min_pin_length as u64,
             0x0E => firmware_version,
         }
     }
@@ -301,13 +305,22 @@ mod test {
             algorithms: None,
             default_cred_protect: None,
             #[cfg(feature = "with_ctap2_1")]
+            min_pin_length: 4,
+            #[cfg(feature = "with_ctap2_1")]
             firmware_version: None,
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
+        #[cfg(not(feature = "with_ctap2_1"))]
         let expected_cbor = cbor_map_options! {
             0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
             0x03 => vec![0x00; 16],
+        };
+        #[cfg(feature = "with_ctap2_1")]
+        let expected_cbor = cbor_map_options! {
+            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
+            0x03 => vec![0x00; 16],
+            0x0D => 4,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -329,6 +342,7 @@ mod test {
             transports: Some(vec![AuthenticatorTransport::Usb]),
             algorithms: Some(vec![ES256_CRED_PARAM]),
             default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            min_pin_length: 4,
             firmware_version: Some(0),
         };
         let response_cbor: Option<cbor::Value> =
@@ -345,6 +359,7 @@ mod test {
             0x09 => cbor_array_vec![vec!["usb"]],
             0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
             0x0C => CredentialProtectionPolicy::UserVerificationRequired as u64,
+            0x0D => 4,
             0x0E => 0,
         };
         assert_eq!(response_cbor, Some(expected_cbor));

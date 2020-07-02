@@ -413,6 +413,9 @@ where
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
+                #[cfg(feature = "with_ctap2_1")]
+                self.pin_protocol_v1
+                    .has_make_credential_permission(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -591,6 +594,8 @@ where
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
+                #[cfg(feature = "with_ctap2_1")]
+                self.pin_protocol_v1.has_get_assertion_permission(&rp_id)?;
                 UV_FLAG
             }
             None => {

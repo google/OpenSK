@@ -1166,6 +1166,13 @@ mod test {
         let policy_error = CredentialProtectionPolicy::try_from(cbor_policy_error);
         let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
         assert_eq!(policy_error, expected_error);
+
+        for policy_literal in 1..=3 {
+            let cbor_policy: cbor::Value = cbor_int!(policy_literal);
+            let policy = CredentialProtectionPolicy::try_from(cbor_policy.clone());
+            let created_cbor: cbor::Value = policy.unwrap().into();
+            assert_eq!(created_cbor, cbor_policy);
+        }
     }
 
     #[test]
@@ -1180,6 +1187,15 @@ mod test {
         );
         let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
         assert_eq!(created_cbor, cbor_authenticator_transport);
+
+        let transports = ["usb", "nfc", "ble", "internal"];
+        for transport in transports.iter() {
+            let cbor_authenticator_transport: cbor::Value = cbor_text!(*transport);
+            let authenticator_transport =
+                AuthenticatorTransport::try_from(cbor_authenticator_transport.clone());
+            let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
+            assert_eq!(created_cbor, cbor_authenticator_transport);
+        }
     }
 
     #[test]
@@ -1322,6 +1338,17 @@ mod test {
         assert_eq!(sub_command, Ok(expected_sub_command));
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
+
+        #[cfg(not(feature = "with_ctap2_1"))]
+        let last_literal = 0x05;
+        #[cfg(feature = "with_ctap2_1")]
+        let last_literal = 0x09;
+        for command_literal in 1..=last_literal {
+            let cbor_sub_command: cbor::Value = cbor_int!(command_literal);
+            let sub_command = ClientPinSubCommand::try_from(cbor_sub_command.clone());
+            let created_cbor: cbor::Value = sub_command.unwrap().into();
+            assert_eq!(created_cbor, cbor_sub_command);
+        }
     }
 
     #[test]

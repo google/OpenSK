@@ -536,6 +536,11 @@ impl PinProtocolV1 {
         self.key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
         self.pin_uv_auth_token = rng.gen_uniform_u8x32();
         self.consecutive_pin_mismatches = 0;
+        #[cfg(feature = "with_ctap2_1")]
+        {
+            self.permissions = 0;
+            self.permissions_rp_id = None;
+        }
     }
 
     pub fn process_hmac_secret(

@@ -62,13 +62,11 @@ const PIN_RETRIES: usize = 4;
 const ATTESTATION_PRIVATE_KEY: usize = 5;
 const ATTESTATION_CERTIFICATE: usize = 6;
 const AAGUID: usize = 7;
-#[cfg(not(feature = "with_ctap2_1"))]
-const NUM_TAGS: usize = 8;
 #[cfg(feature = "with_ctap2_1")]
 const MIN_PIN_LENGTH: usize = 8;
 #[cfg(feature = "with_ctap2_1")]
 const MIN_PIN_LENGTH_RP_IDS: usize = 9;
-#[cfg(feature = "with_ctap2_1")]
+// Different NUM_TAGS make the storage incompatible, so we use max(8,10).
 const NUM_TAGS: usize = 10;
 
 const MAX_PIN_RETRIES: u8 = 6;
@@ -397,9 +395,13 @@ impl PersistentStore {
     }
 
     pub fn pin_retries(&self) -> u8 {
-        self.store
-            .find_one(&Key::PinRetries)
-            .map_or(MAX_PIN_RETRIES, |(_, entry)| entry.data[0])
+        match self.store.find_one(&Key::PinRetries) {
+            None => MAX_PIN_RETRIES,
+            Some((_, entry)) => {
+                debug_assert_eq!(entry.data.len(), 1);
+                entry.data[0]
+            }
+        }
     }
 
     pub fn decr_pin_retries(&mut self) {
@@ -415,17 +417,19 @@ impl PersistentStore {
             }
             Some((index, entry)) => {
                 debug_assert_eq!(entry.data.len(), 1);
-                let new_value = entry.data[0].saturating_sub(1);
-                self.store
-                    .replace(
-                        index,
-                        StoreEntry {
-                            tag: PIN_RETRIES,
-                            data: &[new_value],
-                            sensitive: false,
-                        },
-                    )
-                    .unwrap();
+                if entry.data[0] > 0 {
+                    let new_value = entry.data[0].saturating_sub(1);
+                    self.store
+                        .replace(
+                            index,
+                            StoreEntry {
+                                tag: PIN_RETRIES,
+                                data: &[new_value],
+                                sensitive: false,
+                            },
+                        )
+                        .unwrap();
+                }
             }
         }
     }
@@ -1022,12 +1026,17 @@ mod test {
             _DEFAULT_MIN_PIN_LENGTH_RP_IDS
         );
 
-        // Changes by the setter are reflected by the getter..
-        let rp_ids = vec![String::from("example.com")];
+        // Changes by the setter are reflected by the getter.
+        let mut rp_ids = vec![String::from("example.com")];
         assert_eq!(
             persistent_store._set_min_pin_length_rp_ids(rp_ids.clone()),
             Ok(())
         );
+        for rp_id in _DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+            if !rp_ids.contains(&rp_id) {
+                rp_ids.push(rp_id);
+            }
+        }
         assert_eq!(persistent_store._min_pin_length_rp_ids(), rp_ids);
     }
 

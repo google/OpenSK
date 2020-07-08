@@ -149,19 +149,13 @@ fn check_and_store_new_pin(
 // TODO remove when all variants are used
 #[allow(dead_code)]
 pub enum PinPermission {
+    // All variants should use integers with a single bit set.
     MakeCredential = 0x01,
     GetAssertion = 0x02,
     CredentialManagement = 0x04,
     BioEnrollment = 0x08,
     PlatformConfiguration = 0x10,
     AuthenticatorConfiguration = 0x20,
-}
-
-#[cfg(feature = "with_ctap2_1")]
-impl PinPermission {
-    pub fn check(self, stored_bits: u8) -> bool {
-        self as u8 & stored_bits != 0
-    }
 }
 
 pub struct PinProtocolV1 {
@@ -592,7 +586,8 @@ impl PinProtocolV1 {
 
     #[cfg(feature = "with_ctap2_1")]
     pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
-        if permission.check(self.permissions) {
+        // Relies on the fact that all permissions are represented by powers of two.
+        if permission as u8 & self.permissions != 0 {
             Ok(())
         } else {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)

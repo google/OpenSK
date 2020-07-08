@@ -38,6 +38,8 @@ use self::data_formats::{
     PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
+#[cfg(feature = "with_ctap2_1")]
+use self::pin_protocol_v1::PinPermission;
 use self::pin_protocol_v1::PinProtocolV1;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
@@ -414,8 +416,11 @@ where
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
                 #[cfg(feature = "with_ctap2_1")]
-                self.pin_protocol_v1
-                    .has_make_credential_permission(&rp_id)?;
+                {
+                    self.pin_protocol_v1
+                        .has_permission(PinPermission::MakeCredential)?;
+                    self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                }
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -595,7 +600,11 @@ where
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
                 #[cfg(feature = "with_ctap2_1")]
-                self.pin_protocol_v1.has_get_assertion_permission(&rp_id)?;
+                {
+                    self.pin_protocol_v1
+                        .has_permission(PinPermission::GetAssertion)?;
+                    self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                }
                 UV_FLAG
             }
             None => {

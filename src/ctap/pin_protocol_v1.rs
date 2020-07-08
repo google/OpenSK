@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,9 +63,9 @@ fn encrypt_hmac_secret_output(
     let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
     let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
     // The specification specifically asks for a zero IV.
-    let iv = [0; 16];
+    let iv = [0u8; 16];
 
-    let mut cred_random_secret = [0; 32];
+    let mut cred_random_secret = [0u8; 32];
     cred_random_secret.clone_from_slice(cred_random);
 
     // Initialization of 4 blocks in any case makes this function more readable.
@@ -76,7 +76,7 @@ fn encrypt_hmac_secret_output(
     }
     cbc_decrypt(&aes_dec_key, iv, &mut blocks[..block_len]);
 
-    let mut decrypted_salt1 = [0; 32];
+    let mut decrypted_salt1 = [0u8; 32];
     decrypted_salt1[..16].clone_from_slice(&blocks[0]);
     let output1 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt1[..]);
     decrypted_salt1[16..].clone_from_slice(&blocks[1]);
@@ -85,7 +85,7 @@ fn encrypt_hmac_secret_output(
     }
 
     if block_len == 4 {
-        let mut decrypted_salt2 = [0; 32];
+        let mut decrypted_salt2 = [0u8; 32];
         decrypted_salt2[..16].clone_from_slice(&blocks[2]);
         decrypted_salt2[16..].clone_from_slice(&blocks[3]);
         let output2 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt2[..]);
@@ -110,7 +110,7 @@ fn check_and_store_new_pin(
     if new_pin_enc.len() != PIN_PADDED_LENGTH {
         return false;
     }
-    let iv = [0; 16];
+    let iv = [0u8; 16];
     // Assuming PIN_PADDED_LENGTH % block_size == 0 here.
     let mut blocks = [[0u8; 16]; PIN_PADDED_LENGTH / 16];
     for i in 0..PIN_PADDED_LENGTH / 16 {
@@ -136,10 +136,29 @@ fn check_and_store_new_pin(
         // TODO(kaczmarczyck) check last byte == 0x00
         return false;
     }
-    let mut pin_hash = [0; 16];
+    let mut pin_hash = [0u8; 16];
     pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
     persistent_store.set_pin_hash(&pin_hash);
     true
+}
+
+#[cfg(feature = "with_ctap2_1")]
+// TODO remove when all variants are used
+#[allow(dead_code)]
+pub enum PinPermission {
+    MakeCredential = 0x01,
+    GetAssertion = 0x02,
+    CredentialManagement = 0x04,
+    BioEnrollment = 0x08,
+    PlatformConfiguration = 0x10,
+    AuthenticatorConfiguration = 0x20,
+}
+
+#[cfg(feature = "with_ctap2_1")]
+impl PinPermission {
+    pub fn check(self, stored_bits: u8) -> bool {
+        self as u8 & stored_bits != 0
+    }
 }
 
 pub struct PinProtocolV1 {
@@ -187,7 +206,7 @@ impl PinProtocolV1 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
                 }
 
-                let iv = [0; 16];
+                let iv = [0u8; 16];
                 let mut blocks = [[0u8; 16]; 1];
                 blocks[0].copy_from_slice(&pin_hash_enc[0..PIN_AUTH_LENGTH]);
                 cbc_decrypt(aes_dec_key, iv, &mut blocks);
@@ -309,7 +328,7 @@ impl PinProtocolV1 {
         self.check_pin_hash_enc(rng, persistent_store, &aes_dec_key, pin_hash_enc)?;
 
         // Assuming PIN_TOKEN_LENGTH % block_size == 0 here.
-        let iv = [0; 16];
+        let iv = [0u8; 16];
         let mut blocks = [[0u8; 16]; PIN_TOKEN_LENGTH / 16];
         for (i, item) in blocks.iter_mut().take(PIN_TOKEN_LENGTH / 16).enumerate() {
             item.copy_from_slice(&self.pin_uv_auth_token[i * 16..(i + 1) * 16]);
@@ -569,19 +588,16 @@ impl PinProtocolV1 {
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    pub fn has_make_credential_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
-        self.has_permission(0x01, rp_id)
+    pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
+        if permission.check(self.permissions) {
+            Ok(())
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        }
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    pub fn has_get_assertion_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
-        self.has_permission(0x02, rp_id)
-    }
-
-    // TODO(kaczmarczyck) use permissons for new commands
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn has_permission(&mut self, bitmask: u8, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+    pub fn has_permission_for_rp_id(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
         if let Some(permissions_rp_id) = &self.permissions_rp_id {
             if rp_id != permissions_rp_id {
                 return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
@@ -589,11 +605,7 @@ impl PinProtocolV1 {
         } else {
             self.permissions_rp_id = Some(String::from(rp_id));
         }
-        if self.permissions & bitmask != 0 {
-            Ok(())
-        } else {
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        }
+        Ok(())
     }
 }
 
@@ -603,12 +615,12 @@ mod test {
     use crypto::rng256::ThreadRng256;
 
     fn set_standard_pin(persistent_store: &mut PersistentStore) {
-        let mut pin = [0x00; 64];
+        let mut pin = [0u8; 64];
         pin[0] = 0x31;
         pin[1] = 0x32;
         pin[2] = 0x33;
         pin[3] = 0x34;
-        let mut pin_hash = [0; 16];
+        let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
         persistent_store.set_pin_hash(&pin_hash);
     }
@@ -620,7 +632,7 @@ mod test {
         blocks[0][1] = 0x32;
         blocks[0][2] = 0x33;
         blocks[0][3] = 0x34;
-        let iv = [0; 16];
+        let iv = [0u8; 16];
         cbc_encrypt(&aes_enc_key, iv, &mut blocks);
 
         let mut encrypted_pin = Vec::with_capacity(64);
@@ -632,7 +644,7 @@ mod test {
 
     fn encrypt_standard_pin_hash(shared_secret: &[u8; 32]) -> Vec<u8> {
         let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
-        let mut pin = [0x00; 64];
+        let mut pin = [0u8; 64];
         pin[0] = 0x31;
         pin[1] = 0x32;
         pin[2] = 0x33;
@@ -641,7 +653,7 @@ mod test {
 
         let mut blocks = [[0u8; 16]; 1];
         blocks[0].copy_from_slice(&pin_hash[..16]);
-        let iv = [0; 16];
+        let iv = [0u8; 16];
         cbc_encrypt(&aes_enc_key, iv, &mut blocks);
 
         let mut encrypted_pin_hash = Vec::with_capacity(16);
@@ -699,7 +711,7 @@ mod test {
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
-                pin_hash_enc.clone()
+                pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
         );
@@ -1089,19 +1101,77 @@ mod test {
     fn test_has_permission() {
         let mut rng = ThreadRng256 {};
         let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        pin_protocol_v1.permissions = 0x03;
-        assert_eq!(pin_protocol_v1.has_permission(0x01, "example.com"), Ok(()));
+        pin_protocol_v1.permissions = 0x7F;
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::MakeCredential),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::GetAssertion),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::CredentialManagement),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::BioEnrollment),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::PlatformConfiguration),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::AuthenticatorConfiguration),
+            Ok(())
+        );
+        pin_protocol_v1.permissions = 0x00;
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::MakeCredential),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::GetAssertion),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::CredentialManagement),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::BioEnrollment),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::PlatformConfiguration),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            pin_protocol_v1.has_permission(PinPermission::AuthenticatorConfiguration),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    #[test]
+    fn test_has_permission_for_rp_id() {
+        let mut rng = ThreadRng256 {};
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        assert_eq!(
+            pin_protocol_v1.has_permission_for_rp_id("example.com"),
+            Ok(())
+        );
         assert_eq!(
             pin_protocol_v1.permissions_rp_id,
             Some(String::from("example.com"))
         );
-        assert_eq!(pin_protocol_v1.has_permission(0x01, "example.com"), Ok(()));
         assert_eq!(
-            pin_protocol_v1.has_permission(0x01, "counter-example.com"),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+            pin_protocol_v1.has_permission_for_rp_id("example.com"),
+            Ok(())
         );
         assert_eq!(
-            pin_protocol_v1.has_permission(0x04, "example.com"),
+            pin_protocol_v1.has_permission_for_rp_id("counter-example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

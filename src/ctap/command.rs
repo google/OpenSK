@@ -332,7 +332,9 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let min_pin_length = min_pin_length
             .map(extract_unsigned)
             .transpose()?
-            .map(|m| m as u8);
+            .map(u8::try_from)
+            .transpose()
+            .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
         #[cfg(feature = "with_ctap2_1")]
         let min_pin_length_rp_ids = match min_pin_length_rp_ids {
             Some(entry) => Some(

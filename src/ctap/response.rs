@@ -288,8 +288,9 @@ mod test {
 
     #[test]
     fn test_get_info_into_cbor() {
+        let versions = vec!["FIDO_2_0".to_string()];
         let get_info_response = AuthenticatorGetInfoResponse {
-            versions: vec!["FIDO_2_0".to_string()],
+            versions: versions.clone(),
             extensions: None,
             aaguid: [0x00; 16],
             options: None,
@@ -313,12 +314,12 @@ mod test {
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
         #[cfg(not(feature = "with_ctap2_1"))]
         let expected_cbor = cbor_map_options! {
-            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
+            0x01 => cbor_array_vec![versions],
             0x03 => vec![0x00; 16],
         };
         #[cfg(feature = "with_ctap2_1")]
         let expected_cbor = cbor_map_options! {
-            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
+            0x01 => cbor_array_vec![versions],
             0x03 => vec![0x00; 16],
             0x0D => 4,
         };

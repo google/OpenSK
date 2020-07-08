@@ -66,7 +66,8 @@ const AAGUID: usize = 7;
 const MIN_PIN_LENGTH: usize = 8;
 #[cfg(feature = "with_ctap2_1")]
 const MIN_PIN_LENGTH_RP_IDS: usize = 9;
-// Different NUM_TAGS make the storage incompatible, so we use max(8,10).
+// Different NUM_TAGS depending on the CTAP version make the storage incompatible,
+// so we use the maximum.
 const NUM_TAGS: usize = 10;
 
 const MAX_PIN_RETRIES: u8 = 6;
@@ -417,19 +418,20 @@ impl PersistentStore {
             }
             Some((index, entry)) => {
                 debug_assert_eq!(entry.data.len(), 1);
-                if entry.data[0] > 0 {
-                    let new_value = entry.data[0].saturating_sub(1);
-                    self.store
-                        .replace(
-                            index,
-                            StoreEntry {
-                                tag: PIN_RETRIES,
-                                data: &[new_value],
-                                sensitive: false,
-                            },
-                        )
-                        .unwrap();
+                if entry.data[0] == 0 {
+                    return;
                 }
+                let new_value = entry.data[0].saturating_sub(1);
+                self.store
+                    .replace(
+                        index,
+                        StoreEntry {
+                            tag: PIN_RETRIES,
+                            data: &[new_value],
+                            sensitive: false,
+                        },
+                    )
+                    .unwrap();
             }
         }
     }

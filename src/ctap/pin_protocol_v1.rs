@@ -26,6 +26,8 @@ use crypto::hmac::{hmac_256, verify_hmac_256_first_128bits};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
+#[cfg(all(test, feature = "with_ctap2_1"))]
+use enum_iterator::IntoEnumIterator;
 use subtle::ConstantTimeEq;
 
 // Those constants have to be multiples of 16, the AES block size.
@@ -143,6 +145,7 @@ fn check_and_store_new_pin(
 }
 
 #[cfg(feature = "with_ctap2_1")]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 // TODO remove when all variants are used
 #[allow(dead_code)]
 pub enum PinPermission {
@@ -1102,55 +1105,16 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
         pin_protocol_v1.permissions = 0x7F;
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::MakeCredential),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::GetAssertion),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::CredentialManagement),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::BioEnrollment),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::PlatformConfiguration),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::AuthenticatorConfiguration),
-            Ok(())
-        );
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(pin_protocol_v1.has_permission(permission), Ok(()));
+        }
         pin_protocol_v1.permissions = 0x00;
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::MakeCredential),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::GetAssertion),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::CredentialManagement),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::BioEnrollment),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::PlatformConfiguration),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-        assert_eq!(
-            pin_protocol_v1.has_permission(PinPermission::AuthenticatorConfiguration),
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(
+                pin_protocol_v1.has_permission(permission),
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+            );
+        }
     }
 
     #[cfg(feature = "with_ctap2_1")]

@@ -18,6 +18,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
+#[cfg(test)]
+use enum_iterator::IntoEnumIterator;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -167,6 +169,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -455,6 +458,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,
     UserVerificationOptionalWithCredentialIdList = 0x02,
@@ -684,7 +688,8 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ClientPinSubCommand {
     GetPinRetries = 0x01,
     GetKeyAgreement = 0x02,
@@ -1167,11 +1172,10 @@ mod test {
         let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
         assert_eq!(policy_error, expected_error);
 
-        for policy_literal in 1..=3 {
-            let cbor_policy: cbor::Value = cbor_int!(policy_literal);
-            let policy = CredentialProtectionPolicy::try_from(cbor_policy.clone());
-            let created_cbor: cbor::Value = policy.unwrap().into();
-            assert_eq!(created_cbor, cbor_policy);
+        for policy in CredentialProtectionPolicy::into_enum_iter() {
+            let created_cbor: cbor::Value = policy.into();
+            let reconstructed = CredentialProtectionPolicy::try_from(created_cbor).unwrap();
+            assert_eq!(policy, reconstructed);
         }
     }
 
@@ -1188,13 +1192,10 @@ mod test {
         let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
         assert_eq!(created_cbor, cbor_authenticator_transport);
 
-        let transports = ["usb", "nfc", "ble", "internal"];
-        for transport in transports.iter() {
-            let cbor_authenticator_transport: cbor::Value = cbor_text!(*transport);
-            let authenticator_transport =
-                AuthenticatorTransport::try_from(cbor_authenticator_transport.clone());
-            let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
-            assert_eq!(created_cbor, cbor_authenticator_transport);
+        for transport in AuthenticatorTransport::into_enum_iter() {
+            let created_cbor: cbor::Value = transport.clone().into();
+            let reconstructed = AuthenticatorTransport::try_from(created_cbor).unwrap();
+            assert_eq!(transport, reconstructed);
         }
     }
 
@@ -1339,15 +1340,10 @@ mod test {
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
 
-        #[cfg(not(feature = "with_ctap2_1"))]
-        let last_literal = 0x05;
-        #[cfg(feature = "with_ctap2_1")]
-        let last_literal = 0x09;
-        for command_literal in 1..=last_literal {
-            let cbor_sub_command: cbor::Value = cbor_int!(command_literal);
-            let sub_command = ClientPinSubCommand::try_from(cbor_sub_command.clone());
-            let created_cbor: cbor::Value = sub_command.unwrap().into();
-            assert_eq!(created_cbor, cbor_sub_command);
+        for command in ClientPinSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
         }
     }
 

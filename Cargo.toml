@@ -16,7 +16,6 @@ crypto = { path = "libraries/crypto" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
-enum-iterator = "0.6.0"
 
 [features]
 debug_allocations = ["libtock/debug_allocations"]
@@ -30,6 +29,7 @@ with_ctap2_1 = []
 
 [dev-dependencies]
 elf2tab = "0.4.0"
+enum-iterator = "0.6.0"
 
 [build-dependencies]
 openssl = "0.10"

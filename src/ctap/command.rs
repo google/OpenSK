@@ -492,8 +492,8 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
-        // TODO(kaczmarczyck) inline the #cfg when the ICE is resolved:
-        // https://github.com/rust-lang/rust/issues/73663
+        // TODO(kaczmarczyck) inline the #cfg when #128 is resolved:
+        // https://github.com/google/OpenSK/issues/128
         #[cfg(not(feature = "with_ctap2_1"))]
         let cbor_value = cbor_map! {
             1 => 1,

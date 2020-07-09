@@ -392,10 +392,6 @@ impl PinProtocolV1 {
         if persistent_store.pin_hash().is_some() {
             match pin_auth {
                 Some(pin_auth) => {
-                    // TODO(kaczmarczyck) not mentioned, but maybe useful?
-                    // if persistent_store.pin_retries() == 0 {
-                    //     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
-                    // }
                     if self.consecutive_pin_mismatches >= 3 {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                     }
@@ -403,6 +399,7 @@ impl PinProtocolV1 {
                     message.extend(&[0x06, 0x08]);
                     message.extend(&[min_pin_length as u8, 0x00, 0x00, 0x00]);
                     // TODO(kaczmarczyck) commented code is useful for the extension
+                    // https://github.com/google/OpenSK/issues/129
                     // if !cbor::write(cbor_array_vec!(min_pin_length_rp_ids), &mut message) {
                     //     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
                     // }
@@ -417,6 +414,8 @@ impl PinProtocolV1 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
         }
         persistent_store.set_min_pin_length(min_pin_length);
+        // TODO(kaczmarczyck) commented code is useful for the extension
+        // https://github.com/google/OpenSK/issues/129
         // if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
         //     persistent_store.set_min_pin_length_rp_ids(min_pin_length_rp_ids)?;
         // }
@@ -932,6 +931,7 @@ mod test {
             0xFE, 0xC9,
         ];
         // TODO(kaczmarczyck) implement test for the min PIN length extension
+        // https://github.com/google/OpenSK/issues/129
         let response = pin_protocol_v1.process_set_min_pin_length(
             &mut persistent_store,
             min_pin_length,

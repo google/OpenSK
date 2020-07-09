@@ -75,6 +75,8 @@ const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 const AAGUID_LENGTH: usize = 16;
 #[cfg(feature = "with_ctap2_1")]
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
+// TODO(kaczmarczyck) use this for the minPinLength extension
+// https://github.com/google/OpenSK/issues/129
 #[cfg(feature = "with_ctap2_1")]
 const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 // TODO(kaczmarczyck) Check whether this constant is necessary, or replace it accordingly.
@@ -396,13 +398,12 @@ impl PersistentStore {
     }
 
     pub fn pin_retries(&self) -> u8 {
-        match self.store.find_one(&Key::PinRetries) {
-            None => MAX_PIN_RETRIES,
-            Some((_, entry)) => {
+        self.store
+            .find_one(&Key::PinRetries)
+            .map_or(MAX_PIN_RETRIES, |(_, entry)| {
                 debug_assert_eq!(entry.data.len(), 1);
                 entry.data[0]
-            }
-        }
+            })
     }
 
     pub fn decr_pin_retries(&mut self) {
@@ -446,7 +447,10 @@ impl PersistentStore {
     pub fn min_pin_length(&self) -> u8 {
         self.store
             .find_one(&Key::MinPinLength)
-            .map_or(DEFAULT_MIN_PIN_LENGTH, |(_, entry)| entry.data[0])
+            .map_or(DEFAULT_MIN_PIN_LENGTH, |(_, entry)| {
+                debug_assert_eq!(entry.data.len(), 1);
+                entry.data[0]
+            })
     }
 
     #[cfg(feature = "with_ctap2_1")]
@@ -1007,7 +1011,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // The minimum PIN lenght is initially at the default.
+        // The minimum PIN length is initially at the default.
         assert_eq!(persistent_store.min_pin_length(), DEFAULT_MIN_PIN_LENGTH);
 
         // Changes by the setter are reflected by the getter..
@@ -1022,7 +1026,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // The minimum PIN lenght is initially at the default.
+        // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
             persistent_store._min_pin_length_rp_ids(),
             _DEFAULT_MIN_PIN_LENGTH_RP_IDS

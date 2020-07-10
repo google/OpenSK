@@ -51,7 +51,7 @@ echo -n '[-] Copying additional boards to Tock... '
 cp -r boards/* third_party/tock/boards
 echo $done_text
 
-# Apply patches to kernel. Do that in a sub-shell
+# Apply patches to kernel. Do that in a sub-shell.
 (
   cd third_party/tock/ && \
   for p in ../../patches/tock/[0-9][0-9]-*.patch
@@ -66,20 +66,23 @@ echo $done_text
   done
 )
 
-# Now apply patches to libtock-rs. Do that in a sub-shell
-(
-  cd third_party/libtock-rs/ && \
-  for p in ../../patches/libtock-rs/[0-9][0-9]-*.patch
-  do
-    echo -n '[-] Applying patch "'$(basename $p)'"... '
-    if git apply "$p"
-    then
-      echo $done_text
-    else
-      patch_conflict_detected
-    fi
-  done
-)
+# Now apply patches to libtock-rs. Do that in a sub-shell.
+#
+# Commented out as there are not patches at the moment, and the pattern fails in
+# that case.
+#(
+#  cd third_party/libtock-rs/ && \
+#  for p in ../../patches/libtock-rs/[0-9][0-9]-*.patch
+#  do
+#    echo -n '[-] Applying patch "'$(basename $p)'"... '
+#    if git apply "$p"
+#    then
+#      echo $done_text
+#    else
+#      patch_conflict_detected
+#    fi
+#  done
+#)
 
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh

@@ -16,8 +16,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
-      - name: Set up submodules
-        run: ./setup-submodules.sh
+        with:
+          submodules: "true"
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi

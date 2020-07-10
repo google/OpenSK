@@ -373,6 +373,7 @@ class OpenSKInstaller:
     ]
     env = os.environ.copy()
     env["RUSTFLAGS"] = " ".join(rust_flags)
+    env["APP_HEAP_SIZE"] = str(APP_HEAP_SIZE)
 
     command = [
         "cargo", "build", "--release", "--target={}".format(props.arch),

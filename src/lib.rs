@@ -16,6 +16,8 @@
 
 #[macro_use]
 extern crate alloc;
-extern crate libtock;
+extern crate lang_items;
+extern crate libtock_core;
+extern crate libtock_drivers;
 
 pub mod embedded_flash;

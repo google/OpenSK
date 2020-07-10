@@ -2,7 +2,7 @@
 name = "libtock_drivers"
 version = "0.1.0"
 authors = [
-  "Tock Project Developers <tock-dev@googlegroups.com>"
+  "Tock Project Developers <tock-dev@googlegroups.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
 ]
 license = "MIT/Apache-2.0"

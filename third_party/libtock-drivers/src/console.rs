@@ -1,11 +1,7 @@
-use crate::callback::Identity0Consumer;
-use crate::executor;
-use crate::futures;
-use crate::result::TockResult;
-use crate::syscalls;
+use crate::util;
 use core::cell::Cell;
 use core::fmt;
-use core::mem;
+use libtock_core::{callback, syscalls};
 
 const DRIVER_NUMBER: usize = 1;
 
@@ -21,62 +17,97 @@ mod allow_nr {
     pub const SHARE_BUFFER: usize = 1;
 }
 
-#[non_exhaustive]
-pub struct ConsoleDriver;
-
-impl ConsoleDriver {
-    pub fn create_console(self) -> Console {
-        Console {
-            allow_buffer: [0; 64],
-        }
-    }
-}
+const BUFFER_SIZE: usize = 1024;
 
 pub struct Console {
-    allow_buffer: [u8; 64],
+    allow_buffer: [u8; BUFFER_SIZE],
+    count_pending: usize,
 }
 
 impl Console {
-    pub fn write<S: AsRef<[u8]>>(&mut self, text: S) -> TockResult<()> {
-        let mut not_written_yet = text.as_ref();
-        while !not_written_yet.is_empty() {
-            let num_bytes_to_print = self.allow_buffer.len().min(not_written_yet.len());
-            self.allow_buffer[..num_bytes_to_print]
-                .copy_from_slice(&not_written_yet[..num_bytes_to_print]);
-            self.flush(num_bytes_to_print)?;
-            not_written_yet = &not_written_yet[num_bytes_to_print..];
+    pub fn new() -> Console {
+        Console {
+            allow_buffer: [0; BUFFER_SIZE],
+            count_pending: 0,
         }
-        Ok(())
     }
 
-    fn flush(&mut self, num_bytes_to_print: usize) -> TockResult<()> {
-        let shared_memory = syscalls::allow(
+    fn is_empty(&self) -> bool {
+        self.count_pending == 0
+    }
+
+    fn is_full(&self) -> bool {
+        self.allow_buffer.len() == self.count_pending
+    }
+
+    fn available_len(&self) -> usize {
+        self.allow_buffer.len() - self.count_pending
+    }
+
+    pub fn write<S: AsRef<[u8]>>(&mut self, text: S) {
+        let mut not_written_yet = text.as_ref();
+        while !not_written_yet.is_empty() {
+            let num_bytes_to_print = self.available_len().min(not_written_yet.len());
+            self.allow_buffer[self.count_pending..(self.count_pending + num_bytes_to_print)]
+                .copy_from_slice(&not_written_yet[..num_bytes_to_print]);
+            self.count_pending += num_bytes_to_print;
+
+            if self.is_full() {
+                self.flush();
+            }
+
+            not_written_yet = &not_written_yet[num_bytes_to_print..];
+        }
+    }
+
+    pub fn flush(&mut self) {
+        if self.is_empty() {
+            // Don't trigger any syscall if the buffer is empty.
+            return;
+        }
+
+        let count = self.count_pending;
+        // Clear the buffer even in case of error, to avoid an infinite loop.
+        self.count_pending = 0;
+
+        let result = syscalls::allow(
             DRIVER_NUMBER,
             allow_nr::SHARE_BUFFER,
-            &mut self.allow_buffer[..num_bytes_to_print],
-        )?;
+            &mut self.allow_buffer[..count],
+        );
+        if result.is_err() {
+            return;
+        }
 
         let is_written = Cell::new(false);
         let mut is_written_alarm = || is_written.set(true);
-        let subscription = syscalls::subscribe::<Identity0Consumer, _>(
+        let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
             DRIVER_NUMBER,
             subscribe_nr::SET_ALARM,
             &mut is_written_alarm,
-        )?;
+        );
+        if subscription.is_err() {
+            return;
+        }
 
-        syscalls::command(DRIVER_NUMBER, command_nr::WRITE, num_bytes_to_print, 0)?;
+        let result_code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE, count, 0);
+        if result_code.is_err() {
+            return;
+        }
 
-        unsafe { executor::block_on(futures::wait_until(|| is_written.get())) };
+        util::yieldk_for(|| is_written.get());
+    }
+}
 
-        mem::drop(subscription);
-        mem::drop(shared_memory);
-
-        Ok(())
+impl Drop for Console {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
 impl fmt::Write for Console {
     fn write_str(&mut self, string: &str) -> Result<(), fmt::Error> {
-        self.write(string).map_err(|_| fmt::Error)
+        self.write(string);
+        Ok(())
     }
 }

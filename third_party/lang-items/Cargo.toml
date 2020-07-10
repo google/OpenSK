@@ -1,0 +1,15 @@
+[package]
+name = "libtock_core"
+version = "0.1.0"
+authors = ["Tock Project Developers <tock-dev@googlegroups.com>"]
+edition = "2018"
+
+[features]
+alloc = ["alloc_init", "linked_list_allocator"]
+alloc_init = []
+custom_panic_handler = []
+custom_alloc_error_handler = []
+
+[dependencies]
+linked_list_allocator = { optional = true, version = "=0.8.1", default-features = false }
+libtock_codegen = { path = "../codegen" }

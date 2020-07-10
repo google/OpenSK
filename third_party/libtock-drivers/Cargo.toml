@@ -1,0 +1,67 @@
+[package]
+name = "libtock"
+version = "0.2.0"
+authors = ["Tock Project Developers <tock-dev@googlegroups.com>"]
+license = "MIT/Apache-2.0"
+edition = "2018"
+
+[features]
+alloc = ["libtock_core/alloc"]
+custom_panic_handler = ["libtock_core/custom_panic_handler"]
+custom_alloc_error_handler = ["libtock_core/custom_alloc_error_handler"]
+__internal_disable_gpio_in_integration_test = []
+
+[dependencies]
+libtock_core = { path = "core" }
+libtock_codegen = { path = "codegen" }
+futures = { version = "0.3.1", default-features = false, features = ["unstable", "cfg-target-has-atomic"] }
+
+[dev-dependencies]
+corepack = { version = "0.4.0", default-features = false, features = ["alloc"] }
+# We pin the serde version because newer serde versions may not be compatible
+# with the nightly toolchain used by libtock-rs.
+serde = { version = "=1.0.84", default-features = false, features = ["derive"] }
+
+[[example]]
+name = "alloc_error"
+path = "examples-features/alloc_error.rs"
+required-features = ["alloc", "custom_alloc_error_handler"]
+
+[[example]]
+name = "ble_scanning"
+path = "examples-features/ble_scanning.rs"
+required-features = ["alloc"]
+
+[[example]]
+name = "libtock_test"
+path = "examples-features/libtock_test.rs"
+required-features = ["alloc"]
+
+[[example]]
+name = "panic"
+path = "examples-features/panic.rs"
+required-features = ["custom_panic_handler"]
+
+[[example]]
+name = "simple_ble"
+path = "examples-features/simple_ble.rs"
+required-features = ["alloc"]
+
+[profile.dev]
+panic = "abort"
+lto = true
+debug = true
+
+[profile.release]
+panic = "abort"
+lto = true
+debug = true
+
+[workspace]
+exclude = [ "tock" ]
+members = [
+    "codegen",
+    "core",
+    "test_runner",
+    "tools/print_sizes",
+]

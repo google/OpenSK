@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "debug_ctap")]
+use crate::console::Console;
+use crate::result::TockError;
+use crate::timer;
+use crate::timer::Duration;
+use crate::util;
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-#[cfg(feature = "debug_ctap")]
-use libtock::console::Console;
-use libtock::result::TockValue;
-use libtock::result::{EALREADY, EBUSY, SUCCESS};
-use libtock::syscalls;
-use libtock::timer;
-use libtock::timer::{Duration, StopAlarmError};
+use libtock_core::result::{CommandError, EALREADY, EBUSY, SUCCESS};
+use libtock_core::{callback, syscalls};
 
 const DRIVER_NUMBER: usize = 0x20009;
 
@@ -51,13 +52,13 @@ mod allow_nr {
 }
 
 pub fn setup() -> bool {
-    let result = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CHECK, 0, 0) };
-    if result != 0 {
+    let result = syscalls::command(DRIVER_NUMBER, command_nr::CHECK, 0, 0);
+    if result.is_err() {
         return false;
     }
 
-    let result = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CONNECT, 0, 0) };
-    if result != 0 {
+    let result = syscalls::command(DRIVER_NUMBER, command_nr::CONNECT, 0, 0);
+    if result.is_err() {
         return false;
     }
 
@@ -72,18 +73,22 @@ pub fn recv(buf: &mut [u8; 64]) -> bool {
     }
 
     let done = Cell::new(false);
-    let mut alarm = |_, _, _| done.set(true);
-    let subscription = syscalls::subscribe(DRIVER_NUMBER, subscribe_nr::RECEIVE, &mut alarm);
+    let mut alarm = || done.set(true);
+    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::RECEIVE,
+        &mut alarm,
+    );
     if subscription.is_err() {
         return false;
     }
 
-    let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0) };
-    if result_code != 0 {
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
+    if result_code.is_err() {
         return false;
     }
 
-    syscalls::yieldk_for(|| done.get());
+    util::yieldk_for(|| done.get());
     true
 }
 
@@ -95,18 +100,22 @@ pub fn send(buf: &mut [u8; 64]) -> bool {
     }
 
     let done = Cell::new(false);
-    let mut alarm = |_, _, _| done.set(true);
-    let subscription = syscalls::subscribe(DRIVER_NUMBER, subscribe_nr::TRANSMIT, &mut alarm);
+    let mut alarm = || done.set(true);
+    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::TRANSMIT,
+        &mut alarm,
+    );
     if subscription.is_err() {
         return false;
     }
 
-    let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, 0, 0) };
-    if result_code != 0 {
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, 0, 0);
+    if result_code.is_err() {
         return false;
     }
 
-    syscalls::yieldk_for(|| done.get());
+    util::yieldk_for(|| done.get());
     true
 }
 
@@ -135,7 +144,7 @@ pub fn send_or_recv(buf: &mut [u8; 64]) -> SendOrRecvStatus {
     }
 
     let status = Cell::new(None);
-    let mut alarm = |direction, _, _| {
+    let mut alarm = |direction| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::TRANSMITTED => SendOrRecvStatus::Sent,
             subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
@@ -144,19 +153,21 @@ pub fn send_or_recv(buf: &mut [u8; 64]) -> SendOrRecvStatus {
         }));
     };
 
-    let subscription =
-        syscalls::subscribe(DRIVER_NUMBER, subscribe_nr::TRANSMIT_OR_RECEIVE, &mut alarm);
+    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::TRANSMIT_OR_RECEIVE,
+        &mut alarm,
+    );
     if subscription.is_err() {
         return SendOrRecvStatus::Error;
     }
 
-    let result_code =
-        unsafe { syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0) };
-    if result_code != 0 {
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0);
+    if result_code.is_err() {
         return SendOrRecvStatus::Error;
     }
 
-    syscalls::yieldk_for(|| status.get().is_some());
+    util::yieldk_for(|| status.get().is_some());
     status.get().unwrap()
 }
 
@@ -166,7 +177,7 @@ pub fn recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
 ) -> Option<SendOrRecvStatus> {
-    #[cfg(feature = "verbose")]
+    #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
         "Receiving packet with timeout of {}ms",
@@ -176,7 +187,7 @@ pub fn recv_with_timeout(
 
     let result = recv_with_timeout_detail(buf, timeout_delay);
 
-    #[cfg(feature = "verbose")]
+    #[cfg(feature = "verbose_usb")]
     {
         if let Some(SendOrRecvStatus::Received) = result {
             writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
@@ -192,7 +203,7 @@ pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
 ) -> Option<SendOrRecvStatus> {
-    #[cfg(feature = "verbose")]
+    #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
         "Sending packet with timeout of {}ms = {:02x?}",
@@ -203,7 +214,7 @@ pub fn send_or_recv_with_timeout(
 
     let result = send_or_recv_with_timeout_detail(buf, timeout_delay);
 
-    #[cfg(feature = "verbose")]
+    #[cfg(feature = "verbose_usb")]
     {
         if let Some(SendOrRecvStatus::Received) = result {
             writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
@@ -223,7 +234,7 @@ fn recv_with_timeout_detail(
     }
 
     let status = Cell::new(None);
-    let mut alarm = |direction, _, _| {
+    let mut alarm = |direction| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
             // Unknown direction or "transmitted" sent by the kernel.
@@ -231,7 +242,11 @@ fn recv_with_timeout_detail(
         }));
     };
 
-    let subscription = syscalls::subscribe(DRIVER_NUMBER, subscribe_nr::RECEIVE, &mut alarm);
+    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::RECEIVE,
+        &mut alarm,
+    );
     if subscription.is_err() {
         return Some(SendOrRecvStatus::Error);
     }
@@ -251,17 +266,20 @@ fn recv_with_timeout_detail(
     };
 
     // Trigger USB reception.
-    let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0) };
-    if result_code != 0 {
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
+    if result_code.is_err() {
         return Some(SendOrRecvStatus::Error);
     }
 
-    syscalls::yieldk_for(|| status.get().is_some() || timeout_expired.get());
+    util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
 
     // Cleanup alarm callback.
     match timeout.stop_alarm(timeout_alarm) {
         Ok(()) => (),
-        Err(TockValue::Expected(StopAlarmError::AlreadyDisabled)) => {
+        Err(TockError::Command(CommandError {
+            return_code: EALREADY,
+            ..
+        })) => {
             if !timeout_expired.get() {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(
@@ -271,14 +289,20 @@ fn recv_with_timeout_detail(
                 .unwrap();
             }
         }
-        Err(e) => panic!("Unexpected error when stopping alarm: {:?}", e),
+        Err(_e) => {
+            #[cfg(feature = "debug_ctap")]
+            panic!("Unexpected error when stopping alarm: {:?}", _e);
+            #[cfg(not(feature = "debug_ctap"))]
+            panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+        }
     }
 
     // Cancel USB transaction if necessary.
     if status.get().is_none() {
-        #[cfg(feature = "verbose")]
+        #[cfg(feature = "verbose_usb")]
         writeln!(Console::new(), "Cancelling USB receive due to timeout").unwrap();
-        let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
+        let result_code =
+            unsafe { syscalls::raw::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
         match result_code {
             // - SUCCESS means that we successfully cancelled the transaction.
             // - EALREADY means that the transaction was already completed.
@@ -310,7 +334,7 @@ fn send_or_recv_with_timeout_detail(
     }
 
     let status = Cell::new(None);
-    let mut alarm = |direction, _, _| {
+    let mut alarm = |direction| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::TRANSMITTED => SendOrRecvStatus::Sent,
             subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
@@ -319,8 +343,11 @@ fn send_or_recv_with_timeout_detail(
         }));
     };
 
-    let subscription =
-        syscalls::subscribe(DRIVER_NUMBER, subscribe_nr::TRANSMIT_OR_RECEIVE, &mut alarm);
+    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::TRANSMIT_OR_RECEIVE,
+        &mut alarm,
+    );
     if subscription.is_err() {
         return Some(SendOrRecvStatus::Error);
     }
@@ -340,18 +367,20 @@ fn send_or_recv_with_timeout_detail(
     };
 
     // Trigger USB transmission.
-    let result_code =
-        unsafe { syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0) };
-    if result_code != 0 {
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0);
+    if result_code.is_err() {
         return Some(SendOrRecvStatus::Error);
     }
 
-    syscalls::yieldk_for(|| status.get().is_some() || timeout_expired.get());
+    util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
 
     // Cleanup alarm callback.
     match timeout.stop_alarm(timeout_alarm) {
         Ok(()) => (),
-        Err(TockValue::Expected(StopAlarmError::AlreadyDisabled)) => {
+        Err(TockError::Command(CommandError {
+            return_code: EALREADY,
+            ..
+        })) => {
             if !timeout_expired.get() {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(
@@ -361,14 +390,20 @@ fn send_or_recv_with_timeout_detail(
                 .unwrap();
             }
         }
-        Err(e) => panic!("Unexpected error when stopping alarm: {:?}", e),
+        Err(_e) => {
+            #[cfg(feature = "debug_ctap")]
+            panic!("Unexpected error when stopping alarm: {:?}", _e);
+            #[cfg(not(feature = "debug_ctap"))]
+            panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+        }
     }
 
     // Cancel USB transaction if necessary.
     if status.get().is_none() {
-        #[cfg(feature = "verbose")]
+        #[cfg(feature = "verbose_usb")]
         writeln!(Console::new(), "Cancelling USB transaction due to timeout").unwrap();
-        let result_code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
+        let result_code =
+            unsafe { syscalls::raw::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
         match result_code {
             // - SUCCESS means that we successfully cancelled the transaction.
             // - EALREADY means that the transaction was already completed.

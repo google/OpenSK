@@ -894,8 +894,22 @@ if __name__ == "__main__":
       dest="application",
       action="store_const",
       const="crypto_bench",
-      help=("Compiles and installs the crypto_bench example that tests "
+      help=("Compiles and installs the crypto_bench example that benchmarks "
             "the performance of the cryptographic algorithms on the board."))
+  apps_group.add_argument(
+      "--panic_test",
+      dest="application",
+      action="store_const",
+      const="panic_test",
+      help=("Compiles and installs the panic_test example that immediately "
+            "triggers a panic."))
+  apps_group.add_argument(
+      "--oom_test",
+      dest="application",
+      action="store_const",
+      const="oom_test",
+      help=("Compiles and installs the oom_test example that tests the "
+            "allocator until an out-of-memory error occurs."))
 
   main_parser.set_defaults(features=["with_ctap1"])
 

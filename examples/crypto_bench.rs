@@ -17,24 +17,26 @@
 #[macro_use]
 extern crate alloc;
 extern crate crypto;
-extern crate libtock;
+extern crate lang_items;
+extern crate libtock_drivers;
 
 use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{
     aes256, cbc, ecdsa, rng256, sha256, Decrypt16BytesBlock, Encrypt16BytesBlock, Hash256,
 };
-use libtock::console::Console;
-use libtock::timer;
-use libtock::timer::Timer;
-use libtock::timer::Timestamp;
+use libtock_drivers::console::Console;
+use libtock_drivers::result::FlexUnwrap;
+use libtock_drivers::timer;
+use libtock_drivers::timer::Timer;
+use libtock_drivers::timer::Timestamp;
 
 fn main() {
     let mut console = Console::new();
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
     let mut with_callback = timer::with_callback(|_, _| {});
-    let timer = with_callback.init().unwrap();
+    let timer = with_callback.init().flex_unwrap();
 
     let mut rng = rng256::TockRng256 {};
 
@@ -158,11 +160,11 @@ where
     writeln!(console, "----------------------------------------").unwrap();
     let mut count = 1;
     for _ in 0..30 {
-        let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock());
+        let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
         for _ in 0..count {
             f();
         }
-        let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock());
+        let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
         let elapsed = (end - start).ms();
         writeln!(
             console,
@@ -172,6 +174,7 @@ where
             elapsed / (count as f64)
         )
         .unwrap();
+        console.flush();
         if elapsed > 1000.0 {
             break;
         }

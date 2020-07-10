@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
+      - name: Set up submodules
+        run: ./setup-submodules.sh
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi

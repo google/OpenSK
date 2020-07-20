@@ -1,12 +1,12 @@
 ========================================
 Board: nrf52840dk
 ----------------------------------------
-Min RAM size from sections in ELF: 16 bytes
+Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 178788 (0x2ba64) bytes.
-  Adding .stack section. Offset: 178916 (0x2bae4). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 187752 (0x2dd68) bytes.
+  Adding .stack section. Offset: 187880 (0x2dde8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -16,16 +16,16 @@ TBF Header:
 
         init_fn_offset:       85       0x55
         protected_size:       20       0x14
-      minimum_ram_size:   107424    0x1A3A0
+      minimum_ram_size:   107428    0x1A3A4
 ========================================
 Board: nrf52840_dongle
 ----------------------------------------
-Min RAM size from sections in ELF: 16 bytes
+Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 178788 (0x2ba64) bytes.
-  Adding .stack section. Offset: 178916 (0x2bae4). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 187752 (0x2dd68) bytes.
+  Adding .stack section. Offset: 187880 (0x2dde8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -35,16 +35,16 @@ TBF Header:
 
         init_fn_offset:       85       0x55
         protected_size:       20       0x14
-      minimum_ram_size:   107424    0x1A3A0
+      minimum_ram_size:   107428    0x1A3A4
 ========================================
 Board: nrf52840_dongle_dfu
 ----------------------------------------
-Min RAM size from sections in ELF: 16 bytes
+Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 178788 (0x2ba64) bytes.
-  Adding .stack section. Offset: 178916 (0x2bae4). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 187752 (0x2dd68) bytes.
+  Adding .stack section. Offset: 187880 (0x2dde8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -54,16 +54,16 @@ TBF Header:
 
         init_fn_offset:       85       0x55
         protected_size:       20       0x14
-      minimum_ram_size:   107424    0x1A3A0
+      minimum_ram_size:   107428    0x1A3A4
 ========================================
 Board: nrf52840_mdk_dfu
 ----------------------------------------
-Min RAM size from sections in ELF: 16 bytes
+Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 178788 (0x2ba64) bytes.
-  Adding .stack section. Offset: 178916 (0x2bae4). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 187752 (0x2dd68) bytes.
+  Adding .stack section. Offset: 187880 (0x2dde8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -73,4 +73,4 @@ TBF Header:
 
         init_fn_offset:       85       0x55
         protected_size:       20       0x14
-      minimum_ram_size:   107424    0x1A3A0
+      minimum_ram_size:   107428    0x1A3A4

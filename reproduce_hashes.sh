@@ -35,3 +35,6 @@ done
 echo "Computing SHA-256 sum of the TAB file..."
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/tab/ctap2.tab >> reproducible/binaries.sha256sum
 tar -rvf reproducible/reproduced.tar target/tab/ctap2.tab
+
+tar -rvf reproducible/reproduced.tar reproducible/elf2tab.txt
+tar -rvf reproducible/reproduced.tar reproducible/binaries.sha256sum

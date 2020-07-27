@@ -755,8 +755,11 @@ where
         &mut self,
         client_pin_params: AuthenticatorClientPinParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.pin_protocol_v1
-            .process(self.rng, &mut self.persistent_store, client_pin_params)
+        self.pin_protocol_v1.process_subcommand(
+            self.rng,
+            &mut self.persistent_store,
+            client_pin_params,
+        )
     }
 
     fn process_reset(&mut self, cid: ChannelID) -> Result<ResponseData, Ctap2StatusCode> {

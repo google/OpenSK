@@ -107,7 +107,7 @@ a few things you can personalize:
     The current minimum is 4. Values from 4 to 63 are allowed. Requiring longer
     PINs can help establish trust between users and relying parties. It makes
     user verification harder to break, but less convenient.
-    NIST recommends 6 at least digit PINs in section 5.1.9.1:
+    NIST recommends at least 6-digit PINs in section 5.1.9.1:
     https://pages.nist.gov/800-63-3/sp800-63b.html
     You can add relying parties to the list of readers of the minimum PIN length.
 

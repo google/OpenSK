@@ -72,6 +72,7 @@ fn encrypt_hmac_secret_output(
 
     // Initialization of 4 blocks in any case makes this function more readable.
     let mut blocks = [[0u8; 16]; 4];
+    // With the if clause restriction above, block_len can only be 2 or 4.
     let block_len = salt_enc.len() / 16;
     for i in 0..block_len {
         blocks[i].copy_from_slice(&salt_enc[16 * i..16 * (i + 1)]);
@@ -395,6 +396,8 @@ impl PinProtocolV1 {
                     if self.consecutive_pin_mismatches >= 3 {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                     }
+                    // TODO(kaczmarczyck) Values are taken from the (not yet public) new revision
+                    // of CTAP 2.1. The code should link the specification when published.
                     let mut message = vec![0xFF; 32];
                     message.extend(&[0x06, 0x08]);
                     message.extend(&[min_pin_length as u8, 0x00, 0x00, 0x00]);
@@ -449,7 +452,7 @@ impl PinProtocolV1 {
         Ok(response)
     }
 
-    pub fn process(
+    pub fn process_subcommand(
         &mut self,
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
@@ -975,7 +978,7 @@ mod test {
             permissions_rp_id: None,
         };
         assert!(pin_protocol_v1
-            .process(&mut rng, &mut persistent_store, client_pin_params)
+            .process_subcommand(&mut rng, &mut persistent_store, client_pin_params)
             .is_ok());
 
         let client_pin_params = AuthenticatorClientPinParameters {
@@ -999,7 +1002,7 @@ mod test {
         #[cfg(feature = "with_ctap2_1")]
         let error_code = Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER;
         assert_eq!(
-            pin_protocol_v1.process(&mut rng, &mut persistent_store, client_pin_params),
+            pin_protocol_v1.process_subcommand(&mut rng, &mut persistent_store, client_pin_params),
             Err(error_code)
         );
     }

@@ -5,6 +5,7 @@ on:
       - 'examples/*.rs'
       - 'libraries/**/*.rs'
       - 'src/**/*.rs'
+      - 'tools/**/*.rs'
       - 'patches/**'
       - '**/Cargo.toml'
       - '.cargo/config'
@@ -46,3 +47,9 @@ jobs:
         with:
           command: fmt
           args: --manifest-path libraries/crypto/Cargo.toml --all -- --check
+
+      - name: Cargo format tools/heapviz
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path tools/heapviz/Cargo.toml --all -- --check

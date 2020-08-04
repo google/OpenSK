@@ -411,7 +411,7 @@ where
                 }
                 if !self
                     .pin_protocol_v1
-                    .check_pin_auth_token(&client_data_hash, &pin_auth)
+                    .verify_pin_auth_token(&client_data_hash, &pin_auth)
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
@@ -595,7 +595,7 @@ where
                 }
                 if !self
                     .pin_protocol_v1
-                    .check_pin_auth_token(&client_data_hash, &pin_auth)
+                    .verify_pin_auth_token(&client_data_hash, &pin_auth)
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }

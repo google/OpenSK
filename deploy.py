@@ -454,14 +454,10 @@ class OpenSKInstaller:
           self.args.application, str(e)))
 
   def get_padding(self):
-    fake_header = tbfh.TBFHeader("")
-    fake_header.version = 2
-    fake_header.fields["header_size"] = 0x10
-    fake_header.fields["total_size"] = (
+    padding = tbfh.TBFHeaderPadding(
         SUPPORTED_BOARDS[self.args.board].app_address -
         SUPPORTED_BOARDS[self.args.board].padding_address)
-    fake_header.fields["flags"] = 0
-    return fake_header.get_binary()
+    return padding.get_binary()
 
   def install_tock_os(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
@@ -543,7 +539,7 @@ class OpenSKInstaller:
     tock.open()
     app_found = False
     with tock._start_communication_with_board():
-      apps = [app.name for app in tock._extract_all_app_headers()]
+      apps = [app.get_name() for app in tock._extract_all_app_headers()]
       app_found = expected_app in apps
     return app_found
 
@@ -582,16 +578,17 @@ class OpenSKInstaller:
                "architecture {}".format(board_props.arch)))
       app_hex = intelhex.IntelHex()
       app_hex.frombytes(
-          app_tab.extract_app(board_props.arch).get_binary(),
+          app_tab.extract_app(board_props.arch).get_binary(
+              board_props.app_address),
           offset=board_props.app_address)
       final_hex.merge(app_hex)
     info("Generating all-merged HEX file: {}".format(dest_file))
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
-    if not tockloader.__version__.startswith("1.4."):
+    if not tockloader.__version__.startswith("1.5."):
       fatal(("Your version of tockloader seems incompatible: found {}, "
-             "expected 1.4.x.".format(tockloader.__version__)))
+             "expected 1.5.x.".format(tockloader.__version__)))
 
     if self.args.programmer == "jlink":
       assert_mandatory_binary("JLinkExe")

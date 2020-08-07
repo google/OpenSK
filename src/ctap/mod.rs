@@ -59,8 +59,8 @@ use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(feature = "debug_ctap")]
-use libtock::console::Console;
-use libtock::timer::{Duration, Timestamp};
+use libtock_drivers::console::Console;
+use libtock_drivers::timer::{Duration, Timestamp};
 use subtle::ConstantTimeEq;
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by

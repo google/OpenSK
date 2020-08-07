@@ -21,7 +21,6 @@ extern crate subtle;
 #[macro_use]
 extern crate arrayref;
 extern crate byteorder;
-extern crate libtock;
 #[macro_use]
 extern crate cbor;
 

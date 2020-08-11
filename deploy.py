@@ -607,8 +607,9 @@ class OpenSKInstaller:
       assert_python_library("intelhex")
       assert_python_library("nordicsemi.lister")
       nrfutil_version = __import__("nordicsemi.version").version.NRFUTIL_VERSION
-      if not nrfutil_version.startswith("6."):
-        fatal(("You need to install nrfutil python3 package v6.0 or above. "
+      nrfutil_major, nrfutil_minor, _ = nrfutil_version.split(".", 3)
+      if not (int(nrfutil_major) == 6 and int(nrfutil_minor) >= 1):
+        fatal(("You need to install nrfutil python3 package v6.1 or above. "
                "Found: {}".format(nrfutil_version)))
       if not SUPPORTED_BOARDS[self.args.board].nordic_dfu:
         fatal("This board doesn't support flashing over DFU.")
@@ -715,7 +716,7 @@ class OpenSKInstaller:
         info("Flashing device using DFU...")
         return subprocess.run(
             [
-                "nrfutil", "dfu", "usb-serial",
+                "nrfutil", "dfu", "usb_serial",
                 "--package={}".format(dfu_pkg_file),
                 "--serial-number={}".format(serial_number[0])
             ],

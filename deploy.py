@@ -255,7 +255,6 @@ class RemoveConstAction(argparse.Action):
 class OpenSKInstaller:
 
   def __init__(self, args):
-    colorama.init()
     self.args = args
     # Where all the TAB files should go
     self.tab_folder = os.path.join("target", "tab")
@@ -617,18 +616,6 @@ class OpenSKInstaller:
       assert_python_library("intelhex")
 
   def run(self):
-    if self.args.listing == "boards":
-      print(os.linesep.join(get_supported_boards()))
-      return 0
-
-    if self.args.listing == "programmers":
-      print(os.linesep.join(PROGRAMMERS))
-      return 0
-
-    if self.args.listing:
-      # Missing check?
-      fatal("Listing {} is not implemented.".format(self.args.listing))
-
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
@@ -726,8 +713,22 @@ class OpenSKInstaller:
 
 
 def main(args):
+  colorama.init()
+
   # Make sure the current working directory is the right one before running
   os.chdir(os.path.realpath(os.path.dirname(__file__)))
+
+  if args.listing == "boards":
+    print(os.linesep.join(get_supported_boards()))
+    return 0
+
+  if args.listing == "programmers":
+    print(os.linesep.join(PROGRAMMERS))
+    return 0
+
+  if args.listing:
+    # Missing check?
+    fatal("Listing {} is not implemented.".format(args.listing))
 
   OpenSKInstaller(args).run()
 
@@ -872,7 +873,12 @@ if __name__ == "__main__":
       help=("When set, the output of elf2tab is appended to this file."),
   )
 
-  apps_group = main_parser.add_mutually_exclusive_group(required=True)
+  # Start parsing to know if we're going to list things or not.
+  partial_args, _ = main_parser.parse_known_args()
+
+  # We only need the apps_group if we have a board set
+  apps_group = main_parser.add_mutually_exclusive_group(
+      required=(partial_args.board is not None))
   apps_group.add_argument(
       "--no-app",
       dest="application",

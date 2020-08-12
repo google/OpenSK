@@ -7,12 +7,9 @@ extern crate cbor;
 use alloc::vec::Vec;
 
 fuzz_target!(|data: &[u8]| {
-    let encoded = cbor::read(data);
-    if let Ok(value) = encoded {
-	let mut decoded = Vec::new();
-	let result = cbor::write(value, &mut decoded);
-	assert!(result);
-	assert_eq!(decoded, data);
+    if let Ok(value) = cbor::read(data) {
+        let mut result = Vec::new();
+        assert!(cbor::write(value, &mut result));
+        assert_eq!(result, data);
     };
 });
-

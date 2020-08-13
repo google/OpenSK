@@ -106,17 +106,13 @@ fn encrypt_hmac_secret_output(
     Ok(encrypted_output)
 }
 
-/// Stores the encrypted new PIN in the persistent storage, if it satisfies the
-/// PIN policy. The PIN is decrypted and stripped from its padding. Next, the
-/// length of the PIN is checked to fulfill policy requirements. Last, the PIN
-/// is hashed, truncated to 16 bytes and persistently stored.
-fn check_and_store_new_pin(
-    persistent_store: &mut PersistentStore,
+/// Decrypts the new_pin_enc and outputs the found PIN.
+fn decrypt_pin(
     aes_dec_key: &crypto::aes256::DecryptionKey,
     new_pin_enc: Vec<u8>,
-) -> bool {
+) -> Option<Vec<u8>> {
     if new_pin_enc.len() != PIN_PADDED_LENGTH {
-        return false;
+        return None;
     }
     let iv = [0u8; 16];
     // Assuming PIN_PADDED_LENGTH % block_size == 0 here.
@@ -129,12 +125,27 @@ fn check_and_store_new_pin(
     // In CTAP 2.1, the specification changed. The new wording might lead to
     // different behavior when there are non-zero bytes after zero bytes.
     // This implementation consistently ignores those degenerate cases.
-    let pin: Vec<u8> = blocks
-        .iter()
-        .flatten()
-        .cloned()
-        .take_while(|&c| c != 0)
-        .collect();
+    Some(
+        blocks
+            .iter()
+            .flatten()
+            .cloned()
+            .take_while(|&c| c != 0)
+            .collect::<Vec<u8>>(),
+    )
+}
+
+/// Stores the encrypted new PIN in the persistent storage, if it satisfies the
+/// PIN policy. The PIN is decrypted and stripped from its padding. Next, the
+/// length of the PIN is checked to fulfill policy requirements. Last, the PIN
+/// is hashed, truncated to 16 bytes and persistently stored.
+fn check_and_store_new_pin(
+    persistent_store: &mut PersistentStore,
+    aes_dec_key: &crypto::aes256::DecryptionKey,
+    new_pin_enc: Vec<u8>,
+) -> Result<(), Ctap2StatusCode> {
+    let pin = decrypt_pin(aes_dec_key, new_pin_enc)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
 
     #[cfg(feature = "with_ctap2_1")]
     let min_pin_length = persistent_store.min_pin_length() as usize;
@@ -142,12 +153,12 @@ fn check_and_store_new_pin(
     let min_pin_length = 4;
     if pin.len() < min_pin_length || pin.len() == PIN_PADDED_LENGTH {
         // TODO(kaczmarczyck) check 4 code point minimum instead
-        return false;
+        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let mut pin_hash = [0u8; 16];
     pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
     persistent_store.set_pin_hash(&pin_hash);
-    true
+    Ok(())
 }
 
 #[cfg(feature = "with_ctap2_1")]
@@ -214,7 +225,7 @@ impl PinProtocolV1 {
 
                 let iv = [0u8; 16];
                 let mut blocks = [[0u8; 16]; 1];
-                blocks[0].copy_from_slice(&pin_hash_enc[0..PIN_AUTH_LENGTH]);
+                blocks[0].copy_from_slice(&pin_hash_enc);
                 cbc_decrypt(aes_dec_key, iv, &mut blocks);
 
                 if !bool::from(pin_hash.ct_eq(&blocks[0])) {
@@ -239,16 +250,16 @@ impl PinProtocolV1 {
 
     /// Uses the self-owned and passed halves of the key agreement to generate the
     /// shared secret for checking pin_auth and generating a decryption key.
-    fn create_decryption_key_verified(
+    fn exchange_decryption_key(
         &self,
         key_agreement: CoseKey,
         pin_auth: &[u8],
-        message: &[u8],
+        authenticated_message: &[u8],
     ) -> Result<crypto::aes256::DecryptionKey, Ctap2StatusCode> {
         let pk: crypto::ecdh::PubKey = CoseKey::try_into(key_agreement)?;
         let shared_secret = self.key_agreement_key.exchange_x_sha256(&pk);
 
-        if !verify_pin_auth(&shared_secret, message, pin_auth) {
+        if !verify_pin_auth(&shared_secret, authenticated_message, pin_auth) {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
 
@@ -288,10 +299,8 @@ impl PinProtocolV1 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         let pin_decryption_key =
-            self.create_decryption_key_verified(key_agreement, &pin_auth, &new_pin_enc)?;
-        if !check_and_store_new_pin(persistent_store, &pin_decryption_key, new_pin_enc) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
-        }
+            self.exchange_decryption_key(key_agreement, &pin_auth, &new_pin_enc)?;
+        check_and_store_new_pin(persistent_store, &pin_decryption_key, new_pin_enc)?;
         persistent_store.reset_pin_retries();
         Ok(())
     }
@@ -311,12 +320,10 @@ impl PinProtocolV1 {
         let mut auth_param_data = new_pin_enc.clone();
         auth_param_data.extend(&pin_hash_enc);
         let pin_decryption_key =
-            self.create_decryption_key_verified(key_agreement, &pin_auth, &auth_param_data)?;
+            self.exchange_decryption_key(key_agreement, &pin_auth, &auth_param_data)?;
         self.verify_pin_hash_enc(rng, persistent_store, &pin_decryption_key, pin_hash_enc)?;
 
-        if !check_and_store_new_pin(persistent_store, &pin_decryption_key, new_pin_enc) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
-        }
+        check_and_store_new_pin(persistent_store, &pin_decryption_key, new_pin_enc)?;
         self.pin_uv_auth_token = rng.gen_uniform_u8x32();
         Ok(())
     }
@@ -345,10 +352,7 @@ impl PinProtocolV1 {
             item.copy_from_slice(&self.pin_uv_auth_token[i * 16..(i + 1) * 16]);
         }
         cbc_encrypt(&token_encryption_key, iv, &mut blocks);
-        let mut pin_token = vec![];
-        for item in blocks.iter().take(PIN_TOKEN_LENGTH / 16) {
-            pin_token.extend(item);
-        }
+        let pin_token: Vec<u8> = blocks.iter().flatten().cloned().collect();
 
         #[cfg(feature = "with_ctap2_1")]
         {
@@ -415,6 +419,9 @@ impl PinProtocolV1 {
                     }
                     // TODO(kaczmarczyck) Values are taken from the (not yet public) new revision
                     // of CTAP 2.1. The code should link the specification when published.
+                    // From CTAP2.1: "If request contains pinUvAuthParam, the Authenticator calls
+                    // verify(pinUvAuthToken, 32×0xff || 0x0608 || uint32LittleEndian(minPINLength)
+                    // || minPinLengthRPIDs, pinUvAuthParam)"
                     let mut message = vec![0xFF; 32];
                     message.extend(&[0x06, 0x08]);
                     message.extend(&[min_pin_length as u8, 0x00, 0x00, 0x00]);
@@ -644,21 +651,25 @@ mod test {
         persistent_store.set_pin_hash(&pin_hash);
     }
 
-    fn encrypt_standard_pin(shared_secret: &[u8; 32]) -> Vec<u8> {
+    // Fails on PINs bigger than 64 byte..
+    fn encrypt_pin(shared_secret: &[u8; 32], pin: Vec<u8>) -> Vec<u8> {
+        assert!(pin.len() <= 64);
+        let mut padded_pin = [0u8; 64];
+        padded_pin[..pin.len()].copy_from_slice(&pin[..]);
         let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
         let mut blocks = [[0u8; 16]; 4];
-        blocks[0][0] = 0x31;
-        blocks[0][1] = 0x32;
-        blocks[0][2] = 0x33;
-        blocks[0][3] = 0x34;
+        let (b0, b1, b2, b3) = array_refs!(&padded_pin, 16, 16, 16, 16);
+        blocks[0][..].copy_from_slice(b0);
+        blocks[1][..].copy_from_slice(b1);
+        blocks[2][..].copy_from_slice(b2);
+        blocks[3][..].copy_from_slice(b3);
         let iv = [0u8; 16];
         cbc_encrypt(&aes_enc_key, iv, &mut blocks);
+        blocks.iter().flatten().cloned().collect::<Vec<u8>>()
+    }
 
-        let mut encrypted_pin = Vec::with_capacity(64);
-        for b in &blocks {
-            encrypted_pin.extend(b);
-        }
-        encrypted_pin
+    fn encrypt_standard_pin(shared_secret: &[u8; 32]) -> Vec<u8> {
+        encrypt_pin(shared_secret, vec![0x31, 0x32, 0x33, 0x34])
     }
 
     fn encrypt_standard_pin_hash(shared_secret: &[u8; 32]) -> Vec<u8> {
@@ -733,6 +744,29 @@ mod test {
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
+        );
+        pin_protocol_v1.consecutive_pin_mismatches = 0;
+
+        let pin_hash_enc = vec![0x77; PIN_AUTH_LENGTH - 1];
+        assert_eq!(
+            pin_protocol_v1.verify_pin_hash_enc(
+                &mut rng,
+                &mut persistent_store,
+                &aes_dec_key,
+                pin_hash_enc
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+
+        let pin_hash_enc = vec![0x77; PIN_AUTH_LENGTH + 1];
+        assert_eq!(
+            pin_protocol_v1.verify_pin_hash_enc(
+                &mut rng,
+                &mut persistent_store,
+                &aes_dec_key,
+                pin_hash_enc
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
     }
 
@@ -1027,14 +1061,12 @@ mod test {
     }
 
     #[test]
-    fn test_check_and_store_new_pin() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+    fn test_decrypt_pin() {
         let shared_secret = [0x88; 32];
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&shared_secret);
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
 
-        // The PIN "1234" should be accepted.
+        // "1234"
         let new_pin_enc = vec![
             0xC0, 0xCF, 0xAE, 0x4C, 0x79, 0x56, 0x87, 0x99, 0xE5, 0x83, 0x4F, 0xE6, 0x4D, 0xFE,
             0x53, 0x32, 0x36, 0x0D, 0xF9, 0x1E, 0x47, 0x66, 0x10, 0x5C, 0x63, 0x30, 0x1D, 0xCC,
@@ -1042,53 +1074,73 @@ mod test {
             0xEE, 0x01, 0x99, 0x6C, 0xD7, 0xE5, 0x2B, 0xA5, 0x7A, 0x5A, 0xE1, 0xEC, 0x69, 0x31,
             0x18, 0x35, 0x06, 0x66, 0x97, 0x84, 0x68, 0xC2,
         ];
-        assert!(check_and_store_new_pin(
-            &mut persistent_store,
-            &aes_dec_key,
-            new_pin_enc
-        ));
+        assert_eq!(
+            decrypt_pin(&aes_dec_key, new_pin_enc),
+            Some(vec![0x31, 0x32, 0x33, 0x34]),
+        );
 
-        // The PIN "123" has only 3 characters.
-        let bad_pin_enc = vec![
+        // "123"
+        let new_pin_enc = vec![
             0xF3, 0x54, 0x29, 0x17, 0xD4, 0xF8, 0xCD, 0x23, 0x1D, 0x59, 0xED, 0xE5, 0x33, 0x42,
             0x13, 0x39, 0x22, 0xBB, 0x91, 0x28, 0x87, 0x6A, 0xF9, 0xB1, 0x80, 0x9C, 0x9D, 0x76,
             0xFF, 0xDD, 0xB8, 0xD6, 0x8D, 0x66, 0x99, 0xA2, 0x42, 0x67, 0xB0, 0x5C, 0x82, 0x3F,
             0x08, 0x55, 0x8C, 0x04, 0xC5, 0x91, 0xF0, 0xF9, 0x58, 0x44, 0x00, 0x1B, 0x99, 0xA6,
             0x7C, 0xC7, 0x2D, 0x43, 0x74, 0x4C, 0x1D, 0x7E,
         ];
-        assert!(!check_and_store_new_pin(
-            &mut persistent_store,
-            &aes_dec_key,
-            bad_pin_enc
-        ));
+        assert_eq!(
+            decrypt_pin(&aes_dec_key, new_pin_enc),
+            Some(vec![0x31, 0x32, 0x33]),
+        );
 
-        // The PIN "12'\0'4" (a zero byte where the 3 was) should be rejected.
-        let bad_pin_enc = vec![
-            0x32, 0x78, 0x24, 0xCD, 0x25, 0xB7, 0x2F, 0x42, 0x18, 0x08, 0x27, 0x80, 0x21, 0xEA,
-            0xE9, 0x2C, 0x20, 0x06, 0x7E, 0x17, 0xBA, 0x87, 0xCB, 0x35, 0xB0, 0xB9, 0x57, 0x9B,
-            0xCB, 0x73, 0x7D, 0xBB, 0x61, 0x0D, 0xBB, 0x70, 0x5F, 0xC3, 0x94, 0x03, 0x64, 0x9A,
-            0xC6, 0xDF, 0x9C, 0x74, 0x36, 0x97, 0xD4, 0x1B, 0x31, 0xD9, 0x7D, 0x1E, 0x42, 0xAC,
-            0x18, 0xBA, 0xE0, 0x6C, 0x16, 0x0B, 0x25, 0xCC,
-        ];
-        assert!(!check_and_store_new_pin(
-            &mut persistent_store,
-            &aes_dec_key,
-            bad_pin_enc
-        ));
+        // Encrypted PIN is too short.
+        let new_pin_enc = vec![0x44; 63];
+        assert_eq!(decrypt_pin(&aes_dec_key, new_pin_enc), None,);
 
-        // The last byte of the decrypted PIN is not padding, which is 0x00.
-        let bad_pin_enc = vec![
-            0x53, 0x3D, 0xAD, 0x69, 0xB6, 0x1B, 0x5F, 0xAF, 0x0F, 0x26, 0xF1, 0x33, 0xB3, 0xCC,
-            0x94, 0x26, 0x68, 0xD0, 0xC4, 0x58, 0xD4, 0x2D, 0x3D, 0x8B, 0x6F, 0x1A, 0xA2, 0x0A,
-            0x44, 0x47, 0xE8, 0x94, 0xF2, 0x2D, 0x99, 0xEB, 0xA1, 0xA6, 0xBE, 0x32, 0x7C, 0x99,
-            0x2B, 0xB8, 0x9A, 0x15, 0x9C, 0xEA, 0x86, 0x47, 0x4B, 0x5E, 0x6C, 0xA2, 0xE2, 0xB9,
-            0x0D, 0x85, 0x25, 0xD3, 0x8A, 0x46, 0x39, 0xAD,
+        // Encrypted PIN is too long.
+        let new_pin_enc = vec![0x44; 65];
+        assert_eq!(decrypt_pin(&aes_dec_key, new_pin_enc), None,);
+    }
+
+    #[test]
+    fn test_check_and_store_new_pin() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let shared_secret = [0x88; 32];
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&shared_secret);
+        let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
+
+        let test_cases = vec![
+            // Accept PIN "1234".
+            (vec![0x31, 0x32, 0x33, 0x34], Ok(())),
+            // Reject PIN "123" since it is too short.
+            (
+                vec![0x31, 0x32, 0x33],
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
+            ),
+            // Reject PIN "12'\0'4" (a zero byte at index 2).
+            (
+                vec![0x31, 0x32, 0x00, 0x34],
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
+            ),
+            // Reject PINs not ending in 0u8 padding.
+            (
+                vec![0x30; 64],
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
+            ),
         ];
-        assert!(!check_and_store_new_pin(
-            &mut persistent_store,
-            &aes_dec_key,
-            bad_pin_enc
-        ));
+        for (pin, result) in test_cases {
+            let old_pin_hash = persistent_store.pin_hash().cloned();
+            let new_pin_enc = encrypt_pin(&shared_secret, pin);
+            assert_eq!(
+                check_and_store_new_pin(&mut persistent_store, &aes_dec_key, new_pin_enc),
+                result
+            );
+            if result.is_ok() {
+                assert_ne!(old_pin_hash.as_ref(), persistent_store.pin_hash());
+            } else {
+                assert_eq!(old_pin_hash.as_ref(), persistent_store.pin_hash());
+            }
+        }
     }
 
     #[test]

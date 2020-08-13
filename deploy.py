@@ -255,7 +255,6 @@ class RemoveConstAction(argparse.Action):
 class OpenSKInstaller:
 
   def __init__(self, args):
-    colorama.init()
     self.args = args
     # Where all the TAB files should go
     self.tab_folder = os.path.join("target", "tab")
@@ -454,14 +453,10 @@ class OpenSKInstaller:
           self.args.application, str(e)))
 
   def get_padding(self):
-    fake_header = tbfh.TBFHeader("")
-    fake_header.version = 2
-    fake_header.fields["header_size"] = 0x10
-    fake_header.fields["total_size"] = (
+    padding = tbfh.TBFHeaderPadding(
         SUPPORTED_BOARDS[self.args.board].app_address -
         SUPPORTED_BOARDS[self.args.board].padding_address)
-    fake_header.fields["flags"] = 0
-    return fake_header.get_binary()
+    return padding.get_binary()
 
   def install_tock_os(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
@@ -543,7 +538,7 @@ class OpenSKInstaller:
     tock.open()
     app_found = False
     with tock._start_communication_with_board():
-      apps = [app.name for app in tock._extract_all_app_headers()]
+      apps = [app.get_name() for app in tock._extract_all_app_headers()]
       app_found = expected_app in apps
     return app_found
 
@@ -582,16 +577,17 @@ class OpenSKInstaller:
                "architecture {}".format(board_props.arch)))
       app_hex = intelhex.IntelHex()
       app_hex.frombytes(
-          app_tab.extract_app(board_props.arch).get_binary(),
+          app_tab.extract_app(board_props.arch).get_binary(
+              board_props.app_address),
           offset=board_props.app_address)
       final_hex.merge(app_hex)
     info("Generating all-merged HEX file: {}".format(dest_file))
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
-    if not tockloader.__version__.startswith("1.4."):
+    if not tockloader.__version__.startswith("1.5."):
       fatal(("Your version of tockloader seems incompatible: found {}, "
-             "expected 1.4.x.".format(tockloader.__version__)))
+             "expected 1.5.x.".format(tockloader.__version__)))
 
     if self.args.programmer == "jlink":
       assert_mandatory_binary("JLinkExe")
@@ -620,18 +616,6 @@ class OpenSKInstaller:
       assert_python_library("intelhex")
 
   def run(self):
-    if self.args.listing == "boards":
-      print(os.linesep.join(get_supported_boards()))
-      return 0
-
-    if self.args.listing == "programmers":
-      print(os.linesep.join(PROGRAMMERS))
-      return 0
-
-    if self.args.listing:
-      # Missing check?
-      fatal("Listing {} is not implemented.".format(self.args.listing))
-
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
@@ -729,8 +713,22 @@ class OpenSKInstaller:
 
 
 def main(args):
+  colorama.init()
+
   # Make sure the current working directory is the right one before running
   os.chdir(os.path.realpath(os.path.dirname(__file__)))
+
+  if args.listing == "boards":
+    print(os.linesep.join(get_supported_boards()))
+    return 0
+
+  if args.listing == "programmers":
+    print(os.linesep.join(PROGRAMMERS))
+    return 0
+
+  if args.listing:
+    # Missing check?
+    fatal("Listing {} is not implemented.".format(args.listing))
 
   OpenSKInstaller(args).run()
 
@@ -875,7 +873,12 @@ if __name__ == "__main__":
       help=("When set, the output of elf2tab is appended to this file."),
   )
 
-  apps_group = main_parser.add_mutually_exclusive_group(required=True)
+  # Start parsing to know if we're going to list things or not.
+  partial_args, _ = main_parser.parse_known_args()
+
+  # We only need the apps_group if we have a board set
+  apps_group = main_parser.add_mutually_exclusive_group(
+      required=(partial_args.board is not None))
   apps_group.add_argument(
       "--no-app",
       dest="application",

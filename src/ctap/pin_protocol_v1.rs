@@ -640,6 +640,7 @@ mod test {
     use super::*;
     use crypto::rng256::ThreadRng256;
 
+    // Stores a PIN hash corresponding to the dummy PIN "1234".
     fn set_standard_pin(persistent_store: &mut PersistentStore) {
         let mut pin = [0u8; 64];
         pin[0] = 0x31;
@@ -651,7 +652,7 @@ mod test {
         persistent_store.set_pin_hash(&pin_hash);
     }
 
-    // Fails on PINs bigger than 64 byte..
+    // Fails on PINs bigger than 64 bytes.
     fn encrypt_pin(shared_secret: &[u8; 32], pin: Vec<u8>) -> Vec<u8> {
         assert!(pin.len() <= 64);
         let mut padded_pin = [0u8; 64];
@@ -668,10 +669,12 @@ mod test {
         blocks.iter().flatten().cloned().collect::<Vec<u8>>()
     }
 
+    // Encrypts the dummy PIN "1234".
     fn encrypt_standard_pin(shared_secret: &[u8; 32]) -> Vec<u8> {
         encrypt_pin(shared_secret, vec![0x31, 0x32, 0x33, 0x34])
     }
 
+    // Encrypts the PIN hash corresponding to the dummy PIN "1234".
     fn encrypt_standard_pin_hash(shared_secret: &[u8; 32]) -> Vec<u8> {
         let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
         let mut pin = [0u8; 64];

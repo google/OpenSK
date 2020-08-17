@@ -179,12 +179,11 @@ pub enum AuthenticatorTransport {
 
 impl From<AuthenticatorTransport> for cbor::Value {
     fn from(transport: AuthenticatorTransport) -> Self {
-        use AuthenticatorTransport::*;
         match transport {
-            Usb => "usb",
-            Nfc => "nfc",
-            Ble => "ble",
-            Internal => "internal",
+            AuthenticatorTransport::Usb => "usb",
+            AuthenticatorTransport::Nfc => "nfc",
+            AuthenticatorTransport::Ble => "ble",
+            AuthenticatorTransport::Internal => "internal",
         }
         .into()
     }
@@ -194,13 +193,12 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use AuthenticatorTransport::*;
         let transport_string = extract_text_string(cbor_value)?;
         match &transport_string[..] {
-            "usb" => Ok(Usb),
-            "nfc" => Ok(Nfc),
-            "ble" => Ok(Ble),
-            "internal" => Ok(Internal),
+            "usb" => Ok(AuthenticatorTransport::Usb),
+            "nfc" => Ok(AuthenticatorTransport::Nfc),
+            "ble" => Ok(AuthenticatorTransport::Ble),
+            "internal" => Ok(AuthenticatorTransport::Internal),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
     }
@@ -475,11 +473,10 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use CredentialProtectionPolicy::*;
         match extract_integer(cbor_value)? {
-            0x01 => Ok(UserVerificationOptional),
-            0x02 => Ok(UserVerificationOptionalWithCredentialIdList),
-            0x03 => Ok(UserVerificationRequired),
+            0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
+            0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+            0x03 => Ok(CredentialProtectionPolicy::UserVerificationRequired),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
     }
@@ -527,17 +524,16 @@ impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
-        use PublicKeyCredentialSourceField::*;
         let mut private_key = [0u8; 32];
         credential.private_key.to_bytes(&mut private_key);
         cbor_map_options! {
-            CredentialId => Some(credential.credential_id),
-            PrivateKey => Some(private_key.to_vec()),
-            RpId => Some(credential.rp_id),
-            UserHandle => Some(credential.user_handle),
-            OtherUi => credential.other_ui,
-            CredRandom => credential.cred_random,
-            CredProtectPolicy => credential.cred_protect_policy,
+            PublicKeyCredentialSourceField::CredentialId => Some(credential.credential_id),
+            PublicKeyCredentialSourceField::PrivateKey => Some(private_key.to_vec()),
+            PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
+            PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
+            PublicKeyCredentialSourceField::OtherUi => credential.other_ui,
+            PublicKeyCredentialSourceField::CredRandom => credential.cred_random,
+            PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
         }
     }
 }
@@ -546,18 +542,15 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use PublicKeyCredentialSourceField::{
-            CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
-        };
         destructure_cbor_map! {
             let {
-                CredentialId => credential_id,
-                PrivateKey => private_key,
-                RpId => rp_id,
-                UserHandle => user_handle,
-                OtherUi => other_ui,
-                CredRandom => cred_random,
-                CredProtectPolicy => cred_protect_policy,
+                PublicKeyCredentialSourceField::CredentialId => credential_id,
+                PublicKeyCredentialSourceField::PrivateKey => private_key,
+                PublicKeyCredentialSourceField::RpId => rp_id,
+                PublicKeyCredentialSourceField::UserHandle => user_handle,
+                PublicKeyCredentialSourceField::OtherUi => other_ui,
+                PublicKeyCredentialSourceField::CredRandom => cred_random,
+                PublicKeyCredentialSourceField::CredProtectPolicy => cred_protect_policy,
             } = extract_map(cbor_value)?;
         }
 
@@ -716,22 +709,21 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use ClientPinSubCommand::*;
         let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
-            0x01 => Ok(GetPinRetries),
-            0x02 => Ok(GetKeyAgreement),
-            0x03 => Ok(SetPin),
-            0x04 => Ok(ChangePin),
-            0x05 => Ok(GetPinToken),
+            0x01 => Ok(ClientPinSubCommand::GetPinRetries),
+            0x02 => Ok(ClientPinSubCommand::GetKeyAgreement),
+            0x03 => Ok(ClientPinSubCommand::SetPin),
+            0x04 => Ok(ClientPinSubCommand::ChangePin),
+            0x05 => Ok(ClientPinSubCommand::GetPinToken),
             #[cfg(feature = "with_ctap2_1")]
-            0x06 => Ok(GetPinUvAuthTokenUsingUvWithPermissions),
+            0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions),
             #[cfg(feature = "with_ctap2_1")]
-            0x07 => Ok(GetUvRetries),
+            0x07 => Ok(ClientPinSubCommand::GetUvRetries),
             #[cfg(feature = "with_ctap2_1")]
-            0x08 => Ok(SetMinPinLength),
+            0x08 => Ok(ClientPinSubCommand::SetMinPinLength),
             #[cfg(feature = "with_ctap2_1")]
-            0x09 => Ok(GetPinUvAuthTokenUsingPinWithPermissions),
+            0x09 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions),
             #[cfg(feature = "with_ctap2_1")]
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
             #[cfg(not(feature = "with_ctap2_1"))]

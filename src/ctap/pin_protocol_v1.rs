@@ -48,9 +48,9 @@ fn verify_pin_auth(hmac_key: &[u8], hmac_contents: &[u8], pin_auth: &[u8]) -> bo
     )
 }
 
-/// Decrypts the HMAC secret salt(s) that were encrypted with the shared secret.
+/// Encrypts the HMAC-secret outputs. To compute them, we first have to
+/// decrypt the HMAC secret salt(s) that were encrypted with the shared secret.
 /// The credRandom is used as a secret to HMAC those salts.
-/// The last step is to re-encrypt the outputs.
 fn encrypt_hmac_secret_output(
     shared_secret: &[u8; 32],
     salt_enc: &[u8],
@@ -202,6 +202,7 @@ impl PinProtocolV1 {
 
     /// Decrypts the encrypted pin_hash and compares it to the stored pin_hash.
     /// Resets or decreases the PIN retries, depending on success or failure.
+    /// Also, in case of failure, the key agreement key is randomly reset.
     fn verify_pin_hash_enc(
         &mut self,
         rng: &mut impl Rng256,
@@ -1079,7 +1080,7 @@ mod test {
         ];
         assert_eq!(
             decrypt_pin(&aes_dec_key, new_pin_enc),
-            Some(vec![0x31, 0x32, 0x33, 0x34]),
+            Some(b"1234".to_vec()),
         );
 
         // "123"
@@ -1092,7 +1093,7 @@ mod test {
         ];
         assert_eq!(
             decrypt_pin(&aes_dec_key, new_pin_enc),
-            Some(vec![0x31, 0x32, 0x33]),
+            Some(b"123".to_vec()),
         );
 
         // Encrypted PIN is too short.

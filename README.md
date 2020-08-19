@@ -117,6 +117,12 @@ customize it.
 
 ## Development and testing
 
+You may use the flag `--help` to view all supported features.
+
+### Debugging
+
+The flag `--debug` enables installation of OpenSK in debug mode. You may use the GUI application J-Link RTT viewer to see the debugging messages.
+
 ### Printing panic messages to the console
 
 By default, libtock-rs blinks some LEDs when the userspace application panicks.

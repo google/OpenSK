@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 
-#[macro_use]
 extern crate alloc;
+extern crate crypto;
 extern crate lang_items;
-extern crate libtock_core;
 extern crate libtock_drivers;
 
-pub mod embedded_flash;
+fn main() {
+    panic!("Bye world!")
+}

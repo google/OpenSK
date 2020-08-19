@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 
-#[macro_use]
 extern crate alloc;
+extern crate crypto;
 extern crate lang_items;
-extern crate libtock_core;
 extern crate libtock_drivers;
 
-pub mod embedded_flash;
+use alloc::vec::Vec;
+use core::fmt::Write;
+use libtock_drivers::console::Console;
+
+fn main() {
+    writeln!(Console::new(), "****************************************").unwrap();
+    for i in 0.. {
+        writeln!(Console::new(), "Allocating {} bytes...", 1 << i).unwrap();
+        let x: Vec<u8> = Vec::with_capacity(1 << i);
+        writeln!(Console::new(), "Allocated!").unwrap();
+        drop(x);
+        writeln!(Console::new(), "Dropped!").unwrap();
+    }
+}

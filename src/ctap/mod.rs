@@ -61,8 +61,8 @@ use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(feature = "debug_ctap")]
-use libtock::console::Console;
-use libtock::timer::{Duration, Timestamp};
+use libtock_drivers::console::Console;
+use libtock_drivers::timer::{Duration, Timestamp};
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
 // this setting. The basic attestation uses the signing key from key_material.rs
@@ -688,7 +688,7 @@ where
             key_id: credential.credential_id.clone(),
             transports: None, // You can set USB as a hint here.
         };
-        let user = if flags & UV_FLAG != 0 {
+        let user = if (flags & UV_FLAG != 0) && (credential.user_handle.len() > 0) {
             Some(PublicKeyCredentialUserEntity {
                 user_id: credential.user_handle.clone(),
                 user_name: None,

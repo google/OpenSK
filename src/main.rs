@@ -22,14 +22,12 @@ extern crate byteorder;
 #[cfg(feature = "std")]
 extern crate core;
 extern crate ctap2;
-extern crate libtock;
 extern crate subtle;
 #[macro_use]
 extern crate cbor;
 extern crate crypto;
 
 mod ctap;
-mod usb_ctap_hid;
 
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
@@ -38,17 +36,18 @@ use crypto::rng256::TockRng256;
 use ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
 use ctap::status_code::Ctap2StatusCode;
 use ctap::CtapState;
-use libtock::buttons;
-use libtock::buttons::ButtonState;
+use libtock_core::result::{CommandError, EALREADY};
+use libtock_drivers::buttons;
+use libtock_drivers::buttons::ButtonState;
 #[cfg(feature = "debug_ctap")]
-use libtock::console::Console;
-use libtock::led;
-use libtock::result::TockValue;
-use libtock::syscalls;
-use libtock::timer;
+use libtock_drivers::console::Console;
+use libtock_drivers::led;
+use libtock_drivers::result::{FlexUnwrap, TockError};
+use libtock_drivers::timer;
 #[cfg(feature = "debug_ctap")]
-use libtock::timer::Timer;
-use libtock::timer::{Duration, StopAlarmError, Timestamp};
+use libtock_drivers::timer::Timer;
+use libtock_drivers::timer::{Duration, Timestamp};
+use libtock_drivers::usb_ctap_hid;
 
 const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
@@ -58,7 +57,7 @@ fn main() {
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
     let mut with_callback = timer::with_callback(|_, _| {});
-    let timer = with_callback.init().unwrap();
+    let timer = with_callback.init().flex_unwrap();
 
     // Setup USB driver.
     if !usb_ctap_hid::setup() {
@@ -70,7 +69,7 @@ fn main() {
     let mut ctap_hid = CtapHid::new();
 
     let mut led_counter = 0;
-    let mut last_led_increment = timer.get_current_clock();
+    let mut last_led_increment = timer.get_current_clock().flex_unwrap();
 
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
@@ -87,11 +86,11 @@ fn main() {
             };
         });
         #[cfg(feature = "with_ctap1")]
-        let mut buttons = buttons_callback.init().unwrap();
+        let mut buttons = buttons_callback.init().flex_unwrap();
         #[cfg(feature = "with_ctap1")]
         // At the moment, all buttons are accepted. You can customize your setup here.
         for mut button in &mut buttons {
-            button.enable().unwrap();
+            button.enable().flex_unwrap();
         }
 
         let mut pkt_request = [0; 64];
@@ -105,7 +104,7 @@ fn main() {
             None => false,
         };
 
-        let now = timer.get_current_clock();
+        let now = timer.get_current_clock().flex_unwrap();
         #[cfg(feature = "with_ctap1")]
         {
             if button_touched.get() {
@@ -115,7 +114,7 @@ fn main() {
             // Heavy computation mostly follows a registered touch luckily. Unregistering
             // callbacks is important to not clash with those from check_user_presence.
             for mut button in &mut buttons {
-                button.disable().unwrap();
+                button.disable().flex_unwrap();
             }
             drop(buttons);
             drop(buttons_callback);
@@ -153,7 +152,7 @@ fn main() {
             }
         }
 
-        let now = timer.get_current_clock();
+        let now = timer.get_current_clock().flex_unwrap();
         if let Some(wait_duration) = now.wrapping_sub(last_led_increment) {
             if wait_duration > KEEPALIVE_DELAY {
                 // Loops quickly when waiting for U2F user presence, so the next LED blink
@@ -188,8 +187,8 @@ fn main() {
 
 #[cfg(feature = "debug_ctap")]
 fn print_packet_notice(notice_text: &str, timer: &Timer) {
-    let now_us =
-        (Timestamp::<f64>::from_clock_value(timer.get_current_clock()).ms() * 1000.0) as u64;
+    let now = timer.get_current_clock().flex_unwrap();
+    let now_us = (Timestamp::<f64>::from_clock_value(now).ms() * 1000.0) as u64;
     writeln!(
         Console::new(),
         "{} at {}.{:06} s",
@@ -264,17 +263,17 @@ fn send_keepalive_up_needed(
     Ok(())
 }
 
-fn blink_leds(pattern_seed: isize) {
-    for l in 0..led::count() {
+fn blink_leds(pattern_seed: usize) {
+    for l in 0..led::count().flex_unwrap() {
         if (pattern_seed ^ l).count_ones() & 1 != 0 {
-            led::get(l).unwrap().on();
+            led::get(l).flex_unwrap().on().flex_unwrap();
         } else {
-            led::get(l).unwrap().off();
+            led::get(l).flex_unwrap().off().flex_unwrap();
         }
     }
 }
 
-fn wink_leds(pattern_seed: isize) {
+fn wink_leds(pattern_seed: usize) {
     // This generates a "snake" pattern circling through the LEDs.
     // Fox example with 4 LEDs the sequence of lit LEDs will be the following.
     // 0 1 2 3
@@ -287,7 +286,7 @@ fn wink_leds(pattern_seed: isize) {
     // *     *
     // * *   *
     // * *
-    let count = led::count();
+    let count = led::count().flex_unwrap();
     let a = (pattern_seed / 2) % count;
     let b = ((pattern_seed + 1) / 2) % count;
     let c = ((pattern_seed + 3) / 2) % count;
@@ -300,22 +299,22 @@ fn wink_leds(pattern_seed: isize) {
             _ => l,
         };
         if k == a || k == b || k == c {
-            led::get(l).unwrap().on();
+            led::get(l).flex_unwrap().on().flex_unwrap();
         } else {
-            led::get(l).unwrap().off();
+            led::get(l).flex_unwrap().off().flex_unwrap();
         }
     }
 }
 
 fn switch_off_leds() {
-    for l in 0..led::count() {
-        led::get(l).unwrap().off();
+    for l in 0..led::count().flex_unwrap() {
+        led::get(l).flex_unwrap().off().flex_unwrap();
     }
 }
 
 fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
-    const TIMEOUT_ITERATIONS: isize = ctap::TOUCH_TIMEOUT_MS / KEEPALIVE_DELAY_MS;
+    const TIMEOUT_ITERATIONS: usize = ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
     send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;
@@ -328,10 +327,10 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
             ButtonState::Released => (),
         };
     });
-    let mut buttons = buttons_callback.init().unwrap();
+    let mut buttons = buttons_callback.init().flex_unwrap();
     // At the moment, all buttons are accepted. You can customize your setup here.
     for mut button in &mut buttons {
-        button.enable().unwrap();
+        button.enable().flex_unwrap();
     }
 
     let mut keepalive_response = Ok(());
@@ -343,19 +342,25 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
         let mut keepalive_callback = timer::with_callback(|_, _| {
             keepalive_expired.set(true);
         });
-        let mut keepalive = keepalive_callback.init().unwrap();
-        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY).unwrap();
+        let mut keepalive = keepalive_callback.init().flex_unwrap();
+        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY).flex_unwrap();
 
         // Wait for a button touch or an alarm.
-        syscalls::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
 
         // Cleanup alarm callback.
         match keepalive.stop_alarm(keepalive_alarm) {
             Ok(()) => (),
-            Err(TockValue::Expected(StopAlarmError::AlreadyDisabled)) => {
-                assert!(keepalive_expired.get())
+            Err(TockError::Command(CommandError {
+                return_code: EALREADY,
+                ..
+            })) => assert!(keepalive_expired.get()),
+            Err(_e) => {
+                #[cfg(feature = "debug_ctap")]
+                panic!("Unexpected error when stopping alarm: {:?}", _e);
+                #[cfg(not(feature = "debug_ctap"))]
+                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
             }
-            Err(e) => panic!("Unexpected error when stopping alarm: {:?}", e),
         }
 
         // TODO: this may take arbitrary time. The keepalive_delay should be adjusted accordingly,
@@ -374,7 +379,7 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
 
     // Cleanup button callbacks.
     for mut button in &mut buttons {
-        button.disable().unwrap();
+        button.disable().flex_unwrap();
     }
 
     // Returns whether the user was present.

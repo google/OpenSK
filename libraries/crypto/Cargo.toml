@@ -10,10 +10,10 @@ license = "Apache-2.0"
 edition = "2018"
 
 [dependencies]
-libtock = { path = "../../third_party/libtock-rs" }
+libtock_drivers = { path = "../../third_party/libtock-drivers" }
 cbor = { path = "../cbor" }
 arrayref = "0.3.6"
-subtle = { version = "2.2", default-features = false, features = ["nightly"] }
+subtle = { version = "2.2.3", default-features = false, features = ["nightly"] }
 byteorder = { version = "1", default-features = false }
 hex = { version = "0.3.2", default-features = false, optional = true }
 ring = { version = "0.16.11", optional = true }

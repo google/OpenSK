@@ -14,7 +14,7 @@
 
 use super::{Index, Storage, StorageError, StorageResult};
 use alloc::vec::Vec;
-use libtock::syscalls;
+use libtock_core::syscalls;
 
 const DRIVER_NUMBER: usize = 0x50003;
 
@@ -41,16 +41,14 @@ mod memop_nr {
 }
 
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
-    let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg) };
-    if code < 0 {
-        Err(StorageError::KernelError { code })
-    } else {
-        Ok(code as usize)
-    }
+    let code = syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg);
+    code.map_err(|e| StorageError::KernelError {
+        code: e.return_code,
+    })
 }
 
 fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
-    let code = unsafe { syscalls::memop(nr, arg) };
+    let code = unsafe { syscalls::raw::memop(nr, arg) };
     if code < 0 {
         Err(StorageError::KernelError { code })
     } else {
@@ -153,8 +151,9 @@ impl Storage for SyscallStorage {
             return Err(StorageError::NotAligned);
         }
         let ptr = self.read_slice(index, value.len())?.as_ptr() as usize;
+
         let code = unsafe {
-            syscalls::allow_ptr(
+            syscalls::raw::allow(
                 DRIVER_NUMBER,
                 allow_nr::WRITE_SLICE,
                 // We rely on the driver not writing to the slice. This should use read-only allow
@@ -166,11 +165,14 @@ impl Storage for SyscallStorage {
         if code < 0 {
             return Err(StorageError::KernelError { code });
         }
-        let code =
-            unsafe { syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len()) };
-        if code < 0 {
-            return Err(StorageError::KernelError { code });
+
+        let code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len());
+        if let Err(e) = code {
+            return Err(StorageError::KernelError {
+                code: e.return_code,
+            });
         }
+
         Ok(())
     }
 
@@ -178,9 +180,11 @@ impl Storage for SyscallStorage {
         let index = Index { page, byte: 0 };
         let length = self.page_size();
         let ptr = self.read_slice(index, length)?.as_ptr() as usize;
-        let code = unsafe { syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length) };
-        if code < 0 {
-            return Err(StorageError::KernelError { code });
+        let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length);
+        if let Err(e) = code {
+            return Err(StorageError::KernelError {
+                code: e.return_code,
+            });
         }
         Ok(())
     }

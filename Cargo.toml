@@ -10,7 +10,9 @@ license = "Apache-2.0"
 edition = "2018"
 
 [dependencies]
-libtock = { path = "third_party/libtock-rs" }
+libtock_core = { path = "third_party/libtock-rs/core" }
+libtock_drivers = { path = "third_party/libtock-drivers" }
+lang_items = { path = "third_party/lang-items" }
 cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
 byteorder = { version = "1", default-features = false }
@@ -18,12 +20,12 @@ arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 
 [features]
-debug_allocations = ["libtock/debug_allocations"]
-debug_ctap = ["crypto/derive_debug"]
-panic_console = ["libtock/panic_console"]
-std = ["cbor/std", "crypto/std", "crypto/derive_debug"]
+debug_allocations = ["lang_items/debug_allocations"]
+debug_ctap = ["crypto/derive_debug", "libtock_drivers/debug_ctap"]
+panic_console = ["lang_items/panic_console"]
+std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std"]
 ram_storage = []
-verbose = ["debug_ctap"]
+verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_ctap2_1 = []
 

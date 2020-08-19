@@ -28,7 +28,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::rng256::Rng256;
 #[cfg(feature = "debug_ctap")]
-use libtock::console::Console;
+use libtock_drivers::console::Console;
 
 // CTAP specification (version 20190130) section 8.1
 // TODO: Channel allocation, section 8.1.3?

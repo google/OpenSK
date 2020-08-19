@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: "true"
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi
@@ -41,6 +43,12 @@ jobs:
         with:
           command: fmt
           args: --manifest-path libraries/cbor/Cargo.toml --all -- --check
+          
+      - name: Cargo format libraries/cbor/fuzz
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path libraries/cbor/fuzz/Cargo.toml --all -- --check
 
       - name: Cargo format libraries/crypto
         uses: actions-rs/cargo@v1

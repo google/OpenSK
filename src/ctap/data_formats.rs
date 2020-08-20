@@ -18,6 +18,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
+#[cfg(test)]
+use enum_iterator::IntoEnumIterator;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -167,6 +169,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -453,6 +456,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,
     UserVerificationOptionalWithCredentialIdList = 0x02,
@@ -520,17 +524,16 @@ impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
-        use PublicKeyCredentialSourceField::*;
         let mut private_key = [0u8; 32];
         credential.private_key.to_bytes(&mut private_key);
         cbor_map_options! {
-            CredentialId => Some(credential.credential_id),
-            PrivateKey => Some(private_key.to_vec()),
-            RpId => Some(credential.rp_id),
-            UserHandle => Some(credential.user_handle),
-            OtherUi => credential.other_ui,
-            CredRandom => credential.cred_random,
-            CredProtectPolicy => credential.cred_protect_policy,
+            PublicKeyCredentialSourceField::CredentialId => Some(credential.credential_id),
+            PublicKeyCredentialSourceField::PrivateKey => Some(private_key.to_vec()),
+            PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
+            PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
+            PublicKeyCredentialSourceField::OtherUi => credential.other_ui,
+            PublicKeyCredentialSourceField::CredRandom => credential.cred_random,
+            PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
         }
     }
 }
@@ -539,18 +542,15 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        use PublicKeyCredentialSourceField::{
-            CredProtectPolicy, CredRandom, CredentialId, OtherUi, PrivateKey, RpId, UserHandle,
-        };
         destructure_cbor_map! {
             let {
-                CredentialId => credential_id,
-                PrivateKey => private_key,
-                RpId => rp_id,
-                UserHandle => user_handle,
-                OtherUi => other_ui,
-                CredRandom => cred_random,
-                CredProtectPolicy => cred_protect_policy,
+                PublicKeyCredentialSourceField::CredentialId => credential_id,
+                PublicKeyCredentialSourceField::PrivateKey => private_key,
+                PublicKeyCredentialSourceField::RpId => rp_id,
+                PublicKeyCredentialSourceField::UserHandle => user_handle,
+                PublicKeyCredentialSourceField::OtherUi => other_ui,
+                PublicKeyCredentialSourceField::CredRandom => cred_random,
+                PublicKeyCredentialSourceField::CredProtectPolicy => cred_protect_policy,
             } = extract_map(cbor_value)?;
         }
 
@@ -681,29 +681,27 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ClientPinSubCommand {
-    GetPinRetries,
-    GetKeyAgreement,
-    SetPin,
-    ChangePin,
-    GetPinUvAuthTokenUsingPin,
-    GetPinUvAuthTokenUsingUv,
-    GetUvRetries,
+    GetPinRetries = 0x01,
+    GetKeyAgreement = 0x02,
+    SetPin = 0x03,
+    ChangePin = 0x04,
+    GetPinToken = 0x05,
+    #[cfg(feature = "with_ctap2_1")]
+    GetPinUvAuthTokenUsingUvWithPermissions = 0x06,
+    #[cfg(feature = "with_ctap2_1")]
+    GetUvRetries = 0x07,
+    #[cfg(feature = "with_ctap2_1")]
+    SetMinPinLength = 0x08,
+    #[cfg(feature = "with_ctap2_1")]
+    GetPinUvAuthTokenUsingPinWithPermissions = 0x09,
 }
 
 impl From<ClientPinSubCommand> for cbor::Value {
     fn from(subcommand: ClientPinSubCommand) -> Self {
-        match subcommand {
-            ClientPinSubCommand::GetPinRetries => 0x01,
-            ClientPinSubCommand::GetKeyAgreement => 0x02,
-            ClientPinSubCommand::SetPin => 0x03,
-            ClientPinSubCommand::ChangePin => 0x04,
-            ClientPinSubCommand::GetPinUvAuthTokenUsingPin => 0x05,
-            ClientPinSubCommand::GetPinUvAuthTokenUsingUv => 0x06,
-            ClientPinSubCommand::GetUvRetries => 0x07,
-        }
-        .into()
+        (subcommand as u64).into()
     }
 }
 
@@ -717,10 +715,18 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
             0x02 => Ok(ClientPinSubCommand::GetKeyAgreement),
             0x03 => Ok(ClientPinSubCommand::SetPin),
             0x04 => Ok(ClientPinSubCommand::ChangePin),
-            0x05 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPin),
-            0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUv),
+            0x05 => Ok(ClientPinSubCommand::GetPinToken),
+            #[cfg(feature = "with_ctap2_1")]
+            0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions),
+            #[cfg(feature = "with_ctap2_1")]
             0x07 => Ok(ClientPinSubCommand::GetUvRetries),
-            // TODO(kaczmarczyck) what is the correct status code for this error?
+            #[cfg(feature = "with_ctap2_1")]
+            0x08 => Ok(ClientPinSubCommand::SetMinPinLength),
+            #[cfg(feature = "with_ctap2_1")]
+            0x09 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions),
+            #[cfg(feature = "with_ctap2_1")]
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+            #[cfg(not(feature = "with_ctap2_1"))]
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
         }
     }
@@ -1157,6 +1163,12 @@ mod test {
         let policy_error = CredentialProtectionPolicy::try_from(cbor_policy_error);
         let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
         assert_eq!(policy_error, expected_error);
+
+        for policy in CredentialProtectionPolicy::into_enum_iter() {
+            let created_cbor: cbor::Value = policy.into();
+            let reconstructed = CredentialProtectionPolicy::try_from(created_cbor).unwrap();
+            assert_eq!(policy, reconstructed);
+        }
     }
 
     #[test]
@@ -1171,6 +1183,12 @@ mod test {
         );
         let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
         assert_eq!(created_cbor, cbor_authenticator_transport);
+
+        for transport in AuthenticatorTransport::into_enum_iter() {
+            let created_cbor: cbor::Value = transport.clone().into();
+            let reconstructed = AuthenticatorTransport::try_from(created_cbor).unwrap();
+            assert_eq!(transport, reconstructed);
+        }
     }
 
     #[test]
@@ -1313,6 +1331,12 @@ mod test {
         assert_eq!(sub_command, Ok(expected_sub_command));
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
+
+        for command in ClientPinSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
+        }
     }
 
     #[test]

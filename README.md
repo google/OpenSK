@@ -103,6 +103,13 @@ a few things you can personalize:
     When changing the default, resident credentials become undiscoverable without
     user verification. This helps privacy, but can make usage less comfortable
     for credentials that need less protection.
+6.  Increase the default minimum length for PINs in `ctap/storage.rs`.
+    The current minimum is 4. Values from 4 to 63 are allowed. Requiring longer
+    PINs can help establish trust between users and relying parties. It makes
+    user verification harder to break, but less convenient.
+    NIST recommends at least 6-digit PINs in section 5.1.9.1:
+    https://pages.nist.gov/800-63-3/sp800-63b.html
+    You can add relying parties to the list of readers of the minimum PIN length.
 
 ### 3D printed enclosure
 

@@ -5,8 +5,8 @@ Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 187736 (0x2dd58) bytes.
-  Adding .stack section. Offset: 187864 (0x2ddd8). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 178536 (0x2b968) bytes.
+  Adding .stack section. Offset: 178664 (0x2b9e8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -24,8 +24,8 @@ Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 187736 (0x2dd58) bytes.
-  Adding .stack section. Offset: 187864 (0x2ddd8). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 178536 (0x2b968) bytes.
+  Adding .stack section. Offset: 178664 (0x2b9e8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -43,8 +43,8 @@ Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 187736 (0x2dd58) bytes.
-  Adding .stack section. Offset: 187864 (0x2ddd8). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 178536 (0x2b968) bytes.
+  Adding .stack section. Offset: 178664 (0x2b9e8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2
@@ -62,8 +62,8 @@ Min RAM size from sections in ELF: 20 bytes
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
-  Adding .text section. Offset: 128 (0x80). Length: 187736 (0x2dd58) bytes.
-  Adding .stack section. Offset: 187864 (0x2ddd8). Length: 16384 (0x4000) bytes.
+  Adding .text section. Offset: 128 (0x80). Length: 178536 (0x2b968) bytes.
+  Adding .stack section. Offset: 178664 (0x2b9e8). Length: 16384 (0x4000) bytes.
 Searching for .rel.X sections to add.
 TBF Header:
                version:        2        0x2

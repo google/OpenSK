@@ -672,7 +672,7 @@ mod test {
 
     // Encrypts the dummy PIN "1234".
     fn encrypt_standard_pin(shared_secret: &[u8; 32]) -> Vec<u8> {
-        encrypt_pin(shared_secret, vec![0x31, 0x32, 0x33, 0x34])
+        encrypt_pin(shared_secret, b"1234".to_vec())
     }
 
     // Encrypts the PIN hash corresponding to the dummy PIN "1234".
@@ -1115,18 +1115,18 @@ mod test {
 
         let test_cases = vec![
             // Accept PIN "1234".
-            (vec![0x31, 0x32, 0x33, 0x34], Ok(())),
+            (b"1234".to_vec(), Ok(())),
             // Reject PIN "123" since it is too short.
             (
-                vec![0x31, 0x32, 0x33],
+                b"123".to_vec(),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
             ),
             // Reject PIN "12'\0'4" (a zero byte at index 2).
             (
-                vec![0x31, 0x32, 0x00, 0x34],
+                b"12\04".to_vec(),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
             ),
-            // Reject PINs not ending in 0u8 padding.
+            // PINs must be at most 63 bytes long, to allow for a trailing 0u8 padding.
             (
                 vec![0x30; 64],
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),

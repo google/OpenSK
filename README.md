@@ -121,7 +121,16 @@ You may use the flag `--help` to view all supported features.
 
 ### Debugging
 
-The flag `--debug` enables installation of OpenSK in debug mode. You may use the GUI application J-Link RTT viewer to see the debugging messages.
+The flag `--debug` enables installation of OpenSK in debug mode. 
+
+* On nRF52840-DK board: The [Segger RTT debugging protocol](https://www.segger.com/products/debug-probes/j-link/technology/about-real-time-transfer/)
+is used. You may open the GUI application [J-Link RTT viewer](https://www.segger.com/products/debug-probes/j-link/tools/rtt-viewer/) 
+(included in the [J-Link software package](https://www.segger.com/downloads/jlink/#J-LinkSoftwareAndDocumentationPack))
+to see the debugging messages.
+* On nRF52840-Dongle: The debugging is instead UART based and you will need an
+external hardware (e.g. [Segger J-Link Debug Probe](https://www.segger.com/products/debug-probes/j-link/))
+as mentioned in the detailed installation guide. We do not cover the details of
+debugging using the probe here.
 
 ### Printing panic messages to the console
 

@@ -839,7 +839,7 @@ if __name__ == "__main__":
   )
   main_parser.add_argument(
       "--ctap2.1",
-      action=RemoveConstAction,
+      action="append_const",
       const="with_ctap2_1",
       dest="features",
       help=("Compiles the OpenSK application with backward compatible "

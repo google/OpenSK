@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::crypto::rng256::Rng256;
+use crypto::rng256::Rng256;
 #[cfg(feature = "with_ctap2_1")]
 use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
@@ -22,7 +22,7 @@ use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
-use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
+use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 
 #[cfg(any(test, feature = "ram_storage"))]
 type Storage = embedded_flash::BufferStorage;

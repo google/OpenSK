@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{ChannelID, CtapHid, HidPacket, Message, ProcessedPacket};
-use crate::timer::Timestamp;
+use libtock_drivers::timer::Timestamp;
 use alloc::vec::Vec;
 use core::mem::swap;
 

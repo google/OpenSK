@@ -1,0 +1,63 @@
+
+[package]
+name = "ctap2-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.3", features = ["arbitrary-derive"] }
+arrayref = "0.3.6"
+libtock_drivers = { path = "../third_party/libtock-drivers" }
+crypto = { path = "../libraries/crypto", features = ['std'] }
+cbor = { path = "../libraries/cbor"}
+arbitrary = { version = "0.4.6", features = ["derive"] }
+rand = "0.7.3"
+
+[dependencies.ctap2]
+path = ".."
+features = ['std', 'ram_storage', 'with_ctap1']
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_split_assemble"
+path = "fuzz_targets/fuzz_target_split_assemble.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_message"
+path = "fuzz_targets/fuzz_target_process_message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_ctap1"
+path = "fuzz_targets/fuzz_target_ctap1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_ctap2_commands"
+path = "fuzz_targets/fuzz_target_ctap2_commands.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2"
+path = "fuzz_targets/fuzz_target_process_ctap2.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap1"
+path = "fuzz_targets/fuzz_target_process_ctap1.rs"
+test = false
+doc = false

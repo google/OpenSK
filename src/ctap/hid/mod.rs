@@ -29,6 +29,7 @@ use core::fmt::Write;
 use crypto::rng256::Rng256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+use arbitrary::Arbitrary;
 
 // CTAP specification (version 20190130) section 8.1
 // TODO: Channel allocation, section 8.1.3?
@@ -50,7 +51,7 @@ pub enum ProcessedPacket<'a> {
 }
 
 // An assembled CTAPHID command.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Arbitrary)]
 pub struct Message {
     // Channel ID.
     pub cid: ChannelID,
@@ -163,7 +164,6 @@ impl CtapHid {
             Ok(Some(message)) => {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
-
                 let cid = message.cid;
                 if !self.has_valid_channel(&message) {
                     #[cfg(feature = "debug_ctap")]

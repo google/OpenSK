@@ -16,7 +16,7 @@ use super::hid::ChannelID;
 use super::key_material::{ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
-use crate::timer::ClockValue;
+use libtock_drivers::timer::ClockValue;
 use alloc::vec::Vec;
 use core::convert::Into;
 use core::convert::TryFrom;

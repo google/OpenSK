@@ -18,6 +18,7 @@ crypto = { path = "libraries/crypto" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
+arbitrary = { version = "0.4.6", features = ["derive"] }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]

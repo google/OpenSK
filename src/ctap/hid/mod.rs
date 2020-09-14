@@ -163,7 +163,6 @@ impl CtapHid {
             Ok(Some(message)) => {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
-
                 let cid = message.cid;
                 if !self.has_valid_channel(&message) {
                     #[cfg(feature = "debug_ctap")]

@@ -228,7 +228,7 @@ class RemoveConstAction(argparse.Action):
                required=False,
                help=None,
                metavar=None):
-    super(RemoveConstAction, self).__init__(
+    super().__init__(
         option_strings=option_strings,
         dest=dest,
         nargs=0,

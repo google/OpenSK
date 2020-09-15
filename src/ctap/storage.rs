@@ -17,11 +17,14 @@ use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialS
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
+#[cfg(feature = "fuzzing")]
 use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
+#[cfg(not(feature = "fuzzing"))]
+use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 
 #[cfg(any(test, feature = "ram_storage"))]
 type Storage = embedded_flash::BufferStorage;

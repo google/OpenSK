@@ -981,6 +981,3 @@ index 942d028..ce73e1f 100644
  };
  pub mod chip;
  pub mod gpio;
---
-libgit2 1.0.1
-

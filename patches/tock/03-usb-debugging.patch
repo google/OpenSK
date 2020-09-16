@@ -11,6 +11,3 @@ index 303a451..18fd331 100644
 
  const VENDOR_ID: u16 = 0x1915; // Nordic Semiconductor
  const PRODUCT_ID: u16 = 0x521f; // nRF52840 Dongle (PCA10059)
---
-libgit2 1.0.1
-

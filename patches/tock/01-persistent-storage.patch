@@ -612,6 +612,3 @@ index 88eea40..ed3ae82 100644
 +        self.storage_locations
 +    }
  }
---
-libgit2 1.0.1
-

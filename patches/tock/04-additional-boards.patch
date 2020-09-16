@@ -11,6 +11,3 @@ index 83c4855..cfd63b1 100644
      "boards/nordic/nrf52dk",
      "boards/nucleo_f429zi",
      "boards/nucleo_f446re",
---
-libgit2 1.0.1
-

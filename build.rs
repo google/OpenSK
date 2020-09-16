@@ -21,8 +21,10 @@ use openssl::pkey::PKey;
 use openssl::x509;
 use std::env;
 use std::fs::File;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use uuid::Uuid;
 
 fn main() {
     println!("cargo:rerun-if-changed=crypto_data/opensk.key");
@@ -84,7 +86,10 @@ fn main() {
     cert_bin_file.write_all(&cert.to_der().unwrap()).unwrap();
 
     let mut aaguid_bin_file = File::create(&aaguid_bin_path).unwrap();
-    let mut serial = cert.serial_number().to_bn().unwrap().to_vec();
-    serial.resize(16, 0);
-    aaguid_bin_file.write_all(&serial).unwrap();
+    let mut aaguid_txt_file = File::open("crypto_data/aaguid.txt").unwrap();
+    let mut content = String::new();
+    aaguid_txt_file.read_to_string(&mut content).unwrap();
+    content.truncate(36);
+    let aaguid = Uuid::parse_str(&content).unwrap();
+    aaguid_bin_file.write_all(aaguid.as_bytes()).unwrap();
 }

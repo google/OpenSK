@@ -228,7 +228,7 @@ class RemoveConstAction(argparse.Action):
                required=False,
                help=None,
                metavar=None):
-    super(RemoveConstAction, self).__init__(
+    super().__init__(
         option_strings=option_strings,
         dest=dest,
         nargs=0,
@@ -406,10 +406,10 @@ class OpenSKInstaller:
         self.args.application))
     elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
         "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.5.0":
+    if elf2tab_ver != "elf2tab 0.6.0":
       error(
           ("Detected unsupported elf2tab version {!a}. The following "
-           "commands may fail. Please use 0.5.0 instead.").format(elf2tab_ver))
+           "commands may fail. Please use 0.6.0 instead.").format(elf2tab_ver))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
@@ -839,7 +839,7 @@ if __name__ == "__main__":
   )
   main_parser.add_argument(
       "--ctap2.1",
-      action=RemoveConstAction,
+      action="append_const",
       const="with_ctap2_1",
       dest="features",
       help=("Compiles the OpenSK application with backward compatible "

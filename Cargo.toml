@@ -30,11 +30,12 @@ with_ctap1 = ["crypto/with_ctap1"]
 with_ctap2_1 = []
 
 [dev-dependencies]
-elf2tab = "0.4.0"
+elf2tab = "0.6.0"
 enum-iterator = "0.6.0"
 
 [build-dependencies]
 openssl = "0.10"
+uuid = { version = "0.8", features = ["v4"] }
 
 [profile.dev]
 panic = "abort"

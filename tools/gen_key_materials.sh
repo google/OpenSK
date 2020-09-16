@@ -14,6 +14,9 @@
 # limitations under the License.
 
 generate_crypto_materials () {
+  # OpenSK AAGUID
+  local aaguid_file=crypto_data/aaguid.txt
+
   # Root CA key pair and certificate
   local ca_priv_key=crypto_data/opensk_ca.key
   local ca_cert_name=crypto_data/opensk_ca
@@ -49,7 +52,7 @@ generate_crypto_materials () {
       -new \
       -key "${ca_priv_key}" \
       -out "${ca_cert_name}.csr" \
-      -subj "/CN=Google OpenSK CA"
+      -subj "/CN=OpenSK CA"
     "${openssl}" x509 \
       -trustout \
       -req \
@@ -72,7 +75,7 @@ generate_crypto_materials () {
       -new \
       -key "${opensk_key}" \
       -out "${opensk_cert_name}.csr" \
-      -subj "/CN=Google OpenSK Hacker Edition"
+      -subj "/CN=OpenSK Hacker Edition"
     "${openssl}" x509 \
       -req \
       -days 3652 \
@@ -83,6 +86,11 @@ generate_crypto_materials () {
       -outform pem \
       -out "${opensk_cert_name}.pem" \
       -sha256
+  fi
+
+  if [ "${force_generate}" = "Y" -o ! -f "${aaguid_file}" ]
+  then
+    uuidgen > "${aaguid_file}"
   fi
 }
 

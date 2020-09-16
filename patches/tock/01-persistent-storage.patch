@@ -1,11 +1,11 @@
 diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
-index 040f4d3a..f6e1069c 100644
+index fc53f59..d72d204 100644
 --- a/boards/nordic/nrf52840_dongle/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle/src/main.rs
-@@ -49,6 +49,11 @@ static mut APP_MEMORY: [u8; 0x3C000] = [0; 0x3C000];
+@@ -55,6 +55,11 @@ const NUM_PROCS: usize = 8;
  static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
-     [None, None, None, None, None, None, None, None];
- 
+     [None; NUM_PROCS];
+
 +static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
 +    address: 0xC0000,
 +    size: 0x40000,
@@ -13,64 +13,20 @@ index 040f4d3a..f6e1069c 100644
 +
  // Static reference to chip for panic dumps
  static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
- 
-@@ -63,7 +68,10 @@ pub unsafe fn reset_handler() {
-     // Loads relocations and clears BSS
-     nrf52840::init();
- 
--    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
-+    let board_kernel = static_init!(
-+        kernel::Kernel,
-+        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
-+    );
-     // GPIOs
-     let gpio = components::gpio::GpioComponent::new(board_kernel).finalize(
-         components::gpio_component_helper!(
-diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
-index 44a6c1cc..2ebc2868 100644
---- a/boards/nordic/nrf52840dk/src/main.rs
-+++ b/boards/nordic/nrf52840dk/src/main.rs
-@@ -117,6 +117,11 @@ static mut APP_MEMORY: [u8; 0x3C000] = [0; 0x3C000];
- static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
-     [None, None, None, None, None, None, None, None];
- 
-+static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
-+    address: 0xC0000,
-+    size: 0x40000,
-+}];
-+
- static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
- 
- /// Dummy buffer that causes the linker to reserve enough space for the stack.
-@@ -146,7 +151,10 @@ pub unsafe fn reset_handler() {
-         UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD))
-     };
- 
--    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
-+    let board_kernel = static_init!(
-+        kernel::Kernel,
-+        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
-+    );
-     let gpio = components::gpio::GpioComponent::new(board_kernel).finalize(
-         components::gpio_component_helper!(
-             &nrf52840::gpio::PORT[Pin::P1_01],
-diff --git a/boards/nordic/nrf52dk_base/src/lib.rs b/boards/nordic/nrf52dk_base/src/lib.rs
-index 5dd4328e..a117d35f 100644
---- a/boards/nordic/nrf52dk_base/src/lib.rs
-+++ b/boards/nordic/nrf52dk_base/src/lib.rs
-@@ -104,6 +104,7 @@ pub struct Platform {
-     // The nRF52dk does not have the flash chip on it, so we make this optional.
-     nonvolatile_storage:
-         Option<&'static capsules::nonvolatile_storage_driver::NonvolatileStorage<'static>>,
-+    nvmc: &'static nrf52::nvmc::SyscallDriver,
+
+@@ -90,6 +95,7 @@ pub struct Platform {
+         'static,
+         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+     >,
++    nvmc: &'static nrf52840::nvmc::SyscallDriver,
  }
- 
+
  impl kernel::Platform for Platform {
-@@ -128,10 +129,30 @@ impl kernel::Platform for Platform {
-             capsules::nonvolatile_storage_driver::DRIVER_NUM => {
-                 f(self.nonvolatile_storage.map_or(None, |nv| Some(nv)))
-             }
-+            nrf52::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
+@@ -108,19 +114,42 @@ impl kernel::Platform for Platform {
+             capsules::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
+             capsules::temperature::DRIVER_NUM => f(Some(self.temp)),
+             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
++            nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
@@ -84,7 +40,7 @@ index 5dd4328e..a117d35f 100644
 +        use kernel::syscall::Syscall;
 +        match *syscall {
 +            Syscall::COMMAND {
-+                driver_number: nrf52::nvmc::DRIVER_NUM,
++                driver_number: nrf52840::nvmc::DRIVER_NUM,
 +                subdriver_number: cmd,
 +                arg0: ptr,
 +                arg1: len,
@@ -95,56 +51,160 @@ index 5dd4328e..a117d35f 100644
 +        }
 +    }
  }
- 
- /// Generic function for starting an nrf52dk board.
-@@ -405,6 +426,14 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
-     );
-     nrf52::acomp::ACOMP.set_client(analog_comparator);
- 
+
+ /// Entry point in the vector table called on hard reset.
+ #[no_mangle]
+ pub unsafe fn reset_handler() {
+     // Loads relocations and clears BSS
+     nrf52840::init();
+
+-    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
++    let board_kernel = static_init!(
++        kernel::Kernel,
++        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
++    );
+
+     // GPIOs
+     let gpio = components::gpio::GpioComponent::new(
+@@ -286,6 +315,14 @@ pub unsafe fn reset_handler() {
+         nrf52840::acomp::Comparator
+     ));
+
 +    let nvmc = static_init!(
-+        nrf52::nvmc::SyscallDriver,
-+        nrf52::nvmc::SyscallDriver::new(
-+            &nrf52::nvmc::NVMC,
++        nrf52840::nvmc::SyscallDriver,
++        nrf52840::nvmc::SyscallDriver::new(
++            &nrf52840::nvmc::NVMC,
 +            board_kernel.create_grant(&memory_allocation_capability),
 +        )
 +    );
 +
-     // Start all of the clocks. Low power operation will require a better
-     // approach than this.
-     nrf52::clock::CLOCK.low_stop();
-@@ -431,6 +460,7 @@ pub unsafe fn setup_board<I: nrf52::interrupt_service::InterruptService>(
-         analog_comparator: analog_comparator,
-         nonvolatile_storage: nonvolatile_storage,
+     nrf52_components::NrfClockComponent::new().finalize(());
+
+     let platform = Platform {
+@@ -300,6 +337,7 @@ pub unsafe fn reset_handler() {
+         temp,
+         alarm,
+         analog_comparator,
++        nvmc,
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
-+        nvmc: nvmc,
      };
- 
-     platform.pconsole.start();
+
+diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
+index 169f3d3..2ebb384 100644
+--- a/boards/nordic/nrf52840dk/src/main.rs
++++ b/boards/nordic/nrf52840dk/src/main.rs
+@@ -123,6 +123,11 @@ const NUM_PROCS: usize = 8;
+ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
+     [None; NUM_PROCS];
+
++static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
++    address: 0xC0000,
++    size: 0x40000,
++}];
++
+ static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
+
+ /// Dummy buffer that causes the linker to reserve enough space for the stack.
+@@ -158,6 +163,7 @@ pub struct Platform {
+         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+     >,
+     nonvolatile_storage: &'static capsules::nonvolatile_storage_driver::NonvolatileStorage<'static>,
++    nvmc: &'static nrf52840::nvmc::SyscallDriver,
+ }
+
+ impl kernel::Platform for Platform {
+@@ -177,10 +183,30 @@ impl kernel::Platform for Platform {
+             capsules::temperature::DRIVER_NUM => f(Some(self.temp)),
+             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
+             capsules::nonvolatile_storage_driver::DRIVER_NUM => f(Some(self.nonvolatile_storage)),
++            nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
+             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
+             _ => f(None),
+         }
+     }
++
++    fn filter_syscall(
++        &self,
++        process: &dyn kernel::procs::ProcessType,
++        syscall: &kernel::syscall::Syscall,
++    ) -> Result<(), kernel::ReturnCode> {
++        use kernel::syscall::Syscall;
++        match *syscall {
++            Syscall::COMMAND {
++                driver_number: nrf52840::nvmc::DRIVER_NUM,
++                subdriver_number: cmd,
++                arg0: ptr,
++                arg1: len,
++            } if (cmd == 2 || cmd == 3) && !process.fits_in_storage_location(ptr, len) => {
++                Err(kernel::ReturnCode::EINVAL)
++            }
++            _ => Ok(()),
++        }
++    }
+ }
+
+ /// Entry point in the vector table called on hard reset.
+@@ -204,7 +230,10 @@ pub unsafe fn reset_handler() {
+         UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD))
+     };
+
+-    let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
++    let board_kernel = static_init!(
++        kernel::Kernel,
++        kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)
++    );
+
+     let gpio = components::gpio::GpioComponent::new(
+         board_kernel,
+@@ -411,6 +440,14 @@ pub unsafe fn reset_handler() {
+         nrf52840::acomp::Comparator
+     ));
+
++    let nvmc = static_init!(
++        nrf52840::nvmc::SyscallDriver,
++        nrf52840::nvmc::SyscallDriver::new(
++            &nrf52840::nvmc::NVMC,
++            board_kernel.create_grant(&memory_allocation_capability),
++        )
++    );
++
+     nrf52_components::NrfClockComponent::new().finalize(());
+
+     let platform = Platform {
+@@ -426,6 +463,7 @@ pub unsafe fn reset_handler() {
+         alarm,
+         analog_comparator,
+         nonvolatile_storage,
++        nvmc,
+         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
+     };
+
 diff --git a/chips/nrf52/src/nvmc.rs b/chips/nrf52/src/nvmc.rs
-index 60fc2da8..ca41b899 100644
+index b70162c..9dcb82b 100644
 --- a/chips/nrf52/src/nvmc.rs
 +++ b/chips/nrf52/src/nvmc.rs
-@@ -3,6 +3,7 @@
+@@ -3,15 +3,16 @@
  //! Used in order read and write to internal flash.
- 
+
  use core::cell::Cell;
 +use core::convert::TryFrom;
  use core::ops::{Index, IndexMut};
  use kernel::common::cells::OptionalCell;
  use kernel::common::cells::TakeCell;
-@@ -11,7 +12,7 @@ use kernel::common::deferred_call::DeferredCall;
+ use kernel::common::cells::VolatileCell;
+ use kernel::common::deferred_call::DeferredCall;
  use kernel::common::registers::{register_bitfields, ReadOnly, ReadWrite};
  use kernel::common::StaticRef;
  use kernel::hil;
 -use kernel::ReturnCode;
 +use kernel::{AppId, AppSlice, Callback, Driver, Grant, ReturnCode, Shared};
- 
+
  use crate::deferred_call_tasks::DeferredCallTask;
- 
+
 @@ -141,7 +142,13 @@ register_bitfields! [u32,
  static DEFERRED_CALL: DeferredCall<DeferredCallTask> =
      unsafe { DeferredCall::new(DeferredCallTask::Nvmc) };
- 
+
 +type WORD = u32;
 +const WORD_SIZE: usize = core::mem::size_of::<WORD>();
  const PAGE_SIZE: usize = 4096;
@@ -152,13 +212,13 @@ index 60fc2da8..ca41b899 100644
 +const MAX_PAGE_ERASES: usize = 10000;
 +const WORD_MASK: usize = WORD_SIZE - 1;
 +const PAGE_MASK: usize = PAGE_SIZE - 1;
- 
+
  /// This is a wrapper around a u8 array that is sized to a single page for the
  /// nrf. Users of this module must pass an object of this type to use the
-@@ -215,6 +222,11 @@ impl Nvmc {
+@@ -219,6 +226,11 @@ impl Nvmc {
          }
      }
- 
+
 +    pub fn configure_readonly(&self) {
 +        let regs = &*self.registers;
 +        regs.config.write(Configuration::WEN::Ren);
@@ -167,7 +227,7 @@ index 60fc2da8..ca41b899 100644
      /// Configure the NVMC to allow writes to flash.
      pub fn configure_writeable(&self) {
          let regs = &*self.registers;
-@@ -230,7 +242,7 @@ impl Nvmc {
+@@ -234,7 +246,7 @@ impl Nvmc {
          let regs = &*self.registers;
          regs.config.write(Configuration::WEN::Een);
          while !self.is_ready() {}
@@ -175,17 +235,17 @@ index 60fc2da8..ca41b899 100644
 +        regs.eraseuicr.write(EraseUicr::ERASEUICR::ERASE);
          while !self.is_ready() {}
      }
- 
-@@ -322,7 +334,7 @@ impl Nvmc {
+
+@@ -326,7 +338,7 @@ impl Nvmc {
          // Put the NVMC in write mode.
          regs.config.write(Configuration::WEN::Wen);
- 
+
 -        for i in (0..data.len()).step_by(4) {
 +        for i in (0..data.len()).step_by(WORD_SIZE) {
              let word: u32 = (data[i + 0] as u32) << 0
                  | (data[i + 1] as u32) << 8
                  | (data[i + 2] as u32) << 16
-@@ -390,3 +402,180 @@ impl hil::flash::Flash for Nvmc {
+@@ -394,3 +406,180 @@ impl hil::flash::Flash for Nvmc {
          self.erase_page(page_number)
      }
  }
@@ -367,26 +427,26 @@ index 60fc2da8..ca41b899 100644
 +    }
 +}
 diff --git a/kernel/src/lib.rs b/kernel/src/lib.rs
-index ebe8052a..a6dcd278 100644
+index dbe5035..428d90c 100644
 --- a/kernel/src/lib.rs
 +++ b/kernel/src/lib.rs
-@@ -47,7 +47,7 @@ pub use crate::platform::systick::SysTick;
- pub use crate::platform::{mpu, Chip, Platform};
- pub use crate::platform::{ClockInterface, NoClockControl, NO_CLOCK_CONTROL};
- pub use crate::returncode::ReturnCode;
--pub use crate::sched::Kernel;
-+pub use crate::sched::{Kernel, StorageLocation};
- 
+@@ -123,7 +123,7 @@ pub use crate::sched::cooperative::{CoopProcessNode, CooperativeSched};
+ pub use crate::sched::mlfq::{MLFQProcessNode, MLFQSched};
+ pub use crate::sched::priority::PrioritySched;
+ pub use crate::sched::round_robin::{RoundRobinProcessNode, RoundRobinSched};
+-pub use crate::sched::{Kernel, Scheduler};
++pub use crate::sched::{Kernel, Scheduler, StorageLocation};
+
  // Export only select items from the process module. To remove the name conflict
  // this cannot be called `process`, so we use a shortened version. These
 diff --git a/kernel/src/memop.rs b/kernel/src/memop.rs
-index 7537d2b4..61870ccd 100644
+index 348c746..5465c95 100644
 --- a/kernel/src/memop.rs
 +++ b/kernel/src/memop.rs
-@@ -108,6 +108,25 @@ crate fn memop(process: &dyn ProcessType, op_type: usize, r1: usize) -> ReturnCo
+@@ -108,6 +108,25 @@ pub(crate) fn memop(process: &dyn ProcessType, op_type: usize, r1: usize) -> Ret
              ReturnCode::SUCCESS
          }
- 
+
 +        // Op Type 12: Number of storage locations.
 +        12 => ReturnCode::SuccessWithValue { value: process.number_storage_locations() },
 +
@@ -410,13 +470,13 @@ index 7537d2b4..61870ccd 100644
      }
  }
 diff --git a/kernel/src/process.rs b/kernel/src/process.rs
-index eb00f274..41243c8e 100644
+index 4dfde3b..0ceff3e 100644
 --- a/kernel/src/process.rs
 +++ b/kernel/src/process.rs
-@@ -281,6 +281,15 @@ pub trait ProcessType {
+@@ -360,6 +360,15 @@ pub trait ProcessType {
      /// writeable flash region.
      fn get_writeable_flash_region(&self, region_index: usize) -> (u32, u32);
- 
+
 +    /// How many storage locations are defined for this process.
 +    fn number_storage_locations(&self) -> usize;
 +
@@ -429,10 +489,10 @@ index eb00f274..41243c8e 100644
      /// Debug function to update the kernel on where the stack starts for this
      /// process. Processes are not required to call this through the memop
      /// system call, but it aids in debugging the process.
-@@ -999,6 +1008,32 @@ impl<C: Chip> ProcessType for Process<'a, C> {
+@@ -1015,6 +1024,32 @@ impl<C: Chip> ProcessType for Process<'_, C> {
          self.header.get_writeable_flash_region(region_index)
      }
- 
+
 +    fn number_storage_locations(&self) -> usize {
 +        self.kernel.storage_locations().len()
 +    }
@@ -462,10 +522,10 @@ index eb00f274..41243c8e 100644
      fn update_stack_start_pointer(&self, stack_pointer: *const u8) {
          if stack_pointer >= self.mem_start() && stack_pointer < self.mem_end() {
              self.debug.map(|debug| {
-@@ -1604,6 +1639,33 @@ impl<C: 'static + Chip> Process<'a, C> {
-             return Ok((None, 0));
+@@ -1664,6 +1699,33 @@ impl<C: 'static + Chip> Process<'_, C> {
+             return Err(ProcessLoadError::MpuInvalidFlashLength);
          }
- 
+
 +        // Allocate MPU region for the storage locations. The storage locations are currently
 +        // readable by all processes due to lack of stable app id.
 +        for storage_location in kernel.storage_locations() {
@@ -490,20 +550,20 @@ index eb00f274..41243c8e 100644
 +                    process_name
 +                );
 +            }
-+            return Ok((None, 0));
++            return Ok((None, remaining_memory));
 +        }
 +
          // Determine how much space we need in the application's
          // memory space just for kernel and grant state. We need to make
          // sure we allocate enough memory just for that.
 diff --git a/kernel/src/sched.rs b/kernel/src/sched.rs
-index fbd68319..43cce76f 100644
+index 88eea40..ed3ae82 100644
 --- a/kernel/src/sched.rs
 +++ b/kernel/src/sched.rs
-@@ -24,6 +24,12 @@ const KERNEL_TICK_DURATION_US: u32 = 10000;
- /// Skip re-scheduling a process if its quanta is nearly exhausted
- const MIN_QUANTA_THRESHOLD_US: u32 = 500;
- 
+@@ -118,15 +118,24 @@ pub enum SchedulingDecision {
+     TrySleep,
+ }
+
 +/// Represents a storage location in flash.
 +pub struct StorageLocation {
 +    pub address: usize,
@@ -513,18 +573,20 @@ index fbd68319..43cce76f 100644
  /// Main object for the kernel. Each board will need to create one.
  pub struct Kernel {
      /// How many "to-do" items exist at any given time. These include
-@@ -33,6 +39,9 @@ pub struct Kernel {
+     /// outstanding callbacks and processes in the Running state.
+     work: Cell<usize>,
+
      /// This holds a pointer to the static array of Process pointers.
      processes: &'static [Option<&'static dyn process::ProcessType>],
- 
+
 +    /// List of storage locations.
 +    storage_locations: &'static [StorageLocation],
 +
      /// A counter which keeps track of how many process identifiers have been
      /// created. This is used to create new unique identifiers for processes.
      process_identifier_max: Cell<usize>,
-@@ -51,9 +60,17 @@ pub struct Kernel {
- 
+@@ -170,9 +179,17 @@ pub enum StoppedExecutingReason {
+
  impl Kernel {
      pub fn new(processes: &'static [Option<&'static dyn process::ProcessType>]) -> Kernel {
 +        Kernel::new_with_storage(processes, &[])
@@ -536,17 +598,20 @@ index fbd68319..43cce76f 100644
 +    ) -> Kernel {
          Kernel {
              work: Cell::new(0),
-             processes: processes,
+             processes,
 +            storage_locations: storage_locations,
              process_identifier_max: Cell::new(0),
              grant_counter: Cell::new(0),
              grants_finalized: Cell::new(false),
-@@ -599,4 +616,8 @@ impl Kernel {
-         }
-         systick.reset();
+@@ -899,4 +916,8 @@ impl Kernel {
+
+         (return_reason, time_executed_us)
      }
 +
 +    pub fn storage_locations(&self) -> &'static [StorageLocation] {
 +        self.storage_locations
 +    }
  }
+--
+libgit2 1.0.1
+

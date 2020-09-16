@@ -29,6 +29,7 @@ use uuid::Uuid;
 fn main() {
     println!("cargo:rerun-if-changed=crypto_data/opensk.key");
     println!("cargo:rerun-if-changed=crypto_data/opensk_cert.pem");
+    println!("cargo:rerun-if-changed=crypto_data/aaguid.txt");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let priv_key_bin_path = Path::new(&out_dir).join("opensk_pkey.bin");

@@ -1,4 +1,3 @@
-
 [package]
 name = "ctap2-fuzz"
 version = "0.0.0"
@@ -14,7 +13,7 @@ libfuzzer-sys = { version = "0.3"}
 arrayref = "0.3.6"
 libtock_drivers = { path = "../third_party/libtock-drivers" }
 crypto = { path = "../libraries/crypto", features = ['std'] }
-cbor = { path = "../libraries/cbor"}
+cbor = { path = "../libraries/cbor" }
 
 [dependencies.ctap2]
 path = ".."

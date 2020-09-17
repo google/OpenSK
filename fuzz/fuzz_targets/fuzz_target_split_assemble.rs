@@ -46,7 +46,7 @@ fuzz_target!(|data: &[u8]| {
             message.cmd &= !PACKET_TYPE_MASK;
             assert_eq!(
                 assembler.parse_packet(last_packet, DUMMY_TIMESTAMP),
-                Ok(Some(message.clone()))
+                Ok(Some(message))
             );
         }
     }

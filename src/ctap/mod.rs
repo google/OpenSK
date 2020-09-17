@@ -33,9 +33,9 @@ use self::command::{
 #[cfg(feature = "with_ctap2_1")]
 use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
-    CredentialProtectionPolicy, PackedAttestationStatement, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameter, PublicKeyCredentialSource, PublicKeyCredentialType,
-    PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    CredentialProtectionPolicy, GetAssertionHmacSecretInput, PackedAttestationStatement,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 #[cfg(feature = "with_ctap2_1")]
@@ -133,6 +133,14 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
     }
 }
 
+#[derive(Clone)]
+struct AssertionInput {
+    client_data_hash: Vec<u8>,
+    auth_data: Vec<u8>,
+    uv: bool,
+    hmac_secret_input: Option<GetAssertionHmacSecretInput>,
+}
+
 // This struct currently holds all state, not only the persistent memory. The persistent members are
 // in the persistent store field.
 pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>>
@@ -147,6 +155,8 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     accepts_reset: bool,
     #[cfg(feature = "with_ctap1")]
     pub u2f_up_state: U2fUserPresenceState,
+    next_credentials: Vec<PublicKeyCredentialSource>,
+    next_assertion_input: Option<AssertionInput>,
 }
 
 impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
@@ -173,6 +183,8 @@ where
                 U2F_UP_PROMPT_TIMEOUT,
                 Duration::from_ms(TOUCH_TIMEOUT_MS),
             ),
+            next_credentials: vec![],
+            next_assertion_input: None,
         }
     }
 
@@ -314,13 +326,13 @@ where
                     Command::AuthenticatorGetAssertion(params) => {
                         self.process_get_assertion(params, cid)
                     }
+                    Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(),
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
                     Command::AuthenticatorReset => self.process_reset(cid),
                     #[cfg(feature = "with_ctap2_1")]
                     Command::AuthenticatorSelection => self.process_selection(cid),
-                    // TODO(kaczmarczyck) implement GetNextAssertion and FIDO 2.1 commands
-                    _ => self.process_unknown_command(),
+                    // TODO(kaczmarczyck) implement FIDO 2.1 commands
                 };
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
@@ -557,6 +569,63 @@ where
         ))
     }
 
+    fn assertion_response(
+        &self,
+        credential: &PublicKeyCredentialSource,
+        assertion_input: AssertionInput,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        let AssertionInput {
+            client_data_hash,
+            mut auth_data,
+            uv,
+            hmac_secret_input,
+        } = assertion_input;
+
+        // Process extensions.
+        if let Some(hmac_secret_input) = hmac_secret_input {
+            let encrypted_output = self
+                .pin_protocol_v1
+                .process_hmac_secret(hmac_secret_input, &credential.cred_random)?;
+            let extensions_output = cbor_map! {
+                "hmac-secret" => encrypted_output,
+            };
+            if !cbor::write(extensions_output, &mut auth_data) {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
+            }
+        }
+
+        let mut signature_data = auth_data.clone();
+        signature_data.extend(client_data_hash);
+        let signature = credential
+            .private_key
+            .sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential.credential_id.clone(),
+            transports: None, // You can set USB as a hint here.
+        };
+        let user = if uv && !credential.user_handle.is_empty() {
+            Some(PublicKeyCredentialUserEntity {
+                user_id: credential.user_handle.clone(),
+                user_name: None,
+                user_display_name: credential.other_ui.clone(),
+                user_icon: None,
+            })
+        } else {
+            None
+        };
+        Ok(ResponseData::AuthenticatorGetAssertion(
+            AuthenticatorGetAssertionResponse {
+                credential: Some(cred_desc),
+                auth_data,
+                signature: signature.to_asn1_der(),
+                user,
+                number_of_credentials: None,
+            },
+        ))
+    }
+
     fn process_get_assertion(
         &mut self,
         get_assertion_params: AuthenticatorGetAssertionParameters,
@@ -643,17 +712,19 @@ where
             }
             found_credentials
         } else {
-            // TODO(kaczmarczyck) use GetNextAssertion
             self.persistent_store.filter_credential(&rp_id, !has_uv)?
         };
 
-        let credential = if let Some(credential) = credentials.first() {
-            credential
-        } else {
-            decrypted_credential
-                .as_ref()
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?
-        };
+        let credential =
+            if let Some((credential, remaining_credentials)) = credentials.split_first() {
+                // TODO(kaczmarczyck) correct credential order
+                self.next_credentials = remaining_credentials.to_vec();
+                credential
+            } else {
+                decrypted_credential
+                    .as_ref()
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?
+            };
 
         if options.up {
             (self.check_user_presence)(cid)?;
@@ -661,50 +732,30 @@ where
 
         self.increment_global_signature_counter()?;
 
-        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
-        // Process extensions.
-        if let Some(hmac_secret_input) = hmac_secret_input {
-            let encrypted_output = self
-                .pin_protocol_v1
-                .process_hmac_secret(hmac_secret_input, &credential.cred_random)?;
-            let extensions_output = cbor_map! {
-                "hmac-secret" => encrypted_output,
-            };
-            if !cbor::write(extensions_output, &mut auth_data) {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
-            }
+        let assertion_input = AssertionInput {
+            client_data_hash,
+            auth_data: self.generate_auth_data(&rp_id_hash, flags)?,
+            uv: flags & UV_FLAG != 0,
+            hmac_secret_input,
+        };
+        if !self.next_credentials.is_empty() {
+            self.next_assertion_input = Some(assertion_input.clone());
         }
+        self.assertion_response(credential, assertion_input)
+    }
 
-        let mut signature_data = auth_data.clone();
-        signature_data.extend(client_data_hash);
-        let signature = credential
-            .private_key
-            .sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
-
-        let cred_desc = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: credential.credential_id.clone(),
-            transports: None, // You can set USB as a hint here.
-        };
-        let user = if (flags & UV_FLAG != 0) && !credential.user_handle.is_empty() {
-            Some(PublicKeyCredentialUserEntity {
-                user_id: credential.user_handle.clone(),
-                user_name: None,
-                user_display_name: credential.other_ui.clone(),
-                user_icon: None,
-            })
+    fn process_get_next_assertion(&mut self) -> Result<ResponseData, Ctap2StatusCode> {
+        // TODO(kaczmarczyck) introduce timer
+        let assertion_input = self
+            .next_assertion_input
+            .clone()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+        if let Some(credential) = self.next_credentials.pop() {
+            self.assertion_response(&credential, assertion_input)
         } else {
-            None
-        };
-        Ok(ResponseData::AuthenticatorGetAssertion(
-            AuthenticatorGetAssertionResponse {
-                credential: Some(cred_desc),
-                auth_data,
-                signature: signature.to_asn1_der(),
-                user,
-                number_of_credentials: None,
-            },
-        ))
+            self.next_assertion_input = None;
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
     }
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
@@ -786,10 +837,6 @@ where
         Ok(ResponseData::AuthenticatorSelection)
     }
 
-    fn process_unknown_command(&self) -> Result<ResponseData, Ctap2StatusCode> {
-        Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
-    }
-
     pub fn generate_auth_data(
         &self,
         rp_id_hash: &[u8],
@@ -813,9 +860,8 @@ where
 #[cfg(test)]
 mod test {
     use super::data_formats::{
-        CoseKey, GetAssertionExtensions, GetAssertionHmacSecretInput, GetAssertionOptions,
-        MakeCredentialExtensions, MakeCredentialOptions, PublicKeyCredentialRpEntity,
-        PublicKeyCredentialUserEntity,
+        CoseKey, GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions,
+        MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
     use super::*;
     use crypto::rng256::ThreadRng256;

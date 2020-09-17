@@ -308,7 +308,8 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -603,7 +604,8 @@ impl PublicKeyCredentialSource {
 // TODO(kaczmarczyck) we could decide to split this data type up
 // It depends on the algorithm though, I think.
 // So before creating a mess, this is my workaround.
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
 
 // This is the algorithm specifier that is supposed to be used in a COSE key

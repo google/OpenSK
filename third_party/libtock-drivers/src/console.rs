@@ -17,7 +17,7 @@ mod allow_nr {
     pub const SHARE_BUFFER: usize = 1;
 }
 
-const BUFFER_SIZE: usize = 1024;
+pub const BUFFER_SIZE: usize = 1024;
 
 pub struct Console {
     allow_buffer: [u8; BUFFER_SIZE],
@@ -70,11 +70,13 @@ impl Console {
         // Clear the buffer even in case of error, to avoid an infinite loop.
         self.count_pending = 0;
 
-        let result = syscalls::allow(
-            DRIVER_NUMBER,
-            allow_nr::SHARE_BUFFER,
-            &mut self.allow_buffer[..count],
-        );
+        Console::write_unbuffered(&mut self.allow_buffer[..count]);
+    }
+
+    pub fn write_unbuffered(buf: &mut [u8]) {
+        let count = buf.len();
+
+        let result = syscalls::allow(DRIVER_NUMBER, allow_nr::SHARE_BUFFER, buf);
         if result.is_err() {
             return;
         }

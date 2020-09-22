@@ -28,6 +28,7 @@ extern crate cbor;
 extern crate crypto;
 
 mod ctap;
+pub mod embedded_flash;
 
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]

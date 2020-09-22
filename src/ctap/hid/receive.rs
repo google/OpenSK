@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::{ChannelID, CtapHid, HidPacket, Message, ProcessedPacket};
-use crate::timer::Timestamp;
 use alloc::vec::Vec;
 use core::mem::swap;
+use libtock_drivers::timer::Timestamp;
 
 // A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
 pub struct MessageAssembler {
@@ -195,7 +195,7 @@ impl MessageAssembler {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::timer::Duration;
+    use libtock_drivers::timer::Duration;
 
     // Except for tests that exercise timeouts, all packets are synchronized at the same dummy
     // timestamp.

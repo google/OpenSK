@@ -16,11 +16,11 @@ use super::hid::ChannelID;
 use super::key_material::{ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
-use crate::timer::ClockValue;
 use alloc::vec::Vec;
 use core::convert::Into;
 use core::convert::TryFrom;
 use crypto::rng256::Rng256;
+use libtock_drivers::timer::ClockValue;
 
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf

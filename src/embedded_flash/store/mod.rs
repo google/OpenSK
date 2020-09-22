@@ -163,9 +163,11 @@ mod bitfield;
 mod format;
 
 use self::format::{Format, IsReplace};
-#[cfg(feature = "std")]
-use super::BufferStorage;
 use super::{Index, Storage};
+#[cfg(any(test, feature = "ram_storage"))]
+use crate::embedded_flash::BufferStorage;
+#[cfg(any(test, feature = "ram_storage"))]
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -402,6 +404,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
     /// Computes the length in bytes that would be used in the storage if an insert operation is
     /// executed provided the data of the inserted entry has `length` bytes and whether this data is
     /// sensitive.
+    #[allow(dead_code)]
     pub fn insert_len(&self, sensitive: bool, length: usize) -> usize {
         self.format.entry_size(IsReplace::Insert, sensitive, length)
     }
@@ -410,6 +413,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
     ///
     /// The value at index `page` of the result is the number of times page `page` was erased. This
     /// number is an underestimate in case power was lost when this page was erased.
+    #[allow(dead_code)]
     pub fn compaction_info(&self) -> Vec<usize> {
         let mut info = Vec::with_capacity(self.format.num_pages);
         for page in 0..self.format.num_pages {
@@ -766,7 +770,7 @@ impl<S: Storage, C: StoreConfig> Store<S, C> {
 }
 
 // Those functions are not meant for production.
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "ram_storage"))]
 impl<C: StoreConfig> Store<BufferStorage, C> {
     /// Takes a snapshot of the storage after a given amount of word operations.
     pub fn arm_snapshot(&mut self, delay: usize) {

@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::crypto::rng256::Rng256;
 #[cfg(feature = "with_ctap2_1")]
 use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
+use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryInto;
-use ctap2::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
+use crypto::rng256::Rng256;
 
 #[cfg(any(test, feature = "ram_storage"))]
 type Storage = embedded_flash::BufferStorage;
@@ -660,9 +660,9 @@ fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::crypto;
-    use crate::crypto::rng256::{Rng256, ThreadRng256};
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
+    use crypto;
+    use crypto::rng256::{Rng256, ThreadRng256};
 
     fn create_credential_source(
         rng: &mut ThreadRng256,

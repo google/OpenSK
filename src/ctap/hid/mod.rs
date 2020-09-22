@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod receive;
-mod send;
+pub mod receive;
+pub mod send;
 
 use self::receive::MessageAssembler;
 use self::send::HidPacketIterator;
@@ -22,13 +22,13 @@ use super::ctap1;
 use super::status_code::Ctap2StatusCode;
 use super::timed_permission::TimedPermission;
 use super::CtapState;
-use crate::timer::{ClockValue, Duration, Timestamp};
 use alloc::vec::Vec;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::rng256::Rng256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+use libtock_drivers::timer::{ClockValue, Duration, Timestamp};
 
 // CTAP specification (version 20190130) section 8.1
 // TODO: Channel allocation, section 8.1.3?

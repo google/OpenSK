@@ -105,9 +105,16 @@ enum Key {
     MinPinLengthRpIds,
 }
 
-pub struct MasterKeys<'a> {
-    pub encryption: &'a [u8; 32],
-    pub hmac: &'a [u8; 32],
+pub struct MasterKeys(Vec<u8>);
+
+impl MasterKeys {
+    pub fn encryption(&self) -> &[u8; 32] {
+        array_ref!(&self.0, 0, 32)
+    }
+
+    pub fn hmac(&self) -> &[u8; 32] {
+        array_ref!(&self.0, 32, 32)
+    }
 }
 
 struct Config;
@@ -246,13 +253,16 @@ impl PersistentStore {
         rp_id: &str,
         credential_id: &[u8],
         check_cred_protect: bool,
-    ) -> Option<PublicKeyCredentialSource> {
+    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         let key = Key::Credential {
             rp_id: Some(rp_id.into()),
             credential_id: Some(credential_id.into()),
             user_handle: None,
         };
-        let (_, entry) = self.store.find_one(&key)?;
+        let entry = match self.store.find_one(&key) {
+            None => return Ok(None),
+            Some((_, entry)) => entry,
+        };
         debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
         let result = deserialize_credential(entry.data);
         debug_assert!(result.is_some());
@@ -262,9 +272,9 @@ impl PersistentStore {
                     == Some(CredentialProtectionPolicy::UserVerificationRequired)
             })
         {
-            None
+            Ok(None)
         } else {
-            result
+            Ok(result)
         }
     }
 
@@ -278,7 +288,7 @@ impl PersistentStore {
             user_handle: Some(credential.user_handle.clone()),
         };
         let old_entry = self.store.find_one(&key);
-        if old_entry.is_none() && self.count_credentials() >= MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        if old_entry.is_none() && self.count_credentials()? >= MAX_SUPPORTED_RESIDENTIAL_KEYS {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
         let credential = serialize_credential(credential)?;
@@ -301,8 +311,9 @@ impl PersistentStore {
         &self,
         rp_id: &str,
         check_cred_protect: bool,
-    ) -> Vec<PublicKeyCredentialSource> {
-        self.store
+    ) -> Result<Vec<PublicKeyCredentialSource>, Ctap2StatusCode> {
+        Ok(self
+            .store
             .find_all(&Key::Credential {
                 rp_id: Some(rp_id.into()),
                 credential_id: None,
@@ -315,163 +326,162 @@ impl PersistentStore {
                 credential
             })
             .filter(|cred| !check_cred_protect || cred.is_discoverable())
-            .collect()
+            .collect())
     }
 
-    pub fn count_credentials(&self) -> usize {
-        self.store
+    pub fn count_credentials(&self) -> Result<usize, Ctap2StatusCode> {
+        Ok(self
+            .store
             .find_all(&Key::Credential {
                 rp_id: None,
                 credential_id: None,
                 user_handle: None,
             })
-            .count()
+            .count())
     }
 
-    pub fn global_signature_counter(&self) -> u32 {
-        self.store
+    pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
+        Ok(self
+            .store
             .find_one(&Key::GlobalSignatureCounter)
             .map_or(0, |(_, entry)| {
                 u32::from_ne_bytes(*array_ref!(entry.data, 0, 4))
-            })
+            }))
     }
 
-    pub fn incr_global_signature_counter(&mut self) {
+    pub fn incr_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
         let mut buffer = [0; core::mem::size_of::<u32>()];
         match self.store.find_one(&Key::GlobalSignatureCounter) {
             None => {
                 buffer.copy_from_slice(&1u32.to_ne_bytes());
-                self.store
-                    .insert(StoreEntry {
-                        tag: GLOBAL_SIGNATURE_COUNTER,
-                        data: &buffer,
-                        sensitive: false,
-                    })
-                    .unwrap();
+                self.store.insert(StoreEntry {
+                    tag: GLOBAL_SIGNATURE_COUNTER,
+                    data: &buffer,
+                    sensitive: false,
+                })?;
             }
             Some((index, entry)) => {
                 let value = u32::from_ne_bytes(*array_ref!(entry.data, 0, 4));
                 // In hopes that servers handle the wrapping gracefully.
                 buffer.copy_from_slice(&value.wrapping_add(1).to_ne_bytes());
-                self.store
-                    .replace(
-                        index,
-                        StoreEntry {
-                            tag: GLOBAL_SIGNATURE_COUNTER,
-                            data: &buffer,
-                            sensitive: false,
-                        },
-                    )
-                    .unwrap();
+                self.store.replace(
+                    index,
+                    StoreEntry {
+                        tag: GLOBAL_SIGNATURE_COUNTER,
+                        data: &buffer,
+                        sensitive: false,
+                    },
+                )?;
             }
         }
+        Ok(())
     }
 
-    pub fn master_keys(&self) -> MasterKeys {
-        // We have as invariant that there is always exactly one MasterKeys entry in the store.
+    pub fn master_keys(&self) -> Result<MasterKeys, Ctap2StatusCode> {
         let (_, entry) = self.store.find_one(&Key::MasterKeys).unwrap();
-        let data = entry.data;
-        // And this entry is well formed: the encryption key followed by the hmac key.
-        let encryption = array_ref!(data, 0, 32);
-        let hmac = array_ref!(data, 32, 32);
-        MasterKeys { encryption, hmac }
+        if entry.data.len() != 64 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(MasterKeys(entry.data.to_vec()))
     }
 
-    pub fn pin_hash(&self) -> Option<&[u8; PIN_AUTH_LENGTH]> {
-        self.store
-            .find_one(&Key::PinHash)
-            .map(|(_, entry)| array_ref!(entry.data, 0, PIN_AUTH_LENGTH))
+    pub fn pin_hash(&self) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
+        let data = match self.store.find_one(&Key::PinHash) {
+            None => return Ok(None),
+            Some((_, entry)) => entry.data,
+        };
+        if data.len() != PIN_AUTH_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(Some(data.to_vec()))
     }
 
-    pub fn set_pin_hash(&mut self, pin_hash: &[u8; PIN_AUTH_LENGTH]) {
+    pub fn set_pin_hash(
+        &mut self,
+        pin_hash: &[u8; PIN_AUTH_LENGTH],
+    ) -> Result<(), Ctap2StatusCode> {
         let entry = StoreEntry {
             tag: PIN_HASH,
             data: pin_hash,
             sensitive: true,
         };
-        match self.store.find_one(&Key::PinHash) {
-            None => self.store.insert(entry).unwrap(),
-            Some((index, _)) => {
-                self.store.replace(index, entry).unwrap();
-            }
-        }
+        Ok(match self.store.find_one(&Key::PinHash) {
+            None => self.store.insert(entry)?,
+            Some((index, _)) => self.store.replace(index, entry)?,
+        })
     }
 
-    pub fn pin_retries(&self) -> u8 {
-        self.store
+    pub fn pin_retries(&self) -> Result<u8, Ctap2StatusCode> {
+        Ok(self
+            .store
             .find_one(&Key::PinRetries)
             .map_or(MAX_PIN_RETRIES, |(_, entry)| {
                 debug_assert_eq!(entry.data.len(), 1);
                 entry.data[0]
-            })
+            }))
     }
 
-    pub fn decr_pin_retries(&mut self) {
+    pub fn decr_pin_retries(&mut self) -> Result<(), Ctap2StatusCode> {
         match self.store.find_one(&Key::PinRetries) {
             None => {
-                self.store
-                    .insert(StoreEntry {
-                        tag: PIN_RETRIES,
-                        data: &[MAX_PIN_RETRIES.saturating_sub(1)],
-                        sensitive: false,
-                    })
-                    .unwrap();
+                self.store.insert(StoreEntry {
+                    tag: PIN_RETRIES,
+                    data: &[MAX_PIN_RETRIES.saturating_sub(1)],
+                    sensitive: false,
+                })?;
             }
             Some((index, entry)) => {
                 debug_assert_eq!(entry.data.len(), 1);
                 if entry.data[0] == 0 {
-                    return;
+                    return Ok(());
                 }
                 let new_value = entry.data[0].saturating_sub(1);
-                self.store
-                    .replace(
-                        index,
-                        StoreEntry {
-                            tag: PIN_RETRIES,
-                            data: &[new_value],
-                            sensitive: false,
-                        },
-                    )
-                    .unwrap();
+                self.store.replace(
+                    index,
+                    StoreEntry {
+                        tag: PIN_RETRIES,
+                        data: &[new_value],
+                        sensitive: false,
+                    },
+                )?;
             }
         }
+        Ok(())
     }
 
-    pub fn reset_pin_retries(&mut self) {
+    pub fn reset_pin_retries(&mut self) -> Result<(), Ctap2StatusCode> {
         if let Some((index, _)) = self.store.find_one(&Key::PinRetries) {
-            self.store.delete(index).unwrap();
+            self.store.delete(index)?;
         }
+        Ok(())
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    pub fn min_pin_length(&self) -> u8 {
-        self.store
+    pub fn min_pin_length(&self) -> Result<u8, Ctap2StatusCode> {
+        Ok(self
+            .store
             .find_one(&Key::MinPinLength)
             .map_or(DEFAULT_MIN_PIN_LENGTH, |(_, entry)| {
                 debug_assert_eq!(entry.data.len(), 1);
                 entry.data[0]
-            })
+            }))
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    pub fn set_min_pin_length(&mut self, min_pin_length: u8) {
+    pub fn set_min_pin_length(&mut self, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
         let entry = StoreEntry {
             tag: MIN_PIN_LENGTH,
             data: &[min_pin_length],
             sensitive: false,
         };
-        match self.store.find_one(&Key::MinPinLength) {
-            None => {
-                self.store.insert(entry).unwrap();
-            }
-            Some((index, _)) => {
-                self.store.replace(index, entry).unwrap();
-            }
-        }
+        Ok(match self.store.find_one(&Key::MinPinLength) {
+            None => self.store.insert(entry)?,
+            Some((index, _)) => self.store.replace(index, entry)?,
+        })
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    pub fn _min_pin_length_rp_ids(&self) -> Vec<String> {
+    pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
             .store
             .find_one(&Key::MinPinLengthRpIds)
@@ -479,7 +489,7 @@ impl PersistentStore {
                 _deserialize_min_pin_length_rp_ids(entry.data)
             });
         debug_assert!(rp_ids.is_some());
-        rp_ids.unwrap_or(vec![])
+        Ok(rp_ids.unwrap_or(vec![]))
     }
 
     #[cfg(feature = "with_ctap2_1")]
@@ -565,7 +575,7 @@ impl PersistentStore {
         Ok(())
     }
 
-    pub fn aaguid(&self) -> Result<&[u8; AAGUID_LENGTH], Ctap2StatusCode> {
+    pub fn aaguid(&self) -> Result<Vec<u8>, Ctap2StatusCode> {
         let (_, entry) = self
             .store
             .find_one(&Key::Aaguid)
@@ -574,7 +584,7 @@ impl PersistentStore {
         if data.len() != AAGUID_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(array_ref!(data, 0, AAGUID_LENGTH))
+        Ok(data.to_vec())
     }
 
     pub fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> Result<(), Ctap2StatusCode> {
@@ -590,7 +600,7 @@ impl PersistentStore {
         Ok(())
     }
 
-    pub fn reset(&mut self, rng: &mut impl Rng256) {
+    pub fn reset(&mut self, rng: &mut impl Rng256) -> Result<(), Ctap2StatusCode> {
         loop {
             let index = {
                 let mut iter = self.store.iter().filter(|(_, entry)| should_reset(entry));
@@ -599,9 +609,10 @@ impl PersistentStore {
                     Some((index, _)) => index,
                 }
             };
-            self.store.delete(index).unwrap();
+            self.store.delete(index)?;
         }
         self.init(rng);
+        Ok(())
     }
 }
 
@@ -708,10 +719,10 @@ mod test {
     fn test_store() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
         assert!(persistent_store.store_credential(credential_source).is_ok());
-        assert!(persistent_store.count_credentials() > 0);
+        assert!(persistent_store.count_credentials().unwrap() > 0);
     }
 
     #[test]
@@ -719,7 +730,7 @@ mod test {
     fn test_fill_store() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
         // To make this test work for bigger storages, implement better int -> Vec conversion.
         assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
@@ -727,7 +738,7 @@ mod test {
             let credential_source =
                 create_credential_source(&mut rng, "example.com", vec![i as u8]);
             assert!(persistent_store.store_credential(credential_source).is_ok());
-            assert_eq!(persistent_store.count_credentials(), i + 1);
+            assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
             &mut rng,
@@ -739,7 +750,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL)
         );
         assert_eq!(
-            persistent_store.count_credentials(),
+            persistent_store.count_credentials().unwrap(),
             MAX_SUPPORTED_RESIDENTIAL_KEYS
         );
     }
@@ -749,7 +760,7 @@ mod test {
     fn test_overwrite() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         // These should have different IDs.
         let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x00]);
@@ -761,9 +772,11 @@ mod test {
         assert!(persistent_store
             .store_credential(credential_source1)
             .is_ok());
-        assert_eq!(persistent_store.count_credentials(), 1);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 1);
         assert_eq!(
-            &persistent_store.filter_credential("example.com", false),
+            &persistent_store
+                .filter_credential("example.com", false)
+                .unwrap(),
             &[expected_credential]
         );
 
@@ -773,7 +786,7 @@ mod test {
             let credential_source =
                 create_credential_source(&mut rng, "example.com", vec![i as u8]);
             assert!(persistent_store.store_credential(credential_source).is_ok());
-            assert_eq!(persistent_store.count_credentials(), i + 1);
+            assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
             &mut rng,
@@ -785,7 +798,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL)
         );
         assert_eq!(
-            persistent_store.count_credentials(),
+            persistent_store.count_credentials().unwrap(),
             MAX_SUPPORTED_RESIDENTIAL_KEYS
         );
     }
@@ -794,7 +807,7 @@ mod test {
     fn test_filter() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
         let credential_source2 =
@@ -811,7 +824,9 @@ mod test {
             .store_credential(credential_source2)
             .is_ok());
 
-        let filtered_credentials = persistent_store.filter_credential("example.com", false);
+        let filtered_credentials = persistent_store
+            .filter_credential("example.com", false)
+            .unwrap();
         assert_eq!(filtered_credentials.len(), 2);
         assert!(
             (filtered_credentials[0].credential_id == id0
@@ -825,7 +840,7 @@ mod test {
     fn test_filter_with_cred_protect() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -841,7 +856,9 @@ mod test {
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
-        let no_credential = persistent_store.filter_credential("example.com", true);
+        let no_credential = persistent_store
+            .filter_credential("example.com", true)
+            .unwrap();
         assert_eq!(no_credential, vec![]);
     }
 
@@ -849,7 +866,7 @@ mod test {
     fn test_find() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
         let id0 = credential_source0.credential_id.clone();
@@ -861,9 +878,13 @@ mod test {
             .store_credential(credential_source1)
             .is_ok());
 
-        let no_credential = persistent_store.find_credential("another.example.com", &id0, false);
+        let no_credential = persistent_store
+            .find_credential("another.example.com", &id0, false)
+            .unwrap();
         assert_eq!(no_credential, None);
-        let found_credential = persistent_store.find_credential("example.com", &id0, false);
+        let found_credential = persistent_store
+            .find_credential("example.com", &id0, false)
+            .unwrap();
         let expected_credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: id0,
@@ -881,7 +902,7 @@ mod test {
     fn test_find_with_cred_protect() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials(), 0);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -895,7 +916,9 @@ mod test {
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
-        let no_credential = persistent_store.find_credential("example.com", &vec![0x00], true);
+        let no_credential = persistent_store
+            .find_credential("example.com", &vec![0x00], true)
+            .unwrap();
         assert_eq!(no_credential, None);
     }
 
@@ -905,19 +928,19 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // Master keys stay the same between resets.
-        let master_keys_1 = persistent_store.master_keys();
-        let master_keys_2 = persistent_store.master_keys();
-        assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
-        assert_eq!(master_keys_2.hmac, master_keys_1.hmac);
+        let master_keys_1 = persistent_store.master_keys().unwrap();
+        let master_keys_2 = persistent_store.master_keys().unwrap();
+        assert_eq!(master_keys_2.encryption(), master_keys_1.encryption());
+        assert_eq!(master_keys_2.hmac(), master_keys_1.hmac());
 
         // Master keys change after reset. This test may fail if the random generator produces the
         // same keys.
-        let master_encryption_key = master_keys_1.encryption.to_vec();
-        let master_hmac_key = master_keys_1.hmac.to_vec();
-        persistent_store.reset(&mut rng);
-        let master_keys_3 = persistent_store.master_keys();
-        assert!(master_keys_3.encryption as &[u8] != &master_encryption_key[..]);
-        assert!(master_keys_3.hmac as &[u8] != &master_hmac_key[..]);
+        let master_encryption_key = master_keys_1.encryption().to_vec();
+        let master_hmac_key = master_keys_1.hmac().to_vec();
+        persistent_store.reset(&mut rng).unwrap();
+        let master_keys_3 = persistent_store.master_keys().unwrap();
+        assert!(master_keys_3.encryption() != &master_encryption_key[..]);
+        assert!(master_keys_3.hmac() != &master_hmac_key[..]);
     }
 
     #[test]
@@ -926,23 +949,23 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // Pin hash is initially not set.
-        assert!(persistent_store.pin_hash().is_none());
+        assert!(persistent_store.pin_hash().unwrap().is_none());
 
         // Setting the pin hash sets the pin hash.
         let random_data = rng.gen_uniform_u8x32();
         assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
         let pin_hash_1 = array_ref!(random_data, 0, PIN_AUTH_LENGTH);
         let pin_hash_2 = array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
-        persistent_store.set_pin_hash(&pin_hash_1);
-        assert_eq!(persistent_store.pin_hash(), Some(pin_hash_1));
-        assert_eq!(persistent_store.pin_hash(), Some(pin_hash_1));
-        persistent_store.set_pin_hash(&pin_hash_2);
-        assert_eq!(persistent_store.pin_hash(), Some(pin_hash_2));
-        assert_eq!(persistent_store.pin_hash(), Some(pin_hash_2));
+        persistent_store.set_pin_hash(&pin_hash_1).unwrap();
+        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_1);
+        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_1);
+        persistent_store.set_pin_hash(&pin_hash_2).unwrap();
+        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_2);
+        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_2);
 
         // Resetting the storage resets the pin hash.
-        persistent_store.reset(&mut rng);
-        assert!(persistent_store.pin_hash().is_none());
+        persistent_store.reset(&mut rng).unwrap();
+        assert!(persistent_store.pin_hash().unwrap().is_none());
     }
 
     #[test]
@@ -951,21 +974,21 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // The pin retries is initially at the maximum.
-        assert_eq!(persistent_store.pin_retries(), MAX_PIN_RETRIES);
+        assert_eq!(persistent_store.pin_retries().unwrap(), MAX_PIN_RETRIES);
 
         // Decrementing the pin retries decrements the pin retries.
         for pin_retries in (0..MAX_PIN_RETRIES).rev() {
-            persistent_store.decr_pin_retries();
-            assert_eq!(persistent_store.pin_retries(), pin_retries);
+            persistent_store.decr_pin_retries().unwrap();
+            assert_eq!(persistent_store.pin_retries().unwrap(), pin_retries);
         }
 
         // Decrementing the pin retries after zero does not modify the pin retries.
-        persistent_store.decr_pin_retries();
-        assert_eq!(persistent_store.pin_retries(), 0);
+        persistent_store.decr_pin_retries().unwrap();
+        assert_eq!(persistent_store.pin_retries().unwrap(), 0);
 
         // Resetting the pin retries resets the pin retries.
-        persistent_store.reset_pin_retries();
-        assert_eq!(persistent_store.pin_retries(), MAX_PIN_RETRIES);
+        persistent_store.reset_pin_retries().unwrap();
+        assert_eq!(persistent_store.pin_retries().unwrap(), MAX_PIN_RETRIES);
     }
 
     #[test]
@@ -993,7 +1016,7 @@ mod test {
         assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
-        persistent_store.reset(&mut rng);
+        persistent_store.reset(&mut rng).unwrap();
         assert_eq!(
             persistent_store.attestation_private_key().unwrap().unwrap(),
             key_material::ATTESTATION_PRIVATE_KEY
@@ -1012,12 +1035,20 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // The minimum PIN length is initially at the default.
-        assert_eq!(persistent_store.min_pin_length(), DEFAULT_MIN_PIN_LENGTH);
+        assert_eq!(
+            persistent_store.min_pin_length().unwrap(),
+            DEFAULT_MIN_PIN_LENGTH
+        );
 
         // Changes by the setter are reflected by the getter..
         let new_min_pin_length = 8;
-        persistent_store.set_min_pin_length(new_min_pin_length);
-        assert_eq!(persistent_store.min_pin_length(), new_min_pin_length);
+        persistent_store
+            .set_min_pin_length(new_min_pin_length)
+            .unwrap();
+        assert_eq!(
+            persistent_store.min_pin_length().unwrap(),
+            new_min_pin_length
+        );
     }
 
     #[cfg(feature = "with_ctap2_1")]
@@ -1028,7 +1059,7 @@ mod test {
 
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
-            persistent_store._min_pin_length_rp_ids(),
+            persistent_store._min_pin_length_rp_ids().unwrap(),
             _DEFAULT_MIN_PIN_LENGTH_RP_IDS
         );
 
@@ -1043,7 +1074,7 @@ mod test {
                 rp_ids.push(rp_id);
             }
         }
-        assert_eq!(persistent_store._min_pin_length_rp_ids(), rp_ids);
+        assert_eq!(persistent_store._min_pin_length_rp_ids().unwrap(), rp_ids);
     }
 
     #[test]

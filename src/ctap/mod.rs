@@ -174,10 +174,11 @@ where
         }
     }
 
-    pub fn increment_global_signature_counter(&mut self) {
+    pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
         if USE_SIGNATURE_COUNTER {
-            self.persistent_store.incr_global_signature_counter();
+            self.persistent_store.incr_global_signature_counter()?;
         }
+        Ok(())
     }
 
     // Encrypts the private key and relying party ID hash into a credential ID. Other
@@ -188,9 +189,9 @@ where
         &mut self,
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
-    ) -> Vec<u8> {
-        let master_keys = self.persistent_store.master_keys();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption);
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        let master_keys = self.persistent_store.master_keys()?;
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption());
         let mut sk_bytes = [0; 32];
         private_key.to_bytes(&mut sk_bytes);
         let mut iv = [0; 16];
@@ -208,9 +209,9 @@ where
         for b in &blocks {
             encrypted_id.extend(b);
         }
-        let id_hmac = hmac_256::<Sha256>(master_keys.hmac, &encrypted_id[..]);
+        let id_hmac = hmac_256::<Sha256>(master_keys.hmac(), &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
-        encrypted_id
+        Ok(encrypted_id)
     }
 
     // Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
@@ -220,20 +221,20 @@ where
         &self,
         credential_id: Vec<u8>,
         rp_id_hash: &[u8],
-    ) -> Option<PublicKeyCredentialSource> {
+    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         if credential_id.len() != ENCRYPTED_CREDENTIAL_ID_SIZE {
-            return None;
+            return Ok(None);
         }
-        let master_keys = self.persistent_store.master_keys();
+        let master_keys = self.persistent_store.master_keys()?;
         let payload_size = ENCRYPTED_CREDENTIAL_ID_SIZE - 32;
         if !verify_hmac_256::<Sha256>(
-            master_keys.hmac,
+            master_keys.hmac(),
             &credential_id[..payload_size],
             array_ref![credential_id, payload_size, 32],
         ) {
-            return None;
+            return Ok(None);
         }
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption);
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption());
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
         let mut iv = [0; 16];
         iv.copy_from_slice(&credential_id[..16]);
@@ -251,11 +252,11 @@ where
         decrypted_rp_id_hash[16..].clone_from_slice(&blocks[3]);
 
         if rp_id_hash != decrypted_rp_id_hash {
-            return None;
+            return Ok(None);
         }
 
         let sk_option = crypto::ecdsa::SecKey::from_bytes(&decrypted_sk);
-        sk_option.map(|sk| PublicKeyCredentialSource {
+        Ok(sk_option.map(|sk| PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
             private_key: sk,
@@ -264,7 +265,7 @@ where
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
-        })
+        }))
     }
 
     pub fn process_command(&mut self, command_cbor: &[u8], cid: ChannelID) -> Vec<u8> {
@@ -338,7 +339,7 @@ where
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                if self.persistent_store.pin_hash().is_none() {
+                if self.persistent_store.pin_hash()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
@@ -389,7 +390,7 @@ where
             for cred_desc in exclude_list {
                 if self
                     .persistent_store
-                    .find_credential(&rp_id, &cred_desc.key_id, pin_uv_auth_param.is_none())
+                    .find_credential(&rp_id, &cred_desc.key_id, pin_uv_auth_param.is_none())?
                     .is_some()
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
@@ -405,7 +406,7 @@ where
         let ed_flag = if has_extension_output { ED_FLAG } else { 0 };
         let flags = match pin_uv_auth_param {
             Some(pin_auth) => {
-                if self.persistent_store.pin_hash().is_none() {
+                if self.persistent_store.pin_hash()?.is_none() {
                     // Specification is unclear, could be CTAP2_ERR_INVALID_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
@@ -424,7 +425,7 @@ where
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
-                if self.persistent_store.pin_hash().is_some() {
+                if self.persistent_store.pin_hash()?.is_some() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED);
                 }
                 if options.uv {
@@ -459,11 +460,11 @@ where
             self.persistent_store.store_credential(credential_source)?;
             random_id
         } else {
-            self.encrypt_key_handle(sk.clone(), &rp_id_hash)
+            self.encrypt_key_handle(sk.clone(), &rp_id_hash)?
         };
 
-        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags);
-        auth_data.extend(self.persistent_store.aaguid()?);
+        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
+        auth_data.append(&mut self.persistent_store.aaguid()?);
         // The length is fixed to 0x20 or 0x70 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG);
@@ -492,6 +493,7 @@ where
         // decide whether batch attestation is needed.
         let (signature, x5c) = match self.persistent_store.attestation_private_key()? {
             Some(attestation_private_key) => {
+                let attestation_private_key = array_ref![attestation_private_key, 0, 32];
                 let attestation_key =
                     crypto::ecdsa::SecKey::from_bytes(attestation_private_key).unwrap();
                 let attestation_certificate = self
@@ -541,7 +543,7 @@ where
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                if self.persistent_store.pin_hash().is_none() {
+                if self.persistent_store.pin_hash()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
@@ -560,7 +562,7 @@ where
 
         // This case was added in FIDO 2.1.
         if pin_uv_auth_param == Some(vec![]) {
-            if self.persistent_store.pin_hash().is_none() {
+            if self.persistent_store.pin_hash()?.is_none() {
                 return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
             } else {
                 return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
@@ -589,7 +591,7 @@ where
         let has_uv = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_auth) => {
-                if self.persistent_store.pin_hash().is_none() {
+                if self.persistent_store.pin_hash()?.is_none() {
                     // Specification is unclear, could be CTAP2_ERR_UNSUPPORTED_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
@@ -631,14 +633,16 @@ where
                     &rp_id,
                     &allowed_credential.key_id,
                     !has_uv,
-                ) {
+                )? {
                     Some(credential) => {
                         found_credentials.push(credential);
                     }
                     None => {
                         if decrypted_credential.is_none() {
-                            decrypted_credential = self
-                                .decrypt_credential_source(allowed_credential.key_id, &rp_id_hash);
+                            decrypted_credential = self.decrypt_credential_source(
+                                allowed_credential.key_id,
+                                &rp_id_hash,
+                            )?;
                         }
                     }
                 }
@@ -646,7 +650,7 @@ where
             found_credentials
         } else {
             // TODO(kaczmarczyck) use GetNextAssertion
-            self.persistent_store.filter_credential(&rp_id, !has_uv)
+            self.persistent_store.filter_credential(&rp_id, !has_uv)?
         };
 
         let credential = if let Some(credential) = credentials.first() {
@@ -661,9 +665,9 @@ where
             (self.check_user_presence)(cid)?;
         }
 
-        self.increment_global_signature_counter();
+        self.increment_global_signature_counter()?;
 
-        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags);
+        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
         // Process extensions.
         if let Some(hmac_secret_input) = hmac_secret_input {
             let encrypted_output = self
@@ -716,8 +720,9 @@ where
         options_map.insert(String::from("up"), true);
         options_map.insert(
             String::from("clientPin"),
-            self.persistent_store.pin_hash().is_some(),
+            self.persistent_store.pin_hash()?.is_some(),
         );
+        let aaguid = self.persistent_store.aaguid()?;
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions: vec![
@@ -726,7 +731,7 @@ where
                     String::from(FIDO2_VERSION_STRING),
                 ],
                 extensions: Some(vec![String::from("hmac-secret")]),
-                aaguid: *self.persistent_store.aaguid()?,
+                aaguid: *array_ref![aaguid, 0, 16],
                 options: Some(options_map),
                 max_msg_size: Some(1024),
                 pin_protocols: Some(vec![
@@ -744,7 +749,7 @@ where
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 default_cred_protect: DEFAULT_CRED_PROTECT,
                 #[cfg(feature = "with_ctap2_1")]
-                min_pin_length: self.persistent_store.min_pin_length(),
+                min_pin_length: self.persistent_store.min_pin_length()?,
                 #[cfg(feature = "with_ctap2_1")]
                 firmware_version: None,
             },
@@ -769,7 +774,7 @@ where
         }
         (self.check_user_presence)(cid)?;
 
-        self.persistent_store.reset(self.rng);
+        self.persistent_store.reset(self.rng)?;
         self.pin_protocol_v1.reset(self.rng);
         #[cfg(feature = "with_ctap1")]
         {
@@ -791,7 +796,11 @@ where
         Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
     }
 
-    pub fn generate_auth_data(&self, rp_id_hash: &[u8], flag_byte: u8) -> Vec<u8> {
+    pub fn generate_auth_data(
+        &self,
+        rp_id_hash: &[u8],
+        flag_byte: u8,
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let mut auth_data = vec![];
         auth_data.extend(rp_id_hash);
         auth_data.push(flag_byte);
@@ -800,10 +809,10 @@ where
         let mut signature_counter = [0u8; 4];
         BigEndian::write_u32(
             &mut signature_counter,
-            self.persistent_store.global_signature_counter(),
+            self.persistent_store.global_signature_counter()?,
         );
         auth_data.extend(&signature_counter);
-        auth_data
+        Ok(auth_data)
     }
 }
 
@@ -1060,6 +1069,7 @@ mod test {
         let stored_credential = ctap_state
             .persistent_store
             .filter_credential("example.com", false)
+            .unwrap()
             .pop()
             .unwrap();
         let credential_id = stored_credential.credential_id;
@@ -1084,6 +1094,7 @@ mod test {
         let stored_credential = ctap_state
             .persistent_store
             .filter_credential("example.com", false)
+            .unwrap()
             .pop()
             .unwrap();
         let credential_id = stored_credential.credential_id;
@@ -1378,12 +1389,12 @@ mod test {
             .persistent_store
             .store_credential(credential_source)
             .is_ok());
-        assert!(ctap_state.persistent_store.count_credentials() > 0);
+        assert!(ctap_state.persistent_store.count_credentials().unwrap() > 0);
 
         let reset_reponse = ctap_state.process_command(&[0x07], DUMMY_CHANNEL_ID);
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
-        assert!(ctap_state.persistent_store.count_credentials() == 0);
+        assert!(ctap_state.persistent_store.count_credentials().unwrap() == 0);
     }
 
     #[test]
@@ -1422,9 +1433,12 @@ mod test {
         // Usually, the relying party ID or its hash is provided by the client.
         // We are not testing the correctness of our SHA256 here, only if it is checked.
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state.encrypt_key_handle(private_key.clone(), &rp_id_hash);
+        let encrypted_id = ctap_state
+            .encrypt_key_handle(private_key.clone(), &rp_id_hash)
+            .unwrap();
         let decrypted_source = ctap_state
             .decrypt_credential_source(encrypted_id, &rp_id_hash)
+            .unwrap()
             .unwrap();
 
         assert_eq!(private_key, decrypted_source.private_key);
@@ -1439,12 +1453,15 @@ mod test {
 
         // Same as above.
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state.encrypt_key_handle(private_key, &rp_id_hash);
+        let encrypted_id = ctap_state
+            .encrypt_key_handle(private_key, &rp_id_hash)
+            .unwrap();
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
             assert!(ctap_state
                 .decrypt_credential_source(modified_id, &rp_id_hash)
+                .unwrap()
                 .is_none());
         }
     }

@@ -2,11 +2,7 @@
 Board: nrf52840dk
 ----------------------------------------
 Creating "target/tab/thumbv7em-none-eabi.tbf"
-<<<<<<< HEAD
 Min RAM size from segments in ELF: 20 bytes
-=======
-Min RAM size from sections in ELF: 20 bytes
->>>>>>> 716db1b (Changed reproducible)
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
@@ -25,19 +21,12 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-<<<<<<< HEAD
-=======
 
->>>>>>> 716db1b (Changed reproducible)
 ========================================
 Board: nrf52840_dongle
 ----------------------------------------
 Creating "target/tab/thumbv7em-none-eabi.tbf"
-<<<<<<< HEAD
 Min RAM size from segments in ELF: 20 bytes
-=======
-Min RAM size from sections in ELF: 20 bytes
->>>>>>> 716db1b (Changed reproducible)
 Number of writeable flash regions: 0
   Adding .crt0_header section. Offset: 64 (0x40). Length: 64 (0x40) bytes.
 Entry point is in .text section
@@ -56,10 +45,7 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-<<<<<<< HEAD
-=======
 
->>>>>>> 716db1b (Changed reproducible)
 ========================================
 Board: nrf52840_dongle_dfu
 ----------------------------------------
@@ -83,6 +69,7 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
+
 ========================================
 Board: nrf52840_mdk_dfu
 ----------------------------------------
@@ -106,3 +93,4 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
+

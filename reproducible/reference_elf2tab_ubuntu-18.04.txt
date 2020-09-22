@@ -18,6 +18,7 @@ TBF Header:
         init_fn_offset:       73       0x49
         protected_size:        8        0x8
       minimum_ram_size:   107428    0x1A3A4
+
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
 

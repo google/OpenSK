@@ -28,7 +28,6 @@ ram_storage = []
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_ctap2_1 = []
-fuzzing = []
 
 [dev-dependencies]
 elf2tab = "0.6.0"

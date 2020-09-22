@@ -21,7 +21,6 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-
 ========================================
 Board: nrf52840_dongle
 ----------------------------------------
@@ -45,7 +44,6 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-
 ========================================
 Board: nrf52840_dongle_dfu
 ----------------------------------------
@@ -69,7 +67,6 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-
 ========================================
 Board: nrf52840_mdk_dfu
 ----------------------------------------
@@ -93,4 +90,3 @@ TBF Header:
 
      start_process_ram: 4294967295 0xFFFFFFFF
    start_process_flash:   262208    0x40040
-

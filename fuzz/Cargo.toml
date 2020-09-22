@@ -17,7 +17,7 @@ cbor = { path = "../libraries/cbor" }
 
 [dependencies.ctap2]
 path = ".."
-features = ['std', 'ram_storage', 'fuzzing']
+features = ['std', 'ram_storage']
 
 # Prevent this from interfering with workspaces
 [workspace]

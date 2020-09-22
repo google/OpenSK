@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #[cfg(feature = "with_ctap2_1")]
 use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};

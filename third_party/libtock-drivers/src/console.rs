@@ -25,6 +25,7 @@ pub struct Console {
 }
 
 impl Console {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Console {
         Console {
             allow_buffer: [0; BUFFER_SIZE],

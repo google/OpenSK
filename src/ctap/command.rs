@@ -325,7 +325,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let key_agreement = key_agreement
             .map(extract_map)
             .transpose()?
-            .map(|x| CoseKey(x));
+            .map(CoseKey);
         let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;

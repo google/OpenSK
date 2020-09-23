@@ -88,6 +88,7 @@ const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 #[cfg(feature = "with_ctap2_1")]
 const _MAX_RP_IDS_LENGTH: usize = 8;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
     // TODO(cretin): Test whether this doesn't consume too much memory. Otherwise, we can use less
@@ -406,10 +407,11 @@ impl PersistentStore {
             data: pin_hash,
             sensitive: true,
         };
-        Ok(match self.store.find_one(&Key::PinHash) {
+        match self.store.find_one(&Key::PinHash) {
             None => self.store.insert(entry)?,
             Some((index, _)) => self.store.replace(index, entry)?,
-        })
+        }
+        Ok(())
     }
 
     pub fn pin_retries(&self) -> Result<u8, Ctap2StatusCode> {

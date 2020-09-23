@@ -44,6 +44,7 @@ impl TockAllocator {
 }
 
 unsafe impl GlobalAlloc for TockAllocator {
+    #[allow(clippy::let_and_return)]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = HEAP
             .allocate_first_fit(layout)

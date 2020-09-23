@@ -105,7 +105,7 @@ enum Key {
     MinPinLengthRpIds,
 }
 
-pub struct MasterKeys(Vec<u8>);
+pub struct MasterKeys([u8; 64]);
 
 impl MasterKeys {
     pub fn encryption(&self) -> &[u8; 32] {
@@ -382,10 +382,10 @@ impl PersistentStore {
         if entry.data.len() != 64 {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(MasterKeys(entry.data.to_vec()))
+        Ok(MasterKeys(*array_ref![entry.data, 0, 64]))
     }
 
-    pub fn pin_hash(&self) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
+    pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
         let data = match self.store.find_one(&Key::PinHash) {
             None => return Ok(None),
             Some((_, entry)) => entry.data,
@@ -393,7 +393,7 @@ impl PersistentStore {
         if data.len() != PIN_AUTH_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(Some(data.to_vec()))
+        Ok(Some(*array_ref![data, 0, PIN_AUTH_LENGTH]))
     }
 
     pub fn set_pin_hash(
@@ -575,7 +575,7 @@ impl PersistentStore {
         Ok(())
     }
 
-    pub fn aaguid(&self) -> Result<Vec<u8>, Ctap2StatusCode> {
+    pub fn aaguid(&self) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
         let (_, entry) = self
             .store
             .find_one(&Key::Aaguid)
@@ -584,7 +584,7 @@ impl PersistentStore {
         if data.len() != AAGUID_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(data.to_vec())
+        Ok(*array_ref![data, 0, AAGUID_LENGTH])
     }
 
     pub fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> Result<(), Ctap2StatusCode> {
@@ -954,14 +954,14 @@ mod test {
         // Setting the pin hash sets the pin hash.
         let random_data = rng.gen_uniform_u8x32();
         assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
-        let pin_hash_1 = array_ref!(random_data, 0, PIN_AUTH_LENGTH);
-        let pin_hash_2 = array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
+        let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
+        let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
         persistent_store.set_pin_hash(&pin_hash_1).unwrap();
-        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_1);
-        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_1);
+        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_1));
+        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_1));
         persistent_store.set_pin_hash(&pin_hash_2).unwrap();
-        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_2);
-        assert_eq!(persistent_store.pin_hash().unwrap().unwrap(), pin_hash_2);
+        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_2));
+        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_2));
 
         // Resetting the storage resets the pin hash.
         persistent_store.reset(&mut rng).unwrap();
@@ -1013,7 +1013,7 @@ mod test {
         persistent_store
             .set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
             .unwrap();
-        assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
+        assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
         persistent_store.reset(&mut rng).unwrap();
@@ -1025,7 +1025,7 @@ mod test {
             persistent_store.attestation_certificate().unwrap().unwrap(),
             key_material::ATTESTATION_CERTIFICATE
         );
-        assert_eq!(persistent_store.aaguid().unwrap(), key_material::AAGUID);
+        assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
     }
 
     #[cfg(feature = "with_ctap2_1")]

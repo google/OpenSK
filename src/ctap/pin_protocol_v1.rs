@@ -148,7 +148,7 @@ fn check_and_store_new_pin(
         .ok_or(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
 
     #[cfg(feature = "with_ctap2_1")]
-    let min_pin_length = persistent_store.min_pin_length() as usize;
+    let min_pin_length = persistent_store.min_pin_length()? as usize;
     #[cfg(not(feature = "with_ctap2_1"))]
     let min_pin_length = 4;
     if pin.len() < min_pin_length || pin.len() == PIN_PADDED_LENGTH {
@@ -157,7 +157,7 @@ fn check_and_store_new_pin(
     }
     let mut pin_hash = [0u8; 16];
     pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
-    persistent_store.set_pin_hash(&pin_hash);
+    persistent_store.set_pin_hash(&pin_hash)?;
     Ok(())
 }
 
@@ -210,16 +210,12 @@ impl PinProtocolV1 {
         aes_dec_key: &crypto::aes256::DecryptionKey,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
-        match persistent_store.pin_hash() {
+        match persistent_store.pin_hash()? {
             Some(pin_hash) => {
                 if self.consecutive_pin_mismatches >= 3 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                 }
-                // We need to copy the pin hash, because decrementing the pin retries below mutably
-                // borrows from the same persistent_store reference, and therefore invalidates the
-                // pin_hash reference.
-                let pin_hash = pin_hash.clone();
-                persistent_store.decr_pin_retries();
+                persistent_store.decr_pin_retries()?;
                 if pin_hash_enc.len() != PIN_AUTH_LENGTH {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
                 }
@@ -231,7 +227,7 @@ impl PinProtocolV1 {
 
                 if !bool::from(pin_hash.ct_eq(&blocks[0])) {
                     self.key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
-                    if persistent_store.pin_retries() == 0 {
+                    if persistent_store.pin_retries()? == 0 {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
                     }
                     self.consecutive_pin_mismatches += 1;
@@ -244,7 +240,7 @@ impl PinProtocolV1 {
             // This status code is not explicitly mentioned in the specification.
             None => return Err(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED),
         }
-        persistent_store.reset_pin_retries();
+        persistent_store.reset_pin_retries()?;
         self.consecutive_pin_mismatches = 0;
         Ok(())
     }
@@ -276,7 +272,7 @@ impl PinProtocolV1 {
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_token: None,
-            retries: Some(persistent_store.pin_retries() as u64),
+            retries: Some(persistent_store.pin_retries()? as u64),
         })
     }
 
@@ -296,13 +292,13 @@ impl PinProtocolV1 {
         pin_auth: Vec<u8>,
         new_pin_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
-        if persistent_store.pin_hash().is_some() {
+        if persistent_store.pin_hash()?.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         let pin_decryption_key =
             self.exchange_decryption_key(key_agreement, &pin_auth, &new_pin_enc)?;
         check_and_store_new_pin(persistent_store, &pin_decryption_key, new_pin_enc)?;
-        persistent_store.reset_pin_retries();
+        persistent_store.reset_pin_retries()?;
         Ok(())
     }
 
@@ -315,7 +311,7 @@ impl PinProtocolV1 {
         new_pin_enc: Vec<u8>,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
-        if persistent_store.pin_retries() == 0 {
+        if persistent_store.pin_retries()? == 0 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
         }
         let mut auth_param_data = new_pin_enc.clone();
@@ -336,7 +332,7 @@ impl PinProtocolV1 {
         key_agreement: CoseKey,
         pin_hash_enc: Vec<u8>,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
-        if persistent_store.pin_retries() == 0 {
+        if persistent_store.pin_retries()? == 0 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
         }
         let pk: crypto::ecdh::PubKey = CoseKey::try_into(key_agreement)?;
@@ -412,7 +408,7 @@ impl PinProtocolV1 {
         if min_pin_length_rp_ids.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
         }
-        if persistent_store.pin_hash().is_some() {
+        if persistent_store.pin_hash()?.is_some() {
             match pin_auth {
                 Some(pin_auth) => {
                     if self.consecutive_pin_mismatches >= 3 {
@@ -438,10 +434,10 @@ impl PinProtocolV1 {
                 None => return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
             };
         }
-        if min_pin_length < persistent_store.min_pin_length() {
+        if min_pin_length < persistent_store.min_pin_length()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
         }
-        persistent_store.set_min_pin_length(min_pin_length);
+        persistent_store.set_min_pin_length(min_pin_length)?;
         // TODO(kaczmarczyck) commented code is useful for the extension
         // https://github.com/google/OpenSK/issues/129
         // if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
@@ -650,7 +646,7 @@ mod test {
         pin[3] = 0x34;
         let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
-        persistent_store.set_pin_hash(&pin_hash);
+        persistent_store.set_pin_hash(&pin_hash).unwrap();
     }
 
     // Fails on PINs bigger than 64 bytes.
@@ -704,7 +700,7 @@ mod test {
             0x01, 0xD9, 0x88, 0x40, 0x50, 0xBB, 0xD0, 0x7A, 0x23, 0x1A, 0xEB, 0x69, 0xD8, 0x36,
             0xC4, 0x12,
         ];
-        persistent_store.set_pin_hash(&pin_hash);
+        persistent_store.set_pin_hash(&pin_hash).unwrap();
         let shared_secret = [0x88; 32];
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&shared_secret);
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
@@ -782,7 +778,7 @@ mod test {
         let expected_response = Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_token: None,
-            retries: Some(persistent_store.pin_retries() as u64),
+            retries: Some(persistent_store.pin_retries().unwrap() as u64),
         });
         assert_eq!(
             pin_protocol_v1.process_get_pin_retries(&mut persistent_store),
@@ -866,8 +862,8 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
 
-        while persistent_store.pin_retries() > 0 {
-            persistent_store.decr_pin_retries();
+        while persistent_store.pin_retries().unwrap() > 0 {
+            persistent_store.decr_pin_retries().unwrap();
         }
         assert_eq!(
             pin_protocol_v1.process_change_pin(
@@ -999,7 +995,7 @@ mod test {
             Some(pin_auth.clone()),
         );
         assert_eq!(response, Ok(()));
-        assert_eq!(persistent_store.min_pin_length(), min_pin_length);
+        assert_eq!(persistent_store.min_pin_length().unwrap(), min_pin_length);
         let response = pin_protocol_v1.process_set_min_pin_length(
             &mut persistent_store,
             7,
@@ -1010,7 +1006,7 @@ mod test {
             response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
-        assert_eq!(persistent_store.min_pin_length(), min_pin_length);
+        assert_eq!(persistent_store.min_pin_length().unwrap(), min_pin_length);
     }
 
     #[test]
@@ -1133,16 +1129,16 @@ mod test {
             ),
         ];
         for (pin, result) in test_cases {
-            let old_pin_hash = persistent_store.pin_hash().cloned();
+            let old_pin_hash = persistent_store.pin_hash().unwrap();
             let new_pin_enc = encrypt_pin(&shared_secret, pin);
             assert_eq!(
                 check_and_store_new_pin(&mut persistent_store, &aes_dec_key, new_pin_enc),
                 result
             );
             if result.is_ok() {
-                assert_ne!(old_pin_hash.as_ref(), persistent_store.pin_hash());
+                assert_ne!(old_pin_hash, persistent_store.pin_hash().unwrap());
             } else {
-                assert_eq!(old_pin_hash.as_ref(), persistent_store.pin_hash());
+                assert_eq!(old_pin_hash, persistent_store.pin_hash().unwrap());
             }
         }
     }

@@ -286,7 +286,9 @@ impl Ctap1Command {
     {
         let sk = crypto::ecdsa::SecKey::gensk(ctap_state.rng);
         let pk = sk.genpk();
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state
+            .encrypt_key_handle(sk, &application)
+            .map_err(|_| Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
             return Err(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG);
@@ -341,14 +343,19 @@ impl Ctap1Command {
         R: Rng256,
         CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
     {
-        let credential_source = ctap_state.decrypt_credential_source(key_handle, &application);
+        let credential_source = ctap_state
+            .decrypt_credential_source(key_handle, &application)
+            .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             if flags == Ctap1Flags::CheckOnly {
                 return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
             }
-            ctap_state.increment_global_signature_counter();
+            ctap_state
+                .increment_global_signature_counter()
+                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             let mut signature_data = ctap_state
-                .generate_auth_data(&application, Ctap1Command::USER_PRESENCE_INDICATOR_BYTE);
+                .generate_auth_data(&application, Ctap1Command::USER_PRESENCE_INDICATOR_BYTE)
+                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
             let signature = credential_source
                 .private_key
@@ -435,6 +442,7 @@ mod test {
                 response[67..67 + ENCRYPTED_CREDENTIAL_ID_SIZE].to_vec(),
                 &application
             )
+            .unwrap()
             .is_some());
         const CERT_START: usize = 67 + ENCRYPTED_CREDENTIAL_ID_SIZE;
         assert_eq!(
@@ -485,7 +493,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
@@ -501,7 +509,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -518,7 +526,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -542,7 +550,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
@@ -560,7 +568,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
@@ -578,7 +586,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
@@ -596,7 +604,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -621,7 +629,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state.encrypt_key_handle(sk, &application);
+        let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
         let message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,

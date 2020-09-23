@@ -169,6 +169,7 @@ use crate::embedded_flash::BufferStorage;
 #[cfg(any(test, feature = "ram_storage"))]
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// Configures a store.

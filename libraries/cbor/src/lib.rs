@@ -18,7 +18,6 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate core;
 
-#[macro_use]
 pub mod macros;
 pub mod reader;
 pub mod values;

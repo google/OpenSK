@@ -49,6 +49,12 @@ cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ct
 echo "Checking that examples build properly..."
 cargo check --release --target=thumbv7em-none-eabi --examples
 
+echo "Checking that fuzz targets build properly..."
+cargo fuzz build
+cd libraries/cbor
+cargo fuzz build
+cd ../..
+
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2

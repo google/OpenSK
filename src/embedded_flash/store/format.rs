@@ -14,6 +14,7 @@
 
 use super::super::{Index, Storage};
 use super::{bitfield, StoreConfig, StoreEntry, StoreError};
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// Whether a user entry is a replace entry.

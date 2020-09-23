@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::values::{Constants, KeyType, SimpleValue, Value};
+use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_btree, cbor_text, cbor_unsigned};
 use alloc::collections::BTreeMap;
 use alloc::str;
 use alloc::vec::Vec;
@@ -214,6 +215,10 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        cbor_array, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null, cbor_true,
+        cbor_undefined,
+    };
 
     #[test]
     fn test_read_unsigned() {

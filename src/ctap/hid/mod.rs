@@ -22,7 +22,9 @@ use super::ctap1;
 use super::status_code::Ctap2StatusCode;
 use super::timed_permission::TimedPermission;
 use super::CtapState;
+use alloc::vec;
 use alloc::vec::Vec;
+use arrayref::{array_ref, array_refs};
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::rng256::Rng256;

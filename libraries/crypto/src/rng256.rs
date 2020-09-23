@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use arrayref::array_ref;
 use libtock_drivers::rng;
 
 // Lightweight RNG trait to generate uniformly distributed 256 bits.

@@ -1,10 +1,10 @@
 #![no_main]
 
-extern crate ctap2;
-extern crate libtock_drivers;
-#[macro_use]
-extern crate arrayref;
+// This explicit "extern crate" is needed to make the linker aware of the
+// `libtock_alloc_init` symbol.
+extern crate lang_items;
 
+use arrayref::array_ref;
 use ctap2::ctap::hid::receive::MessageAssembler;
 use ctap2::ctap::hid::send::HidPacketIterator;
 use ctap2::ctap::hid::{HidPacket, Message};

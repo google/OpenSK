@@ -19,7 +19,10 @@ use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 #[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
+#[cfg(feature = "with_ctap2_1")]
+use alloc::vec;
 use alloc::vec::Vec;
+use arrayref::array_ref;
 use core::convert::TryInto;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::hmac::{hmac_256, verify_hmac_256_first_128bits};
@@ -635,6 +638,7 @@ impl PinProtocolV1 {
 #[cfg(test)]
 mod test {
     use super::*;
+    use arrayref::array_refs;
     use crypto::rng256::ThreadRng256;
 
     // Stores a PIN hash corresponding to the dummy PIN "1234".

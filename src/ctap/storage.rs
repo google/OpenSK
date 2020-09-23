@@ -105,16 +105,9 @@ enum Key {
     MinPinLengthRpIds,
 }
 
-pub struct MasterKeys([u8; 64]);
-
-impl MasterKeys {
-    pub fn encryption(&self) -> &[u8; 32] {
-        array_ref!(&self.0, 0, 32)
-    }
-
-    pub fn hmac(&self) -> &[u8; 32] {
-        array_ref!(&self.0, 32, 32)
-    }
+pub struct MasterKeys {
+    pub encryption: [u8; 32],
+    pub hmac: [u8; 32],
 }
 
 struct Config;
@@ -382,7 +375,10 @@ impl PersistentStore {
         if entry.data.len() != 64 {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(MasterKeys(*array_ref![entry.data, 0, 64]))
+        Ok(MasterKeys {
+            encryption: *array_ref![entry.data, 0, 32],
+            hmac: *array_ref![entry.data, 32, 32],
+        })
     }
 
     pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
@@ -930,17 +926,17 @@ mod test {
         // Master keys stay the same between resets.
         let master_keys_1 = persistent_store.master_keys().unwrap();
         let master_keys_2 = persistent_store.master_keys().unwrap();
-        assert_eq!(master_keys_2.encryption(), master_keys_1.encryption());
-        assert_eq!(master_keys_2.hmac(), master_keys_1.hmac());
+        assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
+        assert_eq!(master_keys_2.hmac, master_keys_1.hmac);
 
         // Master keys change after reset. This test may fail if the random generator produces the
         // same keys.
-        let master_encryption_key = master_keys_1.encryption().to_vec();
-        let master_hmac_key = master_keys_1.hmac().to_vec();
+        let master_encryption_key = master_keys_1.encryption.to_vec();
+        let master_hmac_key = master_keys_1.hmac.to_vec();
         persistent_store.reset(&mut rng).unwrap();
         let master_keys_3 = persistent_store.master_keys().unwrap();
-        assert!(master_keys_3.encryption() != &master_encryption_key[..]);
-        assert!(master_keys_3.hmac() != &master_hmac_key[..]);
+        assert!(master_keys_3.encryption != &master_encryption_key[..]);
+        assert!(master_keys_3.hmac != &master_hmac_key[..]);
     }
 
     #[test]

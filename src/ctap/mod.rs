@@ -191,7 +191,7 @@ where
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let master_keys = self.persistent_store.master_keys()?;
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption());
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
         let mut sk_bytes = [0; 32];
         private_key.to_bytes(&mut sk_bytes);
         let mut iv = [0; 16];
@@ -209,7 +209,7 @@ where
         for b in &blocks {
             encrypted_id.extend(b);
         }
-        let id_hmac = hmac_256::<Sha256>(master_keys.hmac(), &encrypted_id[..]);
+        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
     }
@@ -228,13 +228,13 @@ where
         let master_keys = self.persistent_store.master_keys()?;
         let payload_size = ENCRYPTED_CREDENTIAL_ID_SIZE - 32;
         if !verify_hmac_256::<Sha256>(
-            master_keys.hmac(),
+            &master_keys.hmac,
             &credential_id[..payload_size],
             array_ref![credential_id, payload_size, 32],
         ) {
             return Ok(None);
         }
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(master_keys.encryption());
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
         let mut iv = [0; 16];
         iv.copy_from_slice(&credential_id[..16]);

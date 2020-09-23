@@ -38,12 +38,18 @@ jobs:
           command: fmt
           args: --all -- --check
 
+      - name: Cargo format fuzz/
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path fuzz/Cargo.toml --all -- --check
+
       - name: Cargo format libraries/cbor
         uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --manifest-path libraries/cbor/Cargo.toml --all -- --check
-          
+
       - name: Cargo format libraries/cbor/fuzz
         uses: actions-rs/cargo@v1
         with:

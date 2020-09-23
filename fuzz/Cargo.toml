@@ -1,0 +1,30 @@
+[package]
+name = "ctap2-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.3"}
+arrayref = "0.3.6"
+libtock_drivers = { path = "../third_party/libtock-drivers" }
+crypto = { path = "../libraries/crypto", features = ['std'] }
+cbor = { path = "../libraries/cbor" }
+
+[dependencies.ctap2]
+path = ".."
+features = ['std', 'ram_storage']
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_split_assemble"
+path = "fuzz_targets/fuzz_target_split_assemble.rs"
+test = false
+doc = false

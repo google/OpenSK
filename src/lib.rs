@@ -14,15 +14,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[macro_use]
 extern crate alloc;
-#[macro_use]
-extern crate arrayref;
-#[macro_use]
-extern crate cbor;
-extern crate lang_items;
-extern crate libtock_core;
-extern crate libtock_drivers;
 
 pub mod ctap;
 pub mod embedded_flash;

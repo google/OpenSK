@@ -16,6 +16,8 @@ use super::status_code::Ctap2StatusCode;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use arrayref::array_ref;
+use cbor::{cbor_array_vec, cbor_bytes_lit, cbor_map_options, destructure_cbor_map};
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
@@ -800,6 +802,10 @@ mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
     use alloc::collections::BTreeMap;
+    use cbor::{
+        cbor_array, cbor_bool, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null, cbor_text,
+        cbor_unsigned,
+    };
     use crypto::rng256::{Rng256, ThreadRng256};
 
     #[test]

@@ -38,8 +38,7 @@ use core::iter::Peekable;
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # #[macro_use]
-/// # extern crate cbor;
+/// # use cbor::destructure_cbor_map;
 /// #
 /// # fn main() {
 /// #     let map = alloc::collections::BTreeMap::new();
@@ -54,8 +53,6 @@ use core::iter::Peekable;
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # #[macro_use]
-/// # extern crate cbor;
 /// #
 /// # fn main() {
 /// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
@@ -71,7 +68,7 @@ macro_rules! destructure_cbor_map {
         // sorted - the behavior is unspecified if the keys are not sorted.
         // Therefore, in test mode we add assertions that the keys are indeed sorted.
         #[cfg(test)]
-        assert_sorted_keys!($( $key, )+);
+        $crate::assert_sorted_keys!($( $key, )+);
 
         use $crate::values::{IntoCborKey, Value};
         use $crate::macros::destructure_cbor_map_peek_value;
@@ -144,7 +141,7 @@ macro_rules! assert_sorted_keys {
                 k2,
             );
         }
-        assert_sorted_keys!($key2, $( $keys, )*);
+        $crate::assert_sorted_keys!($key2, $( $keys, )*);
     };
 }
 
@@ -227,7 +224,7 @@ macro_rules! cbor_array_vec {
     }};
 }
 
-#[cfg(test)]
+#[macro_export]
 macro_rules! cbor_true {
     ( ) => {
         $crate::values::Value::Simple($crate::values::SimpleValue::TrueValue)
@@ -248,7 +245,7 @@ macro_rules! cbor_null {
     };
 }
 
-#[cfg(test)]
+#[macro_export]
 macro_rules! cbor_undefined {
     ( ) => {
         $crate::values::Value::Simple($crate::values::SimpleValue::Undefined)
@@ -267,28 +264,28 @@ macro_rules! cbor_bool {
 #[macro_export]
 macro_rules! cbor_unsigned {
     ( $x:expr ) => {
-        cbor_key_unsigned!($x).into()
+        $crate::cbor_key_unsigned!($x).into()
     };
 }
 
 #[macro_export]
 macro_rules! cbor_int {
     ( $x:expr ) => {
-        cbor_key_int!($x).into()
+        $crate::cbor_key_int!($x).into()
     };
 }
 
 #[macro_export]
 macro_rules! cbor_text {
     ( $x:expr ) => {
-        cbor_key_text!($x).into()
+        $crate::cbor_key_text!($x).into()
     };
 }
 
 #[macro_export]
 macro_rules! cbor_bytes {
     ( $x:expr ) => {
-        cbor_key_bytes!($x).into()
+        $crate::cbor_key_bytes!($x).into()
     };
 }
 
@@ -296,7 +293,7 @@ macro_rules! cbor_bytes {
 #[macro_export]
 macro_rules! cbor_bytes_lit {
     ( $x:expr ) => {
-        cbor_bytes!(($x as &[u8]).to_vec())
+        $crate::cbor_bytes!(($x as &[u8]).to_vec())
     };
 }
 

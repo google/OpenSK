@@ -92,6 +92,10 @@ impl<'a> Writer<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        cbor_array, cbor_array_vec, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null,
+        cbor_text, cbor_true, cbor_undefined,
+    };
 
     fn write_return(value: Value) -> Option<Vec<u8>> {
         let mut encoded_cbor = Vec::new();

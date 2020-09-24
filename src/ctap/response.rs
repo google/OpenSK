@@ -21,6 +21,7 @@ use super::data_formats::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use cbor::{cbor_array_vec, cbor_bool, cbor_map_btree, cbor_map_options, cbor_text};
 
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
@@ -236,6 +237,7 @@ mod test {
     #[cfg(feature = "with_ctap2_1")]
     use super::super::ES256_CRED_PARAM;
     use super::*;
+    use cbor::{cbor_bytes, cbor_map};
 
     #[test]
     fn test_make_credential_into_cbor() {

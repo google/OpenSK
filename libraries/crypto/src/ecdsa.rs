@@ -19,7 +19,12 @@ use super::ec::point::PointP256;
 use super::hmac::hmac_256;
 use super::rng256::Rng256;
 use super::{Hash256, HashBlockSize64Bytes};
+use alloc::vec;
 use alloc::vec::Vec;
+#[cfg(feature = "std")]
+use arrayref::array_ref;
+use arrayref::{array_mut_ref, mut_array_refs};
+use cbor::{cbor_bytes, cbor_map_options};
 use core::marker::PhantomData;
 
 #[derive(Clone, PartialEq)]
@@ -349,9 +354,6 @@ mod test {
     use super::super::rng256::ThreadRng256;
     use super::super::sha256::Sha256;
     use super::*;
-    extern crate hex;
-    extern crate ring;
-    extern crate untrusted;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]

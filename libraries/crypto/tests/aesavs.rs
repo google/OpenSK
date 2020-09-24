@@ -15,11 +15,7 @@
 /// Test vectors for AES-ECB from NIST's validation suite.
 ///
 /// See also https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/aes/AESAVS.pdf
-#[macro_use]
-extern crate arrayref;
-extern crate hex;
-extern crate regex;
-
+use arrayref::array_ref;
 use crypto::{aes256, Decrypt16BytesBlock, Encrypt16BytesBlock};
 use regex::Regex;
 use std::fs::File;

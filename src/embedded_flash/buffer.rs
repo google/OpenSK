@@ -14,6 +14,7 @@
 
 use super::{Index, Storage, StorageError, StorageResult};
 use alloc::boxed::Box;
+use alloc::vec;
 
 pub struct BufferStorage {
     storage: Box<[u8]>,

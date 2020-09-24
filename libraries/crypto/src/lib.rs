@@ -15,14 +15,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(wrapping_int_impl)]
 
-#[macro_use]
 extern crate alloc;
-extern crate subtle;
-#[macro_use]
-extern crate arrayref;
-extern crate byteorder;
-#[macro_use]
-extern crate cbor;
 
 pub mod aes256;
 pub mod cbc;

@@ -1,0 +1,33 @@
+---
+name: Cargo Clippy
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  cargo_clippy:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: "true"
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - name: Install Clippy
+        run: rustup component add clippy
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-targets --features std
+      - name: Deny Clippy warnings
+        run: cargo clippy --all-targets --features std -- -D warnings

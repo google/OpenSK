@@ -30,3 +30,5 @@ jobs:
 
       - name: Cargo fuzz build
         run: cargo fuzz build
+      - name: Cargo fuzz build (libraries/cbor)
+        run: cd libraries/cbor && cargo fuzz build && cd ../..

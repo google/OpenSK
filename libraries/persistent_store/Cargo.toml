@@ -1,0 +1,11 @@
+[package]
+name = "persistent_store"
+version = "0.1.0"
+authors = ["Julien Cretin <cretin@google.com>"]
+license = "Apache-2.0"
+edition = "2018"
+
+[dependencies]
+
+[features]
+std = []

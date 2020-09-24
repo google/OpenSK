@@ -1252,7 +1252,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk.clone());
+        let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
             "hmac-secret" => cbor_map! {
                 1 => cbor::Value::Map(cose_key.0.clone()),

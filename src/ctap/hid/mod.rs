@@ -137,6 +137,7 @@ impl CtapHid {
     const TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(100);
     const WINK_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(5000);
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> CtapHid {
         CtapHid {
             assembler: MessageAssembler::new(),

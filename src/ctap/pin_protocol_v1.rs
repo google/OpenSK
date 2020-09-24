@@ -777,7 +777,7 @@ mod test {
     #[test]
     fn test_process_get_pin_retries() {
         let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let persistent_store = PersistentStore::new(&mut rng);
         let pin_protocol_v1 = PinProtocolV1::new(&mut rng);
         let expected_response = Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
@@ -785,7 +785,7 @@ mod test {
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
         });
         assert_eq!(
-            pin_protocol_v1.process_get_pin_retries(&mut persistent_store),
+            pin_protocol_v1.process_get_pin_retries(&persistent_store),
             expected_response
         );
     }

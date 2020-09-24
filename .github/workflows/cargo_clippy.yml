@@ -15,6 +15,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi
+          components: clippy
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -23,8 +24,6 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
-      - name: Install Clippy
-        run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

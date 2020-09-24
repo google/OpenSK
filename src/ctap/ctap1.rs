@@ -17,6 +17,7 @@ use super::key_material::{ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
 use alloc::vec::Vec;
+use arrayref::array_ref;
 use core::convert::Into;
 use core::convert::TryFrom;
 use crypto::rng256::Rng256;

@@ -14,6 +14,7 @@
 
 use super::util::{xor_block_16, Block16};
 use super::{Decrypt16BytesBlock, Encrypt16BytesBlock};
+use arrayref::{array_mut_ref, array_ref};
 
 /** A portable and naive textbook implementation of AES-256 **/
 type Word = [u8; 4];

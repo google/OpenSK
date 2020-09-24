@@ -14,18 +14,10 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[macro_use]
 extern crate alloc;
-#[macro_use]
-extern crate arrayref;
-extern crate byteorder;
 #[cfg(feature = "std")]
 extern crate core;
-extern crate ctap2;
-extern crate subtle;
-#[macro_use]
-extern crate cbor;
-extern crate crypto;
+extern crate lang_items;
 
 mod ctap;
 pub mod embedded_flash;

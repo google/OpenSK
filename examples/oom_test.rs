@@ -15,9 +15,7 @@
 #![no_std]
 
 extern crate alloc;
-extern crate crypto;
 extern crate lang_items;
-extern crate libtock_drivers;
 
 use alloc::vec::Vec;
 use core::fmt::Write;

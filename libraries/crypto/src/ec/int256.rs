@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use super::super::rng256::Rng256;
+use alloc::vec;
 use alloc::vec::Vec;
+use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 use subtle::{self, Choice, ConditionallySelectable, ConstantTimeEq};

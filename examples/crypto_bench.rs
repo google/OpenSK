@@ -14,12 +14,10 @@
 
 #![no_std]
 
-#[macro_use]
 extern crate alloc;
-extern crate crypto;
 extern crate lang_items;
-extern crate libtock_drivers;
 
+use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{

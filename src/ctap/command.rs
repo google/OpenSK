@@ -21,6 +21,7 @@ use super::data_formats::{
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
+use cbor::destructure_cbor_map;
 use core::convert::TryFrom;
 
 // Depending on your memory, you can use Some(n) to limit request sizes in
@@ -383,6 +384,7 @@ mod test {
     use super::super::ES256_CRED_PARAM;
     use super::*;
     use alloc::collections::BTreeMap;
+    use cbor::{cbor_array, cbor_map};
 
     #[test]
     fn test_from_cbor_make_credential_parameters() {

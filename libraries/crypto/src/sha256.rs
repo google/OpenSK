@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{Hash256, HashBlockSize64Bytes};
+use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::num::Wrapping;
 
@@ -210,7 +211,6 @@ impl Sha256 {
 #[cfg(test)]
 mod test {
     use super::*;
-    extern crate hex;
 
     #[test]
     fn test_choice() {

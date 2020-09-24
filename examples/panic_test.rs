@@ -14,10 +14,7 @@
 
 #![no_std]
 
-extern crate alloc;
-extern crate crypto;
 extern crate lang_items;
-extern crate libtock_drivers;
 
 fn main() {
     panic!("Bye world!")

@@ -239,6 +239,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::{cbor_key_bytes, cbor_key_int, cbor_key_text};
+
     #[test]
     fn test_key_type_ordering() {
         assert!(cbor_key_int!(0) < cbor_key_int!(23));

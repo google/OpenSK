@@ -16,6 +16,10 @@ use super::exponent256::ExponentP256;
 use super::gfp256::GFP256;
 use super::int256::Int256;
 use super::montgomery::Montgomery;
+#[cfg(test)]
+use arrayref::array_mut_ref;
+#[cfg(feature = "std")]
+use arrayref::array_ref;
 use core::ops::Add;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 

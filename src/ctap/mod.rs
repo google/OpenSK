@@ -51,8 +51,11 @@ use self::storage::PersistentStore;
 use self::timed_permission::U2fUserPresenceState;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
+use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
+use cbor::{cbor_map, cbor_map_options};
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};

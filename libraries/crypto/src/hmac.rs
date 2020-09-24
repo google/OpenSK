@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{Hash256, HashBlockSize64Bytes};
+use arrayref::array_ref;
 use subtle::ConstantTimeEq;
 
 const BLOCK_SIZE: usize = 64;
@@ -71,7 +72,6 @@ fn xor_pads(ipad: &mut [u8; BLOCK_SIZE], opad: &mut [u8; BLOCK_SIZE], key: &[u8]
 mod test {
     use super::super::sha256::Sha256;
     use super::*;
-    extern crate hex;
 
     #[test]
     fn test_verify_hmac_valid() {

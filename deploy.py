@@ -404,8 +404,9 @@ class OpenSKInstaller:
     assert self.args.application
     info("Generating Tock TAB file for application/example {}".format(
         self.args.application))
-    elf2tab_ver = self.checked_command_output(["elf2tab", "--version"]).split(
-        "\n", maxsplit=1)[0]
+    elf2tab_ver = self.checked_command_output(["bin/elf2tab",
+                                               "--version"]).split(
+                                                   "\n", maxsplit=1)[0]
     if elf2tab_ver != "elf2tab 0.6.0":
       error(
           ("Detected unsupported elf2tab version {!a}. The following "
@@ -414,8 +415,8 @@ class OpenSKInstaller:
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
     elf2tab_args = [
-        "elf2tab", "--deterministic", "--package-name", self.args.application,
-        "-o", tab_filename
+        "bin/elf2tab", "--deterministic", "--package-name",
+        self.args.application, "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")

@@ -19,11 +19,13 @@ extern crate lang_items;
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use crypto::rng256::ThreadRng256;
-use ctap2::ctap::command::{ AuthenticatorMakeCredentialParameters,
-    AuthenticatorGetAssertionParameters, AuthenticatorClientPinParameters};
+use ctap2::ctap::command::{
+    AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
+    AuthenticatorMakeCredentialParameters,
+};
 use ctap2::ctap::hid::receive::MessageAssembler;
 use ctap2::ctap::hid::send::HidPacketIterator;
-use ctap2::ctap::hid::{HidPacket, ChannelID, CtapHid, Message};
+use ctap2::ctap::hid::{ChannelID, CtapHid, HidPacket, Message};
 use ctap2::ctap::status_code::Ctap2StatusCode;
 use ctap2::ctap::CtapState;
 use libtock_drivers::timer::{ClockValue, Timestamp};
@@ -97,20 +99,18 @@ fn is_type(data: &[u8], input_type: InputType) -> bool {
     }
     match cbor::read(data) {
         Err(_) => false,
-        Ok(decoded_cbor) => {
-            match input_type {
-                InputType::CborMakeCredentialParameter => {
-                    AuthenticatorMakeCredentialParameters::try_from(decoded_cbor).is_ok()
-                }
-                InputType::CborGetAssertionParameter => {
-                    AuthenticatorGetAssertionParameters::try_from(decoded_cbor).is_ok()
-                }
-                InputType::CborClientPinParameter => {
-                    AuthenticatorClientPinParameters::try_from(decoded_cbor).is_ok()
-                }
-                _ => true
+        Ok(decoded_cbor) => match input_type {
+            InputType::CborMakeCredentialParameter => {
+                AuthenticatorMakeCredentialParameters::try_from(decoded_cbor).is_ok()
             }
-        }
+            InputType::CborGetAssertionParameter => {
+                AuthenticatorGetAssertionParameters::try_from(decoded_cbor).is_ok()
+            }
+            InputType::CborClientPinParameter => {
+                AuthenticatorClientPinParameters::try_from(decoded_cbor).is_ok()
+            }
+            _ => true,
+        },
     }
 }
 

@@ -7,10 +7,7 @@ on:
 
 jobs:
   build_fuzzing:
-    strategy:
-      matrix:
-        os: [ubuntu-18.04, macos-10.15]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
         with:

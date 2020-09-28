@@ -1,0 +1,26 @@
+---
+name: Persistent store tests
+on:
+  push:
+    paths:
+      - 'libraries/peristent_store/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  persistent_store_test:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Unit testing of Persistent store library (release mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path libraries/persistent_store/Cargo.toml --release --features std
+
+      - name: Unit testing of Persistent store library (debug mode)
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path libraries/persistent_store/Cargo.toml --features std

@@ -62,6 +62,12 @@ jobs:
           command: fmt
           args: --manifest-path libraries/crypto/Cargo.toml --all -- --check
 
+      - name: Cargo format libraries/persistent_store
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path libraries/persistent_store/Cargo.toml --all -- --check
+
       - name: Cargo format tools/heapviz
         uses: actions-rs/cargo@v1
         with:

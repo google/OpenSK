@@ -12,51 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Represents a byte position in a storage
+/// Represents a byte position in a storage.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct StorageIndex {
     pub page: usize,
     pub byte: usize,
 }
 
-/// Represents a possible storage error
+/// Represents a possible storage error.
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageError {
-    /// Arguments are not correctly aligned
+    /// Arguments are not correctly aligned.
     NotAligned,
 
-    /// Arguments are out of bounds
+    /// Arguments are out of bounds.
     OutOfBounds,
 
-    /// Implementation-specific error
+    /// Implementation-specific error.
     CustomError,
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
-/// Abstracts a flash storage
+/// Abstracts a flash storage.
 pub trait Storage {
-    /// The size of a word in bytes
+    /// The size of a word in bytes.
     fn word_size(&self) -> usize;
 
-    /// The size of a page in bytes
+    /// The size of a page in bytes.
     fn page_size(&self) -> usize;
 
-    /// The number of pages in the storage
+    /// The number of pages in the storage.
     fn num_pages(&self) -> usize;
 
-    /// Maximum number of times a word can be written between page erasures
+    /// Maximum number of times a word can be written between page erasures.
     fn max_word_writes(&self) -> usize;
 
-    /// Maximum number of times a page can be erased
+    /// Maximum number of times a page can be erased.
     fn max_page_erases(&self) -> usize;
 
-    /// Reads a byte slice from the storage
+    /// Reads a byte slice from the storage.
     ///
     /// The `index` must designate `length` bytes in the storage.
     fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]>;
 
-    /// Writes a word slice to the storage
+    /// Writes a word slice to the storage.
     ///
     /// The following pre-conditions must hold:
     /// - The `index` must designate `value.len()` bytes in the storage.
@@ -64,20 +64,20 @@ pub trait Storage {
     /// - The written words should not have been written too many times since last page erasure.
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()>;
 
-    /// Erases a page of the storage
+    /// Erases a page of the storage.
     ///
     /// The `page` must be in the storage.
     fn erase_page(&mut self, page: usize) -> StorageResult<()>;
 }
 
 impl StorageIndex {
-    /// Whether a slice fits in a storage page
+    /// Whether a slice fits in a storage page.
     fn is_valid(self, length: usize, storage: &impl Storage) -> bool {
         let page_size = storage.page_size();
         self.page < storage.num_pages() && length <= page_size && self.byte <= page_size - length
     }
 
-    /// Returns the range of a valid slice
+    /// Returns the range of a valid slice.
     ///
     /// The range starts at `self` with `length` bytes.
     pub fn range(

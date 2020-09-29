@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ const CLOCK_FREQUENCY_HZ: usize = 32768;
 const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
 const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum InputType {
     CborMakeCredentialParameter,
     CborGetAssertionParameter,
@@ -78,11 +78,11 @@ where
     let message = Message {
         cid: CHANNEL_BROADCAST,
         cmd: COMMAND_INIT,
-        payload: nonce.clone(),
+        payload: nonce,
     };
     let mut assembler_reply = MessageAssembler::new();
     let mut result_cid: ChannelID = Default::default();
-    for pkt_request in HidPacketIterator::new(message.clone()).unwrap() {
+    for pkt_request in HidPacketIterator::new(message).unwrap() {
         for pkt_reply in ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, ctap_state) {
             if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP) {
                 result_cid.copy_from_slice(&result.payload[8..12]);
@@ -94,7 +94,7 @@ where
 
 // Checks whether the given data can be interpreted as the given type.
 fn is_type(data: &[u8], input_type: InputType) -> bool {
-    if input_type.clone() == InputType::Ctap1 {
+    if input_type == InputType::Ctap1 {
         return true;
     }
     match cbor::read(data) {
@@ -114,10 +114,50 @@ fn is_type(data: &[u8], input_type: InputType) -> bool {
     }
 }
 
+// Interprets the raw data as a complete message (with channel id, command type and payload) and
+// invokes message splitting, packet processing at CTAP HID level and response assembling.
+fn process_message<CheckUserPresence>(
+    data: &[u8],
+    ctap_state: &mut CtapState<ThreadRng256, CheckUserPresence>,
+    ctap_hid: &mut CtapHid,
+) where
+    CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
+{
+    let message = raw_to_message(data);
+    if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
+        let mut assembler_reply = MessageAssembler::new();
+        for pkt_request in hid_packet_iterator {
+            for pkt_reply in
+                ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, ctap_state)
+            {
+                // Only checks for assembling crashes, not for semantics.
+                let _ = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP);
+            }
+        }
+    }
+}
+
+// Interprets the raw data as any ctap command (including the command byte) and
+// invokes message splitting, packet processing at CTAP HID level and response assembling
+// using an initialized and allocated channel.
+pub fn process_ctap_any_type(data: &[u8]) {
+    // Initialize ctap state and hid and get the allocated cid.
+    let mut rng = ThreadRng256 {};
+    let user_immediately_present = |_| Ok(());
+    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+    let mut ctap_hid = CtapHid::new();
+    let cid = initialize(&mut ctap_state, &mut ctap_hid);
+    // Wrap input as message with the allocated cid.
+    let mut command = cid.to_vec();
+    command.extend(data);
+    process_message(&command, &mut ctap_state, &mut ctap_hid);
+}
+
 // Interprets the raw data as of the given input type and
-// invokes message splitting, assembling and packet processing at CTAP HID level.
-pub fn process_input(data: &[u8], input_type: InputType) {
-    if !is_type(data, input_type.clone()) {
+// invokes message splitting, packet processing at CTAP HID level and response assembling
+// using an initialized and allocated channel.
+pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
+    if !is_type(data, input_type) {
         return ();
     }
     // Initialize ctap state and hid and get the allocated cid.
@@ -143,23 +183,11 @@ pub fn process_input(data: &[u8], input_type: InputType) {
         }
     }
     command.extend(data);
-    // Process message at HID level.
-    let message = raw_to_message(&command);
-    if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
-        let mut assembler_reply = MessageAssembler::new();
-        for pkt_request in hid_packet_iterator {
-            for pkt_reply in
-                ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, &mut ctap_state)
-            {
-                // Only checks for assembling crashes, not for semantics.
-                let _ = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP);
-            }
-        }
-    }
+    process_message(&command, &mut ctap_state, &mut ctap_hid);
 }
 
 // Splits and reassembles the given data as HID packets.
-pub fn split_assemble(data: &[u8]) {
+pub fn split_assemble_hid_packets(data: &[u8]) {
     let mut message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message.clone()) {
         let mut assembler = MessageAssembler::new();

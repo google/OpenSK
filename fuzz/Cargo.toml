@@ -17,8 +17,26 @@ fuzz_helper = { path = "fuzz_helper" }
 members = ["."]
 
 [[bin]]
+name = "fuzz_target_process_ctap_command"
+path = "fuzz_targets/fuzz_target_process_ctap_command.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fuzz_target_process_ctap1"
 path = "fuzz_targets/fuzz_target_process_ctap1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_client_pin"
+path = "fuzz_targets/fuzz_target_process_ctap2_client_pin.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_get_assertion"
+path = "fuzz_targets/fuzz_target_process_ctap2_get_assertion.rs"
 test = false
 doc = false
 

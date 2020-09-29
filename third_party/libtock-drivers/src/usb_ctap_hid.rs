@@ -173,6 +173,7 @@ pub fn send_or_recv(buf: &mut [u8; 64]) -> SendOrRecvStatus {
 
 // Same as recv, but with a timeout.
 // If the timeout elapses, return None.
+#[allow(clippy::let_and_return)]
 pub fn recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
@@ -199,6 +200,7 @@ pub fn recv_with_timeout(
 
 // Same as send_or_recv, but with a timeout.
 // If the timeout elapses, return None.
+#[allow(clippy::let_and_return)]
 pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,

@@ -23,8 +23,8 @@ fn main() {
     let mut buf = [0; BUFFER_SIZE];
     loop {
         for i in 1..buf.len() {
-            for j in 0..i {
-                buf[j] = b'0' + ((i % 10) as u8);
+            for byte in buf.iter_mut().take(i) {
+                *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
             Console::write_unbuffered(&mut buf[..(i + 1)]);

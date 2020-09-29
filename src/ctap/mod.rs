@@ -694,7 +694,7 @@ where
             key_id: credential.credential_id.clone(),
             transports: None, // You can set USB as a hint here.
         };
-        let user = if (flags & UV_FLAG != 0) && (credential.user_handle.len() > 0) {
+        let user = if (flags & UV_FLAG != 0) && !credential.user_handle.is_empty() {
             Some(PublicKeyCredentialUserEntity {
                 user_id: credential.user_handle.clone(),
                 user_name: None,

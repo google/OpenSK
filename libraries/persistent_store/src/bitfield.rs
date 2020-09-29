@@ -67,7 +67,7 @@ impl Field {
 /// # Invariant
 ///
 /// - The value must fit in the bit field: `num_bits(value) <= field.len`.
-pub struct Const {
+pub struct ConstField {
     /// The bit field.
     pub field: Field,
 
@@ -75,7 +75,7 @@ pub struct Const {
     pub value: usize,
 }
 
-impl Const {
+impl ConstField {
     /// Checks that the bit field has its value.
     pub fn check(&self, word: u32) -> bool {
         self.field.get(word) == self.value
@@ -137,8 +137,10 @@ impl Checksum {
     ///
     /// # Preconditions
     ///
-    /// - The checksum bits should be set to one.
-    /// - The number of zeros in the word plus the value should fit in the checksum.
+    /// - The bits of the checksum bit field should be set to one: `self.field.get(*word) ==
+    ///   self.field.mask()`.
+    /// - The checksum value should fit in the checksum bit field: `num_bits(word.count_zeros() +
+    ///   value) < self.field.len`.
     pub fn set(&self, word: &mut u32, value: usize) {
         debug_assert_eq!(self.field.get(*word), self.field.mask() as usize);
         self.field.set(word, word.count_zeros() as usize + value);
@@ -164,8 +166,8 @@ pub struct Length {
 /// - `$name: Field <= $max,` to define a bit field of minimum length to store `$max`
 /// - `$name: Checksum <= $max,` to define a checksum of minimum length to store `$max`
 /// - `$name: Length,` to define a length tracker
-/// - `$name: Const = [$bits],` to define a constant bit field with value `$bits` (a sequence of
-///   space-separated bits)
+/// - `$name: ConstField = [$bits],` to define a constant bit field with value `$bits` (a sequence
+///   of space-separated bits)
 #[cfg_attr(doc, macro_export)] // For `cargo doc` to produce documentation.
 macro_rules! bitfield {
     ($($input: tt)*) => {
@@ -210,7 +212,8 @@ macro_rules! bitfield_impl {
             [$($input)*]
         }
     };
-    ([$($output: tt)*]{ pos: $pos: expr }[$name: ident: Const = $bits: tt, $($input: tt)*]) => {
+    ([$($output: tt)*]{ pos: $pos: expr }
+     [$name: ident: ConstField = $bits: tt, $($input: tt)*]) => {
         bitfield_impl! {
             Reverse $name []$bits
             [$($output)*]{ pos: $pos }[$($input)*]
@@ -231,7 +234,7 @@ macro_rules! bitfield_impl {
     (Reverse $name: ident $bits: tt []
      [$($output: tt)*]{ pos: $pos: expr }[$($input: tt)*]) => {
         bitfield_impl! {
-            Const $name { len: 0, val: 0 }$bits
+            ConstField $name { len: 0, val: 0 }$bits
             [$($output)*]{ pos: $pos }[$($input)*]
         }
     };
@@ -239,10 +242,10 @@ macro_rules! bitfield_impl {
     // Auxiliary rules for constant bit fields:
     // - Input is a sequence of bits in reversed order
     // - Output is the constant bit field definition with the sequence of bits as value
-    (Const $name: ident { len: $len: expr, val: $val: expr }[]
+    (ConstField $name: ident { len: $len: expr, val: $val: expr }[]
      [$($output: tt)*]{ pos: $pos: expr }[$($input: tt)*]) => {
         bitfield_impl! {
-            [$($output)* const $name: Const = Const {
+            [$($output)* const $name: ConstField = ConstField {
                 field: Field { pos: $pos, len: $len },
                 value: $val,
             };]
@@ -250,10 +253,10 @@ macro_rules! bitfield_impl {
             [$($input)*]
         }
     };
-    (Const $name: ident { len: $len: expr, val: $val: expr }[$bit: tt $($bits: tt)*]
+    (ConstField $name: ident { len: $len: expr, val: $val: expr }[$bit: tt $($bits: tt)*]
      [$($output: tt)*]{ pos: $pos: expr }[$($input: tt)*]) => {
         bitfield_impl! {
-            Const $name { len: $len + 1, val: $val * 2 + $bit }[$($bits)*]
+            ConstField $name { len: $len + 1, val: $val * 2 + $bit }[$($bits)*]
             [$($output)*]{ pos: $pos }[$($input)*]
         }
     };
@@ -287,8 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn const_ok() {
-        let field = Const {
+    fn const_field_ok() {
+        let field = ConstField {
             field: Field { pos: 3, len: 5 },
             value: 9,
         };
@@ -333,16 +336,16 @@ mod tests {
     fn bitfield_ok() {
         bitfield! {
             FIELD: Field <= 127,
-            CONST: Const = [0 1 0 1],
+            CONST_FIELD: ConstField = [0 1 0 1],
             BIT: Bit,
             CHECKSUM: Checksum <= 58,
             LENGTH: Length,
         }
         assert_eq!(FIELD.pos, 0);
         assert_eq!(FIELD.len, 7);
-        assert_eq!(CONST.field.pos, 7);
-        assert_eq!(CONST.field.len, 4);
-        assert_eq!(CONST.value, 10);
+        assert_eq!(CONST_FIELD.field.pos, 7);
+        assert_eq!(CONST_FIELD.field.len, 4);
+        assert_eq!(CONST_FIELD.value, 10);
         assert_eq!(BIT.pos, 11);
         assert_eq!(CHECKSUM.field.pos, 12);
         assert_eq!(CHECKSUM.field.len, 6);

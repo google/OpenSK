@@ -24,7 +24,7 @@ use crate::{StoreError, StoreResult};
 ///
 /// # Invariant
 ///
-/// - `pos + len < 32`.
+/// - The bit field must fit in a 32-bits word: `pos + len < 32`.
 pub struct Field {
     /// The position of the bit field.
     pub pos: usize,
@@ -43,8 +43,8 @@ impl Field {
     ///
     /// # Preconditions
     ///
-    /// - `num_bits(value) < self.len`.
-    /// - `self.get(*word) & value == value`.
+    /// - The value must fit in the bit field: `num_bits(value) < self.len`.
+    /// - The value must only change bits from 1 to 0: `self.get(*word) & value == value`.
     pub fn set(&self, word: &mut u32, value: usize) {
         let value = value as u32;
         debug_assert_eq!(value & self.mask(), value);
@@ -54,6 +54,9 @@ impl Field {
     }
 
     /// Returns a bit mask the length of the bit field.
+    ///
+    /// The mask is meant to be applied on a value. It should be shifted to be applied to the bit
+    /// field.
     fn mask(&self) -> u32 {
         (1 << self.len) - 1
     }
@@ -63,7 +66,7 @@ impl Field {
 ///
 /// # Invariant
 ///
-/// - `num_bits(value) <= field.len`.
+/// - The value must fit in the bit field: `num_bits(value) <= field.len`.
 pub struct Const {
     /// The bit field.
     pub field: Field,
@@ -88,7 +91,7 @@ impl Const {
 ///
 /// # Invariant
 ///
-/// - `pos < 32`.
+/// - The bit must fit in a 32-bits word: `pos < 32`.
 pub struct Bit {
     /// The position of the bit.
     pub pos: usize,

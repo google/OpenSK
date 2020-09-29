@@ -72,7 +72,6 @@ impl DecryptionKey {
     pub fn new(key: &EncryptionKey) -> DecryptionKey {
         let mut dec_round_keys = [Default::default(); 15];
         dec_round_keys[0] = key.enc_round_keys[14];
-        #[allow(clippy::needless_range_loop)]
         for i in 1..14 {
             let rk = &mut dec_round_keys[i];
             *rk = key.enc_round_keys[14 - i];

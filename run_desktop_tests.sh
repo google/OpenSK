@@ -31,7 +31,7 @@ cargo fmt --all -- --check
 cd ../..
 
 echo "Running Clippy lints..."
-cargo clippy --all-targets --features std -- -D warnings
+cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml

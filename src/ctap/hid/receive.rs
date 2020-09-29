@@ -49,12 +49,6 @@ pub enum Error {
     Timeout,
 }
 
-impl Default for MessageAssembler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MessageAssembler {
     pub fn new() -> MessageAssembler {
         MessageAssembler {

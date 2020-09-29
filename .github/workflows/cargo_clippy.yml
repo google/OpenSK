@@ -29,4 +29,4 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-targets --features std
       - name: Deny Clippy warnings
-        run: cargo clippy --all-targets --features std -- -D warnings
+        run: cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings

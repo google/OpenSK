@@ -151,7 +151,7 @@ fn main() {
 
 fn bench<F>(console: &mut Console, timer: &Timer, title: &str, mut f: F)
 where
-    F: FnMut() -> (),
+    F: FnMut(),
 {
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "Benchmarking: {}", title).unwrap();

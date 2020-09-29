@@ -1,11 +1,13 @@
-bin/
 target/
 Cargo.lock
 
+# Local installation of elf2tab.
+/elf2tab/
+
 # Prevent people from commiting sensitive files.
-crypto_data/
+/crypto_data/
 
 # Temporary files.
-reproducible/binaries.sha256sum
-reproducible/elf2tab.txt
-reproducible/reproduced.tar
+/reproducible/binaries.sha256sum
+/reproducible/elf2tab.txt
+/reproducible/reproduced.tar

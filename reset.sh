@@ -26,7 +26,7 @@ while
       # Reset the submodules
       git submodule foreach 'git reset --hard && git clean -fxd'
       # Reset also the main repository
-      git reset --hard && git clean -fxd
+      git reset --hard && git clean -fxd --exclude elf2tab
 
       set +x
       echo "DONE."

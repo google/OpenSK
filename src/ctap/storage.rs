@@ -88,6 +88,7 @@ const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 #[cfg(feature = "with_ctap2_1")]
 const _MAX_RP_IDS_LENGTH: usize = 8;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
     // TODO(cretin): Test whether this doesn't consume too much memory. Otherwise, we can use less
@@ -264,12 +265,10 @@ impl PersistentStore {
         debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
         let result = deserialize_credential(entry.data);
         debug_assert!(result.is_some());
-        if check_cred_protect
-            && result.as_ref().map_or(false, |cred| {
-                cred.cred_protect_policy
-                    == Some(CredentialProtectionPolicy::UserVerificationRequired)
-            })
-        {
+        let user_verification_required = result.as_ref().map_or(false, |cred| {
+            cred.cred_protect_policy == Some(CredentialProtectionPolicy::UserVerificationRequired)
+        });
+        if check_cred_protect && user_verification_required {
             Ok(None)
         } else {
             Ok(result)
@@ -406,10 +405,11 @@ impl PersistentStore {
             data: pin_hash,
             sensitive: true,
         };
-        Ok(match self.store.find_one(&Key::PinHash) {
+        match self.store.find_one(&Key::PinHash) {
             None => self.store.insert(entry)?,
             Some((index, _)) => self.store.replace(index, entry)?,
-        })
+        }
+        Ok(())
     }
 
     pub fn pin_retries(&self) -> Result<u8, Ctap2StatusCode> {
@@ -673,7 +673,6 @@ fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap
 mod test {
     use super::*;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
-    use crypto;
     use crypto::rng256::{Rng256, ThreadRng256};
 
     fn create_credential_source(
@@ -918,7 +917,7 @@ mod test {
         assert!(persistent_store.store_credential(credential).is_ok());
 
         let no_credential = persistent_store
-            .find_credential("example.com", &vec![0x00], true)
+            .find_credential("example.com", &[0x00], true)
             .unwrap();
         assert_eq!(no_credential, None);
     }
@@ -940,8 +939,8 @@ mod test {
         let master_hmac_key = master_keys_1.hmac.to_vec();
         persistent_store.reset(&mut rng).unwrap();
         let master_keys_3 = persistent_store.master_keys().unwrap();
-        assert!(master_keys_3.encryption != &master_encryption_key[..]);
-        assert!(master_keys_3.hmac != &master_hmac_key[..]);
+        assert!(master_keys_3.encryption != master_encryption_key.as_slice());
+        assert!(master_keys_3.hmac != master_hmac_key.as_slice());
     }
 
     #[test]

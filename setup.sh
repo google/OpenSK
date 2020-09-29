@@ -42,4 +42,5 @@ pip3 install --user --upgrade 'tockloader==1.5' six intelhex
 rustup target add thumbv7em-none-eabi
 
 # Install dependency to create applications.
-cargo install elf2tab --version 0.6.0 --root .
+mkdir -p elf2tab
+cargo install elf2tab --version 0.6.0 --root elf2tab/

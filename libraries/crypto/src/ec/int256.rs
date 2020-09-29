@@ -554,6 +554,7 @@ impl Add for &Int256 {
     type Output = (Int256, Digit);
 
     // Returns sum and carry (0 or 1).
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, other: &Int256) -> (Int256, Digit) {
         let mut digits = [0; NDIGITS];
         let mut carry: DoubleDigit = 0;
@@ -570,6 +571,7 @@ impl Add for &Int256 {
 
 impl AddAssign<&Int256> for Int256 {
     // Adds to self, ignoring carry.
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, other: &Int256) {
         let mut carry: DoubleDigit = 0;
         for i in 0..NDIGITS {
@@ -584,6 +586,7 @@ impl Add<Digit> for &Int256 {
     type Output = (Int256, Digit);
 
     // Returns sum and carry (0 or 1).
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, digit: Digit) -> (Int256, Digit) {
         let mut digits = [0; NDIGITS];
         let mut carry = digit as DoubleDigit;
@@ -603,6 +606,7 @@ impl Sub for &Int256 {
     type Output = (Int256, Digit);
 
     // Returns difference and borrow (0 or -1).
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, other: &Int256) -> (Int256, Digit) {
         let mut digits = [0; NDIGITS];
         let mut borrow: SignedDoubleDigit = 0;
@@ -620,6 +624,7 @@ impl Sub for &Int256 {
 
 impl SubAssign<&Int256> for Int256 {
     // Substract from self, ignoring carry.
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn sub_assign(&mut self, other: &Int256) {
         let mut borrow: SignedDoubleDigit = 0;
         for i in 0..NDIGITS {

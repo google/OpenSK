@@ -23,9 +23,15 @@ cd ../..
 cd libraries/crypto
 cargo fmt --all -- --check
 cd ../..
+cd libraries/persistent_store
+cargo fmt --all -- --check
+cd ../..
 cd tools/heapviz
 cargo fmt --all -- --check
 cd ../..
+
+echo "Running Clippy lints..."
+cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -84,6 +90,9 @@ then
   cd libraries/crypto
   RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std,derive_debug
   cd ../..
+  cd libraries/persistent_store
+  cargo test --release --features std
+  cd ../..
   cargo test --release --features std
 
   echo "Running unit tests on the desktop (debug mode)..."
@@ -92,6 +101,9 @@ then
   cd ../..
   cd libraries/crypto
   RUSTFLAGS='-C target-feature=+aes' cargo test --features std,derive_debug
+  cd ../..
+  cd libraries/persistent_store
+  cargo test --features std
   cd ../..
   cargo test --features std
 

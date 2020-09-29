@@ -41,5 +41,5 @@ pub fn fill_buffer(buf: &mut [u8]) -> bool {
     }
 
     util::yieldk_for(|| is_filled.get());
-    return true;
+    true
 }

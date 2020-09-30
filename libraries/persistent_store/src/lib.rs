@@ -214,7 +214,7 @@
 //! We want to show that the next `N - 1` compactions won't move the tail past the
 //! last page of their window, with `I` the initial window:
 //!
-//! ```
+//! ```text
 //! forall 1 <= i <= N - 1, t_{I + i} <= (I + i + N - 1) * Q
 //! ```
 //!
@@ -224,19 +224,19 @@
 //! first page of the window with the last entry possibly overlapping on the next
 //! page.
 //!
-//! ```
+//! ```text
 //! forall j, t_{j + 1} = t_j + |h_{j + 1}| - |h_j| + 1
 //! ```
 //!
 //! By induction, we have:
 //!
-//! ```
+//! ```text
 //! t_{I + i} <= t_I + |h_{I + i}| - |h_I| + i
 //! ```
 //!
 //! We have the following properties:
 //!
-//! ```
+//! ```text
 //! t_I <= h_I + V
 //! |h_{I + i}| - |h_I| <= h_{I + i} - h_I
 //! h_{I + i} <= (I + i) * Q + M
@@ -244,7 +244,7 @@
 //!
 //! Replacing into our previous equality, we can conclude:
 //!
-//! ```
+//! ```text
 //! t_{I + i}  = t_I + |h_{I + i}| - |h_I| + i
 //!           <= h_I + V + (I + i) * Q + M - h_I + i
 //!            = (N - 1) * (Q - 1) - M + (I + i) * Q + M + i
@@ -256,7 +256,7 @@
 //! We also want to show that after `N - 1` compactions, the remaining capacity is
 //! available without compaction.
 //!
-//! ```
+//! ```text
 //! V - (t_{I + N - 1} - h_{I + N - 1}) >=    // The available words in the window.
 //!   C - (|t_{I + N - 1}| - |h_{I + N - 1}|) // The remaining capacity.
 //!   + 1                                     // Reserved for Clear.
@@ -264,14 +264,14 @@
 //!
 //! We can replace the definition of `C` and simplify:
 //!
-//! ```
+//! ```text
 //! V - (t_{I + N - 1} - h_{I + N - 1}) >= V - N - (|t_{I + N - 1}| - |h_{I + N - 1}|) + 1
 //! iff t_{I + N - 1} - h_{I + N - 1} <= |t_{I + N - 1}| - |h_{I + N - 1}| + N - 1
 //! ```
 //!
 //! We have the following properties:
 //!
-//! ```
+//! ```text
 //! t_{I + N - 1} = t_I + |h_{I + N - 1}| - |h_I| + N - 1
 //! |t_{I + N - 1}| - |h_{I + N - 1}| = |t_I| - |h_I| // Compaction preserves capacity.
 //! |h_{I + N - 1}| - |t_I| <= h_{I + N - 1} - t_I
@@ -279,7 +279,7 @@
 //!
 //! From which we conclude:
 //!
-//! ```
+//! ```text
 //! t_{I + N - 1} - h_{I + N - 1} <= |t_{I + N - 1}| - |h_{I + N - 1}| + N - 1
 //! iff t_I + |h_{I + N - 1}| - |h_I| + N - 1 - h_{I + N - 1} <= |t_I| - |h_I| + N - 1
 //! iff t_I + |h_{I + N - 1}| - h_{I + N - 1} <= |t_I|

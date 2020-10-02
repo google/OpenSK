@@ -46,6 +46,10 @@ pub enum InputType {
     Ctap1,
 }
 
+fn user_immediately_present(_: ChannelID) -> Result<(), Ctap2StatusCode> {
+    Ok(())
+}
+
 // Converts a byte slice into Message
 fn raw_to_message(data: &[u8]) -> Message {
     if data.len() <= 4 {
@@ -143,7 +147,6 @@ fn process_message<CheckUserPresence>(
 pub fn process_ctap_any_type(data: &[u8]) {
     // Initialize ctap state and hid and get the allocated cid.
     let mut rng = ThreadRng256 {};
-    let user_immediately_present = |_| Ok(());
     let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
     let mut ctap_hid = CtapHid::new();
     let cid = initialize(&mut ctap_state, &mut ctap_hid);
@@ -158,11 +161,10 @@ pub fn process_ctap_any_type(data: &[u8]) {
 // using an initialized and allocated channel.
 pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
     if !is_type(data, input_type) {
-        return ();
+        return;
     }
     // Initialize ctap state and hid and get the allocated cid.
     let mut rng = ThreadRng256 {};
-    let user_immediately_present = |_| Ok(());
     let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
     let mut ctap_hid = CtapHid::new();
     let cid = initialize(&mut ctap_state, &mut ctap_hid);
@@ -186,7 +188,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
     process_message(&command, &mut ctap_state, &mut ctap_hid);
 }
 
-// Splits and reassembles the given data as HID packets.
+// Splits the given data as HID packets and reassembles it, verifying that the original input message is reconstructed.
 pub fn split_assemble_hid_packets(data: &[u8]) {
     let mut message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message.clone()) {

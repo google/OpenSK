@@ -14,6 +14,10 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[macro_use]
+mod bitfield;
 mod storage;
+mod store;
 
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};
+pub use self::store::{StoreError, StoreResult};

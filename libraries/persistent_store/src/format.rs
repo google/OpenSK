@@ -19,7 +19,6 @@ use crate::bitfield::*;
 use crate::{Storage, StorageIndex, StoreError, StoreResult};
 use alloc::vec::Vec;
 use core::cmp::min;
-use core::convert::TryFrom;
 
 type WORD = u32;
 
@@ -30,15 +29,15 @@ const WORD_SIZE: usize = core::mem::size_of::<WORD>();
 const MAX_PAGE_SIZE: usize = 4096;
 
 /// Maximum number of erase cycles.
-const MAX_CYCLE: usize = 65535;
+const MAX_ERASE_CYCLE: usize = 65535;
 
 /// Maximum page index.
 ///
 /// Thus the maximum number of pages in one more than this number.
-const MAX_PAGE: usize = 63;
+const MAX_PAGE_INDEX: usize = 63;
 
 /// Maximum number of keys.
-const MAX_KEY: usize = 4095;
+const MAX_KEY_INDEX: usize = 4095;
 
 /// Maximum length in bytes of a user payload.
 const MAX_VALUE_LEN: usize = 1023;
@@ -91,13 +90,13 @@ impl Format {
     /// - A page contains at least 8 words.
     /// - A page contains at most [`MAX_PAGE_SIZE`] bytes.
     /// - There is at least 3 pages.
-    /// - There is at most [`MAX_PAGE`]` + 1` pages.
+    /// - There is at most [`MAX_PAGE_INDEX`]` + 1` pages.
     /// - A word can be written at least twice between erase cycles.
-    /// - A page can be erased at most [`MAX_CYCLE`] times.
+    /// - A page can be erased at most [`MAX_ERASE_CYCLE`] times.
     ///
     /// [`MAX_PAGE_SIZE`]: constant.MAX_PAGE_SIZE.html
-    /// [`MAX_PAGE`]: constant.MAX_PAGE.html
-    /// [`MAX_CYCLE`]: constant.MAX_CYCLE.html
+    /// [`MAX_PAGE_INDEX`]: constant.MAX_PAGE_INDEX.html
+    /// [`MAX_ERASE_CYCLE`]: constant.MAX_ERASE_CYCLE.html
     fn is_storage_supported<S: Storage>(storage: &S) -> bool {
         let word_size = storage.word_size();
         let page_size = storage.page_size();
@@ -107,9 +106,9 @@ impl Format {
         word_size == 4
             && page_size % word_size == 0
             && (8 * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
-            && (3 <= num_pages && num_pages <= MAX_PAGE + 1)
+            && (3 <= num_pages && num_pages <= MAX_PAGE_INDEX + 1)
             && max_word_writes >= 2
-            && max_page_erases <= MAX_CYCLE
+            && max_page_erases <= MAX_ERASE_CYCLE
     }
 
     /// The size of a word in bytes.
@@ -126,28 +125,28 @@ impl Format {
 
     /// The number of pages in the storage.
     ///
-    /// Notation: `N`. We have `3 <= N <= MAX_PAGE + 1`.
+    /// Notation: `N`. We have `3 <= N <= MAX_PAGE_INDEX + 1`.
     pub fn num_pages(&self) -> usize {
         self.num_pages
     }
 
     /// The maximum page index.
     ///
-    /// We have `2 <= self.max_page() <= MAX_PAGE`.
+    /// We have `2 <= self.max_page() <= MAX_PAGE_INDEX`.
     pub fn max_page(&self) -> usize {
         self.num_pages - 1
     }
 
     /// The maximum number of times a page can be erased.
     ///
-    /// Notation: `E`. We have `E <= MAX_CYCLE`.
+    /// Notation: `E`. We have `E <= MAX_ERASE_CYCLE`.
     pub fn max_page_erases(&self) -> usize {
         self.max_page_erases
     }
 
     /// The maximum key.
     pub fn max_key(&self) -> usize {
-        MAX_KEY
+        MAX_KEY_INDEX
     }
 
     /// The maximum number of updates per transaction.
@@ -222,8 +221,7 @@ impl Format {
     }
 
     /// Parses the init info of a page from its storage representation.
-    pub fn parse_init(&self, word: &[u8]) -> StoreResult<WordState<InitInfo>> {
-        let word = slice_to_word(word);
+    pub fn parse_init(&self, word: WORD) -> StoreResult<WordState<InitInfo>> {
         Ok(if word == ERASED_WORD {
             WordState::Erased
         } else if WORD_CHECKSUM.get(word)? != 0 {
@@ -254,8 +252,7 @@ impl Format {
     }
 
     /// Parses the compact info of a page from its storage representation.
-    pub fn parse_compact(&self, word: &[u8]) -> StoreResult<WordState<CompactInfo>> {
-        let word = slice_to_word(word);
+    pub fn parse_compact(&self, word: WORD) -> StoreResult<WordState<CompactInfo>> {
         Ok(if word == ERASED_WORD {
             WordState::Erased
         } else if WORD_CHECKSUM.get(word)? != 0 {
@@ -278,22 +275,22 @@ impl Format {
     }
 
     /// Builds the storage representation of an internal entry.
-    pub fn build_internal(&self, internal: Internal) -> [u8; WORD_SIZE] {
+    pub fn build_internal(&self, internal: InternalEntry) -> [u8; WORD_SIZE] {
         let mut word = ERASED_WORD;
         match internal {
-            Internal::Erase { page } => {
+            InternalEntry::Erase { page } => {
                 ID_ERASE.set(&mut word);
                 ERASE_PAGE.set(&mut word, page);
             }
-            Internal::Clear { min_key } => {
+            InternalEntry::Clear { min_key } => {
                 ID_CLEAR.set(&mut word);
                 CLEAR_MIN_KEY.set(&mut word, min_key);
             }
-            Internal::Marker { count } => {
+            InternalEntry::Marker { count } => {
                 ID_MARKER.set(&mut word);
                 MARKER_COUNT.set(&mut word, count);
             }
-            Internal::Remove { key } => {
+            InternalEntry::Remove { key } => {
                 ID_REMOVE.set(&mut word);
                 REMOVE_KEY.set(&mut word, key);
             }
@@ -303,8 +300,7 @@ impl Format {
     }
 
     /// Parses the first word of an entry from its storage representation.
-    pub fn parse_word(&self, word: &[u8]) -> StoreResult<WordState<ParsedWord>> {
-        let word = slice_to_word(word);
+    pub fn parse_word(&self, word: WORD) -> StoreResult<WordState<ParsedWord>> {
         let valid = if ID_PADDING.check(word) {
             ParsedWord::Padding(Padding { length: 0 })
         } else if ID_HEADER.check(word) {
@@ -329,16 +325,16 @@ impl Format {
             }
         } else if ID_ERASE.check(word) {
             let page = ERASE_PAGE.get(word);
-            ParsedWord::Internal(Internal::Erase { page })
+            ParsedWord::Internal(InternalEntry::Erase { page })
         } else if ID_CLEAR.check(word) {
             let min_key = CLEAR_MIN_KEY.get(word);
-            ParsedWord::Internal(Internal::Clear { min_key })
+            ParsedWord::Internal(InternalEntry::Clear { min_key })
         } else if ID_MARKER.check(word) {
             let count = MARKER_COUNT.get(word);
-            ParsedWord::Internal(Internal::Marker { count })
+            ParsedWord::Internal(InternalEntry::Marker { count })
         } else if ID_REMOVE.check(word) {
             let key = REMOVE_KEY.get(word);
-            ParsedWord::Internal(Internal::Remove { key })
+            ParsedWord::Internal(InternalEntry::Remove { key })
         } else if word == ERASED_WORD {
             return Ok(WordState::Erased);
         } else {
@@ -349,10 +345,10 @@ impl Format {
                 return Ok(WordState::Partial);
             }
             let invalid = match internal {
-                Internal::Erase { page } => *page > self.max_page(),
-                Internal::Clear { min_key } => *min_key > self.max_key(),
-                Internal::Marker { count } => *count > MAX_UPDATES,
-                Internal::Remove { key } => *key > self.max_key(),
+                InternalEntry::Erase { page } => *page > self.max_page(),
+                InternalEntry::Clear { min_key } => *min_key > self.max_key(),
+                InternalEntry::Marker { count } => *count > MAX_UPDATES,
+                InternalEntry::Remove { key } => *key > self.max_key(),
             };
             if invalid {
                 return Err(StoreError::InvalidStorage);
@@ -382,32 +378,18 @@ impl Format {
     }
 
     /// Sets the padding bit in the first word of a user entry.
-    ///
-    /// The word is taken as a slice for convenience.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `slice.len() != WORD_SIZE`.
-    pub fn set_padding(&self, slice: &mut [u8]) {
-        let mut word = slice_to_word(slice);
-        ID_PADDING.set(&mut word);
-        slice.copy_from_slice(&word.to_ne_bytes());
+    pub fn set_padding(&self, word: &mut WORD) {
+        ID_PADDING.set(word);
     }
 
     /// Sets the deleted bit in the first word of a user entry.
-    ///
-    /// The word is taken as a slice for convenience.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `slice.len() != WORD_SIZE`.
-    pub fn set_deleted(&self, slice: &mut [u8]) {
-        let mut word = slice_to_word(slice);
-        HEADER_DELETED.set(&mut word);
-        slice.copy_from_slice(&word.to_ne_bytes());
+    pub fn set_deleted(&self, word: &mut WORD) {
+        HEADER_DELETED.set(word);
     }
 
     /// Returns the minimum number of words to represent a given number of bytes.
+    ///
+    /// Assumes `bytes + 4` does not overflow.
     pub fn bytes_to_words(&self, bytes: usize) -> usize {
         div_ceil(bytes, self.word_size())
     }
@@ -424,7 +406,8 @@ const CONTENT_WORD: usize = 2;
 
 /// The checksum for a single word.
 ///
-/// It needs 5 bits to store numbers between 0 and 27.
+/// Since checksums are the number of bits set to zero and a word is 32 bits, we need 5 bits to
+/// store numbers between 0 and 27 (which is 32 - 5).
 const WORD_CHECKSUM: Checksum = Checksum {
     field: Field { pos: 27, len: 5 },
 };
@@ -432,7 +415,7 @@ const WORD_CHECKSUM: Checksum = Checksum {
 // The fields of the init info of a page.
 bitfield! {
     /// The number of times the page has been erased.
-    INIT_CYCLE: Field <= MAX_CYCLE,
+    INIT_CYCLE: Field <= MAX_ERASE_CYCLE,
 
     /// The word index of the first entry in this virtual page.
     INIT_PREFIX: Field <= div_ceil(MAX_VALUE_LEN, WORD_SIZE),
@@ -447,7 +430,7 @@ bitfield! {
     ///
     /// In particular, compaction copies non-deleted user entries from the head to the tail as long
     /// as entries span the page to be compacted.
-    COMPACT_TAIL: Field <= MAX_VIRT_PAGE_SIZE * MAX_PAGE,
+    COMPACT_TAIL: Field <= MAX_VIRT_PAGE_SIZE * MAX_PAGE_INDEX,
 
     #[cfg(test)]
     LEN_COMPACT: Length,
@@ -488,7 +471,7 @@ bitfield! {
     HEADER_LENGTH: Field <= MAX_VALUE_LEN,
 
     /// The key of the user entry.
-    HEADER_KEY: Field <= MAX_KEY,
+    HEADER_KEY: Field <= MAX_KEY_INDEX,
 
     /// The checksum of the user entry.
     ///
@@ -509,7 +492,7 @@ bitfield! {
     ID_ERASE: ConstField = [1 1 0 0 0],
 
     /// The page to be erased.
-    ERASE_PAGE: Field <= MAX_PAGE,
+    ERASE_PAGE: Field <= MAX_PAGE_INDEX,
 
     #[cfg(test)]
     LEN_ERASE: Length,
@@ -523,7 +506,7 @@ bitfield! {
     /// The minimum key to be cleared.
     ///
     /// All entries with a key below this limit are not cleared. All other entries are deleted.
-    CLEAR_MIN_KEY: Field <= MAX_KEY,
+    CLEAR_MIN_KEY: Field <= MAX_KEY_INDEX,
 
     #[cfg(test)]
     LEN_CLEAR: Length,
@@ -549,7 +532,7 @@ bitfield! {
     ID_REMOVE: ConstField = [1 1 0 1 1],
 
     /// The key of the user entry to be removed.
-    REMOVE_KEY: Field <= MAX_KEY,
+    REMOVE_KEY: Field <= MAX_KEY_INDEX,
 
     #[cfg(test)]
     LEN_REMOVE: Length,
@@ -678,7 +661,7 @@ pub enum ParsedWord {
     Header(Header),
 
     /// Internal entry.
-    Internal(Internal),
+    Internal(InternalEntry),
 }
 
 /// Padding entry.
@@ -710,13 +693,13 @@ impl Header {
     /// If the user entry has no payload, the `footer` must be set to `None`. Otherwise it should be
     /// the last word of the entry.
     pub fn check(&self, footer: Option<&[u8]>) -> bool {
-        footer.map_or(0, |x| count_zeros(x)) == self.checksum
+        footer.map_or(0, count_zeros) == self.checksum
     }
 }
 
 /// Internal entry.
 #[derive(Debug)]
-pub enum Internal {
+pub enum InternalEntry {
     /// Indicates that a page should be erased.
     Erase {
         /// The page to be erased.
@@ -753,18 +736,9 @@ pub fn is_erased(slice: &[u8]) -> bool {
     slice.iter().all(|&x| x == 0xff)
 }
 
-/// Converts a word slice into a word.
-///
-/// # Panics
-///
-/// Panics if `word.len() != WORD_SIZE`.
-fn slice_to_word(word: &[u8]) -> WORD {
-    u32::from_ne_bytes(<[u8; WORD_SIZE]>::try_from(word).unwrap())
-}
-
 /// Divides then takes ceiling.
 ///
-/// Returns `ceil(x / m)` with mathematical notations.
+/// Returns `ceil(x / m)` with mathematical notations. Assumes `x + m` does not overflow.
 pub const fn div_ceil(x: usize, m: usize) -> usize {
     (x + m - 1) / m
 }
@@ -882,19 +856,6 @@ mod tests {
     }
 
     #[test]
-    fn slice_to_word_ok() {
-        // We write test with little-endian in mind, but use this helper function to test regardless
-        // of endianness.
-        fn test(slice: &[u8], word: u32) {
-            #[cfg(target_endian = "little")]
-            let word = word.swap_bytes();
-            assert_eq!(slice_to_word(slice), word);
-        }
-        test(&[0x01, 0x02, 0x03, 0x04], 0x01020304);
-        test(&[0xf0, 0x78, 0x3c, 0x1e], 0xf0783c1e);
-    }
-
-    #[test]
     fn div_ceil_ok() {
         assert_eq!(div_ceil(0, 1), 0);
         assert_eq!(div_ceil(1, 1), 1);
@@ -903,5 +864,18 @@ mod tests {
         assert_eq!(div_ceil(1, 2), 1);
         assert_eq!(div_ceil(2, 2), 1);
         assert_eq!(div_ceil(3, 2), 2);
+    }
+
+    #[test]
+    fn positions_fit_in_a_word() {
+        // All reachable positions are smaller than this value, which is one past the last position.
+        // It is simply the total number of virtual words, i.e. the number of words per virtual page
+        // times the number of virtual pages times the number of times a virtual page can be used
+        // (one more than the number of times it can be erased since we can write before the first
+        // erase cycle and after the last erase cycle).
+        assert_eq!(
+            (MAX_ERASE_CYCLE + 1) * (MAX_PAGE_INDEX + 1) * MAX_VIRT_PAGE_SIZE,
+            0xff800000
+        );
     }
 }

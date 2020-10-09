@@ -1,3 +1,5 @@
+Make sure that binaries are not reproducible because the build is not hermetic.
+
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
 [![Build Status](https://travis-ci.org/google/OpenSK.svg?branch=master)](https://travis-ci.org/google/OpenSK)

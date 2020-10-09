@@ -36,7 +36,9 @@ const MAX_ERASE_CYCLE: usize = 65535;
 /// Thus the maximum number of pages in one more than this number.
 const MAX_PAGE_INDEX: usize = 63;
 
-/// Maximum number of keys.
+/// Maximum key index.
+///
+/// Thus the number of keys in one more than this number.
 const MAX_KEY_INDEX: usize = 4095;
 
 /// Maximum length in bytes of a user payload.
@@ -55,12 +57,27 @@ const ERASED_WORD: u32 = 0xffffffff;
 #[derive(Clone, Debug)]
 pub struct Format {
     /// The size in bytes of a page in the storage.
+    ///
+    /// # Invariant
+    ///
+    /// - Words divide a page evenly.
+    /// - There are at least 8 words in a page.
+    /// - There are at most `MAX_PAGE_SIZE` bytes in a page.
     page_size: usize,
 
     /// The number of pages in the storage.
+    ///
+    /// # Invariant
+    ///
+    /// - There are at least 3 pages.
+    /// - There are at most `MAX_PAGE_INDEX + 1` pages.
     num_pages: usize,
 
     /// The maximum number of times a page can be erased.
+    ///
+    /// # Invariant
+    ///
+    /// - A page can be erased at most `MAX_ERASE_CYCLE` times.
     max_page_erases: usize,
 }
 
@@ -118,14 +135,14 @@ impl Format {
 
     /// The size of a page in bytes.
     ///
-    /// We have `32 <= self.page_size() <= MAX_PAGE_SIZE`.
+    /// We have `32 <= self.page_size() <= MAX_PAGE_SIZE` assuming a word is 4 bytes.
     pub fn page_size(&self) -> usize {
         self.page_size
     }
 
-    /// The number of pages in the storage.
+    /// The number of pages in the storage, denoted by `N`.
     ///
-    /// Notation: `N`. We have `3 <= N <= MAX_PAGE_INDEX + 1`.
+    /// We have `3 <= N <= MAX_PAGE_INDEX + 1`.
     pub fn num_pages(&self) -> usize {
         self.num_pages
     }
@@ -137,9 +154,9 @@ impl Format {
         self.num_pages - 1
     }
 
-    /// The maximum number of times a page can be erased.
+    /// The maximum number of times a page can be erased, denoted by `E`.
     ///
-    /// Notation: `E`. We have `E <= MAX_ERASE_CYCLE`.
+    /// We have `E <= MAX_ERASE_CYCLE`.
     pub fn max_page_erases(&self) -> usize {
         self.max_page_erases
     }
@@ -154,18 +171,18 @@ impl Format {
         MAX_UPDATES
     }
 
-    /// The size of a virtual page in words.
+    /// The size of a virtual page in words, denoted by `Q`.
     ///
     /// A virtual page is stored in a physical page after the page header.
     ///
-    /// Notation: `Q`. We have `6 <= Q <= MAX_VIRT_PAGE_SIZE`.
+    /// We have `6 <= Q <= MAX_VIRT_PAGE_SIZE`.
     pub fn virt_page_size(&self) -> usize {
         self.page_size() / self.word_size() - CONTENT_WORD
     }
 
     /// The maximum length in bytes of a user payload.
     ///
-    /// We have `20 <= self.max_value_len() <= MAX_VALUE_LEN`.
+    /// We have `20 <= self.max_value_len() <= MAX_VALUE_LEN` assuming words are 4 bytes.
     pub fn max_value_len(&self) -> usize {
         min(
             (self.virt_page_size() - 1) * self.word_size(),
@@ -173,35 +190,35 @@ impl Format {
         )
     }
 
-    /// The maximum prefix length in words.
+    /// The maximum prefix length in words, denoted by `M`.
     ///
     /// A prefix is the first words of a virtual page that belong to the last entry of the previous
     /// virtual page. This happens because entries may overlap up to 2 virtual pages.
     ///
-    /// Notation: `M`. We have `5 <= M < Q`.
+    /// We have `5 <= M < Q`.
     pub fn max_prefix_len(&self) -> usize {
         self.bytes_to_words(self.max_value_len())
     }
 
-    /// The total virtual capacity in words.
+    /// The total virtual capacity in words, denoted by `V`.
     ///
-    /// Notation: `V`. We have `V = (N - 1) * (Q - 1) - M`.
+    /// We have `V = (N - 1) * (Q - 1) - M`.
     pub fn virt_size(&self) -> usize {
         (self.num_pages() - 1) * (self.virt_page_size() - 1) - self.max_prefix_len()
     }
 
-    /// The total user capacity in words.
+    /// The total user capacity in words, denoted by `C`.
     ///
-    /// Notation: `C`. We have `C = V - N = (N - 1) * (Q - 2) - M - 1`.
+    /// We have `C = V - N = (N - 1) * (Q - 2) - M - 1`.
     pub fn total_capacity(&self) -> usize {
         // From the virtual capacity, we reserve N - 1 words for `Erase` entries and 1 word for a
         // `Clear` entry.
         self.virt_size() - self.num_pages()
     }
 
-    /// The total virtual lifetime in words.
+    /// The total virtual lifetime in words, denoted by `L`.
     ///
-    /// Notation: `L`. We have `L = (E * N + N - 1) * Q`.
+    /// We have `L = (E * N + N - 1) * Q`.
     pub fn total_lifetime(&self) -> Position {
         Position::new(self, self.max_page_erases(), self.num_pages() - 1, 0)
     }
@@ -389,7 +406,7 @@ impl Format {
 
     /// Returns the minimum number of words to represent a given number of bytes.
     ///
-    /// Assumes `bytes + 4` does not overflow.
+    /// Assumes `bytes + self.word_size()` does not overflow.
     pub fn bytes_to_words(&self, bytes: usize) -> usize {
         div_ceil(bytes, self.word_size())
     }
@@ -402,6 +419,8 @@ const INIT_WORD: usize = 0;
 const COMPACT_WORD: usize = 1;
 
 /// The word index of the content of a page.
+///
+/// Since a page is at least 8 words, there is always at least 6 words of content.
 const CONTENT_WORD: usize = 2;
 
 /// The checksum for a single word.

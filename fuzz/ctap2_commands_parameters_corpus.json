@@ -90,7 +90,7 @@
         "description": "cbor value"
     },
     {
-        "hex": "",
+        "hex": "a4015820cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd02a14269645770696E5F616273656E63652E6578616D706C652E636F6D03a262696458201D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D646e616d65644164616d0481a263616c672664747970656a7075626C69632D6B6579",
         "cbor": "{1: h'CDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCD', 2: {\"id\": \"pin_absence.example.com\"}, 3: {\"id\": h'1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D1D', \"name\": \"Adam\"}, 4: [{\"alg\": -7, \"type\": \"public-key\"}]}",
         "description": "make credential parameter 1"
     },

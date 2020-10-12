@@ -8,3 +8,4 @@ pub mod rng;
 pub mod timer;
 pub mod usb_ctap_hid;
 pub mod util;
+pub mod nfc;

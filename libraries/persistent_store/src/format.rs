@@ -33,12 +33,12 @@ const MAX_ERASE_CYCLE: usize = 65535;
 
 /// Maximum page index.
 ///
-/// Thus the maximum number of pages in one more than this number.
+/// Thus the maximum number of pages is one more than this number.
 const MAX_PAGE_INDEX: usize = 63;
 
 /// Maximum key index.
 ///
-/// Thus the number of keys in one more than this number.
+/// Thus the number of keys is one more than this number.
 const MAX_KEY_INDEX: usize = 4095;
 
 /// Maximum length in bytes of a user payload.
@@ -106,8 +106,8 @@ impl Format {
     /// - The size of a word evenly divides the size of a page.
     /// - A page contains at least 8 words.
     /// - A page contains at most [`MAX_PAGE_SIZE`] bytes.
-    /// - There is at least 3 pages.
-    /// - There is at most [`MAX_PAGE_INDEX`]` + 1` pages.
+    /// - There are at least 3 pages.
+    /// - There are at most [`MAX_PAGE_INDEX`]` + 1` pages.
     /// - A word can be written at least twice between erase cycles.
     /// - A page can be erased at most [`MAX_ERASE_CYCLE`] times.
     ///

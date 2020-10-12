@@ -921,6 +921,13 @@ if __name__ == "__main__":
       const="console_test",
       help=("Compiles and installs the console_test example that tests the "
             "console driver with messages of various lengths."))
+  apps_group.add_argument(
+      "--nfct_test",
+      dest="application",
+      action="store_const",
+      const="console_test",
+      help=("Compiles and installs the console_test example that tests the "
+            "console driver with messages of various lengths."))
 
   main_parser.set_defaults(features=["with_ctap1"])
 

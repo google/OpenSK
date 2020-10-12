@@ -4,6 +4,8 @@ use libtock_drivers::console::Console;
 use libtock_drivers::nfc;
 
 fn main(){
+    let mut console = Console::new();
+
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "nfct_test application is installed").unwrap();
     writeln!(console, "****************************************").unwrap();

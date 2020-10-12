@@ -22,45 +22,106 @@ mod allow_nr {
     pub const RECEIVE: usize = 2;
 }
 
-pub const TX_BUFFER_SIZE: usize = 256;
-pub const RX_BUFFER_SIZE: usize = 256;
-
-pub struct NfcTag {
-    tx_buffer: [u8; BUFFER_SIZE],
-    rx_buffer: [u8; BUFFER_SIZE],
-    tag_type: u8,
+pub fn enable_emulation() {
+    emulate(true);
 }
 
-impl NfcTag {
-    pub fn new() -> Console {
-        Console {
-            tx_buffer: [0; TX_BUFFER_SIZE],
-            tx_buffer: [0; RX_BUFFER_SIZE],
-            tag_type: 0,
-        }
+pub fn disable_emulation() {
+    emulate(false);
+}
+
+pub fn emulate(enabled: bool) -> bool {
+    let result_code = syscalls::command(
+        DRIVER_NUMBER,
+        command_nr::EMULATE,
+        enabled as usize,
+        0
+    );
+    if result_code.is_err() {
+        return false;
     }
 
-    pub fn set_tag_type(&mut self, type: u8) {
-        self.tag_type = type;
+    true
+}
+
+pub fn selected() -> bool {
+    let is_selected = Cell::new(false);
+    let mut is_selected_alarm = || is_selected.set(true);
+    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::SELECT,
+        &mut is_selected_alarm,
+    );
+    if subscription.is_err() {
+        return false;
     }
 
-    pub fn selected(&self) -> bool {
-        let is_selected = Cell::new(false);
-        let mut is_selected_alarm = || is_selected.set(true);
-        let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
-            DRIVER_NUMBER,
-            subscribe_nr::SELECT,
-            &mut is_selected_alarm,
-        );
-        if subscription.is_err() {
-            return;
-        }
+    util::yieldk_for(|| is_selected.get());
+    true
+}
 
-        util::yieldk_for(|| is_selected.get());
-        true
+pub fn configure(tag_type: u8) -> bool {
+    let result_code = syscalls::command(
+        DRIVER_NUMBER,
+        command_nr::CONFIGURE,
+        tag_type as usize,
+        0
+    );
+    if result_code.is_err() {
+        return false;
     }
 
-    pub fn receive(&self) {
+    true
+}
 
+pub fn receive(buf: &mut [u8]) -> bool {
+    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf);
+    if result.is_err() {
+        return false;
     }
+
+    let done = Cell::new(false);
+    let mut alarm = || done.set(true);
+    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::RECEIVE,
+        &mut alarm,
+    );
+    if subscription.is_err() {
+        return false;
+    }
+
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
+    if result_code.is_err() {
+        return false;
+    }
+
+    util::yieldk_for(|| done.get());
+    true
+}
+
+pub fn transmit(buf: &mut [u8]) -> bool {
+    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT, buf);
+    if result.is_err() {
+        return false;
+    }
+
+    let done = Cell::new(false);
+    let mut alarm = || done.set(true);
+    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::TRANSMIT,
+        &mut alarm,
+    );
+    if subscription.is_err() {
+        return false;
+    }
+
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, 0, 0);
+    if result_code.is_err() {
+        return false;
+    }
+
+    util::yieldk_for(|| done.get());
+    true
 }

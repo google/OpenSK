@@ -40,7 +40,7 @@
 //! The store provides the following _updates_:
 //! -   Given a key and a value, `Insert` updates the store such that the value is
 //!     associated with the key. The values for other keys are left unchanged.
-//! -   Given a key, `Remove` updates the store such that no value is associated for
+//! -   Given a key, `Remove` updates the store such that no value is associated with
 //!     the key. The values for other keys are left unchanged. Additionally, if there
 //!     was a value associated with the key, the value is wiped from the storage
 //!     (all its bits are set to 0).
@@ -95,8 +95,8 @@
 //! The _total lifetime_ of the store is below `L = ((E + 1) * N - 1) * (P - 2)` and
 //! above `L - M` words, where `E` is the maximum number of erase cycles. The
 //! lifetime is used when capacity is used, including transiently, as well as when
-//! compaction occurs. The more the store is loaded (few remaining words of
-//! capacity), the more compactions are frequent, and the more lifetime is used.
+//! compaction occurs. Compaction frequency and litetime consumption are positively
+//! correlated to the store load factor (the ratio of used capacity to total capacity).
 //!
 //! It is possible to approximate the cost of transient words in terms of capacity:
 //! `L` transient words are equivalent to `C - x` words of capacity where `x` is the
@@ -104,7 +104,7 @@
 //!
 //! ## Preconditions
 //!
-//! The store may behave in unexpected ways if the following assumptions don't hold:
+//! The following assumptions need to hold, or the store may behave in unexpected ways:
 //! -   A word can be written twice between erase cycles.
 //! -   A page can be erased `E` times after the first boot of the store.
 //! -   When power is lost while writing a slice or erasing a page, the next read

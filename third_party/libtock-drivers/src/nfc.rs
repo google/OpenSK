@@ -31,12 +31,7 @@ pub fn disable_emulation() {
 }
 
 pub fn emulate(enabled: bool) -> bool {
-    let result_code = syscalls::command(
-        DRIVER_NUMBER,
-        command_nr::EMULATE,
-        enabled as usize,
-        0
-    );
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::EMULATE, enabled as usize, 0);
     if result_code.is_err() {
         return false;
     }
@@ -61,12 +56,7 @@ pub fn selected() -> bool {
 }
 
 pub fn configure(tag_type: u8) -> bool {
-    let result_code = syscalls::command(
-        DRIVER_NUMBER,
-        command_nr::CONFIGURE,
-        tag_type as usize,
-        0
-    );
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::CONFIGURE, tag_type as usize, 0);
     if result_code.is_err() {
         return false;
     }

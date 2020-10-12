@@ -1,9 +1,11 @@
+extern crate alloc;
 extern crate lang_items;
 
+use core::fmt::Write;
 use libtock_drivers::console::Console;
-use libtock_drivers::nfc;
+// use libtock_drivers::nfc;
 
-fn main(){
+fn main() {
     let mut console = Console::new();
 
     writeln!(console, "****************************************").unwrap();
@@ -14,9 +16,9 @@ fn main(){
     // 2. Configure Type 4 tag
     // [_.] Enable Tag emulation (currently the tag is always activated)
     // loop {
-        // 1. Allow Receive Buffer
-        // 2. Subscribe to RECEIVE CALLBACK
-        // 3. Allow TX buffer
-        // 4. Subscribe to TX CALLBACK
+    // 1. Allow Receive Buffer
+    // 2. Subscribe to RECEIVE CALLBACK
+    // 3. Allow TX buffer
+    // 4. Subscribe to TX CALLBACK
     // }
 }

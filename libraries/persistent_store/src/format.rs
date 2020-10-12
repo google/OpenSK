@@ -109,7 +109,8 @@ impl Format {
     /// - There are at least 3 pages.
     /// - There are at most [`MAX_PAGE_INDEX`]` + 1` pages.
     /// - A word can be written at least twice between erase cycles.
-    /// - A page can be erased at most [`MAX_ERASE_CYCLE`] times.
+    /// - The maximum number of erase cycles (i.e. the maximum number of times a page can be erased)
+    ///   is at most [`MAX_ERASE_CYCLE`].
     ///
     /// [`MAX_PAGE_SIZE`]: constant.MAX_PAGE_SIZE.html
     /// [`MAX_PAGE_INDEX`]: constant.MAX_PAGE_INDEX.html

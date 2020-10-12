@@ -39,9 +39,9 @@
 //!
 //! The store provides the following _updates_:
 //! -   Given a key and a value, `Insert` updates the store such that the value is
-//!     associated with the key. The value for other keys are left unchanged.
+//!     associated with the key. The values for other keys are left unchanged.
 //! -   Given a key, `Remove` updates the store such that no value is associated for
-//!     the key. The value for other keys are left unchanged. Additionally, if there
+//!     the key. The values for other keys are left unchanged. Additionally, if there
 //!     was a value associated with the key, the value is wiped from the storage
 //!     (all its bits are set to 0).
 //!

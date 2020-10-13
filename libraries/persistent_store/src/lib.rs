@@ -95,7 +95,7 @@
 //! The _total lifetime_ of the store is below `L = ((E + 1) * N - 1) * (P - 2)` and
 //! above `L - M` words, where `E` is the maximum number of erase cycles. The
 //! lifetime is used when capacity is used, including transiently, as well as when
-//! compaction occurs. Compaction frequency and litetime consumption are positively
+//! compaction occurs. Compaction frequency and lifetime consumption are positively
 //! correlated to the store load factor (the ratio of used capacity to total capacity).
 //!
 //! It is possible to approximate the cost of transient words in terms of capacity:
@@ -125,8 +125,8 @@
 //!     It is preferred to use `Clear` with a threshold of 0 to keep the lifetime
 //!     tracking.
 //!
-//! The store properties may still hold outside some of those assumptions but with
-//! weaker probabilities as the usage diverges from them.
+//! The store properties may still hold outside some of those assumptions, but with
+//! an increasing chance of failure.
 //!
 //! # Implementation
 //!
@@ -301,9 +301,18 @@
 //! erased word. Marking an entry as padding or deleted is a single bit operation,
 //! so the property trivially holds. For those cases, the proof relies on the fact
 //! that there is exactly one bit equal to 0 in the 3 first bits. Either the 3 first
-//! bits are still `111` in which case we expect the remaining bits to bit equal
+//! bits are still `111` in which case we expect the remaining bits to be equal
 //! to 1. Otherwise we can use the checksum of the given type of entry because those
-//! 2 types of entries are not reachable from each other.
+//! 2 types of entries are not reachable from each other. Here is a visualization of
+//! the partitioning based on the first 3 bits:
+//!
+//! | First 3 bits | Description        | How to check                 |
+//! | ------------:| ------------------ | ---------------------------- |
+//! | `111`        | Erased word        | All bits set to `1`          |
+//! | `101`        | User entry         | Contains a checksum          |
+//! | `110`        | Internal entry     | Contains a checksum          |
+//! | `100`        | Deleted user entry | No check, atomically written |
+//! | `0??`        | Padding entry      | No check, atomically written |
 //!
 //! To show that valid entries of a given type are not reachable from each other, we
 //! show 3 lemmas:

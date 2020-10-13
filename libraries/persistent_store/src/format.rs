@@ -456,8 +456,15 @@ bitfield! {
     LEN_COMPACT: Length,
 }
 
-// Overview of the first word of the different kind of entries:
+// Overview of the first word of the different kind of entries.
 //
+// Each column represents a bit of the word. The first 2 lines give the position in hexadecimal of
+// the bit in the word (the exponent of 2 when the word is written in binary). Each entry starts
+// with the sequence of bits of its identifier. The dots following the identifier are the number of
+// bits necessary to hold the information of the entry (including the checksum). The remaining free
+// bits after the dots are not used by the entry.
+//
+//         0               1
 //         0123456789abcdef0123456789abcdef
 // padding 0
 //  header 10..............................
@@ -466,7 +473,8 @@ bitfield! {
 //  marker 11010..........
 //  remove 11011.................
 //
-// NOTE: We could pad the internal entries to the right.
+// NOTE: We could pad the internal entries to the right by extending their identifier. This permits
+// to free some space for shorter identifier for future kind of entries.
 
 // The fields of a padding entry.
 bitfield! {

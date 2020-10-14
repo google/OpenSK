@@ -218,6 +218,13 @@ impl Format {
     /// The total virtual capacity in words, denoted by `V`.
     ///
     /// We have `V = (N - 1) * (Q - 1) - M`.
+    ///
+    /// We can show `V >= (N - 2) * (Q - 1)` with the following steps:
+    /// - `M <= Q - 1` from `M < Q` from [`M`] definition
+    /// - `-M >= -(Q - 1)` from above
+    /// - `V >= (N - 1) * (Q - 1) - (Q - 1)` from `V` definition
+    ///
+    /// [`M`]: struct.Format.html#method.max_prefix_len
     pub fn virt_size(&self) -> usize {
         (self.num_pages() - 1) * (self.virt_page_size() - 1) - self.max_prefix_len()
     }
@@ -225,6 +232,13 @@ impl Format {
     /// The total user capacity in words, denoted by `C`.
     ///
     /// We have `C = V - N = (N - 1) * (Q - 2) - M - 1`.
+    ///
+    /// We can show `C >= (N - 2) * (Q - 2) - 2` with the following steps:
+    /// - `V >= (N - 2) * (Q - 1)` from [`V`] definition
+    /// - `C >= (N - 2) * (Q - 1) - N` from `C` definition
+    /// - `(N - 2) * (Q - 1) - N = (N - 2) * (Q - 2) - 2` by calculus
+    ///
+    /// [`V`]: struct.Format.html#method.virt_size
     pub fn total_capacity(&self) -> usize {
         // From the virtual capacity, we reserve N - 1 words for `Erase` entries and 1 word for a
         // `Clear` entry.

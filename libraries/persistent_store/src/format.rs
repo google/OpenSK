@@ -23,28 +23,43 @@ use core::cmp::min;
 type WORD = u32;
 
 /// Size of a word in bytes.
+///
+/// Currently, the store only supports storages where a word is 4 bytes.
 const WORD_SIZE: usize = core::mem::size_of::<WORD>();
 
 /// Maximum size of a page in bytes.
+///
+/// Currently, the store only supports storages where pages are between 8 and 1024 [words].
+///
+/// [words]: constant.WORD_SIZE.html
 const MAX_PAGE_SIZE: usize = 4096;
 
 /// Maximum number of erase cycles.
+///
+/// Currently, the store only supports storages where the maximum number of erase cycles fits on 16
+/// bits.
 const MAX_ERASE_CYCLE: usize = 65535;
 
 /// Maximum page index.
 ///
-/// Thus the maximum number of pages is one more than this number.
+/// Thus the maximum number of pages is one more than this number. Currently, the store only
+/// supports storages where the number of pages is between 3 and 64.
 const MAX_PAGE_INDEX: usize = 63;
 
 /// Maximum key index.
 ///
-/// Thus the number of keys is one more than this number.
+/// Thus the number of keys is one more than this number. Currently, the store only supports 4096
+/// keys.
 const MAX_KEY_INDEX: usize = 4095;
 
 /// Maximum length in bytes of a user payload.
+///
+/// Currently, the store only supports values smaller than 1024 bytes.
 const MAX_VALUE_LEN: usize = 1023;
 
 /// Maximum number of updates per transaction.
+///
+/// Currently, the store only supports transactions with at most 31 updates.
 const MAX_UPDATES: usize = 31;
 
 /// Maximum number of words per virtual page.

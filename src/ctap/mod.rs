@@ -562,26 +562,6 @@ where
             }
         }
 
-        // This case was added in FIDO 2.1.
-        if pin_uv_auth_param == Some(vec![]) {
-            if self.persistent_store.pin_hash()?.is_none() {
-                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
-            }
-        }
-
-        if pin_uv_auth_param.is_some() {
-            match pin_uv_auth_protocol {
-                Some(protocol) => {
-                    if protocol != CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                    }
-                }
-                None => return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-            }
-        }
-
         let hmac_secret_input = extensions.map(|e| e.hmac_secret).flatten();
         if hmac_secret_input.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.

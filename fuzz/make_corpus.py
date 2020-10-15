@@ -1,5 +1,5 @@
-import json
 import argparse
+import json
 import os.path
 
 # Creates a directory containing seed inputs from a json file having
@@ -20,6 +20,7 @@ import os.path
 #  python make_corpus.py ./corpus ./corpus_file.json
 
 
+# Creates a corpus directory to the given path from the given json file.
 def make_corpus(corpus_dir, corpus_json):
   if not os.path.exists(corpus_dir):
     os.makedirs(corpus_dir)
@@ -28,24 +29,24 @@ def make_corpus(corpus_dir, corpus_json):
 
   if os.path.isfile(corpus_json) and \
     os.path.splitext(corpus_json)[-1] == ".json":
-    with open(corpus_json) as file:
-      corpus = json.load(file)
+    with open(corpus_json) as corpus_file:
+      corpus = json.load(corpus_file)
   else:
     raise TypeError
 
   for i, seed_file in enumerate(corpus):
     seed_file_name = "seed_file_" + str(i)
-    raw_hex = seed_file['hex'].decode("hex")
-    with open(os.path.join(corpus_dir, seed_file_name), 'wb') as f:
+    raw_hex = seed_file["hex"].decode("hex")
+    with open(os.path.join(corpus_dir, seed_file_name), "wb") as f:
       f.write(raw_hex)
 
 
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument(
-      'corpus_directory', help='the resulting corpus directory path')
+      "corpus_directory", help="the resulting corpus directory path")
   parser.add_argument(
-      'corpus_json', help='the json file path to make the corpus from')
+      "corpus_json", help="the json file path to make the corpus from")
   args = parser.parse_args()
   try:
     make_corpus(args.corpus_directory, args.corpus_json)

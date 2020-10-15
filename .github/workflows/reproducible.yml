@@ -40,7 +40,7 @@ jobs:
 
       - name: Comparing binary sizes
         if: always()
-        run: git diff --no-index reproducible/reference_elf2tab_${{ matrix.os }}.txt reproducible/elf2tab.txt
+        run: git diff --no-index reproducible/reference_elf2tab_${{ matrix.os }}.txt reproducible/elf2tab.txt || true
       - name: Comparing cryptographic hashes
         if: always()
-        run: git diff --no-index reproducible/reference_binaries_${{ matrix.os }}.sha256sum reproducible/binaries.sha256sum
+        run: git diff --no-index reproducible/reference_binaries_${{ matrix.os }}.sha256sum reproducible/binaries.sha256sum || true

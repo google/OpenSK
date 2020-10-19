@@ -26,7 +26,7 @@ const LED1_B_PIN: Pin = Pin::P0_24;
 
 // The nRF52840 Dongle button
 const BUTTON_PIN: Pin = Pin::P0_18;
-const BUTTON_RST_PIN: Pin = Pin::P0_02;
+// const BUTTON_RST_PIN: Pin = Pin::P0_02;
 
 const UART_RTS: Option<Pin> = Some(Pin::P0_21);
 const UART_TXD: Pin = Pin::P0_20;
@@ -209,12 +209,12 @@ pub unsafe fn reset_handler() {
     let chip = static_init!(nrf52840::chip::Chip, nrf52840::chip::new());
     CHIP = Some(chip);
 
-    nrf52_components::startup::NrfStartupComponent::new(
-        false,
-        BUTTON_RST_PIN,
-        nrf52840::uicr::Regulator0Output::V3_0,
-    )
-    .finalize(());
+    // nrf52_components::startup::NrfStartupComponent::new(
+    //     false,
+    //     BUTTON_RST_PIN,
+    //     nrf52840::uicr::Regulator0Output::V3_0,
+    // )
+    // .finalize(());
 
     // Create capabilities that the board needs to call certain protected kernel
     // functions.

@@ -1,5 +1,6 @@
 use crate::util;
 use core::cell::Cell;
+use libtock_core::result::{ENOMEM, SUCCESS};
 use libtock_core::{callback, syscalls};
 
 const DRIVER_NUMBER: usize = 0x30003;
@@ -23,25 +24,26 @@ mod allow_nr {
     pub const RECEIVE: usize = 2;
 }
 
+pub enum TransOrRecvStatus {
+    Error,
+    InvalidBuffer,
+    OOM,
+    Success,
+}
+
 pub struct NfcTag {}
 
 impl NfcTag {
-    pub fn enable_emulation() {
-        NfcTag::emulate(true);
+    pub fn enable_emulation() -> bool {
+        NfcTag::emulate(true)
     }
 
-    pub fn disable_emulation() {
-        NfcTag::emulate(false);
+    pub fn disable_emulation() -> bool {
+        NfcTag::emulate(false)
     }
 
-    pub fn emulate(enabled: bool) -> bool {
-        let result_code =
-            syscalls::command(DRIVER_NUMBER, command_nr::EMULATE, enabled as usize, 0);
-        if result_code.is_err() {
-            return false;
-        }
-
-        true
+    fn emulate(enabled: bool) -> bool {
+        syscalls::command(DRIVER_NUMBER, command_nr::EMULATE, enabled as usize, 0).is_ok()
     }
 
     /// Subscribe to the tag being SELECTED callback.
@@ -63,34 +65,21 @@ impl NfcTag {
 
     /// Configure the tag type command.
     pub fn configure(tag_type: u8) -> bool {
-        let result_code =
-            syscalls::command(DRIVER_NUMBER, command_nr::CONFIGURE, tag_type as usize, 0);
-        if result_code.is_err() {
-            return false;
-        }
-
-        true
+        syscalls::command(DRIVER_NUMBER, command_nr::CONFIGURE, tag_type as usize, 0).is_ok()
     }
 
-    /// Set the maximum frame delay value to support
-    /// transmission with the reader.
+    /// Set the maximum frame delay value to support transmission with the reader.
     pub fn set_framedelaymax(delay: u32) -> bool {
-        let result_code =
-            syscalls::command(DRIVER_NUMBER, command_nr::FRAMEDELAYMAX, delay as usize, 0);
-        if result_code.is_err() {
-            return false;
-        }
-
-        true
+        syscalls::command(DRIVER_NUMBER, command_nr::FRAMEDELAYMAX, delay as usize, 0).is_ok()
     }
 
     /// 1. Share with the driver a buffer.
     /// 2. Subscribe to having a successful receive callback.
     /// 3. Issue the request for reception.
-    pub fn receive(buf: &mut [u8]) -> bool {
+    pub fn receive(buf: &mut [u8; 256]) -> TransOrRecvStatus {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf);
         if result.is_err() {
-            return false;
+            return TransOrRecvStatus::InvalidBuffer;
         }
 
         let done = Cell::new(false);
@@ -101,25 +90,28 @@ impl NfcTag {
             &mut alarm,
         );
         if subscription.is_err() {
-            return false;
+            return TransOrRecvStatus::Error;
         }
 
-        let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
-        if result_code.is_err() {
-            return false;
+        let result_code =
+            unsafe { syscalls::raw::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0) };
+        match result_code {
+            SUCCESS => (),
+            ENOMEM => return TransOrRecvStatus::OOM,
+            _ => return TransOrRecvStatus::Error,
         }
 
         util::yieldk_for(|| done.get());
-        true
+        TransOrRecvStatus::Success
     }
 
     /// 1. Share with the driver a buffer containing the app's reply.
     /// 2. Subscribe to having a successful transmission callback.
     /// 3. Issue the request for transmitting.
-    pub fn transmit(buf: &mut [u8], amount: usize) -> bool {
+    pub fn transmit(buf: &mut [u8], amount: usize) -> TransOrRecvStatus {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT, buf);
         if result.is_err() {
-            return false;
+            return TransOrRecvStatus::InvalidBuffer;
         }
 
         let done = Cell::new(false);
@@ -130,15 +122,15 @@ impl NfcTag {
             &mut alarm,
         );
         if subscription.is_err() {
-            return false;
+            return TransOrRecvStatus::Error;
         }
 
         let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, amount, 0);
         if result_code.is_err() {
-            return false;
+            return TransOrRecvStatus::Error;
         }
 
         util::yieldk_for(|| done.get());
-        true
+        TransOrRecvStatus::Success
     }
 }

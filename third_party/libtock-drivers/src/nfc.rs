@@ -1,4 +1,4 @@
-use crate::result::TockError;
+use crate::result::TockResult;
 use crate::util;
 use core::cell::Cell;
 use core::mem;
@@ -76,7 +76,7 @@ impl NfcTag {
     /// 1. Share with the driver a buffer.
     /// 2. Subscribe to having a successful receive callback.
     /// 3. Issue the request for reception.
-    pub fn receive(buf: &mut [u8; 256]) -> Result<RecvOp, TockError> {
+    pub fn receive(buf: &mut [u8; 256]) -> TockResult<RecvOp> {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
         // set callback with 2 arguments, to receive ReturnCode and RX Amount
         let result_code = Cell::new(None);
@@ -103,7 +103,7 @@ impl NfcTag {
     /// 1. Share with the driver a buffer containing the app's reply.
     /// 2. Subscribe to having a successful transmission callback.
     /// 3. Issue the request for transmitting.
-    pub fn transmit(buf: &mut [u8], amount: usize) -> Result<usize, TockError> {
+    pub fn transmit(buf: &mut [u8], amount: usize) -> TockResult<usize> {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT, buf)?;
         // set callback with 1 argument, to receive ReturnCode
         let result_code = Cell::new(None);

@@ -79,13 +79,11 @@ impl NfcTag {
     pub fn receive(buf: &mut [u8; 256]) -> Result<RecvOp, TockError> {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
         // set callback with 2 arguments, to receive ReturnCode and RX Amount
-        let done = Cell::new(false);
         let result_code = Cell::new(None);
         let recv_amount = Cell::new(None);
         let mut callback = |result, amount| {
             result_code.set(Some(result));
-            recv_amount.set(Some(amount));
-            done.set(true)
+            recv_amount.set(Some(amount))
         };
         let subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
             DRIVER_NUMBER,
@@ -93,7 +91,7 @@ impl NfcTag {
             &mut callback,
         )?;
         syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0)?;
-        util::yieldk_for(|| done.get());
+        util::yieldk_for(|| recv_amount.get().is_some());
         mem::drop(subscription);
         mem::drop(result);
         Ok(RecvOp {
@@ -108,19 +106,15 @@ impl NfcTag {
     pub fn transmit(buf: &mut [u8], amount: usize) -> Result<usize, TockError> {
         let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT, buf)?;
         // set callback with 1 argument, to receive ReturnCode
-        let done = Cell::new(false);
         let result_code = Cell::new(None);
-        let mut callback = |result| {
-            result_code.set(Some(result));
-            done.set(true)
-        };
+        let mut callback = |result| result_code.set(Some(result));
         let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
             DRIVER_NUMBER,
             subscribe_nr::TRANSMIT,
             &mut callback,
         )?;
         syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, amount, 0)?;
-        util::yieldk_for(|| done.get());
+        util::yieldk_for(|| result_code.get().is_some());
         mem::drop(subscription);
         mem::drop(result);
         Ok(result_code.get().unwrap())

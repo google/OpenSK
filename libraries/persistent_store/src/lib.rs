@@ -13,11 +13,14 @@
 // limitations under the License.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![feature(slice_fill)]
 
 #[macro_use]
 mod bitfield;
+mod buffer;
 mod storage;
 mod store;
 
+pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};
 pub use self::store::{StoreError, StoreResult};

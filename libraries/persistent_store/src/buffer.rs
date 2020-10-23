@@ -310,7 +310,9 @@ impl Storage for BufferStorage {
         // Check and update counters.
         self.incr_page_erases(page);
         // Write to the storage.
-        self.storage[range].fill(0xff);
+        for byte in &mut self.storage[range] {
+            *byte = 0xff;
+        }
         Ok(())
     }
 }

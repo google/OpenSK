@@ -119,7 +119,9 @@ impl BufferStorage {
     ///
     /// # Panics
     ///
-    /// Panics if an interruption was not [armed] and if the interruption already triggered.
+    /// Panics if any of the following conditions hold:
+    /// - An interruption was not [armed].
+    /// - An interruption was armed and it has triggered.
     ///
     /// [armed]: struct.BufferStorage.html#method.arm_interruption
     pub fn disarm_interruption(&mut self) -> usize {
@@ -139,15 +141,18 @@ impl BufferStorage {
 
     /// Corrupts an interrupted operation.
     ///
-    /// Applies the [corruption function] to the storage. Counters are incremented if the operation
-    /// is complete at their level, i.e. a word is written and a page is erased if the corruption
-    /// function writes all its bits.
+    /// Applies the [corruption function] to the storage. Counters are updated accordingly:
+    /// - If a word is fully written, its counter is incremented regardless of whether other words
+    ///   of the same operation have been fully written.
+    /// - If a page is fully erased, its counter is incremented (and its word counters are reset).
     ///
     /// # Panics
     ///
-    /// Panics if an interruption was not [armed] and if the interruption did not trigger. May also
-    /// panic if the corruption function corrupts more bits than allowed or if the interrupted
-    /// operation itself would have panicked.
+    /// Panics if any of the following conditions hold:
+    /// - An interruption was not [armed].
+    /// - An interruption was armed but did not trigger.
+    /// - The corruption function corrupts more bits than allowed.
+    /// - The interrupted operation itself would have panicked.
     ///
     /// [armed]: struct.BufferStorage.html#method.arm_interruption
     /// [corruption function]: type.BufferCorruptFunction.html
@@ -339,7 +344,7 @@ impl core::fmt::Display for BufferStorage {
 
 /// Represents a storage operation.
 ///
-/// It is polymorphic over the ownership of the byte slice ot avoid unnecessary copies.
+/// It is polymorphic over the ownership of the byte slice to avoid unnecessary copies.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum BufferOperation<ByteSlice: Borrow<[u8]>> {
     /// Represents a write operation.
@@ -459,7 +464,7 @@ mod tests {
         max_page_erases: 3,
         strict_write: true,
     };
-    // Those words are decreasing bit patterns. Bits are only changed from 1 to 0 and at last one
+    // Those words are decreasing bit patterns. Bits are only changed from 1 to 0 and at least one
     // bit is changed.
     const BLANK_WORD: &[u8] = &[0xff, 0xff, 0xff, 0xff];
     const FIRST_WORD: &[u8] = &[0xee, 0xdd, 0xbb, 0x77];

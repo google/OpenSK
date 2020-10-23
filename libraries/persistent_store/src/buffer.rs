@@ -105,13 +105,15 @@ impl BufferStorage {
     ///
     /// Before each subsequent mutable operation (write or erase), the delay is decremented if
     /// positive. If the delay is elapsed, the operation is saved and an error is returned.
-    /// Subsequent operations will panic until the interrupted operation is [corrupted].
+    /// Subsequent operations will panic until the interrupted operation is [corrupted] or the
+    /// interruption is [reset].
     ///
     /// # Panics
     ///
     /// Panics if an interruption is already armed.
     ///
     /// [corrupted]: struct.BufferStorage.html#method.corrupt_operation
+    /// [reset]: struct.BufferStorage.html#method.reset_interruption
     pub fn arm_interruption(&mut self, delay: usize) {
         self.interruption.arm(delay);
     }

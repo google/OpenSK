@@ -19,6 +19,9 @@ use alloc::vec;
 
 /// Simulates a flash storage using a buffer in memory.
 ///
+/// This buffer storage can be used in place of an actual flash storage. It is particularly useful
+/// for tests and fuzzing, for which it has dedicated functionalities.
+///
 /// This storage tracks how many times words are written between page erase cycles, how many times
 /// pages are erased, and whether an operation flips bits in the wrong direction (optional).
 /// Operations panic if those conditions are broken. This storage also permits to interrupt
@@ -222,6 +225,11 @@ impl BufferStorage {
     /// The partial write is described as if `complete` was supposed to be written to the storage
     /// starting at byte `index`, but actually only `value` was written. Word counters are
     /// incremented only if their value would change and they would be completely written.
+    ///
+    /// # Preconditions
+    ///
+    /// - `index` must be word-aligned.
+    /// - `value` and `complete` must have the same word-aligned length.
     ///
     /// # Panics
     ///

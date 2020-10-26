@@ -795,7 +795,7 @@ pub fn is_erased(slice: &[u8]) -> bool {
 /// Divides then takes ceiling.
 ///
 /// Returns `ceil(x / m)` with mathematical notations. Assumes `x + m` does not overflow.
-pub const fn div_ceil(x: usize, m: usize) -> usize {
+const fn div_ceil(x: usize, m: usize) -> usize {
     (x + m - 1) / m
 }
 

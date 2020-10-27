@@ -7,6 +7,7 @@ use libtock_core::{callback, syscalls};
 const DRIVER_NUMBER: usize = 0x30003;
 
 mod command_nr {
+    pub const CHECK: usize = 0;
     pub const TRANSMIT: usize = 1;
     pub const RECEIVE: usize = 2;
     pub const EMULATE: usize = 3;
@@ -34,6 +35,11 @@ pub struct RecvOp {
 pub struct NfcTag {}
 
 impl NfcTag {
+    /// Check the existence of an NFC driver.
+    pub fn setup() -> bool {
+        syscalls::command(DRIVER_NUMBER, command_nr::CHECK, 0, 0).is_ok()
+    }
+
     pub fn enable_emulation() -> bool {
         NfcTag::emulate(true)
     }

@@ -352,9 +352,13 @@ extern crate alloc;
 mod bitfield;
 mod buffer;
 mod format;
+#[cfg(feature = "std")]
+mod model;
 mod storage;
 mod store;
 
 pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
+#[cfg(feature = "std")]
+pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};
-pub use self::store::{StoreError, StoreResult};
+pub use self::store::{StoreError, StoreRatio, StoreResult, StoreUpdate};

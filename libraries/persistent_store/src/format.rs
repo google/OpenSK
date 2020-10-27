@@ -76,7 +76,7 @@ const MAX_UPDATES: usize = 31;
 const MAX_VIRT_PAGE_SIZE: usize = div_ceil(MAX_PAGE_SIZE, WORD_SIZE) - CONTENT_WORD;
 
 /// Word with all bits set to one.
-const ERASED_WORD: u32 = 0xffffffff;
+const ERASED_WORD: WORD = !(0 as WORD);
 
 /// Helpers for a given storage configuration.
 #[derive(Clone, Debug)]
@@ -449,7 +449,9 @@ impl Format {
 
     /// Returns the minimum number of words to represent a given number of bytes.
     ///
-    /// Assumes `bytes + self.word_size()` does not overflow.
+    /// # Preconditions
+    ///
+    /// - `bytes + self.word_size()` does not overflow.
     pub fn bytes_to_words(&self, bytes: usize) -> usize {
         div_ceil(bytes, self.word_size())
     }
@@ -808,7 +810,11 @@ pub fn is_erased(slice: &[u8]) -> bool {
 
 /// Divides then takes ceiling.
 ///
-/// Returns `ceil(x / m)` with mathematical notations. Assumes `x + m` does not overflow.
+/// Returns `ceil(x / m)` in mathematical notations (not Rust code).
+///
+/// # Preconditions
+///
+/// - `x + m` does not overflow.
 const fn div_ceil(x: usize, m: usize) -> usize {
     (x + m - 1) / m
 }

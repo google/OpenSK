@@ -27,6 +27,11 @@ type WORD = u32;
 /// Currently, the store only supports storages where a word is 4 bytes.
 const WORD_SIZE: usize = core::mem::size_of::<WORD>();
 
+/// Minimum number of words per page.
+///
+/// Currently, the store only supports storages where pages have at least 8 words.
+const MIN_NUM_WORDS_PER_PAGE: usize = 8;
+
 /// Maximum size of a page in bytes.
 ///
 /// Currently, the store only supports storages where pages are between 8 and 1024 [words].
@@ -39,6 +44,11 @@ const MAX_PAGE_SIZE: usize = 4096;
 /// Currently, the store only supports storages where the maximum number of erase cycles fits on 16
 /// bits.
 const MAX_ERASE_CYCLE: usize = 65535;
+
+/// Minimum number of pages.
+///
+/// Currently, the store only supports storages with at least 3 pages.
+const MIN_NUM_PAGES: usize = 3;
 
 /// Maximum page index.
 ///
@@ -117,16 +127,19 @@ impl Format {
     /// Returns whether a storage is supported.
     ///
     /// A storage is supported if the following conditions hold:
-    /// - The size of a word is 4 bytes.
+    /// - The size of a word is [`WORD_SIZE`] bytes.
     /// - The size of a word evenly divides the size of a page.
-    /// - A page contains at least 8 words.
+    /// - A page contains at least [`MIN_NUM_WORDS_PER_PAGE`] words.
     /// - A page contains at most [`MAX_PAGE_SIZE`] bytes.
-    /// - There are at least 3 pages.
+    /// - There are at least [`MIN_NUM_PAGES`] pages.
     /// - There are at most [`MAX_PAGE_INDEX`]` + 1` pages.
     /// - A word can be written at least twice between erase cycles.
     /// - The maximum number of erase cycles is at most [`MAX_ERASE_CYCLE`].
     ///
+    /// [`WORD_SIZE`]: constant.WORD_SIZE.html
+    /// [`MIN_NUM_WORDS_PER_PAGE`]: constant.MIN_NUM_WORDS_PER_PAGE.html
     /// [`MAX_PAGE_SIZE`]: constant.MAX_PAGE_SIZE.html
+    /// [`MIN_NUM_PAGES`]: constant.MIN_NUM_PAGES.html
     /// [`MAX_PAGE_INDEX`]: constant.MAX_PAGE_INDEX.html
     /// [`MAX_ERASE_CYCLE`]: constant.MAX_ERASE_CYCLE.html
     fn is_storage_supported<S: Storage>(storage: &S) -> bool {
@@ -135,10 +148,10 @@ impl Format {
         let num_pages = storage.num_pages();
         let max_word_writes = storage.max_word_writes();
         let max_page_erases = storage.max_page_erases();
-        word_size == 4
+        word_size == WORD_SIZE
             && page_size % word_size == 0
-            && (8 * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
-            && (3 <= num_pages && num_pages <= MAX_PAGE_INDEX + 1)
+            && (MIN_NUM_WORDS_PER_PAGE * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
+            && (MIN_NUM_PAGES <= num_pages && num_pages <= MAX_PAGE_INDEX + 1)
             && max_word_writes >= 2
             && max_page_erases <= MAX_ERASE_CYCLE
     }
@@ -150,14 +163,14 @@ impl Format {
 
     /// The size of a page in bytes.
     ///
-    /// We have `32 <= self.page_size() <= MAX_PAGE_SIZE` assuming a word is 4 bytes.
+    /// We have `MIN_NUM_WORDS_PER_PAGE * self.word_size() <= self.page_size() <= MAX_PAGE_SIZE`.
     pub fn page_size(&self) -> usize {
         self.page_size
     }
 
     /// The number of pages in the storage, denoted by `N`.
     ///
-    /// We have `3 <= N <= MAX_PAGE_INDEX + 1`.
+    /// We have `MIN_NUM_PAGES <= N <= MAX_PAGE_INDEX + 1`.
     pub fn num_pages(&self) -> usize {
         self.num_pages
     }
@@ -190,14 +203,15 @@ impl Format {
     ///
     /// A virtual page is stored in a physical page after the page header.
     ///
-    /// We have `6 <= Q <= MAX_VIRT_PAGE_SIZE`.
+    /// We have `MIN_NUM_WORDS_PER_PAGE - 2 <= Q <= MAX_VIRT_PAGE_SIZE`.
     pub fn virt_page_size(&self) -> usize {
         self.page_size() / self.word_size() - CONTENT_WORD
     }
 
     /// The maximum length in bytes of a user payload.
     ///
-    /// We have `20 <= self.max_value_len() <= MAX_VALUE_LEN` assuming words are 4 bytes.
+    /// We have `(MIN_NUM_WORDS_PER_PAGE - 3) * self.word_size() <= self.max_value_len() <=
+    /// MAX_VALUE_LEN`.
     pub fn max_value_len(&self) -> usize {
         min(
             (self.virt_page_size() - 1) * self.word_size(),
@@ -210,7 +224,7 @@ impl Format {
     /// A prefix is the first words of a virtual page that belong to the last entry of the previous
     /// virtual page. This happens because entries may overlap up to 2 virtual pages.
     ///
-    /// We have `5 <= M < Q`.
+    /// We have `MIN_NUM_WORDS_PER_PAGE - 3 <= M < Q`.
     pub fn max_prefix_len(&self) -> usize {
         self.bytes_to_words(self.max_value_len())
     }

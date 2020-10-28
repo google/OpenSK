@@ -13,6 +13,7 @@ mod command_nr {
     pub const EMULATE: usize = 3;
     pub const CONFIGURE: usize = 4;
     pub const FRAMEDELAYMAX: usize = 5;
+    pub const SELECTED: usize = 6;
 }
 
 mod subscribe_nr {
@@ -27,6 +28,7 @@ mod allow_nr {
 }
 
 #[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub struct RecvOp {
     pub result_code: usize,
     pub recv_amount: usize,
@@ -65,6 +67,11 @@ impl NfcTag {
             return false;
         }
 
+        let result = syscalls::command(DRIVER_NUMBER, command_nr::SELECTED, 0, 0);
+        if result.is_err() {
+            return false;
+        }
+
         util::yieldk_for(|| is_selected.get());
         true
     }
@@ -83,27 +90,23 @@ impl NfcTag {
     /// 2. Subscribe to having a successful receive callback.
     /// 3. Issue the request for reception.
     pub fn receive(buf: &mut [u8; 256]) -> TockResult<RecvOp> {
-        let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
+        let _result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
         // set callback with 2 arguments, to receive ReturnCode and RX Amount
-        let result_code = Cell::new(None);
-        let recv_amount = Cell::new(None);
+        let recv_data = Cell::new(None);
         let mut callback = |result, amount| {
-            result_code.set(Some(result));
-            recv_amount.set(Some(amount))
+            recv_data.set(Some(RecvOp {
+                result_code: result,
+                recv_amount: amount,
+            }))
         };
-        let subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
+        let _subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
             DRIVER_NUMBER,
             subscribe_nr::RECEIVE,
             &mut callback,
         )?;
         syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0)?;
-        util::yieldk_for(|| recv_amount.get().is_some());
-        mem::drop(subscription);
-        mem::drop(result);
-        Ok(RecvOp {
-            result_code: result_code.get().unwrap(),
-            recv_amount: recv_amount.get().unwrap(),
-        })
+        util::yieldk_for(|| recv_data.get().is_some());
+        Ok(recv_data.get().unwrap())
     }
 
     /// 1. Share with the driver a buffer containing the app's reply.

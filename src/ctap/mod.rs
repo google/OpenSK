@@ -373,7 +373,7 @@ where
             }
             (extensions.hmac_secret, cred_protect)
         } else {
-            (false, None)
+            (false, DEFAULT_CRED_PROTECT)
         };
 
         let cred_random = if use_hmac_extension {

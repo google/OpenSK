@@ -90,7 +90,7 @@ impl NfcTag {
     /// 2. Subscribe to having a successful receive callback.
     /// 3. Issue the request for reception.
     pub fn receive(buf: &mut [u8; 256]) -> TockResult<RecvOp> {
-        let _result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
+        let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
         // set callback with 2 arguments, to receive ReturnCode and RX Amount
         let recv_data = Cell::new(None);
         let mut callback = |result, amount| {
@@ -99,13 +99,15 @@ impl NfcTag {
                 recv_amount: amount,
             }))
         };
-        let _subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
+        let subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
             DRIVER_NUMBER,
             subscribe_nr::RECEIVE,
             &mut callback,
         )?;
         syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0)?;
         util::yieldk_for(|| recv_data.get().is_some());
+        mem::drop(subscription);
+        mem::drop(result);
         Ok(recv_data.get().unwrap())
     }
 

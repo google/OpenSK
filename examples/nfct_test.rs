@@ -1,23 +1,44 @@
 #![no_std]
+#![allow(unused_imports)]
 
 extern crate alloc;
 extern crate lang_items;
+extern crate libtock_drivers;
 
 use core::fmt::Write;
+use libtock_core::result::CommandError;
 use libtock_drivers::console::Console;
+#[cfg(feature = "with_nfc")]
 use libtock_drivers::nfc::NfcTag;
+#[cfg(feature = "with_nfc")]
 use libtock_drivers::nfc::RecvOp;
+use libtock_drivers::result::TockError;
 
 #[allow(dead_code)]
-/// Helper function to write a slice into a fixed
-/// length transmission buffer.
+/// Helper function to write a slice into a transmission buffer.
 fn write_tx_buffer(buf: &mut [u8], slice: &[u8]) {
     for (i, &byte) in slice.iter().enumerate() {
         buf[i] = byte;
     }
 }
 
+#[allow(dead_code)]
+/// Helper function to write on console the received packet.
+fn print_rx_buffer(buf: &mut [u8], amount: usize) {
+    if amount < 1 || amount > buf.len() {
+        return;
+    }
+    let mut console = Console::new();
+    write!(console, " -- RX Packet:").unwrap();
+    for byte in buf.iter().take(amount - 1) {
+        write!(console, " {:02x?}", byte).unwrap();
+    }
+    writeln!(console, " {:02x?}", buf[amount - 1]).unwrap();
+}
+
+#[cfg(feature = "with_nfc")]
 #[derive(PartialEq, Eq)]
+/// enum for reserving the NFC tag state.
 enum State {
     Enabled,
     Disabled,
@@ -29,8 +50,11 @@ fn main() {
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "nfct_test application is installed").unwrap();
 
+    #[cfg(feature = "with_nfc")]
     let mut state = State::Disabled;
+    #[cfg(feature = "with_nfc")]
     let mut state_change_cntr = 0;
+    #[cfg(feature = "with_nfc")]
     loop {
         match state {
             State::Enabled => {
@@ -40,28 +64,15 @@ fn main() {
                         Ok(RecvOp {
                             recv_amount: amount,
                             ..
-                        }) => match amount {
-                            1 => writeln!(console, " -- RX Packet: {:02x?}", rx_buf[0],).unwrap(),
-                            2 => writeln!(
-                                console,
-                                " -- RX Packet: {:02x?} {:02x?}",
-                                rx_buf[0], rx_buf[1],
-                            )
-                            .unwrap(),
-                            3 => writeln!(
-                                console,
-                                " -- RX Packet: {:02x?} {:02x?} {:02x?}",
-                                rx_buf[0], rx_buf[1], rx_buf[2],
-                            )
-                            .unwrap(),
-                            _ => writeln!(
-                                console,
-                                " -- RX Packet: {:02x?} {:02x?} {:02x?} {:02x?}",
-                                rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3],
-                            )
-                            .unwrap(),
-                        },
-                        Err(_) => writeln!(console, " -- rx error!").unwrap(),
+                        }) => print_rx_buffer(&mut rx_buf, amount),
+                        Err(TockError::Command(CommandError {
+                            return_code: -4, /* EOFF: Not Ready */
+                            ..
+                        })) => (),
+                        Err(TockError::Command(CommandError {
+                            return_code: value, ..
+                        })) => writeln!(console, " -- Err({})!", value).unwrap(),
+                        Err(_) => writeln!(console, " -- RX ERROR").unwrap(),
                     }
 
                     match rx_buf[0] {
@@ -83,11 +94,24 @@ fn main() {
                             }
                         }
                         0x02 | 0x03 /* APDU Prefix */ => {
-                            let mut reply = [rx_buf[0], 0x90, 0x00];
-                            let amount = reply.len();
-                            match NfcTag::transmit(&mut reply, amount) {
-                                Ok(_) => (),
-                                Err(_) => writeln!(console, " -- tx error!").unwrap(),
+                            // If the received packet is applet selection command (FIDO 2)
+                            if rx_buf[1] == 0x00 && rx_buf[2] == 0xa4 && rx_buf[3] == 0x04 {
+                                // Vesion: "U2F_V2"
+                                // let mut reply = [rx_buf[0], 0x55, 0x32, 0x46, 0x5f, 0x56, 0x32, 0x90, 0x00,];
+                                // Vesion: "FIDO_2_0"
+                                let mut reply = [rx_buf[0], 0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30, 0x90, 0x00,];
+                                let amount = reply.len();
+                                match NfcTag::transmit(&mut reply, amount) {
+                                    Ok(_) => (),
+                                    Err(_) => writeln!(console, " -- tx error!").unwrap(),
+                                }
+                            } else {
+                                let mut reply = [rx_buf[0], 0x90, 0x00];
+                                let amount = reply.len();
+                                match NfcTag::transmit(&mut reply, amount) {
+                                    Ok(_) => (),
+                                    Err(_) => writeln!(console, " -- tx error!").unwrap(),
+                                }
                             }
                         }
                         0x52 | 0x50 /* WUPA | Halt */ => {
@@ -97,30 +121,20 @@ fn main() {
                             state = State::Disabled;
                             break;
                         }
-                        _ => {
-                        }
+                        _ => (),
                     }
                 }
             }
             State::Disabled => {
-                if NfcTag::enable_emulation() {
-                    writeln!(console, " -- TAG ENABLED").unwrap();
-                }
-                // 1. Configure Type 4 tag
+                NfcTag::enable_emulation();
+                // Configure Type 4 tag
                 if NfcTag::configure(4) {
-                    writeln!(console, " -- TAG CONFIGURED").unwrap();
+                    state = State::Enabled;
                 }
-                // 2. Subscribe to a SELECTED CALLBACK
-                if NfcTag::selected() {
-                    writeln!(console, " -- TAG SELECTED").unwrap();
-                    // 0xfffff results in 1048575 / 13.56e6 = 77ms
-                    NfcTag::set_framedelaymax(0xfffff);
-                }
-                state = State::Enabled;
             }
         }
         state_change_cntr += 1;
-        if state_change_cntr > 10 && state == State::Disabled {
+        if state_change_cntr > 100 && state == State::Disabled {
             break;
         }
     }

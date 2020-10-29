@@ -69,18 +69,32 @@ pub type StoreResult<T> = Result<T, StoreError>;
 ///
 /// This is used for the [capacity] and [lifetime] metrics. Those metrics are measured in words.
 ///
+/// # Invariant
+///
+/// - The used value does not exceed the total: `used <= total`.
+///
 /// [capacity]: struct.Store.html#method.capacity
 /// [lifetime]: struct.Store.html#method.lifetime
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct StoreRatio {
     /// How much of the metric is used.
-    pub used: usize,
+    pub(crate) used: usize,
 
     /// How much of the metric can be used at most.
-    pub total: usize,
+    pub(crate) total: usize,
 }
 
 impl StoreRatio {
+    /// How much of the metric is used.
+    pub fn used(self) -> usize {
+        self.used
+    }
+
+    /// How much of the metric can be used at most.
+    pub fn total(self) -> usize {
+        self.total
+    }
+
     /// How much of the metric is remaining.
     pub fn remaining(self) -> usize {
         self.total - self.used

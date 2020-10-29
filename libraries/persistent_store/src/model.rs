@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug)]
 pub struct StoreModel {
     /// Represents the content of the store.
-    map: HashMap<usize, Box<[u8]>>,
+    content: HashMap<usize, Box<[u8]>>,
 
     /// The modeled storage configuration.
     format: Format,
@@ -53,13 +53,13 @@ pub enum StoreOperation {
 impl StoreModel {
     /// Creates an empty model for a given storage configuration.
     pub fn new(format: Format) -> StoreModel {
-        let map = HashMap::new();
-        StoreModel { map, format }
+        let content = HashMap::new();
+        StoreModel { content, format }
     }
 
     /// Returns the modeled content.
-    pub fn map(&self) -> &HashMap<usize, Box<[u8]>> {
-        &self.map
+    pub fn content(&self) -> &HashMap<usize, Box<[u8]>> {
+        &self.content
     }
 
     /// Returns the storage configuration.
@@ -79,7 +79,7 @@ impl StoreModel {
     /// Returns the capacity according to the model.
     pub fn capacity(&self) -> StoreRatio {
         let total = self.format.total_capacity();
-        let used: usize = self.map.values().map(|x| self.entry_size(x)).sum();
+        let used: usize = self.content.values().map(|x| self.entry_size(x)).sum();
         StoreRatio { used, total }
     }
 
@@ -100,11 +100,15 @@ impl StoreModel {
         }
         // Fail if there is not enough capacity.
         let capacity = match updates.len() {
+            // An empty transaction doesn't consume anything.
             0 => 0,
+            // Transactions with a single update are optimized by avoiding a marker entry.
             1 => match &updates[0] {
                 StoreUpdate::Insert { value, .. } => self.entry_size(value),
+                // Transactions with a single update which is a removal don't consume anything.
                 StoreUpdate::Remove { .. } => 0,
             },
+            // A transaction consumes one word for the marker entry in addition to its updates.
             _ => 1 + updates.iter().map(|x| self.update_size(x)).sum::<usize>(),
         };
         if self.capacity().remaining() < capacity {
@@ -114,10 +118,10 @@ impl StoreModel {
         for update in updates {
             match update {
                 StoreUpdate::Insert { key, value } => {
-                    self.map.insert(key, value.into_boxed_slice());
+                    self.content.insert(key, value.into_boxed_slice());
                 }
                 StoreUpdate::Remove { key } => {
-                    self.map.remove(&key);
+                    self.content.remove(&key);
                 }
             }
         }
@@ -129,7 +133,7 @@ impl StoreModel {
         if min_key > self.format.max_key() {
             return Err(StoreError::InvalidArgument);
         }
-        self.map.retain(|&k, _| k < min_key);
+        self.content.retain(|&k, _| k < min_key);
         Ok(())
     }
 

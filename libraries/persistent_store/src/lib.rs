@@ -348,8 +348,6 @@
 #[macro_use]
 extern crate alloc;
 
-#[macro_use]
-mod bitfield;
 mod buffer;
 mod format;
 #[cfg(feature = "std")]
@@ -362,3 +360,25 @@ pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
 pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};
 pub use self::store::{StoreError, StoreRatio, StoreResult, StoreUpdate};
+
+/// Internal representation of natural numbers.
+///
+/// In Rust natural numbers are represented as `usize`. However, internally we represent them as
+/// `u32`. This is done to preserve semantics across different targets. This is useful when tests
+/// run with `usize = u64` while the actual target has `usize = u32`.
+///
+/// To avoid too many conversions between `usize` and `Nat` which are necessary when interfacing
+/// with Rust, `usize` is used instead of `Nat` in code meant only for tests.
+///
+/// Currently, the store only supports targets with `usize = u32`.
+type Nat = u32;
+
+/// Returns the internal representation of a Rust natural number.
+///
+/// # Panics
+///
+/// Panics if the conversion overflows.
+fn usize_to_nat(x: usize) -> Nat {
+    use core::convert::TryFrom;
+    Nat::try_from(x).unwrap()
+}

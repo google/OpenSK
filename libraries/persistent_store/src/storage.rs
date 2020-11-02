@@ -37,9 +37,13 @@ pub type StorageResult<T> = Result<T, StorageError>;
 /// Abstracts a flash storage.
 pub trait Storage {
     /// The size of a word in bytes.
+    ///
+    /// A word is the smallest unit of writable flash.
     fn word_size(&self) -> usize;
 
     /// The size of a page in bytes.
+    ///
+    /// A page is the smallest unit of erasable flash.
     fn page_size(&self) -> usize;
 
     /// The number of pages in the storage.

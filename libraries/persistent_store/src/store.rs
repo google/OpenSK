@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::StorageError;
+use crate::{Nat, StorageError};
 use alloc::vec::Vec;
 
 /// Errors returned by store operations.
@@ -78,26 +78,26 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct StoreRatio {
     /// How much of the metric is used.
-    pub(crate) used: usize,
+    pub(crate) used: Nat,
 
     /// How much of the metric can be used at most.
-    pub(crate) total: usize,
+    pub(crate) total: Nat,
 }
 
 impl StoreRatio {
     /// How much of the metric is used.
     pub fn used(self) -> usize {
-        self.used
+        self.used as usize
     }
 
     /// How much of the metric can be used at most.
     pub fn total(self) -> usize {
-        self.total
+        self.total as usize
     }
 
     /// How much of the metric is remaining.
     pub fn remaining(self) -> usize {
-        self.total - self.used
+        (self.total - self.used) as usize
     }
 }
 

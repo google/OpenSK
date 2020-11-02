@@ -847,6 +847,13 @@ if __name__ == "__main__":
             "support for CTAP2.1 protocol."),
   )
   main_parser.add_argument(
+      "--nfc",
+      action="append_const",
+      const="with_nfc",
+      dest="features",
+      help=("Compiles the OpenSK application with support for nfc."),
+  )
+  main_parser.add_argument(
       "--regen-keys",
       action="store_true",
       default=False,
@@ -921,13 +928,6 @@ if __name__ == "__main__":
       const="console_test",
       help=("Compiles and installs the console_test example that tests the "
             "console driver with messages of various lengths."))
-  apps_group.add_argument(
-      "--nfct_test",
-      dest="application",
-      action="store_const",
-      const="nfct_test",
-      help=("Compiles and installs the nfct_test example that tests the "
-            "NFC driver."))
 
   main_parser.set_defaults(features=["with_ctap1"])
 

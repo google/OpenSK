@@ -847,6 +847,13 @@ if __name__ == "__main__":
             "support for CTAP2.1 protocol."),
   )
   main_parser.add_argument(
+      "--nfc",
+      action="append_const",
+      const="with_nfc",
+      dest="features",
+      help=("Compiles the OpenSK application with support for nfc."),
+  )
+  main_parser.add_argument(
       "--regen-keys",
       action="store_true",
       default=False,

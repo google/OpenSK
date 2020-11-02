@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO(ia0): Remove when the module is used.
-#![allow(dead_code)]
-
 #[macro_use]
 mod bitfield;
 

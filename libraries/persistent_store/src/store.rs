@@ -262,20 +262,17 @@ impl<S: Storage> Store<S> {
         if count > self.format.max_updates() {
             return Err(StoreError::InvalidArgument);
         }
-        // Compute how much capacity (including transient) we need.
+        // Check that the updates are valid.
         let mut sorted_keys = Vec::with_capacity(count as usize);
-        let mut word_capacity = 1 + count;
         for update in updates {
             let key = usize_to_nat(update.key());
             if key > self.format.max_key() {
                 return Err(StoreError::InvalidArgument);
             }
             if let Some(value) = update.value() {
-                let value_len = usize_to_nat(value.len());
-                if value_len > self.format.max_value_len() {
+                if usize_to_nat(value.len()) > self.format.max_value_len() {
                     return Err(StoreError::InvalidArgument);
                 }
-                word_capacity += self.format.bytes_to_words(value_len);
             }
             match sorted_keys.binary_search(&key) {
                 Ok(_) => return Err(StoreError::InvalidArgument),
@@ -283,7 +280,7 @@ impl<S: Storage> Store<S> {
             }
         }
         // Reserve the capacity.
-        self.reserve(word_capacity)?;
+        self.reserve(self.format.transaction_capacity(updates))?;
         // Write the marker entry.
         let marker = self.tail()?;
         let entry = self.format.build_internal(InternalEntry::Marker { count });

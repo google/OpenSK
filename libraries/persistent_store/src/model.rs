@@ -79,7 +79,12 @@ impl StoreModel {
     /// Returns the capacity according to the model.
     pub fn capacity(&self) -> StoreRatio {
         let total = self.format.total_capacity();
-        let used = usize_to_nat(self.content.values().map(|x| self.entry_size(x)).sum());
+        let used = usize_to_nat(
+            self.content
+                .values()
+                .map(|x| self.format.entry_size(x) as usize)
+                .sum(),
+        );
         StoreRatio { used, total }
     }
 
@@ -99,18 +104,7 @@ impl StoreModel {
             return Err(StoreError::InvalidArgument);
         }
         // Fail if there is not enough capacity.
-        let capacity = match updates.len() {
-            // An empty transaction doesn't consume anything.
-            0 => 0,
-            // Transactions with a single update are optimized by avoiding a marker entry.
-            1 => match &updates[0] {
-                StoreUpdate::Insert { value, .. } => self.entry_size(value),
-                // Transactions with a single update which is a removal don't consume anything.
-                StoreUpdate::Remove { .. } => 0,
-            },
-            // A transaction consumes one word for the marker entry in addition to its updates.
-            _ => 1 + updates.iter().map(|x| self.update_size(x)).sum::<usize>(),
-        };
+        let capacity = self.format.transaction_capacity(&updates) as usize;
         if self.capacity().remaining() < capacity {
             return Err(StoreError::NoCapacity);
         }
@@ -143,19 +137,6 @@ impl StoreModel {
             return Err(StoreError::NoCapacity);
         }
         Ok(())
-    }
-
-    /// Returns the word capacity of an update.
-    fn update_size(&self, update: &StoreUpdate) -> usize {
-        match update {
-            StoreUpdate::Insert { value, .. } => self.entry_size(value),
-            StoreUpdate::Remove { .. } => 1,
-        }
-    }
-
-    /// Returns the word capacity of an entry.
-    fn entry_size(&self, value: &[u8]) -> usize {
-        1 + self.format.bytes_to_words(usize_to_nat(value.len())) as usize
     }
 
     /// Returns whether an update is valid.

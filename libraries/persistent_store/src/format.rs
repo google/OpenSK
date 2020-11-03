@@ -18,7 +18,7 @@ mod bitfield;
 #[cfg(test)]
 use self::bitfield::Length;
 use self::bitfield::{count_zeros, num_bits, Bit, Checksum, ConstField, Field};
-use crate::{usize_to_nat, Nat, Storage, StorageIndex, StoreError, StoreResult};
+use crate::{usize_to_nat, Nat, Storage, StorageIndex, StoreError, StoreResult, StoreUpdate};
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::convert::TryFrom;
@@ -489,6 +489,35 @@ impl Format {
     /// Sets the deleted bit in the first word of a user entry.
     pub fn set_deleted(&self, word: &mut Word) {
         HEADER_DELETED.set(word);
+    }
+
+    /// Returns the capacity required by a transaction.
+    pub fn transaction_capacity(&self, updates: &[StoreUpdate]) -> Nat {
+        match updates.len() {
+            // An empty transaction doesn't consume anything.
+            0 => 0,
+            // Transactions with a single update are optimized by avoiding a marker entry.
+            1 => match &updates[0] {
+                StoreUpdate::Insert { value, .. } => self.entry_size(value),
+                // Transactions with a single update which is a removal don't consume anything.
+                StoreUpdate::Remove { .. } => 0,
+            },
+            // A transaction consumes one word for the marker entry in addition to its updates.
+            _ => 1 + updates.iter().map(|x| self.update_capacity(x)).sum::<Nat>(),
+        }
+    }
+
+    /// Returns the capacity of an update.
+    fn update_capacity(&self, update: &StoreUpdate) -> Nat {
+        match update {
+            StoreUpdate::Insert { value, .. } => self.entry_size(value),
+            StoreUpdate::Remove { .. } => 1,
+        }
+    }
+
+    /// Returns the size of a user entry given its value.
+    pub fn entry_size(&self, value: &[u8]) -> Nat {
+        1 + self.bytes_to_words(usize_to_nat(value.len()))
     }
 
     /// Returns the minimum number of words to represent a given number of bytes.

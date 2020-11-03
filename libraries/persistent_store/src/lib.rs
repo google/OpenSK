@@ -359,7 +359,9 @@ pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
 #[cfg(feature = "std")]
 pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};
-pub use self::store::{StoreError, StoreRatio, StoreResult, StoreUpdate};
+pub use self::store::{
+    Store, StoreError, StoreHandle, StoreIter, StoreRatio, StoreResult, StoreUpdate,
+};
 
 /// Internal representation of natural numbers.
 ///

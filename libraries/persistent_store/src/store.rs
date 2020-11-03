@@ -324,7 +324,7 @@ impl<S: Storage> Store<S> {
         if self.capacity()?.remaining() < length {
             return Err(StoreError::NoCapacity);
         }
-        if self.immediate_capacity()? < length as isize {
+        if self.immediate_capacity()? < usize_to_nat(length) {
             self.compact()?;
         }
         Ok(())
@@ -623,7 +623,7 @@ impl<S: Storage> Store<S> {
         if self.capacity()?.remaining() < length as usize {
             return Err(StoreError::NoCapacity);
         }
-        while self.immediate_capacity()? < length as isize {
+        while self.immediate_capacity()? < length {
             self.compact()?;
         }
         Ok(())
@@ -838,16 +838,10 @@ impl<S: Storage> Store<S> {
     }
 
     /// Returns the number of words that can be written without compaction.
-    ///
-    /// This can be temporarily negative during compaction.
-    fn immediate_capacity(&self) -> StoreResult<isize> {
+    fn immediate_capacity(&self) -> StoreResult<Nat> {
         let tail = self.tail()?;
         let end = self.head()? + self.format.virt_size();
-        Ok(if tail > end {
-            -((tail - end) as isize)
-        } else {
-            (end - tail) as isize
-        })
+        Ok(end.get().saturating_sub(tail.get()))
     }
 
     /// Returns the position of the first word in the store.

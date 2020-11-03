@@ -14,7 +14,7 @@
 
 use crate::format::Format;
 use crate::{usize_to_nat, StoreError, StoreRatio, StoreResult, StoreUpdate};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Models the mutable operations of a store.
 ///
@@ -90,17 +90,8 @@ impl StoreModel {
 
     /// Applies a transaction.
     fn transaction(&mut self, updates: Vec<StoreUpdate>) -> StoreResult<()> {
-        // Fail if too many updates.
-        if updates.len() > self.format.max_updates() as usize {
-            return Err(StoreError::InvalidArgument);
-        }
-        // Fail if an update is invalid.
-        if !updates.iter().all(|x| self.update_valid(x)) {
-            return Err(StoreError::InvalidArgument);
-        }
-        // Fail if updates are not disjoint, i.e. there are duplicate keys.
-        let keys: HashSet<_> = updates.iter().map(|x| x.key()).collect();
-        if keys.len() != updates.len() {
+        // Fail if the transaction is invalid.
+        if self.format.transaction_valid(&updates).is_none() {
             return Err(StoreError::InvalidArgument);
         }
         // Fail if there is not enough capacity.
@@ -137,13 +128,5 @@ impl StoreModel {
             return Err(StoreError::NoCapacity);
         }
         Ok(())
-    }
-
-    /// Returns whether an update is valid.
-    fn update_valid(&self, update: &StoreUpdate) -> bool {
-        update.key() <= self.format.max_key() as usize
-            && update
-                .value()
-                .map_or(true, |x| x.len() <= self.format.max_value_len() as usize)
     }
 }

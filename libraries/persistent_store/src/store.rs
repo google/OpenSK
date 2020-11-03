@@ -259,26 +259,11 @@ impl<S: Storage> Store<S> {
                 StoreUpdate::Remove { key } => return self.remove(key),
             }
         }
-        if count > self.format.max_updates() {
-            return Err(StoreError::InvalidArgument);
-        }
-        // Check that the updates are valid.
-        let mut sorted_keys = Vec::with_capacity(count as usize);
-        for update in updates {
-            let key = usize_to_nat(update.key());
-            if key > self.format.max_key() {
-                return Err(StoreError::InvalidArgument);
-            }
-            if let Some(value) = update.value() {
-                if usize_to_nat(value.len()) > self.format.max_value_len() {
-                    return Err(StoreError::InvalidArgument);
-                }
-            }
-            match sorted_keys.binary_search(&key) {
-                Ok(_) => return Err(StoreError::InvalidArgument),
-                Err(pos) => sorted_keys.insert(pos, key),
-            }
-        }
+        // Get the sorted keys. Fail if the transaction is invalid.
+        let sorted_keys = match self.format.transaction_valid(updates) {
+            None => return Err(StoreError::InvalidArgument),
+            Some(x) => x,
+        };
         // Reserve the capacity.
         self.reserve(self.format.transaction_capacity(updates))?;
         // Write the marker entry.

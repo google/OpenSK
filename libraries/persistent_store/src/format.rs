@@ -520,6 +520,32 @@ impl Format {
         1 + self.bytes_to_words(usize_to_nat(value.len()))
     }
 
+    /// Checks if a transaction is valid and returns its sorted keys.
+    ///
+    /// Returns `None` if the transaction is invalid.
+    pub fn transaction_valid(&self, updates: &[StoreUpdate]) -> Option<Vec<Nat>> {
+        if usize_to_nat(updates.len()) > self.max_updates() {
+            return None;
+        }
+        let mut sorted_keys = Vec::with_capacity(updates.len());
+        for update in updates {
+            let key = usize_to_nat(update.key());
+            if key > self.max_key() {
+                return None;
+            }
+            if let Some(value) = update.value() {
+                if usize_to_nat(value.len()) > self.max_value_len() {
+                    return None;
+                }
+            }
+            match sorted_keys.binary_search(&key) {
+                Ok(_) => return None,
+                Err(pos) => sorted_keys.insert(pos, key),
+            }
+        }
+        Some(sorted_keys)
+    }
+
     /// Returns the minimum number of words to represent a given number of bytes.
     ///
     /// # Preconditions

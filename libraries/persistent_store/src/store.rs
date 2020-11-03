@@ -18,9 +18,11 @@ use crate::format::{
 };
 #[cfg(feature = "std")]
 pub use crate::model::{StoreModel, StoreOperation};
-#[cfg(feature = "std")]
-pub use crate::BufferStorage;
 use crate::{usize_to_nat, Nat, Storage, StorageError, StorageIndex};
+#[cfg(feature = "std")]
+pub use crate::{
+    BufferStorage, StoreDriver, StoreDriverOff, StoreDriverOn, StoreInterruption, StoreInvariant,
+};
 use alloc::vec::Vec;
 use core::cmp::{max, min, Ordering};
 #[cfg(feature = "std")]
@@ -1232,4 +1234,208 @@ fn is_write_needed(source: &[u8], target: &[u8]) -> StoreResult<bool> {
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BufferOptions;
+
+    #[derive(Clone)]
+    struct Config {
+        word_size: usize,
+        page_size: usize,
+        num_pages: usize,
+        max_word_writes: usize,
+        max_page_erases: usize,
+    }
+
+    impl Config {
+        fn new_driver(&self) -> StoreDriverOff {
+            let options = BufferOptions {
+                word_size: self.word_size,
+                page_size: self.page_size,
+                max_word_writes: self.max_word_writes,
+                max_page_erases: self.max_page_erases,
+                strict_write: true,
+            };
+            StoreDriverOff::new(options, self.num_pages)
+        }
+    }
+
+    const MINIMAL: Config = Config {
+        word_size: 4,
+        page_size: 64,
+        num_pages: 5,
+        max_word_writes: 2,
+        max_page_erases: 9,
+    };
+
+    const NORDIC: Config = Config {
+        word_size: 4,
+        page_size: 0x1000,
+        num_pages: 20,
+        max_word_writes: 2,
+        max_page_erases: 10000,
+    };
+
+    const TITAN: Config = Config {
+        word_size: 4,
+        page_size: 0x800,
+        num_pages: 10,
+        max_word_writes: 2,
+        max_page_erases: 10000,
+    };
+
+    #[test]
+    fn nordic_capacity() {
+        let driver = NORDIC.new_driver().power_on().unwrap();
+        assert_eq!(driver.model().capacity().total, 19123);
+    }
+
+    #[test]
+    fn titan_capacity() {
+        let driver = TITAN.new_driver().power_on().unwrap();
+        assert_eq!(driver.model().capacity().total, 4315);
+    }
+
+    #[test]
+    fn minimal_virt_page_size() {
+        // Make sure a virtual page has 14 words. We use this property in the other tests below to
+        // know whether entries are spanning, starting, and ending pages.
+        assert_eq!(MINIMAL.new_driver().model().format().virt_page_size(), 14);
+    }
+
+    #[test]
+    fn init_ok() {
+        assert!(MINIMAL.new_driver().power_on().is_ok());
+    }
+
+    #[test]
+    fn insert_ok() {
+        let mut driver = MINIMAL.new_driver().power_on().unwrap();
+        // Empty entry.
+        driver.insert(0, &[]).unwrap();
+        driver.insert(1, &[]).unwrap();
+        driver.check().unwrap();
+        // Last word is erased but last bit is not user data.
+        driver.insert(0, &[0xff]).unwrap();
+        driver.insert(1, &[0xff]).unwrap();
+        driver.check().unwrap();
+        // Last word is erased and last bit is user data.
+        driver.insert(0, &[0xff, 0xff, 0xff, 0xff]).unwrap();
+        driver.insert(1, &[0xff, 0xff, 0xff, 0xff]).unwrap();
+        driver.insert(2, &[0x5c; 6]).unwrap();
+        driver.check().unwrap();
+        // Entry spans 2 pages.
+        assert_eq!(driver.store().tail().unwrap().get(), 13);
+        driver.insert(3, &[0x5c; 8]).unwrap();
+        driver.check().unwrap();
+        assert_eq!(driver.store().tail().unwrap().get(), 16);
+        // Entry ends a page.
+        driver.insert(2, &[0x93; (28 - 16 - 1) * 4]).unwrap();
+        driver.check().unwrap();
+        assert_eq!(driver.store().tail().unwrap().get(), 28);
+        // Entry starts a page.
+        driver.insert(3, &[0x81; 10]).unwrap();
+        driver.check().unwrap();
+    }
+
+    #[test]
+    fn remove_ok() {
+        let mut driver = MINIMAL.new_driver().power_on().unwrap();
+        // Remove absent entry.
+        driver.remove(0).unwrap();
+        driver.remove(1).unwrap();
+        driver.check().unwrap();
+        // Remove last inserted entry.
+        driver.insert(0, &[0x5c; 6]).unwrap();
+        driver.remove(0).unwrap();
+        driver.check().unwrap();
+        // Remove empty entries.
+        driver.insert(0, &[]).unwrap();
+        driver.insert(1, &[]).unwrap();
+        driver.remove(0).unwrap();
+        driver.remove(1).unwrap();
+        driver.check().unwrap();
+        // Remove entry with flipped bit.
+        driver.insert(0, &[0xff]).unwrap();
+        driver.insert(1, &[0xff; 4]).unwrap();
+        driver.remove(0).unwrap();
+        driver.remove(1).unwrap();
+        driver.check().unwrap();
+        // Write some entries with one spanning 2 pages.
+        driver.insert(2, &[0x93; 9]).unwrap();
+        assert_eq!(driver.store().tail().unwrap().get(), 13);
+        driver.insert(3, &[0x81; 10]).unwrap();
+        assert_eq!(driver.store().tail().unwrap().get(), 17);
+        driver.insert(4, &[0x76; 11]).unwrap();
+        driver.check().unwrap();
+        // Remove the entry spanning 2 pages.
+        driver.remove(3).unwrap();
+        driver.check().unwrap();
+        // Write some entries with one ending a page and one starting the next.
+        assert_eq!(driver.store().tail().unwrap().get(), 21);
+        driver.insert(2, &[0xd7; (28 - 21 - 1) * 4]).unwrap();
+        assert_eq!(driver.store().tail().unwrap().get(), 28);
+        driver.insert(4, &[0xe2; 21]).unwrap();
+        driver.check().unwrap();
+        // Remove them.
+        driver.remove(2).unwrap();
+        driver.remove(4).unwrap();
+        driver.check().unwrap();
+    }
+
+    #[test]
+    fn prepare_ok() {
+        let mut driver = MINIMAL.new_driver().power_on().unwrap();
+
+        // Don't compact if enough immediate capacity.
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 39);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 34);
+        assert_eq!(driver.store().head().unwrap().get(), 0);
+        driver.store_mut().prepare(34).unwrap();
+        assert_eq!(driver.store().head().unwrap().get(), 0);
+
+        // Fill the store.
+        for key in 0..4 {
+            driver.insert(key, &[0x38; 28]).unwrap();
+        }
+        driver.check().unwrap();
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 7);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 2);
+        // Removing entries increases available capacity but not immediate capacity.
+        driver.remove(0).unwrap();
+        driver.remove(2).unwrap();
+        driver.check().unwrap();
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 7);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 18);
+
+        // Prepare for next write (7 words data + 1 word overhead).
+        assert_eq!(driver.store().head().unwrap().get(), 0);
+        driver.store_mut().prepare(8).unwrap();
+        driver.check().unwrap();
+        assert_eq!(driver.store().head().unwrap().get(), 16);
+        // The available capacity did not change, but the immediate capacity is above 8.
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 14);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 18);
+    }
+
+    #[test]
+    fn reboot_ok() {
+        let mut driver = MINIMAL.new_driver().power_on().unwrap();
+
+        // Do some operations and reboot.
+        driver.insert(0, &[0x38; 24]).unwrap();
+        driver.insert(1, &[0x5c; 13]).unwrap();
+        driver = driver.power_off().power_on().unwrap();
+        driver.check().unwrap();
+
+        // Do more operations and reboot.
+        driver.insert(2, &[0x93; 1]).unwrap();
+        driver.remove(0).unwrap();
+        driver.insert(3, &[0xde; 9]).unwrap();
+        driver = driver.power_off().power_on().unwrap();
+        driver.check().unwrap();
+    }
 }

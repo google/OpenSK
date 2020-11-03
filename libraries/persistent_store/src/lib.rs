@@ -349,6 +349,8 @@
 extern crate alloc;
 
 mod buffer;
+#[cfg(feature = "std")]
+mod driver;
 mod format;
 #[cfg(feature = "std")]
 mod model;
@@ -356,6 +358,10 @@ mod storage;
 mod store;
 
 pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
+#[cfg(feature = "std")]
+pub use self::driver::{
+    StoreDriver, StoreDriverOff, StoreDriverOn, StoreInterruption, StoreInvariant,
+};
 #[cfg(feature = "std")]
 pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};

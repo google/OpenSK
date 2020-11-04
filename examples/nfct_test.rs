@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(unused_imports)]
 
 extern crate alloc;
 extern crate lang_items;
@@ -8,19 +7,13 @@ extern crate libtock_drivers;
 use core::fmt::Write;
 use libtock_core::result::CommandError;
 use libtock_drivers::console::Console;
-#[cfg(feature = "with_nfc")]
 use libtock_drivers::nfc::NfcTag;
-#[cfg(feature = "with_nfc")]
 use libtock_drivers::nfc::RecvOp;
+use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::result::TockError;
-
-#[allow(dead_code)]
-/// Helper function to write a slice into a transmission buffer.
-fn write_tx_buffer(buf: &mut [u8], slice: &[u8]) {
-    for (i, &byte) in slice.iter().enumerate() {
-        buf[i] = byte;
-    }
-}
+use libtock_drivers::timer;
+use libtock_drivers::timer::Timer;
+use libtock_drivers::timer::Timestamp;
 
 #[allow(dead_code)]
 /// Helper function to write on console the received packet.
@@ -29,24 +22,37 @@ fn print_rx_buffer(buf: &mut [u8], amount: usize) {
         return;
     }
     let mut console = Console::new();
-    write!(console, " -- RX Packet:").unwrap();
+    write!(console, "RX:").unwrap();
     for byte in buf.iter().take(amount - 1) {
         write!(console, " {:02x?}", byte).unwrap();
     }
     writeln!(console, " {:02x?}", buf[amount - 1]).unwrap();
+    console.flush();
 }
 
 #[allow(dead_code)]
-/// Helper function to write on console the received packet.
-fn transmit_slice(buf: &mut [u8] {
+/// Function to identify the time elapsed for a transmission request.
+fn bench_transmit(console: &mut Console, timer: &Timer, title: &str, mut buf: &mut [u8]) {
     let amount = buf.len();
+    let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
     match NfcTag::transmit(&mut buf, amount) {
         Ok(_) => (),
-        Err(_) => writeln!(console, " -- tx error!").unwrap(),
+        Err(_) => writeln!(Console::new(), " -- tx error!").unwrap(),
     }
+    let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+    let elapsed = (end - start).ms();
+    writeln!(
+        console,
+        "{}\n{:.2} ms elapsed for {} bytes ({:.2} kbit/s)",
+        title,
+        elapsed,
+        amount,
+        (amount as f64) / elapsed * 8.
+    )
+    .unwrap();
+    console.flush();
 }
 
-#[cfg(feature = "with_nfc")]
 #[derive(PartialEq, Eq)]
 /// enum for reserving the NFC tag state.
 enum State {
@@ -56,15 +62,23 @@ enum State {
 
 fn main() {
     let mut console = Console::new();
+    // Setup the timer with a dummy callback (we only care about reading the current time, but the
+    // API forces us to set an alarm callback too).
+    let mut with_callback = timer::with_callback(|_, _| {});
+    let timer = with_callback.init().flex_unwrap();
 
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "nfct_test application is installed").unwrap();
+    writeln!(
+        console,
+        "Clock frequency: {} Hz",
+        timer.clock_frequency().hz()
+    )
+    .unwrap();
 
-    #[cfg(feature = "with_nfc")]
     let mut state = State::Disabled;
-    #[cfg(feature = "with_nfc")]
+    // Variable to count the change in the tag's state
     let mut state_change_cntr = 0;
-    #[cfg(feature = "with_nfc")]
     loop {
         match state {
             State::Enabled => {
@@ -88,24 +102,44 @@ fn main() {
                     match rx_buf[0] {
                         0xe0 /* RATS */=> {
                             let mut answer_to_select = [0x05, 0x78, 0x80, 0xB1, 0x00];
-                            transmit_slice(&mut answer_to_select);
+                            bench_transmit(&mut console, &timer, "TX: ATS", &mut answer_to_select);
                         }
                         0xc2 /* DESELECT */ => {
                             // Ignore the request
                             let mut command_error = [0x6A, 0x81];
-                            transmit_slice(&mut command_error);
+                            bench_transmit(&mut console, &timer, "TX: DESELECT", &mut command_error);
                         }
-                        0x02 | 0x03 /* APDU Prefix */ => {
+                        0x02 | 0x03 /* APDU Prefix */ => match rx_buf[2] {
                             // If the received packet is applet selection command (FIDO 2)
-                            if rx_buf[1] == 0x00 && rx_buf[2] == 0xa4 && rx_buf[3] == 0x04 {
-                                /// Vesion: "U2F_V2"
-                                // let mut reply = [rx_buf[0], 0x55, 0x32, 0x46, 0x5f, 0x56, 0x32, 0x90, 0x00,];
-                                /// Vesion: "FIDO_2_0"
-                                let mut reply = [rx_buf[0], 0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30, 0x90, 0x00,];
-                                transmit_slice(&mut reply);
-                            } else {
+                            0xa4 /* SELECT */ => if rx_buf[3] == 0x04 && rx_buf[5] == 0x08 && rx_buf[6] == 0xa0 {
+                                    // Vesion: "FIDO_2_0"
+                                    let mut reply = [rx_buf[0], 0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30, 0x90, 0x00,];
+                                    bench_transmit(&mut console, &timer, "TX: Version Str", &mut reply);
+                                } else {
+                                    let mut reply = [rx_buf[0], 0x90, 0x00];
+                                    bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
+                                }
+                            0xb0 /* READ */ =>  match rx_buf[5] {
+                                    0x02 => {
+                                    let mut reply = [rx_buf[0], 0x12, 0x90, 0x00,];
+                                    bench_transmit(&mut console, &timer, "TX: File Size", &mut reply);
+                                }
+                                0x12 => {
+                                    let mut reply = [rx_buf[0], 0xd1, 0x01, 0x0e, 0x55, 0x77, 0x77, 0x77, 0x2e, 0x6f, 0x70, 0x65, 0x6e, 0x73, 0x6b, 0x2e, 0x64, 0x65, 0x76, 0x90, 0x00,];
+                                    bench_transmit(&mut console, &timer, "TX: NDEF", &mut reply);
+                                }
+                                0x0f => {
+                                    let mut reply = [rx_buf[0], 0x00, 0x0f, 0x20, 0x00, 0x7f, 0x00, 0x7f, 0x04, 0x06, 0xe1, 0x04, 0x00, 0x7f, 0x00, 0x00, 0x90, 0x00,];
+                                    bench_transmit(&mut console, &timer, "TX: CC", &mut reply);
+                                }
+                                _ => {
+                                    let mut reply = [rx_buf[0], 0x90, 0x00];
+                                    bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
+                                }
+                            }
+                            _ => {
                                 let mut reply = [rx_buf[0], 0x90, 0x00];
-                                transmit_slice(&mut reply);
+                                bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
                             }
                         }
                         0x52 | 0x50 /* WUPA | Halt */ => {

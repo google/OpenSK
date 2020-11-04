@@ -31,7 +31,7 @@ cargo fmt --all -- --check
 cd ../..
 
 echo "Running Clippy lints..."
-cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
+cargo clippy --all-targets --features std --features with_nfc -- -A clippy::new_without_default -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -53,7 +53,7 @@ cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ct
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,panic_console,debug_allocations,verbose
 
 echo "Checking that examples build properly..."
-cargo check --release --target=thumbv7em-none-eabi --examples
+cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
 
 echo "Checking that fuzz targets build properly..."
 cargo fuzz build

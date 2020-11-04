@@ -19,7 +19,6 @@ mod example {
 
 #[cfg(feature = "with_nfc")]
 mod example {
-
     use super::Console;
     use super::Write;
     use libtock_core::result::CommandError;
@@ -160,29 +159,26 @@ mod example {
         let mut is_enabled = false;
         let mut state_change_counter = 0;
         loop {
-            match is_enabled {
-                true => {
-                    let mut rx_buf = [0; 256];
-                    loop {
-                        receive_packet(&mut console, &mut rx_buf);
-                        // If the reader restarts the communication and we can't
-                        // reply to the received packet, then disable the tag.
-                        if !transmit_reply(&mut console, &timer, &rx_buf) {
-                            is_enabled = false;
-                            break;
-                        }
+            if is_enabled {
+                let mut rx_buf = [0; 256];
+                loop {
+                    receive_packet(&mut console, &mut rx_buf);
+                    // If the reader restarts the communication and we can't
+                    // reply to the received packet, then disable the tag.
+                    if !transmit_reply(&mut console, &timer, &rx_buf) {
+                        is_enabled = false;
+                        break;
                     }
                 }
-                false => {
-                    NfcTag::enable_emulation();
-                    // Configure Type 4 tag
-                    if NfcTag::configure(4) {
-                        is_enabled = true;
-                    }
+            } else {
+                NfcTag::enable_emulation();
+                // Configure Type 4 tag
+                if NfcTag::configure(4) {
+                    is_enabled = true;
                 }
             }
             state_change_counter += 1;
-            if state_change_counter > 100 && is_enabled == false {
+            if !is_enabled && state_change_counter > 100 {
                 break;
             }
         }

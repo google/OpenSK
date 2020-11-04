@@ -102,6 +102,9 @@ const RESET_TIMEOUT_MS: isize = 10000;
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
+// TODO(#106) change to final string when ready
+#[cfg(feature = "with_ctap2_1")]
+pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
 // We currently only support one algorithm for signatures: ES256.
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
@@ -710,6 +713,8 @@ where
                     #[cfg(feature = "with_ctap1")]
                     String::from(U2F_VERSION_STRING),
                     String::from(FIDO2_VERSION_STRING),
+                    #[cfg(feature = "with_ctap2_1")]
+                    String::from(FIDO2_1_VERSION_STRING),
                 ],
                 extensions: Some(vec![String::from("hmac-secret")]),
                 aaguid: self.persistent_store.aaguid()?,
@@ -825,12 +830,24 @@ mod test {
         #[cfg(not(feature = "with_ctap2_1"))]
         let mut expected_response = vec![0x00, 0xA6, 0x01];
         // The difference here is a longer array of supported versions.
-        #[cfg(not(feature = "with_ctap1"))]
-        expected_response.extend(&[0x81, 0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30]);
+        let mut version_count = 0;
+        // CTAP 2 is always supported
+        version_count += 1;
         #[cfg(feature = "with_ctap1")]
+        {
+            version_count += 1;
+        }
+        #[cfg(feature = "with_ctap2_1")]
+        {
+            version_count += 1;
+        }
+        expected_response.push(0x80 + version_count);
+        #[cfg(feature = "with_ctap1")]
+        expected_response.extend(&[0x66, 0x55, 0x32, 0x46, 0x5F, 0x56, 0x32]);
+        expected_response.extend(&[0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30]);
+        #[cfg(feature = "with_ctap2_1")]
         expected_response.extend(&[
-            0x82, 0x66, 0x55, 0x32, 0x46, 0x5F, 0x56, 0x32, 0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F,
-            0x32, 0x5F, 0x30,
+            0x6C, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45,
         ]);
         expected_response.extend(&[
             0x02, 0x81, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,

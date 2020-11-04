@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use crate::format::Format;
-use crate::{StoreError, StoreRatio, StoreResult, StoreUpdate};
-use std::collections::{HashMap, HashSet};
+use crate::{usize_to_nat, StoreError, StoreRatio, StoreResult, StoreUpdate};
+use std::collections::HashMap;
 
 /// Models the mutable operations of a store.
 ///
@@ -79,38 +79,23 @@ impl StoreModel {
     /// Returns the capacity according to the model.
     pub fn capacity(&self) -> StoreRatio {
         let total = self.format.total_capacity();
-        let used: usize = self.content.values().map(|x| self.entry_size(x)).sum();
+        let used = usize_to_nat(
+            self.content
+                .values()
+                .map(|x| self.format.entry_size(x) as usize)
+                .sum(),
+        );
         StoreRatio { used, total }
     }
 
     /// Applies a transaction.
     fn transaction(&mut self, updates: Vec<StoreUpdate>) -> StoreResult<()> {
-        // Fail if too many updates.
-        if updates.len() > self.format.max_updates() {
-            return Err(StoreError::InvalidArgument);
-        }
-        // Fail if an update is invalid.
-        if !updates.iter().all(|x| self.update_valid(x)) {
-            return Err(StoreError::InvalidArgument);
-        }
-        // Fail if updates are not disjoint, i.e. there are duplicate keys.
-        let keys: HashSet<_> = updates.iter().map(|x| x.key()).collect();
-        if keys.len() != updates.len() {
+        // Fail if the transaction is invalid.
+        if self.format.transaction_valid(&updates).is_none() {
             return Err(StoreError::InvalidArgument);
         }
         // Fail if there is not enough capacity.
-        let capacity = match updates.len() {
-            // An empty transaction doesn't consume anything.
-            0 => 0,
-            // Transactions with a single update are optimized by avoiding a marker entry.
-            1 => match &updates[0] {
-                StoreUpdate::Insert { value, .. } => self.entry_size(value),
-                // Transactions with a single update which is a removal don't consume anything.
-                StoreUpdate::Remove { .. } => 0,
-            },
-            // A transaction consumes one word for the marker entry in addition to its updates.
-            _ => 1 + updates.iter().map(|x| self.update_size(x)).sum::<usize>(),
-        };
+        let capacity = self.format.transaction_capacity(&updates) as usize;
         if self.capacity().remaining() < capacity {
             return Err(StoreError::NoCapacity);
         }
@@ -130,7 +115,7 @@ impl StoreModel {
 
     /// Applies a clear operation.
     fn clear(&mut self, min_key: usize) -> StoreResult<()> {
-        if min_key > self.format.max_key() {
+        if min_key > self.format.max_key() as usize {
             return Err(StoreError::InvalidArgument);
         }
         self.content.retain(|&k, _| k < min_key);
@@ -143,26 +128,5 @@ impl StoreModel {
             return Err(StoreError::NoCapacity);
         }
         Ok(())
-    }
-
-    /// Returns the word capacity of an update.
-    fn update_size(&self, update: &StoreUpdate) -> usize {
-        match update {
-            StoreUpdate::Insert { value, .. } => self.entry_size(value),
-            StoreUpdate::Remove { .. } => 1,
-        }
-    }
-
-    /// Returns the word capacity of an entry.
-    fn entry_size(&self, value: &[u8]) -> usize {
-        1 + self.format.bytes_to_words(value.len())
-    }
-
-    /// Returns whether an update is valid.
-    fn update_valid(&self, update: &StoreUpdate) -> bool {
-        update.key() <= self.format.max_key()
-            && update
-                .value()
-                .map_or(true, |x| x.len() <= self.format.max_value_len())
     }
 }

@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helps manipulate bit fields in 32-bits words.
+//! Helps manipulate words as bit fields.
+//!
+//! This module assumes that `Word` and `Nat` are both represented as `u32`.
 
-use crate::{StoreError, StoreResult};
+use crate::format::Word;
+use crate::{Nat, StoreError, StoreResult};
 
 /// Represents a bit field.
 ///
@@ -25,16 +28,16 @@ use crate::{StoreError, StoreResult};
 /// - The bit field must fit in a 32-bits word: `pos + len < 32`.
 pub struct Field {
     /// The position of the bit field.
-    pub pos: usize,
+    pub pos: Nat,
 
     /// The length of the bit field.
-    pub len: usize,
+    pub len: Nat,
 }
 
 impl Field {
     /// Reads the value of a bit field.
-    pub fn get(&self, word: u32) -> usize {
-        ((word >> self.pos) & self.mask()) as usize
+    pub fn get(&self, word: Word) -> Nat {
+        (word.0 >> self.pos) & self.mask()
     }
 
     /// Sets the value of a bit field.
@@ -43,12 +46,11 @@ impl Field {
     ///
     /// - The value must fit in the bit field: `num_bits(value) < self.len`.
     /// - The value must only change bits from 1 to 0: `self.get(*word) & value == value`.
-    pub fn set(&self, word: &mut u32, value: usize) {
-        let value = value as u32;
+    pub fn set(&self, word: &mut Word, value: Nat) {
         debug_assert_eq!(value & self.mask(), value);
         let mask = !(self.mask() << self.pos);
-        *word &= mask | (value << self.pos);
-        debug_assert_eq!(self.get(*word), value as usize);
+        word.0 &= mask | (value << self.pos);
+        debug_assert_eq!(self.get(*word), value);
     }
 
     /// Returns a bit mask the length of the bit field.
@@ -70,17 +72,17 @@ pub struct ConstField {
     pub field: Field,
 
     /// The constant value.
-    pub value: usize,
+    pub value: Nat,
 }
 
 impl ConstField {
     /// Checks that the bit field has its value.
-    pub fn check(&self, word: u32) -> bool {
+    pub fn check(&self, word: Word) -> bool {
         self.field.get(word) == self.value
     }
 
     /// Sets the bit field to its value.
-    pub fn set(&self, word: &mut u32) {
+    pub fn set(&self, word: &mut Word) {
         self.field.set(word, self.value);
     }
 }
@@ -92,18 +94,18 @@ impl ConstField {
 /// - The bit must fit in a 32-bits word: `pos < 32`.
 pub struct Bit {
     /// The position of the bit.
-    pub pos: usize,
+    pub pos: Nat,
 }
 
 impl Bit {
     /// Returns whether the value of the bit is zero.
-    pub fn get(&self, word: u32) -> bool {
-        word & (1 << self.pos) == 0
+    pub fn get(&self, word: Word) -> bool {
+        word.0 & (1 << self.pos) == 0
     }
 
     /// Sets the value of the bit to zero.
-    pub fn set(&self, word: &mut u32) {
-        *word &= !(1 << self.pos);
+    pub fn set(&self, word: &mut Word) {
+        word.0 &= !(1 << self.pos);
     }
 }
 
@@ -123,9 +125,9 @@ impl Checksum {
     /// # Errors
     ///
     /// Returns `InvalidStorage` if the external increment would be negative.
-    pub fn get(&self, word: u32) -> StoreResult<usize> {
+    pub fn get(&self, word: Word) -> StoreResult<Nat> {
         let checksum = self.field.get(word);
-        let zeros = word.count_zeros() as usize - (self.field.len - checksum.count_ones() as usize);
+        let zeros = word.0.count_zeros() - (self.field.len - checksum.count_ones());
         checksum
             .checked_sub(zeros)
             .ok_or(StoreError::InvalidStorage)
@@ -139,9 +141,9 @@ impl Checksum {
     ///   self.field.mask()`.
     /// - The checksum value should fit in the checksum bit field: `num_bits(word.count_zeros() +
     ///   value) < self.field.len`.
-    pub fn set(&self, word: &mut u32, value: usize) {
-        debug_assert_eq!(self.field.get(*word), self.field.mask() as usize);
-        self.field.set(word, word.count_zeros() as usize + value);
+    pub fn set(&self, word: &mut Word, value: Nat) {
+        debug_assert_eq!(self.field.get(*word), self.field.mask());
+        self.field.set(word, word.0.count_zeros() + value);
     }
 }
 
@@ -153,7 +155,7 @@ impl Checksum {
 #[cfg(any(doc, test))]
 pub struct Length {
     /// The position of the next available bit.
-    pub pos: usize,
+    pub pos: Nat,
 }
 
 /// Helps defining contiguous bit fields.
@@ -266,13 +268,13 @@ macro_rules! bitfield_impl {
 }
 
 /// Counts the number of bits equal to zero in a byte slice.
-pub fn count_zeros(slice: &[u8]) -> usize {
-    slice.iter().map(|&x| x.count_zeros() as usize).sum()
+pub fn count_zeros(slice: &[u8]) -> Nat {
+    slice.iter().map(|&x| x.count_zeros()).sum()
 }
 
 /// Returns the number of bits necessary to represent a number.
-pub const fn num_bits(x: usize) -> usize {
-    8 * core::mem::size_of::<usize>() - x.leading_zeros() as usize
+pub const fn num_bits(x: Nat) -> Nat {
+    8 * core::mem::size_of::<Nat>() as Nat - x.leading_zeros()
 }
 
 #[cfg(test)]
@@ -282,14 +284,14 @@ mod tests {
     #[test]
     fn field_ok() {
         let field = Field { pos: 3, len: 5 };
-        assert_eq!(field.get(0x00000000), 0);
-        assert_eq!(field.get(0x00000007), 0);
-        assert_eq!(field.get(0x00000008), 1);
-        assert_eq!(field.get(0x000000f8), 0x1f);
-        assert_eq!(field.get(0x0000ff37), 6);
-        let mut word = 0xffffffff;
+        assert_eq!(field.get(Word(0x00000000)), 0);
+        assert_eq!(field.get(Word(0x00000007)), 0);
+        assert_eq!(field.get(Word(0x00000008)), 1);
+        assert_eq!(field.get(Word(0x000000f8)), 0x1f);
+        assert_eq!(field.get(Word(0x0000ff37)), 6);
+        let mut word = Word(0xffffffff);
         field.set(&mut word, 3);
-        assert_eq!(word, 0xffffff1f);
+        assert_eq!(word, Word(0xffffff1f));
     }
 
     #[test]
@@ -298,25 +300,25 @@ mod tests {
             field: Field { pos: 3, len: 5 },
             value: 9,
         };
-        assert!(!field.check(0x00000000));
-        assert!(!field.check(0x0000ffff));
-        assert!(field.check(0x00000048));
-        assert!(field.check(0x0000ff4f));
-        let mut word = 0xffffffff;
+        assert!(!field.check(Word(0x00000000)));
+        assert!(!field.check(Word(0x0000ffff)));
+        assert!(field.check(Word(0x00000048)));
+        assert!(field.check(Word(0x0000ff4f)));
+        let mut word = Word(0xffffffff);
         field.set(&mut word);
-        assert_eq!(word, 0xffffff4f);
+        assert_eq!(word, Word(0xffffff4f));
     }
 
     #[test]
     fn bit_ok() {
         let bit = Bit { pos: 3 };
-        assert!(bit.get(0x00000000));
-        assert!(bit.get(0xfffffff7));
-        assert!(!bit.get(0x00000008));
-        assert!(!bit.get(0xffffffff));
-        let mut word = 0xffffffff;
+        assert!(bit.get(Word(0x00000000)));
+        assert!(bit.get(Word(0xfffffff7)));
+        assert!(!bit.get(Word(0x00000008)));
+        assert!(!bit.get(Word(0xffffffff)));
+        let mut word = Word(0xffffffff);
         bit.set(&mut word);
-        assert_eq!(word, 0xfffffff7);
+        assert_eq!(word, Word(0xfffffff7));
     }
 
     #[test]
@@ -324,15 +326,15 @@ mod tests {
         let field = Checksum {
             field: Field { pos: 3, len: 5 },
         };
-        assert_eq!(field.get(0x00000000), Err(StoreError::InvalidStorage));
-        assert_eq!(field.get(0xffffffff), Ok(31));
-        assert_eq!(field.get(0xffffff07), Ok(0));
-        assert_eq!(field.get(0xffffff0f), Ok(1));
-        assert_eq!(field.get(0x00ffff67), Ok(4));
-        assert_eq!(field.get(0x7fffff07), Err(StoreError::InvalidStorage));
-        let mut word = 0x0fffffff;
+        assert_eq!(field.get(Word(0x00000000)), Err(StoreError::InvalidStorage));
+        assert_eq!(field.get(Word(0xffffffff)), Ok(31));
+        assert_eq!(field.get(Word(0xffffff07)), Ok(0));
+        assert_eq!(field.get(Word(0xffffff0f)), Ok(1));
+        assert_eq!(field.get(Word(0x00ffff67)), Ok(4));
+        assert_eq!(field.get(Word(0x7fffff07)), Err(StoreError::InvalidStorage));
+        let mut word = Word(0x0fffffff);
         field.set(&mut word, 4);
-        assert_eq!(word, 0x0fffff47);
+        assert_eq!(word, Word(0x0fffff47));
     }
 
     #[test]

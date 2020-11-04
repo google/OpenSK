@@ -12,71 +12,106 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO(ia0): Remove when the module is used.
-#![allow(dead_code)]
+#[macro_use]
+mod bitfield;
 
-use crate::bitfield::*;
-use crate::{Storage, StorageIndex, StoreError, StoreResult};
+#[cfg(test)]
+use self::bitfield::Length;
+use self::bitfield::{count_zeros, num_bits, Bit, Checksum, ConstField, Field};
+use crate::{usize_to_nat, Nat, Storage, StorageIndex, StoreError, StoreResult, StoreUpdate};
 use alloc::vec::Vec;
 use core::cmp::min;
+use core::convert::TryFrom;
 
+/// Internal representation of a word in flash.
+///
+/// Currently, the store only supports storages where a word is 32 bits.
 type WORD = u32;
+
+/// Abstract representation of a word in flash.
+///
+/// This type is kept abstract to avoid possible confusion with `Nat` if they happen to have the
+/// same representation. This is because they have different semantics, `Nat` represents natural
+/// numbers while `Word` represents sequences of bits (and thus has no arithmetic).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Word(WORD);
+
+/// Byte slice representation of a word in flash.
+///
+/// The slice is in little-endian representation.
+pub type WordSlice = [u8; core::mem::size_of::<WORD>()];
+
+impl Word {
+    /// Converts a byte slice into a word.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `slice.len() != WORD_SIZE`.
+    pub fn from_slice(slice: &[u8]) -> Word {
+        Word(WORD::from_le_bytes(<WordSlice>::try_from(slice).unwrap()))
+    }
+
+    /// Converts a word into a byte slice.
+    pub fn as_slice(self) -> WordSlice {
+        self.0.to_le_bytes()
+    }
+}
 
 /// Size of a word in bytes.
 ///
 /// Currently, the store only supports storages where a word is 4 bytes.
-const WORD_SIZE: usize = core::mem::size_of::<WORD>();
+const WORD_SIZE: Nat = core::mem::size_of::<WORD>() as Nat;
 
 /// Minimum number of words per page.
 ///
 /// Currently, the store only supports storages where pages have at least 8 words.
-const MIN_NUM_WORDS_PER_PAGE: usize = 8;
+const MIN_NUM_WORDS_PER_PAGE: Nat = 8;
 
 /// Maximum size of a page in bytes.
 ///
 /// Currently, the store only supports storages where pages are between 8 and 1024 [words].
 ///
 /// [words]: constant.WORD_SIZE.html
-const MAX_PAGE_SIZE: usize = 4096;
+const MAX_PAGE_SIZE: Nat = 4096;
 
 /// Maximum number of erase cycles.
 ///
 /// Currently, the store only supports storages where the maximum number of erase cycles fits on 16
 /// bits.
-const MAX_ERASE_CYCLE: usize = 65535;
+const MAX_ERASE_CYCLE: Nat = 65535;
 
 /// Minimum number of pages.
 ///
 /// Currently, the store only supports storages with at least 3 pages.
-const MIN_NUM_PAGES: usize = 3;
+const MIN_NUM_PAGES: Nat = 3;
 
 /// Maximum page index.
 ///
 /// Thus the maximum number of pages is one more than this number. Currently, the store only
 /// supports storages where the number of pages is between 3 and 64.
-const MAX_PAGE_INDEX: usize = 63;
+const MAX_PAGE_INDEX: Nat = 63;
 
 /// Maximum key index.
 ///
 /// Thus the number of keys is one more than this number. Currently, the store only supports 4096
 /// keys.
-const MAX_KEY_INDEX: usize = 4095;
+const MAX_KEY_INDEX: Nat = 4095;
 
 /// Maximum length in bytes of a user payload.
 ///
 /// Currently, the store only supports values smaller than 1024 bytes.
-const MAX_VALUE_LEN: usize = 1023;
+const MAX_VALUE_LEN: Nat = 1023;
 
 /// Maximum number of updates per transaction.
 ///
 /// Currently, the store only supports transactions with at most 31 updates.
-const MAX_UPDATES: usize = 31;
+const MAX_UPDATES: Nat = 31;
 
 /// Maximum number of words per virtual page.
-const MAX_VIRT_PAGE_SIZE: usize = div_ceil(MAX_PAGE_SIZE, WORD_SIZE) - CONTENT_WORD;
+const MAX_VIRT_PAGE_SIZE: Nat = div_ceil(MAX_PAGE_SIZE, WORD_SIZE) - CONTENT_WORD;
 
 /// Word with all bits set to one.
-const ERASED_WORD: WORD = !(0 as WORD);
+const ERASED_WORD: Word = Word(!(0 as WORD));
 
 /// Helpers for a given storage configuration.
 #[derive(Clone, Debug)]
@@ -88,7 +123,7 @@ pub struct Format {
     /// - Words divide a page evenly.
     /// - There are at least 8 words in a page.
     /// - There are at most `MAX_PAGE_SIZE` bytes in a page.
-    page_size: usize,
+    page_size: Nat,
 
     /// The number of pages in the storage.
     ///
@@ -96,14 +131,14 @@ pub struct Format {
     ///
     /// - There are at least 3 pages.
     /// - There are at most `MAX_PAGE_INDEX + 1` pages.
-    num_pages: usize,
+    num_pages: Nat,
 
     /// The maximum number of times a page can be erased.
     ///
     /// # Invariant
     ///
     /// - A page can be erased at most `MAX_ERASE_CYCLE` times.
-    max_page_erases: usize,
+    max_page_erases: Nat,
 }
 
 impl Format {
@@ -115,9 +150,9 @@ impl Format {
     pub fn new<S: Storage>(storage: &S) -> Option<Format> {
         if Format::is_storage_supported(storage) {
             Some(Format {
-                page_size: storage.page_size(),
-                num_pages: storage.num_pages(),
-                max_page_erases: storage.max_page_erases(),
+                page_size: usize_to_nat(storage.page_size()),
+                num_pages: usize_to_nat(storage.num_pages()),
+                max_page_erases: usize_to_nat(storage.max_page_erases()),
             })
         } else {
             None
@@ -143,11 +178,11 @@ impl Format {
     /// [`MAX_PAGE_INDEX`]: constant.MAX_PAGE_INDEX.html
     /// [`MAX_ERASE_CYCLE`]: constant.MAX_ERASE_CYCLE.html
     fn is_storage_supported<S: Storage>(storage: &S) -> bool {
-        let word_size = storage.word_size();
-        let page_size = storage.page_size();
-        let num_pages = storage.num_pages();
-        let max_word_writes = storage.max_word_writes();
-        let max_page_erases = storage.max_page_erases();
+        let word_size = usize_to_nat(storage.word_size());
+        let page_size = usize_to_nat(storage.page_size());
+        let num_pages = usize_to_nat(storage.num_pages());
+        let max_word_writes = usize_to_nat(storage.max_word_writes());
+        let max_page_erases = usize_to_nat(storage.max_page_erases());
         word_size == WORD_SIZE
             && page_size % word_size == 0
             && (MIN_NUM_WORDS_PER_PAGE * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
@@ -157,45 +192,45 @@ impl Format {
     }
 
     /// The size of a word in bytes.
-    pub fn word_size(&self) -> usize {
+    pub fn word_size(&self) -> Nat {
         WORD_SIZE
     }
 
     /// The size of a page in bytes.
     ///
     /// We have `MIN_NUM_WORDS_PER_PAGE * self.word_size() <= self.page_size() <= MAX_PAGE_SIZE`.
-    pub fn page_size(&self) -> usize {
+    pub fn page_size(&self) -> Nat {
         self.page_size
     }
 
     /// The number of pages in the storage, denoted by `N`.
     ///
     /// We have `MIN_NUM_PAGES <= N <= MAX_PAGE_INDEX + 1`.
-    pub fn num_pages(&self) -> usize {
+    pub fn num_pages(&self) -> Nat {
         self.num_pages
     }
 
     /// The maximum page index.
     ///
     /// We have `2 <= self.max_page() <= MAX_PAGE_INDEX`.
-    pub fn max_page(&self) -> usize {
+    pub fn max_page(&self) -> Nat {
         self.num_pages - 1
     }
 
     /// The maximum number of times a page can be erased, denoted by `E`.
     ///
     /// We have `E <= MAX_ERASE_CYCLE`.
-    pub fn max_page_erases(&self) -> usize {
+    pub fn max_page_erases(&self) -> Nat {
         self.max_page_erases
     }
 
     /// The maximum key.
-    pub fn max_key(&self) -> usize {
+    pub fn max_key(&self) -> Nat {
         MAX_KEY_INDEX
     }
 
     /// The maximum number of updates per transaction.
-    pub fn max_updates(&self) -> usize {
+    pub fn max_updates(&self) -> Nat {
         MAX_UPDATES
     }
 
@@ -204,7 +239,7 @@ impl Format {
     /// A virtual page is stored in a physical page after the page header.
     ///
     /// We have `MIN_NUM_WORDS_PER_PAGE - 2 <= Q <= MAX_VIRT_PAGE_SIZE`.
-    pub fn virt_page_size(&self) -> usize {
+    pub fn virt_page_size(&self) -> Nat {
         self.page_size() / self.word_size() - CONTENT_WORD
     }
 
@@ -212,7 +247,7 @@ impl Format {
     ///
     /// We have `(MIN_NUM_WORDS_PER_PAGE - 3) * self.word_size() <= self.max_value_len() <=
     /// MAX_VALUE_LEN`.
-    pub fn max_value_len(&self) -> usize {
+    pub fn max_value_len(&self) -> Nat {
         min(
             (self.virt_page_size() - 1) * self.word_size(),
             MAX_VALUE_LEN,
@@ -225,7 +260,7 @@ impl Format {
     /// virtual page. This happens because entries may overlap up to 2 virtual pages.
     ///
     /// We have `MIN_NUM_WORDS_PER_PAGE - 3 <= M < Q`.
-    pub fn max_prefix_len(&self) -> usize {
+    pub fn max_prefix_len(&self) -> Nat {
         self.bytes_to_words(self.max_value_len())
     }
 
@@ -239,7 +274,7 @@ impl Format {
     /// - `V >= (N - 1) * (Q - 1) - (Q - 1)` from `V` definition
     ///
     /// [`M`]: struct.Format.html#method.max_prefix_len
-    pub fn virt_size(&self) -> usize {
+    pub fn virt_size(&self) -> Nat {
         (self.num_pages() - 1) * (self.virt_page_size() - 1) - self.max_prefix_len()
     }
 
@@ -253,7 +288,7 @@ impl Format {
     /// - `(N - 2) * (Q - 1) - N = (N - 2) * (Q - 2) - 2` by calculus
     ///
     /// [`V`]: struct.Format.html#method.virt_size
-    pub fn total_capacity(&self) -> usize {
+    pub fn total_capacity(&self) -> Nat {
         // From the virtual capacity, we reserve N - 1 words for `Erase` entries and 1 word for a
         // `Clear` entry.
         self.virt_size() - self.num_pages()
@@ -270,18 +305,21 @@ impl Format {
     ///
     /// The init info of the page must be provided to know where the first entry of the page
     /// starts.
-    pub fn page_head(&self, init: InitInfo, page: usize) -> Position {
+    pub fn page_head(&self, init: InitInfo, page: Nat) -> Position {
         Position::new(self, init.cycle, page, init.prefix)
     }
 
     /// Returns the storage index of the init info of a page.
-    pub fn index_init(&self, page: usize) -> StorageIndex {
+    pub fn index_init(&self, page: Nat) -> StorageIndex {
         let byte = INIT_WORD * self.word_size();
-        StorageIndex { page, byte }
+        StorageIndex {
+            page: page as usize,
+            byte: byte as usize,
+        }
     }
 
     /// Parses the init info of a page from its storage representation.
-    pub fn parse_init(&self, word: WORD) -> StoreResult<WordState<InitInfo>> {
+    pub fn parse_init(&self, word: Word) -> StoreResult<WordState<InitInfo>> {
         Ok(if word == ERASED_WORD {
             WordState::Erased
         } else if WORD_CHECKSUM.get(word)? != 0 {
@@ -297,22 +335,25 @@ impl Format {
     }
 
     /// Builds the storage representation of an init info.
-    pub fn build_init(&self, init: InitInfo) -> [u8; WORD_SIZE] {
+    pub fn build_init(&self, init: InitInfo) -> WordSlice {
         let mut word = ERASED_WORD;
         INIT_CYCLE.set(&mut word, init.cycle);
         INIT_PREFIX.set(&mut word, init.prefix);
         WORD_CHECKSUM.set(&mut word, 0);
-        word.to_ne_bytes()
+        word.as_slice()
     }
 
     /// Returns the storage index of the compact info of a page.
-    pub fn index_compact(&self, page: usize) -> StorageIndex {
+    pub fn index_compact(&self, page: Nat) -> StorageIndex {
         let byte = COMPACT_WORD * self.word_size();
-        StorageIndex { page, byte }
+        StorageIndex {
+            page: page as usize,
+            byte: byte as usize,
+        }
     }
 
     /// Parses the compact info of a page from its storage representation.
-    pub fn parse_compact(&self, word: WORD) -> StoreResult<WordState<CompactInfo>> {
+    pub fn parse_compact(&self, word: Word) -> StoreResult<WordState<CompactInfo>> {
         Ok(if word == ERASED_WORD {
             WordState::Erased
         } else if WORD_CHECKSUM.get(word)? != 0 {
@@ -327,15 +368,15 @@ impl Format {
     }
 
     /// Builds the storage representation of a compact info.
-    pub fn build_compact(&self, compact: CompactInfo) -> [u8; WORD_SIZE] {
+    pub fn build_compact(&self, compact: CompactInfo) -> WordSlice {
         let mut word = ERASED_WORD;
         COMPACT_TAIL.set(&mut word, compact.tail);
         WORD_CHECKSUM.set(&mut word, 0);
-        word.to_ne_bytes()
+        word.as_slice()
     }
 
     /// Builds the storage representation of an internal entry.
-    pub fn build_internal(&self, internal: InternalEntry) -> [u8; WORD_SIZE] {
+    pub fn build_internal(&self, internal: InternalEntry) -> WordSlice {
         let mut word = ERASED_WORD;
         match internal {
             InternalEntry::Erase { page } => {
@@ -356,11 +397,11 @@ impl Format {
             }
         }
         WORD_CHECKSUM.set(&mut word, 0);
-        word.to_ne_bytes()
+        word.as_slice()
     }
 
     /// Parses the first word of an entry from its storage representation.
-    pub fn parse_word(&self, word: WORD) -> StoreResult<WordState<ParsedWord>> {
+    pub fn parse_word(&self, word: Word) -> StoreResult<WordState<ParsedWord>> {
         let valid = if ID_PADDING.check(word) {
             ParsedWord::Padding(Padding { length: 0 })
         } else if ID_HEADER.check(word) {
@@ -418,33 +459,91 @@ impl Format {
     }
 
     /// Builds the storage representation of a user entry.
-    pub fn build_user(&self, key: usize, value: &[u8]) -> Vec<u8> {
-        let length = value.len();
+    pub fn build_user(&self, key: Nat, value: &[u8]) -> Vec<u8> {
+        let length = usize_to_nat(value.len());
         let word_size = self.word_size();
         let footer = self.bytes_to_words(length);
-        let mut result = vec![0xff; (1 + footer) * word_size];
-        result[word_size..][..length].copy_from_slice(value);
+        let mut result = vec![0xff; ((1 + footer) * word_size) as usize];
+        result[word_size as usize..][..length as usize].copy_from_slice(value);
         let mut word = ERASED_WORD;
         ID_HEADER.set(&mut word);
-        if footer > 0 && is_erased(&result[footer * word_size..]) {
+        if footer > 0 && is_erased(&result[(footer * word_size) as usize..]) {
             HEADER_FLIPPED.set(&mut word);
             *result.last_mut().unwrap() = 0x7f;
         }
         HEADER_LENGTH.set(&mut word, length);
         HEADER_KEY.set(&mut word, key);
-        HEADER_CHECKSUM.set(&mut word, count_zeros(&result[footer * word_size..]));
-        result[..word_size].copy_from_slice(&word.to_ne_bytes());
+        HEADER_CHECKSUM.set(
+            &mut word,
+            count_zeros(&result[(footer * word_size) as usize..]),
+        );
+        result[..word_size as usize].copy_from_slice(&word.as_slice());
         result
     }
 
     /// Sets the padding bit in the first word of a user entry.
-    pub fn set_padding(&self, word: &mut WORD) {
+    pub fn set_padding(&self, word: &mut Word) {
         ID_PADDING.set(word);
     }
 
     /// Sets the deleted bit in the first word of a user entry.
-    pub fn set_deleted(&self, word: &mut WORD) {
+    pub fn set_deleted(&self, word: &mut Word) {
         HEADER_DELETED.set(word);
+    }
+
+    /// Returns the capacity required by a transaction.
+    pub fn transaction_capacity(&self, updates: &[StoreUpdate]) -> Nat {
+        match updates.len() {
+            // An empty transaction doesn't consume anything.
+            0 => 0,
+            // Transactions with a single update are optimized by avoiding a marker entry.
+            1 => match &updates[0] {
+                StoreUpdate::Insert { value, .. } => self.entry_size(value),
+                // Transactions with a single update which is a removal don't consume anything.
+                StoreUpdate::Remove { .. } => 0,
+            },
+            // A transaction consumes one word for the marker entry in addition to its updates.
+            _ => 1 + updates.iter().map(|x| self.update_capacity(x)).sum::<Nat>(),
+        }
+    }
+
+    /// Returns the capacity of an update.
+    fn update_capacity(&self, update: &StoreUpdate) -> Nat {
+        match update {
+            StoreUpdate::Insert { value, .. } => self.entry_size(value),
+            StoreUpdate::Remove { .. } => 1,
+        }
+    }
+
+    /// Returns the size of a user entry given its value.
+    pub fn entry_size(&self, value: &[u8]) -> Nat {
+        1 + self.bytes_to_words(usize_to_nat(value.len()))
+    }
+
+    /// Checks if a transaction is valid and returns its sorted keys.
+    ///
+    /// Returns `None` if the transaction is invalid.
+    pub fn transaction_valid(&self, updates: &[StoreUpdate]) -> Option<Vec<Nat>> {
+        if usize_to_nat(updates.len()) > self.max_updates() {
+            return None;
+        }
+        let mut sorted_keys = Vec::with_capacity(updates.len());
+        for update in updates {
+            let key = usize_to_nat(update.key());
+            if key > self.max_key() {
+                return None;
+            }
+            if let Some(value) = update.value() {
+                if usize_to_nat(value.len()) > self.max_value_len() {
+                    return None;
+                }
+            }
+            match sorted_keys.binary_search(&key) {
+                Ok(_) => return None,
+                Err(pos) => sorted_keys.insert(pos, key),
+            }
+        }
+        Some(sorted_keys)
     }
 
     /// Returns the minimum number of words to represent a given number of bytes.
@@ -452,21 +551,21 @@ impl Format {
     /// # Preconditions
     ///
     /// - `bytes + self.word_size()` does not overflow.
-    pub fn bytes_to_words(&self, bytes: usize) -> usize {
+    pub fn bytes_to_words(&self, bytes: Nat) -> Nat {
         div_ceil(bytes, self.word_size())
     }
 }
 
 /// The word index of the init info in a page.
-const INIT_WORD: usize = 0;
+const INIT_WORD: Nat = 0;
 
 /// The word index of the compact info in a page.
-const COMPACT_WORD: usize = 1;
+const COMPACT_WORD: Nat = 1;
 
 /// The word index of the content of a page.
 ///
 /// Since a page is at least 8 words, there is always at least 6 words of content.
-const CONTENT_WORD: usize = 2;
+const CONTENT_WORD: Nat = 2;
 
 /// The checksum for a single word.
 ///
@@ -619,27 +718,36 @@ bitfield! {
 ///
 /// Then the position of a word is `(c*N + p)*Q + w`. This position monotonically increases and
 /// represents the consumed lifetime of the storage.
+///
+/// This type is kept abstract to avoid possible confusion with `Nat` and `Word` if they happen to
+/// have the same representation. Here is an overview of their semantics:
+///
+/// | Name       | Semantics                   | Arithmetic operations | Bit-wise operations |
+/// | ---------- | --------------------------- | --------------------- | ------------------- |
+/// | `Nat`      | Natural numbers             | Yes (no overflow)     | No                  |
+/// | `Word`     | Word in flash               | No                    | Yes                 |
+/// | `Position` | Position in virtual storage | Yes (no overflow)     | No                  |
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Position(usize);
+pub struct Position(Nat);
 
-impl core::ops::Add<usize> for Position {
+impl core::ops::Add<Nat> for Position {
     type Output = Position;
 
-    fn add(self, delta: usize) -> Position {
+    fn add(self, delta: Nat) -> Position {
         Position(self.0 + delta)
     }
 }
 
 impl core::ops::Sub<Position> for Position {
-    type Output = usize;
+    type Output = Nat;
 
-    fn sub(self, base: Position) -> usize {
+    fn sub(self, base: Position) -> Nat {
         self.0 - base.0
     }
 }
 
-impl core::ops::AddAssign<usize> for Position {
-    fn add_assign(&mut self, delta: usize) {
+impl core::ops::AddAssign<Nat> for Position {
+    fn add_assign(&mut self, delta: Nat) {
         self.0 += delta;
     }
 }
@@ -651,12 +759,12 @@ impl Position {
     /// - Its word index in its page.
     /// - Its page index in the storage.
     /// - The number of times that page was erased.
-    pub fn new(format: &Format, cycle: usize, page: usize, word: usize) -> Position {
+    pub fn new(format: &Format, cycle: Nat, page: Nat, word: Nat) -> Position {
         Position((cycle * format.num_pages() + page) * format.virt_page_size() + word)
     }
 
     /// Accesses the underlying position as a natural number.
-    pub fn get(self) -> usize {
+    pub fn get(self) -> Nat {
         self.0
     }
 
@@ -665,7 +773,10 @@ impl Position {
         let page = self.page(format);
         let word = CONTENT_WORD + self.word(format);
         let byte = word * format.word_size();
-        StorageIndex { page, byte }
+        StorageIndex {
+            page: page as usize,
+            byte: byte as usize,
+        }
     }
 
     /// Returns the beginning of the current virtual page.
@@ -681,17 +792,17 @@ impl Position {
     }
 
     /// Returns the number of times the current page was erased.
-    pub fn cycle(self, format: &Format) -> usize {
+    pub fn cycle(self, format: &Format) -> Nat {
         (self.0 / format.virt_page_size()) / format.num_pages()
     }
 
     /// Returns the current page index.
-    pub fn page(self, format: &Format) -> usize {
+    pub fn page(self, format: &Format) -> Nat {
         (self.0 / format.virt_page_size()) % format.num_pages()
     }
 
     /// Returns the current word index in the page.
-    pub fn word(self, format: &Format) -> usize {
+    pub fn word(self, format: &Format) -> Nat {
         self.0 % format.virt_page_size()
     }
 }
@@ -711,16 +822,16 @@ pub enum WordState<T> {
 /// Information for an initialized page.
 pub struct InitInfo {
     /// The number of times this page has been erased.
-    pub cycle: usize,
+    pub cycle: Nat,
 
     /// The word index of the first entry in this virtual page.
-    pub prefix: usize,
+    pub prefix: Nat,
 }
 
 /// Information for a page being compacted.
 pub struct CompactInfo {
     /// The distance in words between head and tail at compaction.
-    pub tail: usize,
+    pub tail: Nat,
 }
 
 /// The first word of an entry.
@@ -740,7 +851,7 @@ pub enum ParsedWord {
 #[derive(Debug)]
 pub struct Padding {
     /// The number of following padding words after the first word of the padding entry.
-    pub length: usize,
+    pub length: Nat,
 }
 
 /// Header of a user entry.
@@ -750,13 +861,13 @@ pub struct Header {
     pub flipped: bool,
 
     /// The length in bytes of the user data.
-    pub length: usize,
+    pub length: Nat,
 
     /// The key of the user entry.
-    pub key: usize,
+    pub key: Nat,
 
     /// The checksum of the user entry.
-    pub checksum: usize,
+    pub checksum: Nat,
 }
 
 impl Header {
@@ -775,13 +886,13 @@ pub enum InternalEntry {
     /// Indicates that a page should be erased.
     Erase {
         /// The page to be erased.
-        page: usize,
+        page: Nat,
     },
 
     /// Indicates that user entries with high key should be deleted.
     Clear {
         /// The minimum key a user entry should have to be deleted.
-        min_key: usize,
+        min_key: Nat,
     },
 
     /// Marks the start of a transaction.
@@ -790,7 +901,7 @@ pub enum InternalEntry {
     /// entries.
     Marker {
         /// The number of updates in the transaction.
-        count: usize,
+        count: Nat,
     },
 
     /// Indicates that a user entry should be removed.
@@ -799,7 +910,7 @@ pub enum InternalEntry {
     /// already atomic.
     Remove {
         /// The key of the user entry to be removed.
-        key: usize,
+        key: Nat,
     },
 }
 
@@ -815,7 +926,7 @@ pub fn is_erased(slice: &[u8]) -> bool {
 /// # Preconditions
 ///
 /// - `x + m` does not overflow.
-const fn div_ceil(x: usize, m: usize) -> usize {
+const fn div_ceil(x: Nat, m: Nat) -> Nat {
     (x + m - 1) / m
 }
 
@@ -825,7 +936,7 @@ mod tests {
 
     #[test]
     fn size_of_format() {
-        assert_eq!(std::mem::size_of::<Format>(), 24);
+        assert_eq!(std::mem::size_of::<Format>(), 12);
     }
 
     #[test]
@@ -919,6 +1030,18 @@ mod tests {
         assert_eq!(REMOVE_KEY.pos, 5);
         assert_eq!(REMOVE_KEY.len, 12);
         assert_eq!(LEN_REMOVE.pos, 17);
+    }
+
+    #[test]
+    fn word_from_slice_ok() {
+        assert_eq!(
+            Word::from_slice(&[0x04, 0x03, 0x02, 0x01]),
+            Word(0x01020304)
+        );
+        assert_eq!(
+            Word::from_slice(&[0x1e, 0x3c, 0x78, 0xf0]),
+            Word(0xf0783c1e)
+        );
     }
 
     #[test]

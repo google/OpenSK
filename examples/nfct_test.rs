@@ -32,15 +32,15 @@ mod example {
 
     /// Helper function to write on console the received packet.
     fn print_rx_buffer(buf: &mut [u8]) {
-        let mut console = Console::new();
-        write!(console, "RX:").unwrap();
         if let Some((last, bytes)) = buf.split_last() {
+            let mut console = Console::new();
+            write!(console, "RX:").unwrap();
             for byte in bytes {
                 write!(console, " {:02x?}", byte).unwrap();
             }
             writeln!(console, " {:02x?}", last).unwrap();
+            console.flush();
         }
-        console.flush();
     }
 
     /// Function to identify the time elapsed for a transmission request.
@@ -65,25 +65,27 @@ mod example {
         console.flush();
     }
 
-    fn receive_packet(console: &mut Console, mut buf: &mut [u8; 256]) {
+    fn receive_packet(console: &mut Console, mut buf: &mut [u8; 256]) -> bool {
         match NfcTag::receive(&mut buf) {
             Ok(RecvOp {
                 recv_amount: amount,
                 ..
             }) => {
-                if amount > 0 && amount <= buf.len() {
+                if amount <= buf.len() {
                     print_rx_buffer(&mut buf[..amount]);
                 }
             }
             Err(TockError::Command(CommandError {
                 return_code: -4, /* EOFF: Not Ready */
                 ..
-            })) => (),
+            })) => return false,
+            // For the example app, just print any other received error without handling.
             Err(TockError::Command(CommandError {
                 return_code: value, ..
             })) => writeln!(console, " -- Err({})!", value).unwrap(),
             Err(_) => writeln!(console, " -- RX Err").unwrap(),
         }
+        true
     }
 
     fn transmit_reply(mut console: &mut Console, timer: &Timer, buf: &[u8]) -> bool {
@@ -156,29 +158,24 @@ mod example {
         )
         .unwrap();
 
-        let mut is_enabled = false;
         let mut state_change_counter = 0;
         loop {
-            if is_enabled {
+            while !NfcTag::enable_emulation() {}
+            // Configure Type 4 tag
+            while !NfcTag::configure(4) {}
+            state_change_counter += 1;
+            loop {
                 let mut rx_buf = [0; 256];
-                loop {
-                    receive_packet(&mut console, &mut rx_buf);
-                    // If the reader restarts the communication and we can't
-                    // reply to the received packet, then disable the tag.
-                    if !transmit_reply(&mut console, &timer, &rx_buf) {
-                        is_enabled = false;
-                        break;
-                    }
-                }
-            } else {
-                NfcTag::enable_emulation();
-                // Configure Type 4 tag
-                if NfcTag::configure(4) {
-                    is_enabled = true;
+                // Await a successful receive
+                while !receive_packet(&mut console, &mut rx_buf) {}
+                // If the reader restarts the communication and we can't
+                // reply to the received packet, then disable the tag.
+                if !transmit_reply(&mut console, &timer, &rx_buf) {
+                    state_change_counter += 1;
+                    break;
                 }
             }
-            state_change_counter += 1;
-            if !is_enabled && state_change_counter > 100 {
+            if state_change_counter > 100 {
                 break;
             }
         }

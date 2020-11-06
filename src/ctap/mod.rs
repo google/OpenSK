@@ -342,6 +342,7 @@ where
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
+                let _ = (self.check_user_presence)(cid);
                 if self.persistent_store.pin_hash()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
@@ -545,6 +546,7 @@ where
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
+                let _ = (self.check_user_presence)(cid);
                 if self.persistent_store.pin_hash()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {

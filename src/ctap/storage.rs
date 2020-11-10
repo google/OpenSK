@@ -75,7 +75,7 @@ const MIN_PIN_LENGTH_RP_IDS: usize = 9;
 // so we use the maximum.
 const NUM_TAGS: usize = 10;
 
-const MAX_PIN_RETRIES: u8 = 6;
+const MAX_PIN_RETRIES: u8 = 8;
 const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 const AAGUID_LENGTH: usize = 16;
 #[cfg(feature = "with_ctap2_1")]

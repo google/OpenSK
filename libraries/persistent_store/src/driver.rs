@@ -302,6 +302,12 @@ impl StoreDriverOff {
     }
 
     /// Returns a mapping from delay time to number of modified bits.
+    ///
+    /// For example if the `i`-th value is `n`, it means that the `i`-th operation modifies `n` bits
+    /// in the storage. For convenience, the vector always ends with `0` for one past the last
+    /// operation. This permits to choose a random index in the vector and then a random set of bit
+    /// positions among the number of modified bits to simulate any possible corruption (including
+    /// no corruption with the last index).
     pub fn delay_map(&self) -> Result<Vec<usize>, (usize, BufferStorage)> {
         let mut result = Vec::new();
         loop {
@@ -407,6 +413,10 @@ impl StoreDriverOn {
     }
 
     /// Returns a mapping from delay time to number of modified bits.
+    ///
+    /// See the documentation of [`StoreDriverOff::delay_map`] for details.
+    ///
+    /// [`StoreDriverOff::delay_map`]: struct.StoreDriverOff.html#method.delay_map
     pub fn delay_map(
         &self,
         operation: &StoreOperation,

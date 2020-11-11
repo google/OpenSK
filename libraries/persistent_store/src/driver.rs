@@ -278,7 +278,7 @@ impl StoreDriverOff {
                 };
                 StoreDriver::On(StoreDriverOn::new(store, self.model, &[]).map_err(
                     |(rollback, store)| {
-                        let storage = store.into_storage();
+                        let storage = store.extract_storage();
                         match error {
                             None => (storage, rollback),
                             Some(complete) => {
@@ -336,7 +336,7 @@ impl StoreDriverOn {
     }
 
     /// Extracts the store.
-    pub fn into_store(self) -> Store<BufferStorage> {
+    pub fn extract_store(self) -> Store<BufferStorage> {
         self.store
     }
 
@@ -397,7 +397,7 @@ impl StoreDriverOn {
             }
             Err(StoreError::StorageError) => {
                 let mut driver = StoreDriverOff {
-                    storage: self.store.into_storage(),
+                    storage: self.store.extract_storage(),
                     model: self.model,
                     complete: None,
                 };
@@ -428,7 +428,7 @@ impl StoreDriverOn {
             store.storage_mut().arm_interruption(delay);
             match store.apply(operation).1 {
                 Err(StoreError::StorageError) => (),
-                Err(StoreError::InvalidStorage) => return Err((delay, store.into_storage())),
+                Err(StoreError::InvalidStorage) => return Err((delay, store.extract_storage())),
                 Ok(()) | Err(_) => break,
             }
             result.push(count_modified_bits(store.storage_mut()));
@@ -440,7 +440,7 @@ impl StoreDriverOn {
     /// Powers off the store.
     pub fn power_off(self) -> StoreDriverOff {
         StoreDriverOff {
-            storage: self.store.into_storage(),
+            storage: self.store.extract_storage(),
             model: self.model,
             complete: None,
         }

@@ -1052,7 +1052,7 @@ impl Store<BufferStorage> {
     }
 
     /// Extracts the storage.
-    pub fn into_storage(self) -> BufferStorage {
+    pub fn extract_storage(self) -> BufferStorage {
         self.storage
     }
 

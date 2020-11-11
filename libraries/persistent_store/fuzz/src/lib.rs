@@ -80,7 +80,11 @@ impl Entropy<'_> {
         result
     }
 
-    /// Reads a bounded number.
+    /// Reads a number between `min` and `max` (inclusive bounds).
+    ///
+    /// The distribution is uniform if the range width is a power of two. Otherwise, the minimum
+    /// amount of entropy is used (the next power of two) and the distribution is the closest to
+    /// uniform for that entropy.
     ///
     /// # Preconditions
     ///

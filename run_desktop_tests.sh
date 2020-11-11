@@ -60,6 +60,9 @@ cargo fuzz build
 cd libraries/cbor
 cargo fuzz build
 cd ../..
+cd libraries/persistent_store
+cargo fuzz build
+cd ../..
 
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features with_ctap1

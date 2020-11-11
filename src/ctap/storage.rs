@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod key;
+
 #[cfg(feature = "with_ctap2_1")]
 use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
-use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
+#[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
 #[cfg(any(test, feature = "ram_storage", feature = "with_ctap2_1"))]
 use alloc::vec;
@@ -30,16 +32,16 @@ use core::convert::TryInto;
 use crypto::rng256::Rng256;
 
 #[cfg(any(test, feature = "ram_storage"))]
-type Storage = embedded_flash::BufferStorage;
+type Storage = persistent_store::BufferStorage;
 #[cfg(not(any(test, feature = "ram_storage")))]
-type Storage = embedded_flash::SyscallStorage;
+type Storage = crate::embedded_flash::SyscallStorage;
 
 // Those constants may be modified before compilation to tune the behavior of the key.
 //
-// The number of pages should be at least 2 and at most what the flash can hold. There should be no
-// reason to put a small number here, except that the latency of flash operations depends on the
-// number of pages. This will improve in the future. Currently, using 20 pages gives 65ms per
-// operation. The rule of thumb is 3.5ms per additional page.
+// The number of pages should be at least 3 and at most what the flash can hold. There should be no
+// reason to put a small number here, except that the latency of flash operations is linear in the
+// number of pages. This may improve in the future. Currently, using 20 pages gives between 20ms and
+// 240ms per operation. The rule of thumb is between 1ms and 12ms per additional page.
 //
 // Limiting the number of residential keys permits to ensure a minimum number of counter increments.
 // Let:
@@ -49,31 +51,14 @@ type Storage = embedded_flash::SyscallStorage;
 // - C the number of erase cycles (10000)
 // - I the minimum number of counter increments
 //
-// We have: I = ((P - 1) * 4092 - K * S) / 12 * C
+// We have: I = (P * 4084 - 5107 - K * S) / 8 * C
 //
-// With P=20 and K=150, we have I > 2M which is enough for 500 increments per day for 10 years.
+// With P=20 and K=150, we have I=2M which is enough for 500 increments per day for 10 years.
 #[cfg(feature = "ram_storage")]
-const NUM_PAGES: usize = 2;
+const NUM_PAGES: usize = 3;
 #[cfg(not(feature = "ram_storage"))]
 const NUM_PAGES: usize = 20;
 const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
-
-// List of tags. They should all be unique. And there should be less than NUM_TAGS.
-const TAG_CREDENTIAL: usize = 0;
-const GLOBAL_SIGNATURE_COUNTER: usize = 1;
-const MASTER_KEYS: usize = 2;
-const PIN_HASH: usize = 3;
-const PIN_RETRIES: usize = 4;
-const ATTESTATION_PRIVATE_KEY: usize = 5;
-const ATTESTATION_CERTIFICATE: usize = 6;
-const AAGUID: usize = 7;
-#[cfg(feature = "with_ctap2_1")]
-const MIN_PIN_LENGTH: usize = 8;
-#[cfg(feature = "with_ctap2_1")]
-const MIN_PIN_LENGTH_RP_IDS: usize = 9;
-// Different NUM_TAGS depending on the CTAP version make the storage incompatible,
-// so we use the maximum.
-const NUM_TAGS: usize = 10;
 
 const MAX_PIN_RETRIES: u8 = 8;
 const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
@@ -88,92 +73,18 @@ const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 #[cfg(feature = "with_ctap2_1")]
 const _MAX_RP_IDS_LENGTH: usize = 8;
 
-#[allow(clippy::enum_variant_names)]
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum Key {
-    // TODO(cretin): Test whether this doesn't consume too much memory. Otherwise, we can use less
-    // keys. Either only a simple enum value for all credentials, or group by rp_id.
-    Credential {
-        rp_id: Option<String>,
-        credential_id: Option<Vec<u8>>,
-        user_handle: Option<Vec<u8>>,
-    },
-    GlobalSignatureCounter,
-    MasterKeys,
-    PinHash,
-    PinRetries,
-    AttestationPrivateKey,
-    AttestationCertificate,
-    Aaguid,
-    #[cfg(feature = "with_ctap2_1")]
-    MinPinLength,
-    #[cfg(feature = "with_ctap2_1")]
-    MinPinLengthRpIds,
-}
-
+/// Wrapper for master keys.
 pub struct MasterKeys {
+    /// Master encryption key.
     pub encryption: [u8; 32],
+
+    /// Master hmac key.
     pub hmac: [u8; 32],
 }
 
-struct Config;
-
-impl StoreConfig for Config {
-    type Key = Key;
-
-    fn num_tags(&self) -> usize {
-        NUM_TAGS
-    }
-
-    fn keys(&self, entry: StoreEntry, mut add: impl FnMut(Key)) {
-        match entry.tag {
-            TAG_CREDENTIAL => {
-                let credential = match deserialize_credential(entry.data) {
-                    None => {
-                        debug_assert!(false);
-                        return;
-                    }
-                    Some(credential) => credential,
-                };
-                add(Key::Credential {
-                    rp_id: Some(credential.rp_id.clone()),
-                    credential_id: Some(credential.credential_id),
-                    user_handle: None,
-                });
-                add(Key::Credential {
-                    rp_id: Some(credential.rp_id.clone()),
-                    credential_id: None,
-                    user_handle: None,
-                });
-                add(Key::Credential {
-                    rp_id: Some(credential.rp_id),
-                    credential_id: None,
-                    user_handle: Some(credential.user_handle),
-                });
-                add(Key::Credential {
-                    rp_id: None,
-                    credential_id: None,
-                    user_handle: None,
-                });
-            }
-            GLOBAL_SIGNATURE_COUNTER => add(Key::GlobalSignatureCounter),
-            MASTER_KEYS => add(Key::MasterKeys),
-            PIN_HASH => add(Key::PinHash),
-            PIN_RETRIES => add(Key::PinRetries),
-            ATTESTATION_PRIVATE_KEY => add(Key::AttestationPrivateKey),
-            ATTESTATION_CERTIFICATE => add(Key::AttestationCertificate),
-            AAGUID => add(Key::Aaguid),
-            #[cfg(feature = "with_ctap2_1")]
-            MIN_PIN_LENGTH => add(Key::MinPinLength),
-            #[cfg(feature = "with_ctap2_1")]
-            MIN_PIN_LENGTH_RP_IDS => add(Key::MinPinLengthRpIds),
-            _ => debug_assert!(false),
-        }
-    }
-}
-
+/// CTAP persistent storage.
 pub struct PersistentStore {
-    store: embedded_flash::Store<Storage, Config>,
+    store: persistent_store::Store<Storage>,
 }
 
 impl PersistentStore {
@@ -188,17 +99,19 @@ impl PersistentStore {
         #[cfg(any(test, feature = "ram_storage"))]
         let storage = PersistentStore::new_test_storage();
         let mut store = PersistentStore {
-            store: embedded_flash::Store::new(storage, Config).unwrap(),
+            store: persistent_store::Store::new(storage).ok().unwrap(),
         };
-        store.init(rng);
+        store.init(rng).unwrap();
         store
     }
 
+    /// Creates a syscall storage in flash.
     #[cfg(not(any(test, feature = "ram_storage")))]
     fn new_prod_storage() -> Storage {
         Storage::new(NUM_PAGES).unwrap()
     }
 
+    /// Creates a buffer storage in RAM.
     #[cfg(any(test, feature = "ram_storage"))]
     fn new_test_storage() -> Storage {
         #[cfg(not(test))]
@@ -206,7 +119,7 @@ impl PersistentStore {
         #[cfg(test)]
         const PAGE_SIZE: usize = 0x1000;
         let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
-        let options = embedded_flash::BufferOptions {
+        let options = persistent_store::BufferOptions {
             word_size: 4,
             page_size: PAGE_SIZE,
             max_word_writes: 2,
@@ -216,283 +129,265 @@ impl PersistentStore {
         Storage::new(store, options)
     }
 
-    fn init(&mut self, rng: &mut impl Rng256) {
-        if self.store.find_one(&Key::MasterKeys).is_none() {
+    /// Initializes the store by creating missing objects.
+    fn init(&mut self, rng: &mut impl Rng256) -> Result<(), Ctap2StatusCode> {
+        // Generate and store the master keys if they are missing.
+        if self.store.find_handle(key::MASTER_KEYS)?.is_none() {
             let master_encryption_key = rng.gen_uniform_u8x32();
             let master_hmac_key = rng.gen_uniform_u8x32();
             let mut master_keys = Vec::with_capacity(64);
             master_keys.extend_from_slice(&master_encryption_key);
             master_keys.extend_from_slice(&master_hmac_key);
-            self.store
-                .insert(StoreEntry {
-                    tag: MASTER_KEYS,
-                    data: &master_keys,
-                    sensitive: true,
-                })
-                .unwrap();
+            self.store.insert(key::MASTER_KEYS, &master_keys)?;
         }
         // The following 3 entries are meant to be written by vendor-specific commands.
         if USE_BATCH_ATTESTATION {
-            if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
-                self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
-                    .unwrap();
+            if self
+                .store
+                .find_handle(key::ATTESTATION_PRIVATE_KEY)?
+                .is_none()
+            {
+                self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)?;
             }
-            if self.store.find_one(&Key::AttestationCertificate).is_none() {
-                self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
-                    .unwrap();
+            if self
+                .store
+                .find_handle(key::ATTESTATION_CERTIFICATE)?
+                .is_none()
+            {
+                self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)?;
             }
         }
-        if self.store.find_one(&Key::Aaguid).is_none() {
-            self.set_aaguid(key_material::AAGUID).unwrap();
+        if self.store.find_handle(key::AAGUID)?.is_none() {
+            self.set_aaguid(key_material::AAGUID)?;
         }
+        Ok(())
     }
 
+    /// Returns the first matching credential.
+    ///
+    /// Returns `None` if no credentials are matched or if `check_cred_protect` is set and the first
+    /// matched credential requires user verification.
     pub fn find_credential(
         &self,
         rp_id: &str,
         credential_id: &[u8],
         check_cred_protect: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        let key = Key::Credential {
-            rp_id: Some(rp_id.into()),
-            credential_id: Some(credential_id.into()),
-            user_handle: None,
-        };
-        let entry = match self.store.find_one(&key) {
-            None => return Ok(None),
-            Some((_, entry)) => entry,
-        };
-        debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
-        let result = deserialize_credential(entry.data);
-        debug_assert!(result.is_some());
-        let user_verification_required = result.as_ref().map_or(false, |cred| {
-            cred.cred_protect_policy == Some(CredentialProtectionPolicy::UserVerificationRequired)
+        let mut iter_result = Ok(());
+        let iter = self.iter_credentials(&mut iter_result)?;
+        // TODO(reviewer): Should we return an error if we find more than one matching credential?
+        // We did not use to in the previous version (panic in debug mode, nothing in release mode)
+        // but I don't remember why. Let's document it.
+        let result = iter.map(|(_, credential)| credential).find(|credential| {
+            credential.rp_id == rp_id && credential.credential_id == credential_id
         });
-        if check_cred_protect && user_verification_required {
-            Ok(None)
-        } else {
-            Ok(result)
+        iter_result?;
+        if let Some(cred) = &result {
+            let user_verification_required = cred.cred_protect_policy
+                == Some(CredentialProtectionPolicy::UserVerificationRequired);
+            if check_cred_protect && user_verification_required {
+                return Ok(None);
+            }
         }
+        Ok(result)
     }
 
+    /// Stores or updates a credential.
+    ///
+    /// If a credential with the same RP id and user handle already exists, it is replaced.
     pub fn store_credential(
         &mut self,
-        credential: PublicKeyCredentialSource,
+        new_credential: PublicKeyCredentialSource,
     ) -> Result<(), Ctap2StatusCode> {
-        let key = Key::Credential {
-            rp_id: Some(credential.rp_id.clone()),
-            credential_id: None,
-            user_handle: Some(credential.user_handle.clone()),
-        };
-        let old_entry = self.store.find_one(&key);
-        if old_entry.is_none() && self.count_credentials()? >= MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        // Holds the key of the existing credential if this is an update.
+        let mut old_key = None;
+        // Holds the unordered list of used keys.
+        let mut keys = Vec::new();
+        let mut iter_result = Ok(());
+        let iter = self.iter_credentials(&mut iter_result)?;
+        for (key, credential) in iter {
+            keys.push(key);
+            if credential.rp_id == new_credential.rp_id
+                && credential.user_handle == new_credential.user_handle
+            {
+                if old_key.is_some() {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE);
+                }
+                old_key = Some(key);
+            }
+        }
+        iter_result?;
+        if old_key.is_none() && keys.len() >= MAX_SUPPORTED_RESIDENTIAL_KEYS {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
-        let credential = serialize_credential(credential)?;
-        let new_entry = StoreEntry {
-            tag: TAG_CREDENTIAL,
-            data: &credential,
-            sensitive: true,
+        let key = match old_key {
+            // This is a new credential being added, we need to allocate a free key. We choose the
+            // first available key. This is quadratic in the number of existing keys.
+            None => key::CREDENTIALS
+                .take(MAX_SUPPORTED_RESIDENTIAL_KEYS)
+                .find(|key| !keys.contains(key))
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE)?,
+            // This is an existing credential being updated, we reuse its key.
+            Some(x) => x,
         };
-        match old_entry {
-            None => self.store.insert(new_entry)?,
-            Some((index, old_entry)) => {
-                debug_assert_eq!(old_entry.tag, TAG_CREDENTIAL);
-                self.store.replace(index, new_entry)?
-            }
-        };
+        let value = serialize_credential(new_credential)?;
+        self.store.insert(key, &value)?;
         Ok(())
     }
 
+    /// Returns the list of matching credentials.
+    ///
+    /// Does not return credentials that are not discoverable if `check_cred_protect` is set.
     pub fn filter_credential(
         &self,
         rp_id: &str,
         check_cred_protect: bool,
     ) -> Result<Vec<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        Ok(self
-            .store
-            .find_all(&Key::Credential {
-                rp_id: Some(rp_id.into()),
-                credential_id: None,
-                user_handle: None,
-            })
-            .filter_map(|(_, entry)| {
-                debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
-                let credential = deserialize_credential(entry.data);
-                debug_assert!(credential.is_some());
-                credential
+        let mut iter_result = Ok(());
+        let iter = self.iter_credentials(&mut iter_result)?;
+        let result = iter
+            .filter_map(|(_, credential)| {
+                if credential.rp_id == rp_id {
+                    Some(credential)
+                } else {
+                    None
+                }
             })
             .filter(|cred| !check_cred_protect || cred.is_discoverable())
-            .collect())
+            .collect();
+        iter_result?;
+        Ok(result)
     }
 
+    /// Returns the number of credentials.
+    #[cfg(test)]
     pub fn count_credentials(&self) -> Result<usize, Ctap2StatusCode> {
-        Ok(self
-            .store
-            .find_all(&Key::Credential {
-                rp_id: None,
-                credential_id: None,
-                user_handle: None,
-            })
-            .count())
+        let mut iter_result = Ok(());
+        let iter = self.iter_credentials(&mut iter_result)?;
+        let result = iter.count();
+        iter_result?;
+        Ok(result)
     }
 
+    /// Iterates through the credentials.
+    ///
+    /// If an error is encountered during iteration, it is written to `result`.
+    fn iter_credentials<'a>(
+        &'a self,
+        result: &'a mut Result<(), Ctap2StatusCode>,
+    ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
+        IterCredentials::new(&self.store, result)
+    }
+
+    /// Returns the global signature counter.
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
-        Ok(self
-            .store
-            .find_one(&Key::GlobalSignatureCounter)
-            .map_or(0, |(_, entry)| {
-                u32::from_ne_bytes(*array_ref!(entry.data, 0, 4))
-            }))
-    }
-
-    pub fn incr_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
-        let mut buffer = [0; core::mem::size_of::<u32>()];
-        match self.store.find_one(&Key::GlobalSignatureCounter) {
-            None => {
-                buffer.copy_from_slice(&1u32.to_ne_bytes());
-                self.store.insert(StoreEntry {
-                    tag: GLOBAL_SIGNATURE_COUNTER,
-                    data: &buffer,
-                    sensitive: false,
-                })?;
-            }
-            Some((index, entry)) => {
-                let value = u32::from_ne_bytes(*array_ref!(entry.data, 0, 4));
-                // In hopes that servers handle the wrapping gracefully.
-                buffer.copy_from_slice(&value.wrapping_add(1).to_ne_bytes());
-                self.store.replace(
-                    index,
-                    StoreEntry {
-                        tag: GLOBAL_SIGNATURE_COUNTER,
-                        data: &buffer,
-                        sensitive: false,
-                    },
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn master_keys(&self) -> Result<MasterKeys, Ctap2StatusCode> {
-        let (_, entry) = self.store.find_one(&Key::MasterKeys).unwrap();
-        if entry.data.len() != 64 {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        Ok(MasterKeys {
-            encryption: *array_ref![entry.data, 0, 32],
-            hmac: *array_ref![entry.data, 32, 32],
+        Ok(match self.store.find(key::GLOBAL_SIGNATURE_COUNTER)? {
+            None => 0,
+            Some(value) => u32::from_ne_bytes(*array_ref!(&value, 0, 4)),
         })
     }
 
-    pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
-        let data = match self.store.find_one(&Key::PinHash) {
-            None => return Ok(None),
-            Some((_, entry)) => entry.data,
-        };
-        if data.len() != PIN_AUTH_LENGTH {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        Ok(Some(*array_ref![data, 0, PIN_AUTH_LENGTH]))
+    /// Increments the global signature counter.
+    pub fn incr_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
+        let old_value = self.global_signature_counter()?;
+        // In hopes that servers handle the wrapping gracefully.
+        let new_value = old_value.wrapping_add(1);
+        self.store
+            .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
+        Ok(())
     }
 
+    /// Returns the master keys.
+    pub fn master_keys(&self) -> Result<MasterKeys, Ctap2StatusCode> {
+        let master_keys = self
+            .store
+            .find(key::MASTER_KEYS)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE)?;
+        if master_keys.len() != 64 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE);
+        }
+        Ok(MasterKeys {
+            encryption: *array_ref![master_keys, 0, 32],
+            hmac: *array_ref![master_keys, 32, 32],
+        })
+    }
+
+    /// Returns the PIN hash if defined.
+    pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
+        let pin_hash = match self.store.find(key::PIN_HASH)? {
+            None => return Ok(None),
+            Some(pin_hash) => pin_hash,
+        };
+        if pin_hash.len() != PIN_AUTH_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE);
+        }
+        Ok(Some(*array_ref![pin_hash, 0, PIN_AUTH_LENGTH]))
+    }
+
+    /// Sets the PIN hash.
+    ///
+    /// If it was already defined, it is updated.
     pub fn set_pin_hash(
         &mut self,
         pin_hash: &[u8; PIN_AUTH_LENGTH],
     ) -> Result<(), Ctap2StatusCode> {
-        let entry = StoreEntry {
-            tag: PIN_HASH,
-            data: pin_hash,
-            sensitive: true,
-        };
-        match self.store.find_one(&Key::PinHash) {
-            None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
-        }
-        Ok(())
+        Ok(self.store.insert(key::PIN_HASH, pin_hash)?)
     }
 
+    /// Returns the number of remaining PIN retries.
     pub fn pin_retries(&self) -> Result<u8, Ctap2StatusCode> {
-        Ok(self
-            .store
-            .find_one(&Key::PinRetries)
-            .map_or(MAX_PIN_RETRIES, |(_, entry)| {
-                debug_assert_eq!(entry.data.len(), 1);
-                entry.data[0]
-            }))
+        match self.store.find(key::PIN_RETRIES)? {
+            None => Ok(MAX_PIN_RETRIES),
+            Some(value) if value.len() == 1 => Ok(value[0]),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE),
+        }
     }
 
+    /// Decrements the number of remaining PIN retries.
     pub fn decr_pin_retries(&mut self) -> Result<(), Ctap2StatusCode> {
-        match self.store.find_one(&Key::PinRetries) {
-            None => {
-                self.store.insert(StoreEntry {
-                    tag: PIN_RETRIES,
-                    data: &[MAX_PIN_RETRIES.saturating_sub(1)],
-                    sensitive: false,
-                })?;
-            }
-            Some((index, entry)) => {
-                debug_assert_eq!(entry.data.len(), 1);
-                if entry.data[0] == 0 {
-                    return Ok(());
-                }
-                let new_value = entry.data[0].saturating_sub(1);
-                self.store.replace(
-                    index,
-                    StoreEntry {
-                        tag: PIN_RETRIES,
-                        data: &[new_value],
-                        sensitive: false,
-                    },
-                )?;
-            }
+        let old_value = self.pin_retries()?;
+        let new_value = old_value.saturating_sub(1);
+        if new_value != old_value {
+            self.store.insert(key::PIN_RETRIES, &[new_value])?;
         }
         Ok(())
     }
 
+    /// Resets the number of remaining PIN retries.
     pub fn reset_pin_retries(&mut self) -> Result<(), Ctap2StatusCode> {
-        if let Some((index, _)) = self.store.find_one(&Key::PinRetries) {
-            self.store.delete(index)?;
-        }
-        Ok(())
+        Ok(self.store.remove(key::PIN_RETRIES)?)
     }
 
+    /// Returns the minimum PIN length.
     #[cfg(feature = "with_ctap2_1")]
     pub fn min_pin_length(&self) -> Result<u8, Ctap2StatusCode> {
-        Ok(self
-            .store
-            .find_one(&Key::MinPinLength)
-            .map_or(DEFAULT_MIN_PIN_LENGTH, |(_, entry)| {
-                debug_assert_eq!(entry.data.len(), 1);
-                entry.data[0]
-            }))
+        match self.store.find(key::MIN_PIN_LENGTH)? {
+            None => Ok(DEFAULT_MIN_PIN_LENGTH),
+            Some(value) if value.len() == 1 => Ok(value[0]),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE),
+        }
     }
 
+    /// Sets the minimum PIN length.
     #[cfg(feature = "with_ctap2_1")]
     pub fn set_min_pin_length(&mut self, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
-        let entry = StoreEntry {
-            tag: MIN_PIN_LENGTH,
-            data: &[min_pin_length],
-            sensitive: false,
-        };
-        Ok(match self.store.find_one(&Key::MinPinLength) {
-            None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
-        })
+        Ok(self.store.insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
     }
 
+    /// TODO: Help from reviewer needed for documentation.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
             .store
-            .find_one(&Key::MinPinLengthRpIds)
-            .map_or(Some(_DEFAULT_MIN_PIN_LENGTH_RP_IDS), |(_, entry)| {
-                _deserialize_min_pin_length_rp_ids(entry.data)
+            .find(key::_MIN_PIN_LENGTH_RP_IDS)?
+            .map_or(Some(_DEFAULT_MIN_PIN_LENGTH_RP_IDS), |value| {
+                _deserialize_min_pin_length_rp_ids(&value)
             });
         debug_assert!(rp_ids.is_some());
         Ok(rp_ids.unwrap_or(vec![]))
     }
 
+    /// TODO: Help from reviewer needed for documentation.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _set_min_pin_length_rp_ids(
         &mut self,
@@ -507,138 +402,173 @@ impl PersistentStore {
         if min_pin_length_rp_ids.len() > _MAX_RP_IDS_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
-        let entry = StoreEntry {
-            tag: MIN_PIN_LENGTH_RP_IDS,
-            data: &_serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
-            sensitive: false,
-        };
-        match self.store.find_one(&Key::MinPinLengthRpIds) {
-            None => {
-                self.store.insert(entry).unwrap();
-            }
-            Some((index, _)) => {
-                self.store.replace(index, entry).unwrap();
-            }
-        }
-        Ok(())
+        Ok(self.store.insert(
+            key::_MIN_PIN_LENGTH_RP_IDS,
+            &_serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
+        )?)
     }
 
+    /// Returns the attestation private key if defined.
     pub fn attestation_private_key(
         &self,
-    ) -> Result<Option<&[u8; ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
-        let data = match self.store.find_one(&Key::AttestationPrivateKey) {
-            None => return Ok(None),
-            Some((_, entry)) => entry.data,
-        };
-        if data.len() != ATTESTATION_PRIVATE_KEY_LENGTH {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    ) -> Result<Option<[u8; ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
+        match self.store.find(key::ATTESTATION_PRIVATE_KEY)? {
+            None => Ok(None),
+            Some(key) if key.len() != ATTESTATION_PRIVATE_KEY_LENGTH => {
+                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE)
+            }
+            Some(key) => Ok(Some(*array_ref![key, 0, ATTESTATION_PRIVATE_KEY_LENGTH])),
         }
-        Ok(Some(array_ref!(data, 0, ATTESTATION_PRIVATE_KEY_LENGTH)))
     }
 
+    /// Sets the attestation private key.
+    ///
+    /// If it is already defined, it is overwritten.
     pub fn set_attestation_private_key(
         &mut self,
         attestation_private_key: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH],
     ) -> Result<(), Ctap2StatusCode> {
-        let entry = StoreEntry {
-            tag: ATTESTATION_PRIVATE_KEY,
-            data: attestation_private_key,
-            sensitive: false,
-        };
-        match self.store.find_one(&Key::AttestationPrivateKey) {
-            None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
-        }
-        Ok(())
+        Ok(self
+            .store
+            .insert(key::ATTESTATION_PRIVATE_KEY, attestation_private_key)?)
     }
 
+    /// Returns the attestation certificate if defined.
     pub fn attestation_certificate(&self) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
-        let data = match self.store.find_one(&Key::AttestationCertificate) {
-            None => return Ok(None),
-            Some((_, entry)) => entry.data,
-        };
-        Ok(Some(data.to_vec()))
+        Ok(self.store.find(key::ATTESTATION_CERTIFICATE)?)
     }
 
+    /// Sets the attestation certificate.
+    ///
+    /// If it is already defined, it is overwritten.
     pub fn set_attestation_certificate(
         &mut self,
         attestation_certificate: &[u8],
     ) -> Result<(), Ctap2StatusCode> {
-        let entry = StoreEntry {
-            tag: ATTESTATION_CERTIFICATE,
-            data: attestation_certificate,
-            sensitive: false,
-        };
-        match self.store.find_one(&Key::AttestationCertificate) {
-            None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
-        }
-        Ok(())
-    }
-
-    pub fn aaguid(&self) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
-        let (_, entry) = self
+        Ok(self
             .store
-            .find_one(&Key::Aaguid)
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-        let data = entry.data;
-        if data.len() != AAGUID_LENGTH {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        Ok(*array_ref![data, 0, AAGUID_LENGTH])
+            .insert(key::ATTESTATION_CERTIFICATE, attestation_certificate)?)
     }
 
+    /// Returns the AAGUID.
+    pub fn aaguid(&self) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
+        let aaguid = self
+            .store
+            .find(key::AAGUID)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE)?;
+        if aaguid.len() != AAGUID_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE);
+        }
+        Ok(*array_ref![aaguid, 0, AAGUID_LENGTH])
+    }
+
+    /// Sets the AAGUID.
+    ///
+    /// If it is already defined, it is overwritten.
     pub fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> Result<(), Ctap2StatusCode> {
-        let entry = StoreEntry {
-            tag: AAGUID,
-            data: aaguid,
-            sensitive: false,
-        };
-        match self.store.find_one(&Key::Aaguid) {
-            None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
-        }
-        Ok(())
+        Ok(self.store.insert(key::AAGUID, aaguid)?)
     }
 
+    /// Resets the store as for a CTAP reset.
+    ///
+    /// In particular persistent entries are not reset.
     pub fn reset(&mut self, rng: &mut impl Rng256) -> Result<(), Ctap2StatusCode> {
-        loop {
-            let index = {
-                let mut iter = self.store.iter().filter(|(_, entry)| should_reset(entry));
-                match iter.next() {
-                    None => break,
-                    Some((index, _)) => index,
-                }
-            };
-            self.store.delete(index)?;
-        }
-        self.init(rng);
+        self.store.clear(key::NUM_PERSISTENT_KEYS)?;
+        self.init(rng)?;
         Ok(())
     }
 }
 
-impl From<StoreError> for Ctap2StatusCode {
-    fn from(error: StoreError) -> Ctap2StatusCode {
+impl From<persistent_store::StoreError> for Ctap2StatusCode {
+    fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
+        use persistent_store::StoreError::*;
         match error {
-            StoreError::StoreFull => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
-            StoreError::InvalidTag => unreachable!(),
-            StoreError::InvalidPrecondition => unreachable!(),
+            // This error is expected. The store is full.
+            NoCapacity => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            // This error is expected. The flash is out of life.
+            NoLifetime => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            // This error is expected if we don't satisfy the store preconditions. For example we
+            // try to store a credential which is too long.
+            InvalidArgument => Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+            // This error is not expected. The storage has been tempered with. We could erase the
+            // storage.
+            InvalidStorage => Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE,
+            // This error is not expected. The kernel is failing our syscalls.
+            StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
         }
     }
 }
 
-fn should_reset(entry: &StoreEntry<'_>) -> bool {
-    match entry.tag {
-        ATTESTATION_PRIVATE_KEY | ATTESTATION_CERTIFICATE | AAGUID => false,
-        _ => true,
+/// Iterator for credentials.
+struct IterCredentials<'a> {
+    /// The store being iterated.
+    store: &'a persistent_store::Store<Storage>,
+
+    /// The store iterator.
+    iter: persistent_store::StoreIter<'a, Storage>,
+
+    /// The iteration result.
+    ///
+    /// It starts as success and gets written at most once with an error if something fails. The
+    /// iteration stops as soon as an error is encountered.
+    result: &'a mut Result<(), Ctap2StatusCode>,
+}
+
+impl<'a> IterCredentials<'a> {
+    /// Creates a credential iterator.
+    fn new(
+        store: &'a persistent_store::Store<Storage>,
+        result: &'a mut Result<(), Ctap2StatusCode>,
+    ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
+        let iter = store.iter()?;
+        Ok(IterCredentials {
+            store,
+            iter,
+            result,
+        })
+    }
+
+    /// Marks the iteration as failed if the content is absent.
+    ///
+    /// For convenience, the function takes and returns ownership instead of taking a shared
+    /// reference and returning nothing. This permits to use it in both expressions and statements
+    /// instead of statements only.
+    fn unwrap<T>(&mut self, x: Option<T>) -> Option<T> {
+        if x.is_none() {
+            *self.result = Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE);
+        }
+        x
     }
 }
 
+impl<'a> Iterator for IterCredentials<'a> {
+    type Item = (usize, PublicKeyCredentialSource);
+
+    fn next(&mut self) -> Option<(usize, PublicKeyCredentialSource)> {
+        if self.result.is_err() {
+            return None;
+        }
+        while let Some(next) = self.iter.next() {
+            let handle = self.unwrap(next.ok())?;
+            let key = handle.get_key();
+            if !key::CREDENTIALS.contains(&key) {
+                continue;
+            }
+            let value = self.unwrap(handle.get_value(&self.store).ok())?;
+            let credential = self.unwrap(deserialize_credential(&value))?;
+            return Some((key, credential));
+        }
+        None
+    }
+}
+
+/// Deserializes a credential from storage representation.
 fn deserialize_credential(data: &[u8]) -> Option<PublicKeyCredentialSource> {
     let cbor = cbor::read(data).ok()?;
     cbor.try_into().ok()
 }
 
+/// Serializes a credential to storage representation.
 fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     if cbor::write(credential.into(), &mut data) {
@@ -648,6 +578,7 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
     }
 }
 
+/// TODO: Help from reviewer needed for documentation.
 #[cfg(feature = "with_ctap2_1")]
 fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
     let cbor = cbor::read(data).ok()?;
@@ -659,6 +590,7 @@ fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
         .ok()
 }
 
+/// TODO: Help from reviewer needed for documentation.
 #[cfg(feature = "with_ctap2_1")]
 fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
@@ -691,28 +623,6 @@ mod test {
             cred_random: None,
             cred_protect_policy: None,
         }
-    }
-
-    #[test]
-    fn format_overhead() {
-        // nRF52840 NVMC
-        const WORD_SIZE: usize = 4;
-        const PAGE_SIZE: usize = 0x1000;
-        const NUM_PAGES: usize = 100;
-        let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
-        let options = embedded_flash::BufferOptions {
-            word_size: WORD_SIZE,
-            page_size: PAGE_SIZE,
-            max_word_writes: 2,
-            max_page_erases: 10000,
-            strict_write: true,
-        };
-        let storage = Storage::new(store, options);
-        let store = embedded_flash::Store::new(storage, Config).unwrap();
-        // We can replace 3 bytes with minimal overhead.
-        assert_eq!(store.replace_len(false, 0), 2 * WORD_SIZE);
-        assert_eq!(store.replace_len(false, 3), 3 * WORD_SIZE);
-        assert_eq!(store.replace_len(false, 4), 3 * WORD_SIZE);
     }
 
     #[test]
@@ -974,21 +884,21 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // The pin retries is initially at the maximum.
-        assert_eq!(persistent_store.pin_retries().unwrap(), MAX_PIN_RETRIES);
+        assert_eq!(persistent_store.pin_retries(), Ok(MAX_PIN_RETRIES));
 
         // Decrementing the pin retries decrements the pin retries.
         for pin_retries in (0..MAX_PIN_RETRIES).rev() {
             persistent_store.decr_pin_retries().unwrap();
-            assert_eq!(persistent_store.pin_retries().unwrap(), pin_retries);
+            assert_eq!(persistent_store.pin_retries(), Ok(pin_retries));
         }
 
         // Decrementing the pin retries after zero does not modify the pin retries.
         persistent_store.decr_pin_retries().unwrap();
-        assert_eq!(persistent_store.pin_retries().unwrap(), 0);
+        assert_eq!(persistent_store.pin_retries(), Ok(0));
 
         // Resetting the pin retries resets the pin retries.
         persistent_store.reset_pin_retries().unwrap();
-        assert_eq!(persistent_store.pin_retries().unwrap(), MAX_PIN_RETRIES);
+        assert_eq!(persistent_store.pin_retries(), Ok(MAX_PIN_RETRIES));
     }
 
     #[test]
@@ -1018,7 +928,7 @@ mod test {
         // The persistent keys stay initialized and preserve their value after a reset.
         persistent_store.reset(&mut rng).unwrap();
         assert_eq!(
-            persistent_store.attestation_private_key().unwrap().unwrap(),
+            &persistent_store.attestation_private_key().unwrap().unwrap(),
             key_material::ATTESTATION_PRIVATE_KEY
         );
         assert_eq!(

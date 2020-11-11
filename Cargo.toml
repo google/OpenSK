@@ -15,6 +15,7 @@ libtock_drivers = { path = "third_party/libtock-drivers" }
 lang_items = { path = "third_party/lang-items" }
 cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
+persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
@@ -23,7 +24,7 @@ subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["crypto/derive_debug", "libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std"]
+std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std", "persistent_store/std"]
 ram_storage = []
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]

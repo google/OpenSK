@@ -12,10 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Fuzzing library for the persistent store.
+//!
+//! The overall design principles are (in order of precedence):
+//! - Determinism: fuzzing is a function from seeds (byte slices) to sequences of store
+//!   manipulations (things like creating a store, applying operations, interrupting operations,
+//!   interrupting reboots, checking invariant, etc). We can replay this function on the same input
+//!   to get the same sequence of manipulations (for the same fuzzing and store code).
+//! - Coverage: fuzzing tries to coverage as much different behaviors as possible for small seeds.
+//!   Ideally, each seed bit would control a branch decision in the tree of execution paths.
+//! - Surjectivity: all sequences of manipulations are reachable by fuzzing for some seed. The only
+//!   situation where coverage takes precedence over surjectivity is for the value of insert updates
+//!   where a pseudo-random generator is used to avoid wasting entropy.
+
 // TODO(ia0): Remove when used.
 #![allow(dead_code)]
 
 /// Bit-level entropy source based on a byte slice shared reference.
+///
+/// The entropy has the following properties (in order of precedence):
+/// - It always returns a result.
+/// - It is deterministic: for a given slice and a given sequence of operations, the same results
+///   are returned. This permits to replay and debug fuzzing artifacts.
+/// - It uses the slice as a bit stream. In particular, it doesn't do big number arithmetic. This
+///   permits to have a simple implementation.
+/// - It doesn't waste information: for a given operation, the minimum integer number of bits is
+///   used to produce the result. As a consequence fractional bits can be wasted at each operation.
+/// - It uses the information uniformly: each bit is used exactly once, except when only a fraction
+///   of it is used. In particular, a bit is not used more than once. A consequence of each bit
+///   being used essentially once, is that the results are mostly uniformly distributed.
+///
+/// # Invariant
+///
+/// - The bit is a valid position in the slice, or one past: `bit <= 8 * data.len()`.
 struct Entropy<'a> {
     /// The byte slice shared reference providing the entropy.
     data: &'a [u8],

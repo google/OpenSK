@@ -30,6 +30,12 @@
 
 /// Bit-level entropy source based on a byte slice shared reference.
 ///
+/// This is used to convert the byte slice provided by the fuzzer into the entropy used by the
+/// fuzzing code to generate a sequence of store manipulations, among other things. Entropy
+/// operations use the shortest necessary sequence of bits from the byte slice, such that fuzzer
+/// mutations of the byte slice have local impact or cascading effects towards future operations
+/// only.
+///
 /// The entropy has the following properties (in order of precedence):
 /// - It always returns a result.
 /// - It is deterministic: for a given slice and a given sequence of operations, the same results

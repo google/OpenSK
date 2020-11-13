@@ -3,6 +3,8 @@ use core::convert::TryFrom;
 
 type ByteArray = &'static [u8];
 
+const APDU_HEADER_LEN: usize = 4;
+
 #[cfg_attr(test, derive(Clone, Debug))]
 #[allow(non_camel_case_types)]
 #[derive(PartialEq)]
@@ -39,11 +41,11 @@ impl From<ApduStatusCode> for ByteArray {
     }
 }
 
-#[allow(non_camel_case_types, dead_code)]
-pub enum ApduIns {
-    SELECT = 0xA4,
-    READ_BINARY = 0xB0,
-    GET_RESPONSE = 0xC0,
+#[allow(dead_code)]
+pub enum ApduInstructions {
+    Select = 0xA4,
+    ReadBinary = 0xB0,
+    GetResponse = 0xC0,
 }
 
 #[cfg_attr(test, derive(Clone, Debug))]
@@ -68,6 +70,33 @@ impl From<&[u8]> for ApduHeader {
 }
 
 #[cfg_attr(test, derive(Clone, Debug))]
+#[derive(PartialEq)]
+/// The APDU cases
+pub enum Case {
+    Le,
+    LcData,
+    LcDataLe,
+    // TODO: More cases to add as extended length APDUs
+    // Le could be 2 or 3 Bytes
+}
+
+#[cfg_attr(test, derive(Clone, Debug))]
+#[allow(dead_code)]
+#[derive(PartialEq)]
+pub enum ApduType {
+    Instruction,
+    Short(Case),
+    Extended(Case),
+    Unknown,
+}
+
+impl Default for ApduType {
+    fn default() -> ApduType {
+        ApduType::Unknown
+    }
+}
+
+#[cfg_attr(test, derive(Clone, Debug))]
 #[allow(dead_code)]
 #[derive(Default, PartialEq)]
 pub struct APDU {
@@ -75,10 +104,8 @@ pub struct APDU {
     lc: u16,
     data: Vec<u8>,
     le: u32,
-    case_type: u8,
+    case_type: ApduType,
 }
-
-const APDU_HEADER_LEN: u8 = 4;
 
 impl TryFrom<&[u8]> for APDU {
     type Error = ApduStatusCode;
@@ -90,24 +117,23 @@ impl TryFrom<&[u8]> for APDU {
         //        +-----+-----+----+----+
         // header | CLA | INS | P1 | P2 |
         //        +-----+-----+----+----+
-        let (header, payload) = frame.split_at(APDU_HEADER_LEN as usize);
+        let (header, payload) = frame.split_at(APDU_HEADER_LEN);
 
         let mut apdu = APDU {
             header: header.into(),
             lc: 0x00,
             data: Vec::new(),
             le: 0x00,
-            case_type: 0x00,
+            case_type: ApduType::default(),
         };
 
         // case 1
         if payload.is_empty() {
-            apdu.case_type = 0x01;
+            apdu.case_type = ApduType::Instruction;
         } else {
             let byte_0 = payload[0];
-            // case 2S (Le)
             if payload.len() == 1 {
-                apdu.case_type = 0x02;
+                apdu.case_type = ApduType::Short(Case::Le);
                 apdu.le = if byte_0 == 0x00 {
                     // Ne = 256
                     0x100
@@ -115,15 +141,13 @@ impl TryFrom<&[u8]> for APDU {
                     byte_0.into()
                 }
             }
-            // case 3S (Lc + data)
             if payload.len() == (1 + byte_0) as usize && byte_0 != 0 {
-                apdu.case_type = 0x03;
+                apdu.case_type = ApduType::Short(Case::LcData);
                 apdu.lc = byte_0.into();
                 apdu.data = payload[1..].to_vec();
             }
-            // case 4S (Lc + data + Le)
             if payload.len() == (1 + byte_0 + 1) as usize && byte_0 != 0 {
-                apdu.case_type = 0x04;
+                apdu.case_type = ApduType::Short(Case::LcDataLe);
                 apdu.lc = byte_0.into();
                 apdu.data = payload[1..(payload.len() - 1)].to_vec();
                 apdu.le = (*payload.last().unwrap()).into();
@@ -133,7 +157,7 @@ impl TryFrom<&[u8]> for APDU {
             }
         }
         // TODO: Add extended length cases
-        if apdu.case_type == 0x00 {
+        if apdu.case_type == ApduType::default() {
             return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED);
         }
         Ok(apdu)
@@ -163,16 +187,15 @@ mod test {
             lc: 0x00,
             data: Vec::new(),
             le: 0x00,
-            case_type: 0x01,
+            case_type: ApduType::Instruction,
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
     fn test_case_type_2_short() {
         let frame: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x0f];
         let response = pass_frame(&frame);
-        assert!(response.is_ok());
         let expected = APDU {
             header: ApduHeader {
                 cla: 0x00,
@@ -183,16 +206,15 @@ mod test {
             lc: 0x00,
             data: Vec::new(),
             le: 0x0f,
-            case_type: 0x02,
+            case_type: ApduType::Short(Case::Le),
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
     fn test_case_type_2_short_le() {
         let frame: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x00];
         let response = pass_frame(&frame);
-        assert!(response.is_ok());
         let expected = APDU {
             header: ApduHeader {
                 cla: 0x00,
@@ -203,9 +225,9 @@ mod test {
             lc: 0x00,
             data: Vec::new(),
             le: 0x100,
-            case_type: 0x02,
+            case_type: ApduType::Short(Case::Le),
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
@@ -213,7 +235,6 @@ mod test {
         let frame: [u8; 7] = [0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04];
         let payload = [0xe1, 0x04];
         let response = pass_frame(&frame);
-        assert!(response.is_ok());
         let expected = APDU {
             header: ApduHeader {
                 cla: 0x00,
@@ -224,9 +245,9 @@ mod test {
             lc: 0x02,
             data: payload.to_vec(),
             le: 0x00,
-            case_type: 0x03,
+            case_type: ApduType::Short(Case::LcData),
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
@@ -236,7 +257,6 @@ mod test {
         ];
         let payload = [0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
         let response = pass_frame(&frame);
-        assert!(response.is_ok());
         let expected = APDU {
             header: ApduHeader {
                 cla: 0x00,
@@ -247,9 +267,9 @@ mod test {
             lc: 0x07,
             data: payload.to_vec(),
             le: 0xff,
-            case_type: 0x04,
+            case_type: ApduType::Short(Case::LcDataLe),
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
@@ -259,7 +279,6 @@ mod test {
         ];
         let payload = [0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
         let response = pass_frame(&frame);
-        assert!(response.is_ok());
         let expected = APDU {
             header: ApduHeader {
                 cla: 0x00,
@@ -270,17 +289,16 @@ mod test {
             lc: 0x07,
             data: payload.to_vec(),
             le: 0x100,
-            case_type: 0x04,
+            case_type: ApduType::Short(Case::LcDataLe),
         };
-        assert_eq!(expected, response.unwrap());
+        assert_eq!(Ok(expected), response);
     }
 
     #[test]
     fn test_invalid_apdu_header_length() {
         let frame: [u8; 3] = [0x00, 0x12, 0x00];
         let response = pass_frame(&frame);
-        assert!(response.is_err());
-        assert_eq!(Some(ApduStatusCode::SW_WRONG_DATA), response.err());
+        assert_eq!(Err(ApduStatusCode::SW_WRONG_DATA), response);
     }
 
     #[test]
@@ -294,10 +312,6 @@ mod test {
             0xcb, 0x00, 0x00,
         ];
         let response = pass_frame(&frame);
-        assert!(response.is_err());
-        assert_eq!(
-            Some(ApduStatusCode::SW_COND_USE_NOT_SATISFIED),
-            response.err()
-        );
+        assert_eq!(Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED), response);
     }
 }

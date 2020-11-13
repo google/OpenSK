@@ -28,6 +28,8 @@
 // TODO(ia0): Remove when used.
 #![allow(dead_code)]
 
+mod histogram;
+
 /// Bit-level entropy source based on a byte slice shared reference.
 ///
 /// This is used to convert the byte slice provided by the fuzzer into the entropy used by the

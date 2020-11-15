@@ -35,7 +35,7 @@ from tockloader import tbfh
 from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
 
-PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
+PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none", "bossac"))
 
 # This structure allows us to support out-of-tree boards as well as (in the
 # future) more achitectures.
@@ -84,6 +84,25 @@ OpenSKBoard = collections.namedtuple(
     ])
 
 SUPPORTED_BOARDS = {
+    "nano33ble": 
+        OpenSKBoard(
+            path="third_party/tock/boards/nano33ble",
+            arch="thumbv7em-none-eabi",
+            page_size=4096,
+            kernel_address=0,
+            padding_address=0x30000,
+            app_ldscript="nrf52840_layout.ld",
+            app_address=0x40000,
+            storage_address=0xC0000,
+            storage_size=0x40000,
+            pyocd_target="",
+            openocd_board="",
+            openocd_options=[],
+            openocd_commands={},
+            jlink_if="swd",
+            jlink_device="",
+            nordic_dfu=False,
+        ),
     "nrf52840dk":
         OpenSKBoard(
             path="third_party/tock/boards/nordic/nrf52840dk",
@@ -596,6 +615,9 @@ class OpenSKInstaller:
     if self.args.programmer == "openocd":
       assert_mandatory_binary("openocd")
 
+    if self.args.programmer == "bossac":
+      assert_mandatory_binary("bossac")
+
     if self.args.programmer == "pyocd":
       assert_mandatory_binary("pyocd")
       assert_python_library("intelhex")
@@ -663,6 +685,41 @@ class OpenSKInstaller:
              "the board are correct."))
         return 1
       return 0
+
+    if self.args.programmer == "bossac":
+            props = SUPPORTED_BOARDS[self.args.board]
+            # Call the Makefile in order to build and flash Tock OS using bossac
+            if self.args.tockos:
+                # The Arduino Nano requires a double tap on the reset button in order to enter bootloader mode
+                # We must wait for the user to confirm that the board is ready to load something on it
+                info(
+                    "Double tap the reset button on your Arduino Nano board in order to begin the flashing process"
+                )
+                info("Press [ENTER] when ready.")
+                _ = input()
+                self.checked_command(["make", "program"], cwd=props.path)
+
+            # Install the app using bossac
+            if self.args.application:
+                info(
+                    "Double tap the reset button on your Arduino Nano board in order to load the application onto the board"
+                )
+                info("Press [ENTER] when ready.")
+                _ = input()
+
+                self.checked_command(
+                    [
+                        "bossac",
+                        "-i",
+                        "-e",
+                        "-o",
+                        "0x30000",
+                        "-w",
+                        "{}.tbf".format(props.arch),
+                        "-R",
+                    ],
+                    cwd="target/tab/",
+                )
 
     if self.args.programmer in ("pyocd", "nordicdfu", "none"):
       dest_file = "target/{}_merged.hex".format(self.args.board)

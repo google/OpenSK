@@ -26,7 +26,6 @@ import os
 import shutil
 import subprocess
 import sys
-
 import colorama
 from six.moves import input
 import tockloader
@@ -35,8 +34,8 @@ from tockloader import tbfh
 from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
 
-PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd",
-                        "nordicdfu", "none", "bossac"))
+PROGRAMMERS = frozenset(
+    ("jlink", "openocd", "pyocd", "nordicdfu", "none", "bossac"))
 
 # This structure allows us to support out-of-tree boards as well as (in the
 # future) more achitectures.
@@ -689,41 +688,37 @@ class OpenSKInstaller:
 
     if self.args.programmer == "bossac":
       props = SUPPORTED_BOARDS[self.args.board]
-            # Call the Makefile in order to build and flash Tock OS using bossac
+      # Call the Makefile in order to build and flash Tock OS using bossac
       if self.args.tockos:
         # The Arduino Nano requires a double tap on the reset button
         # in order to enter bootloader mode
         # We must wait for the user to confirm that
         # the board is ready to load something on it
-        info(
-            """Double tap the reset button on your Arduino Nano board
-            in order to begin the flashing process"""
-                )
+        info("""Double tap the reset button on your Arduino Nano board
+            in order to begin the flashing process""")
         info("Press [ENTER] when ready.")
         _ = input()
         self.checked_command(["make", "program"], cwd=props.path)
 
       # Install the app using bossac
       if self.args.application:
-        info(
-            """Double tap the reset button on your Arduino Nano board
-            in order to load the application onto the board"""
-            )
+        info("""Double tap the reset button on your Arduino Nano board
+            in order to load the application onto the board""")
         info("Press [ENTER] when ready.")
         _ = input()
 
         self.checked_command(
-          [
-          "bossac",
-          "-i",
-          "-e",
-          "-o",
-          "0x30000",
-          "-w",
-          "{}.tbf".format(props.arch),
-          "-R",
-          ],
-          cwd="target/tab/",
+            [
+                "bossac",
+                "-i",
+                "-e",
+                "-o",
+                "0x30000",
+                "-w",
+                "{}.tbf".format(props.arch),
+                "-R",
+            ],
+            cwd="target/tab/",
         )
 
     if self.args.programmer in ("pyocd", "nordicdfu", "none"):

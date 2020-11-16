@@ -11,6 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.3"
 persistent_store = { path = "..", features = ["std"] }
+strum = { version = "0.19", features = ["derive"] }
 
 # Prevent this from interfering with workspaces
 [workspace]

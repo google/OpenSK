@@ -29,6 +29,9 @@
 #![allow(dead_code)]
 
 mod histogram;
+mod stats;
+
+pub use stats::{StatKey, Stats};
 
 /// Bit-level entropy source based on a byte slice shared reference.
 ///

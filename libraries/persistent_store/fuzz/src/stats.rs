@@ -17,7 +17,6 @@
 //! This is not used during actual fuzzing, only when replaying a corpus to compute statistics.
 
 use crate::histogram::{bucket_from_width, Histogram};
-use crate::num_bits;
 use std::collections::HashMap;
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
@@ -110,13 +109,14 @@ impl Stats {
         self.stats.get(&key).and_then(|h| h.get(bucket))
     }
 
-    /// Returns one past the highest non-empty bucket.
+    /// Returns the bit-width of one past the highest non-empty bucket.
     ///
-    /// In other words, all non-empty buckets of the histogram are smaller than the returned bucket.
-    fn bucket_lim(&self) -> usize {
+    /// In other words, all non-empty buckets of the histogram have a bit-width smaller than the
+    /// returned width.
+    fn width_lim(&self) -> usize {
         self.stats
             .values()
-            .map(|h| h.bucket_lim())
+            .map(|h| h.width_lim())
             .max()
             .unwrap_or(0)
     }
@@ -125,10 +125,10 @@ impl Stats {
 impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         let mut matrix: Vec<Vec<String>> = Vec::new();
+        let bits = self.width_lim();
 
         let mut header = Vec::new();
         header.push(String::new());
-        let bits = num_bits(self.bucket_lim());
         for width in 0..bits {
             header.push(format!(" {}", bucket_from_width(width)));
         }

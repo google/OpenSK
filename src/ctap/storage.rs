@@ -337,6 +337,26 @@ impl PersistentStore {
             .count())
     }
 
+    pub fn new_creation_order(&self) -> Result<u64, Ctap2StatusCode> {
+        Ok(self
+            .store
+            .find_all(&Key::Credential {
+                rp_id: None,
+                credential_id: None,
+                user_handle: None,
+            })
+            .filter_map(|(_, entry)| {
+                debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
+                let credential = deserialize_credential(entry.data);
+                debug_assert!(credential.is_some());
+                credential
+            })
+            .map(|c| c.creation_order)
+            .max()
+            .unwrap_or(0)
+            + 1)
+    }
+
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
         Ok(self
             .store
@@ -690,6 +710,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         }
     }
 
@@ -853,6 +874,7 @@ mod test {
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
+            creation_order: 0,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -894,6 +916,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -913,6 +936,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            creation_order: 0,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -1090,6 +1114,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

@@ -155,6 +155,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     accepts_reset: bool,
     #[cfg(feature = "with_ctap1")]
     pub u2f_up_state: U2fUserPresenceState,
+    // Sorted by ascending order of creation, so the last element is the most recent one.
     next_credentials: Vec<PublicKeyCredentialSource>,
     next_assertion_input: Option<AssertionInput>,
 }
@@ -302,6 +303,7 @@ where
             other_ui: None,
             cred_random,
             cred_protect_policy: None,
+            creation_order: 0,
         }))
     }
 
@@ -424,7 +426,6 @@ where
         } else {
             None
         };
-        // TODO(kaczmarczyck) unsolicited output for default credProtect level
         let has_extension_output = use_hmac_extension || cred_protect_policy.is_some();
 
         let rp_id = rp.rp_id;
@@ -501,6 +502,7 @@ where
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_random: cred_random.map(|c| c.to_vec()),
                 cred_protect_policy,
+                creation_order: self.persistent_store.new_creation_order()?,
             };
             self.persistent_store.store_credential(credential_source)?;
             random_id
@@ -717,8 +719,9 @@ where
 
         let credential =
             if let Some((credential, remaining_credentials)) = credentials.split_first() {
-                // TODO(kaczmarczyck) correct credential order
                 self.next_credentials = remaining_credentials.to_vec();
+                self.next_credentials
+                    .sort_unstable_by_key(|c| c.creation_order);
                 credential
             } else {
                 decrypted_credential
@@ -1091,6 +1094,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         assert!(ctap_state
             .persistent_store
@@ -1457,6 +1461,7 @@ mod test {
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
+            creation_order: 0,
         };
         assert!(ctap_state
             .persistent_store
@@ -1507,6 +1512,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            creation_order: 0,
         };
         assert!(ctap_state
             .persistent_store
@@ -1550,6 +1556,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         assert!(ctap_state
             .persistent_store

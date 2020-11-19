@@ -33,12 +33,7 @@ impl Histogram {
     ///
     /// The bucket of `item` is the highest power of two, lower or equal to `item`. If `item` is
     /// zero, then its bucket is also zero.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the item is too big, i.e. it uses its most significant bit.
     pub fn add(&mut self, item: usize) {
-        assert!(item <= usize::max_value() / 2);
         *self.buckets.entry(get_bucket(item)).or_insert(0) += 1;
     }
 
@@ -49,15 +44,12 @@ impl Histogram {
         }
     }
 
-    /// Returns one past the highest non-empty bucket.
+    /// Returns the bit-width of one past the highest non-empty bucket.
     ///
-    /// In other words, all non-empty buckets of the histogram are smaller than the returned bucket.
-    pub fn bucket_lim(&self) -> usize {
-        match self.buckets.keys().max() {
-            None => 0,
-            Some(0) => 1,
-            Some(x) => 2 * x,
-        }
+    /// In other words, all non-empty buckets of the histogram have a bit-width smaller than the
+    /// returned width.
+    pub fn width_lim(&self) -> usize {
+        self.buckets.keys().max().map_or(0, |&x| num_bits(x) + 1)
     }
 
     /// Returns the count of a bucket.

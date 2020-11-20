@@ -379,6 +379,8 @@ pub use self::store::{
 /// with Rust, `usize` is used instead of `Nat` in code meant only for tests.
 ///
 /// Currently, the store only supports targets with `usize = u32`.
+// Make sure production builds have `usize = 32`.
+#[cfg(any(target_pointer_width = "32", feature = "std"))]
 type Nat = u32;
 
 /// Returns the internal representation of a Rust natural number.

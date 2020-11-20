@@ -392,12 +392,16 @@ where
         let has_extension_output = use_hmac_extension || cred_protect_policy.is_some();
 
         let rp_id = rp.rp_id;
+        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
                 if self
                     .persistent_store
                     .find_credential(&rp_id, &cred_desc.key_id, pin_uv_auth_param.is_none())?
                     .is_some()
+                    || self
+                        .decrypt_credential_source(cred_desc.key_id, &rp_id_hash)?
+                        .is_some()
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
@@ -446,7 +450,6 @@ where
         let sk = crypto::ecdsa::SecKey::gensk(self.rng);
         let pk = sk.genpk();
 
-        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         let credential_id = if options.rk {
             let random_id = self.rng.gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {

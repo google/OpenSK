@@ -298,7 +298,9 @@ impl CtapHid {
                 HidPacketIterator::none()
             }
             Err((cid, error)) => {
-                if !self.is_allocated_channel(cid) {
+                if !self.is_allocated_channel(cid)
+                    && error != receive::Error::UnexpectedContinuation
+                {
                     CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL)
                 } else {
                     match error {
@@ -511,6 +513,27 @@ mod test {
             }
 
             assert_eq!(messages, vec![message]);
+        }
+    }
+
+    #[test]
+    fn test_spurious_continuation_packet() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+        let mut ctap_hid = CtapHid::new();
+
+        let mut packet = [0x00; 64];
+        packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
+        let mut assembler_reply = MessageAssembler::new();
+        for pkt_reply in ctap_hid.process_hid_packet(&packet, DUMMY_CLOCK_VALUE, &mut ctap_state) {
+            // Continuation packets are silently ignored.
+            assert_eq!(
+                assembler_reply
+                    .parse_packet(&pkt_reply, DUMMY_TIMESTAMP)
+                    .unwrap(),
+                None
+            );
         }
     }
 

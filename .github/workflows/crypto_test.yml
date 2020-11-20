@@ -27,7 +27,7 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
-      - run: echo "::set-env name=RUSTFLAGS::-C target-feature=+aes"
+      - run: echo "RUSTFLAGS=-C target-feature=+aes" >> $GITHUB_ENV
 
       - name: Unit testing of crypto library (release mode)
         uses: actions-rs/cargo@v1

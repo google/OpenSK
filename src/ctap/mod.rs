@@ -83,8 +83,9 @@ const USE_SIGNATURE_COUNTER: bool = true;
 // - 16 byte initialization vector for AES-256,
 // - 32 byte ECDSA private key for the credential,
 // - 32 byte relying party ID hashed with SHA256,
+// - (optional) 32 byte for HMAC-secret,
 // - 32 byte HMAC-SHA256 over everything else.
-pub const ENCRYPTED_CREDENTIAL_ID_SIZE: usize = 112;
+pub const CREDENTIAL_ID_BASE_SIZE: usize = 112;
 // Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
 // Set this bit when checking user verification.
@@ -195,6 +196,7 @@ where
         &mut self,
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
+        cred_random: Option<&[u8; 32]>,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let master_keys = self.persistent_store.master_keys()?;
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
@@ -203,14 +205,19 @@ where
         let mut iv = [0; 16];
         iv.copy_from_slice(&self.rng.gen_uniform_u8x32()[..16]);
 
-        let mut blocks = [[0u8; 16]; 4];
+        let block_len = if cred_random.is_some() { 6 } else { 4 };
+        let mut blocks = vec![[0u8; 16]; block_len];
         blocks[0].copy_from_slice(&sk_bytes[..16]);
         blocks[1].copy_from_slice(&sk_bytes[16..]);
         blocks[2].copy_from_slice(&application[..16]);
         blocks[3].copy_from_slice(&application[16..]);
+        if let Some(cred_random) = cred_random {
+            blocks[4].copy_from_slice(&cred_random[..16]);
+            blocks[5].copy_from_slice(&cred_random[16..]);
+        }
         cbc_encrypt(&aes_enc_key, iv, &mut blocks);
 
-        let mut encrypted_id = Vec::with_capacity(ENCRYPTED_CREDENTIAL_ID_SIZE);
+        let mut encrypted_id = Vec::with_capacity(16 * (block_len + 3));
         encrypted_id.extend(&iv);
         for b in &blocks {
             encrypted_id.extend(b);
@@ -228,11 +235,15 @@ where
         credential_id: Vec<u8>,
         rp_id_hash: &[u8],
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        if credential_id.len() != ENCRYPTED_CREDENTIAL_ID_SIZE {
+        let has_cred_random = if credential_id.len() == CREDENTIAL_ID_BASE_SIZE {
+            false
+        } else if credential_id.len() == CREDENTIAL_ID_BASE_SIZE + 32 {
+            true
+        } else {
             return Ok(None);
-        }
+        };
         let master_keys = self.persistent_store.master_keys()?;
-        let payload_size = ENCRYPTED_CREDENTIAL_ID_SIZE - 32;
+        let payload_size = credential_id.len() - 32;
         if !verify_hmac_256::<Sha256>(
             &master_keys.hmac,
             &credential_id[..payload_size],
@@ -244,8 +255,9 @@ where
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
         let mut iv = [0; 16];
         iv.copy_from_slice(&credential_id[..16]);
-        let mut blocks = [[0u8; 16]; 4];
-        for i in 0..4 {
+        let block_len = if has_cred_random { 6 } else { 4 };
+        let mut blocks = vec![[0u8; 16]; block_len];
+        for i in 0..block_len {
             blocks[i].copy_from_slice(&credential_id[16 * (i + 1)..16 * (i + 2)]);
         }
 
@@ -256,6 +268,14 @@ where
         decrypted_sk[16..].clone_from_slice(&blocks[1]);
         decrypted_rp_id_hash[..16].clone_from_slice(&blocks[2]);
         decrypted_rp_id_hash[16..].clone_from_slice(&blocks[3]);
+        let cred_random = if has_cred_random {
+            let mut decrypted_cred_random = [0; 32];
+            decrypted_cred_random[..16].clone_from_slice(&blocks[4]);
+            decrypted_cred_random[16..].clone_from_slice(&blocks[5]);
+            Some(decrypted_cred_random.to_vec())
+        } else {
+            None
+        };
 
         if rp_id_hash != decrypted_rp_id_hash {
             return Ok(None);
@@ -269,7 +289,7 @@ where
             rp_id: String::from(""),
             user_handle: vec![],
             other_ui: None,
-            cred_random: None,
+            cred_random,
             cred_protect_policy: None,
         }))
     }
@@ -380,11 +400,7 @@ where
         };
 
         let cred_random = if use_hmac_extension {
-            if !options.rk {
-                // The extension is actually supported, but we need resident keys.
-                return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
-            }
-            Some(self.rng.gen_uniform_u8x32().to_vec())
+            Some(self.rng.gen_uniform_u8x32())
         } else {
             None
         };
@@ -463,13 +479,13 @@ where
                 other_ui: user
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
-                cred_random,
+                cred_random: cred_random.map(|c| c.to_vec()),
                 cred_protect_policy,
             };
             self.persistent_store.store_credential(credential_source)?;
             random_id
         } else {
-            self.encrypt_key_handle(sk.clone(), &rp_id_hash)?
+            self.encrypt_key_handle(sk.clone(), &rp_id_hash, cred_random.as_ref())?
         };
 
         let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
@@ -728,10 +744,9 @@ where
                 ]),
                 #[cfg(feature = "with_ctap2_1")]
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
-                // You can use ENCRYPTED_CREDENTIAL_ID_SIZE here, but if your
-                // browser passes that value, it might be used to fingerprint.
+                // #TODO(106) update with version 2.1 of HMAC-secret
                 #[cfg(feature = "with_ctap2_1")]
-                max_credential_id_length: None,
+                max_credential_id_length: Some(CREDENTIAL_ID_BASE_SIZE as u64 + 32),
                 #[cfg(feature = "with_ctap2_1")]
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 #[cfg(feature = "with_ctap2_1")]
@@ -829,7 +844,7 @@ mod test {
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID);
 
         #[cfg(feature = "with_ctap2_1")]
-        let mut expected_response = vec![0x00, 0xA9, 0x01];
+        let mut expected_response = vec![0x00, 0xAA, 0x01];
         #[cfg(not(feature = "with_ctap2_1"))]
         let mut expected_response = vec![0x00, 0xA6, 0x01];
         // The difference here is a longer array of supported versions.
@@ -864,9 +879,9 @@ mod test {
         #[cfg(feature = "with_ctap2_1")]
         expected_response.extend(
             [
-                0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C, 0x67, 0x26,
-                0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B,
-                0x65, 0x79, 0x0D, 0x04,
+                0x08, 0x18, 0x90, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61,
+                0x6C, 0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69,
+                0x63, 0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04,
             ]
             .iter(),
         );
@@ -993,7 +1008,7 @@ mod test {
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00, 0x00,
                 ];
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                expected_auth_data.extend(&[0x00, ENCRYPTED_CREDENTIAL_ID_SIZE as u8]);
+                expected_auth_data.extend(&[0x00, CREDENTIAL_ID_BASE_SIZE as u8]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],
                     expected_auth_data[..]
@@ -1119,6 +1134,57 @@ mod test {
             cred_protect: None,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.options.rk = false;
+        make_credential_params.extensions = extensions;
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+
+        match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let AuthenticatorMakeCredentialResponse {
+                    fmt,
+                    auth_data,
+                    att_stmt,
+                } = make_credential_response;
+                // The expected response is split to only assert the non-random parts.
+                assert_eq!(fmt, "packed");
+                let mut expected_auth_data = vec![
+                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
+                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00, 0x00,
+                ];
+                expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
+                let credential_size = CREDENTIAL_ID_BASE_SIZE + 32;
+                expected_auth_data.extend(&[0x00, credential_size as u8]);
+                assert_eq!(
+                    auth_data[0..expected_auth_data.len()],
+                    expected_auth_data[..]
+                );
+                let expected_extension_cbor = vec![
+                    0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
+                    0xF5,
+                ];
+                assert_eq!(
+                    auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
+                    expected_extension_cbor[..]
+                );
+                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
+            }
+            _ => panic!("Invalid response type"),
+        }
+    }
+
+    #[test]
+    fn test_process_make_credential_hmac_secret_resident_key() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        let extensions = Some(MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: None,
+        });
+        let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
@@ -1218,6 +1284,71 @@ mod test {
             }
             _ => panic!("Invalid response type"),
         }
+    }
+
+    #[test]
+    fn test_process_get_assertion_hmac_secret() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        let make_extensions = Some(MakeCredentialExtensions {
+            hmac_secret: true,
+            cred_protect: None,
+        });
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.options.rk = false;
+        make_credential_params.extensions = make_extensions;
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + ctap_state.persistent_store.aaguid().unwrap().len();
+                let credential_size = CREDENTIAL_ID_BASE_SIZE + 32;
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, credential_size);
+                auth_data[offset + 2..offset + 2 + credential_size].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+
+        let pk = sk.genpk();
+        let hmac_secret_input = GetAssertionHmacSecretInput {
+            key_agreement: CoseKey::from(pk),
+            salt_enc: vec![0x02; 32],
+            salt_auth: vec![0x03; 16],
+        };
+        let get_extensions = Some(GetAssertionExtensions {
+            hmac_secret: Some(hmac_secret_input),
+        });
+
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions: get_extensions,
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(get_assertion_params, DUMMY_CHANNEL_ID);
+
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
+        );
     }
 
     #[test]
@@ -1435,7 +1566,7 @@ mod test {
         // We are not testing the correctness of our SHA256 here, only if it is checked.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = ctap_state
-            .encrypt_key_handle(private_key.clone(), &rp_id_hash)
+            .encrypt_key_handle(private_key.clone(), &rp_id_hash, None)
             .unwrap();
         let decrypted_source = ctap_state
             .decrypt_credential_source(encrypted_id, &rp_id_hash)
@@ -1443,6 +1574,29 @@ mod test {
             .unwrap();
 
         assert_eq!(private_key, decrypted_source.private_key);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_credential_with_cred_random() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        // Usually, the relying party ID or its hash is provided by the client.
+        // We are not testing the correctness of our SHA256 here, only if it is checked.
+        let rp_id_hash = [0x55; 32];
+        let cred_random = [0xC9; 32];
+        let encrypted_id = ctap_state
+            .encrypt_key_handle(private_key.clone(), &rp_id_hash, Some(&cred_random))
+            .unwrap();
+        let decrypted_source = ctap_state
+            .decrypt_credential_source(encrypted_id, &rp_id_hash)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(private_key, decrypted_source.private_key);
+        assert_eq!(Some(cred_random.to_vec()), decrypted_source.cred_random);
     }
 
     #[test]
@@ -1455,7 +1609,30 @@ mod test {
         // Same as above.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = ctap_state
-            .encrypt_key_handle(private_key, &rp_id_hash)
+            .encrypt_key_handle(private_key, &rp_id_hash, None)
+            .unwrap();
+        for i in 0..encrypted_id.len() {
+            let mut modified_id = encrypted_id.clone();
+            modified_id[i] ^= 0x01;
+            assert!(ctap_state
+                .decrypt_credential_source(modified_id, &rp_id_hash)
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_bad_hmac_with_cred_random() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        // Same as above.
+        let rp_id_hash = [0x55; 32];
+        let cred_random = [0xC9; 32];
+        let encrypted_id = ctap_state
+            .encrypt_key_handle(private_key, &rp_id_hash, Some(&cred_random))
             .unwrap();
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();

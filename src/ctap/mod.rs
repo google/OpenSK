@@ -137,7 +137,6 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 struct AssertionInput {
     client_data_hash: Vec<u8>,
     auth_data: Vec<u8>,
-    uv: bool,
     hmac_secret_input: Option<GetAssertionHmacSecretInput>,
 }
 
@@ -571,15 +570,17 @@ where
         ))
     }
 
+    // Processes the input of a get_assertion operation for a given credential
+    // and returns the correct Get(Next)Assertion response.
     fn assertion_response(
         &self,
         credential: &PublicKeyCredentialSource,
         assertion_input: AssertionInput,
+        number_of_credentials: Option<usize>,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AssertionInput {
             client_data_hash,
             mut auth_data,
-            uv,
             hmac_secret_input,
         } = assertion_input;
 
@@ -607,7 +608,7 @@ where
             key_id: credential.credential_id.clone(),
             transports: None, // You can set USB as a hint here.
         };
-        let user = if uv && !credential.user_handle.is_empty() {
+        let user = if !credential.user_handle.is_empty() {
             Some(PublicKeyCredentialUserEntity {
                 user_id: credential.user_handle.clone(),
                 user_name: None,
@@ -623,9 +624,35 @@ where
                 auth_data,
                 signature: signature.to_asn1_der(),
                 user,
-                number_of_credentials: None,
+                number_of_credentials: number_of_credentials.map(|n| n as u64),
             },
         ))
+    }
+
+    // Returns the first applicable credential from the allow list.
+    fn get_any_credential_from_allow_list(
+        &mut self,
+        allow_list: Vec<PublicKeyCredentialDescriptor>,
+        rp_id: &str,
+        rp_id_hash: &[u8],
+        has_uv: bool,
+    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+        for allowed_credential in allow_list {
+            let credential = self.persistent_store.find_credential(
+                rp_id,
+                &allowed_credential.key_id,
+                !has_uv,
+            )?;
+            if credential.is_some() {
+                return Ok(credential);
+            }
+            let credential =
+                self.decrypt_credential_source(allowed_credential.key_id, &rp_id_hash)?;
+            if credential.is_some() {
+                return Ok(credential);
+            }
+        }
+        Ok(None)
     }
 
     fn process_get_assertion(
@@ -690,44 +717,29 @@ where
         }
 
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-        let mut decrypted_credential = None;
-        let credentials = if let Some(allow_list) = allow_list {
-            let mut found_credentials = vec![];
-            for allowed_credential in allow_list {
-                match self.persistent_store.find_credential(
-                    &rp_id,
-                    &allowed_credential.key_id,
-                    !has_uv,
-                )? {
-                    Some(credential) => {
-                        found_credentials.push(credential);
-                    }
-                    None => {
-                        if decrypted_credential.is_none() {
-                            decrypted_credential = self.decrypt_credential_source(
-                                allowed_credential.key_id,
-                                &rp_id_hash,
-                            )?;
-                        }
-                    }
-                }
+        let mut credentials = if let Some(allow_list) = allow_list {
+            if let Some(credential) =
+                self.get_any_credential_from_allow_list(allow_list, &rp_id, &rp_id_hash, has_uv)?
+            {
+                vec![credential]
+            } else {
+                vec![]
             }
-            found_credentials
         } else {
             self.persistent_store.filter_credential(&rp_id, !has_uv)?
         };
+        // Remove user identifiable information without uv.
+        if !has_uv {
+            for credential in &mut credentials {
+                credential.other_ui = None;
+            }
+        }
+        credentials.sort_unstable_by_key(|c| c.creation_order);
 
-        let credential =
-            if let Some((credential, remaining_credentials)) = credentials.split_first() {
-                self.next_credentials = remaining_credentials.to_vec();
-                self.next_credentials
-                    .sort_unstable_by_key(|c| c.creation_order);
-                credential
-            } else {
-                decrypted_credential
-                    .as_ref()
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?
-            };
+        let (credential, remaining_credentials) = credentials
+            .split_last()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
+        self.next_credentials = remaining_credentials.to_vec();
 
         if options.up {
             (self.check_user_presence)(cid)?;
@@ -738,13 +750,16 @@ where
         let assertion_input = AssertionInput {
             client_data_hash,
             auth_data: self.generate_auth_data(&rp_id_hash, flags)?,
-            uv: flags & UV_FLAG != 0,
             hmac_secret_input,
         };
-        if !self.next_credentials.is_empty() {
+        let number_of_credentials = if self.next_credentials.is_empty() {
+            self.next_assertion_input = None;
+            None
+        } else {
             self.next_assertion_input = Some(assertion_input.clone());
-        }
-        self.assertion_response(credential, assertion_input)
+            Some(self.next_credentials.len() + 1)
+        };
+        self.assertion_response(credential, assertion_input, number_of_credentials)
     }
 
     fn process_get_next_assertion(&mut self) -> Result<ResponseData, Ctap2StatusCode> {
@@ -753,12 +768,14 @@ where
             .next_assertion_input
             .clone()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-        if let Some(credential) = self.next_credentials.pop() {
-            self.assertion_response(&credential, assertion_input)
-        } else {
+        let credential = self
+            .next_credentials
+            .pop()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+        if self.next_credentials.is_empty() {
             self.next_assertion_input = None;
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        }
+        };
+        self.assertion_response(&credential, assertion_input, None)
     }
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
@@ -1318,7 +1335,13 @@ mod test {
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x00, 0x00, 0x00, 0x00, 0x01,
                 ];
                 assert_eq!(auth_data, expected_auth_data);
-                assert!(user.is_none());
+                let expected_user = PublicKeyCredentialUserEntity {
+                    user_id: vec![0xFA, 0xB1, 0xA2],
+                    user_name: None,
+                    user_display_name: None,
+                    user_icon: None,
+                };
+                assert_eq!(user, Some(expected_user));
                 assert!(number_of_credentials.is_none());
             }
             _ => panic!("Invalid response type"),
@@ -1536,6 +1559,98 @@ mod test {
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+    }
+
+    #[test]
+    fn test_process_get_next_assertion() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.user.user_id = vec![0x01];
+        assert!(ctap_state
+            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .is_ok());
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.user.user_id = vec![0x02];
+        assert!(ctap_state
+            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .is_ok());
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: None,
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(get_assertion_params, DUMMY_CHANNEL_ID);
+
+        match get_assertion_response.unwrap() {
+            ResponseData::AuthenticatorGetAssertion(get_assertion_response) => {
+                let AuthenticatorGetAssertionResponse {
+                    auth_data,
+                    user,
+                    number_of_credentials,
+                    ..
+                } = get_assertion_response;
+                let expected_auth_data = vec![
+                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
+                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x00, 0x00, 0x00, 0x00, 0x01,
+                ];
+                assert_eq!(auth_data, expected_auth_data);
+                let expected_user = PublicKeyCredentialUserEntity {
+                    user_id: vec![0x02],
+                    user_name: None,
+                    user_display_name: None,
+                    user_icon: None,
+                };
+                assert_eq!(user, Some(expected_user));
+                assert_eq!(number_of_credentials, Some(2));
+            }
+            _ => panic!("Invalid response type"),
+        }
+
+        let get_assertion_response = ctap_state.process_get_next_assertion();
+        match get_assertion_response.unwrap() {
+            ResponseData::AuthenticatorGetAssertion(get_assertion_response) => {
+                let AuthenticatorGetAssertionResponse {
+                    auth_data,
+                    user,
+                    number_of_credentials,
+                    ..
+                } = get_assertion_response;
+                let expected_auth_data = vec![
+                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
+                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x00, 0x00, 0x00, 0x00, 0x01,
+                ];
+                assert_eq!(auth_data, expected_auth_data);
+                let expected_user = PublicKeyCredentialUserEntity {
+                    user_id: vec![0x01],
+                    user_name: None,
+                    user_display_name: None,
+                    user_icon: None,
+                };
+                assert_eq!(user, Some(expected_user));
+                assert!(number_of_credentials.is_none());
+            }
+            _ => panic!("Invalid response type"),
+        }
+
+        let get_assertion_response = ctap_state.process_get_next_assertion();
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         );
     }
 

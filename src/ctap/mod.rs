@@ -86,6 +86,7 @@ const USE_SIGNATURE_COUNTER: bool = true;
 // - (optional) 32 byte for HMAC-secret,
 // - 32 byte HMAC-SHA256 over everything else.
 pub const CREDENTIAL_ID_BASE_SIZE: usize = 112;
+pub const CREDENTIAL_ID_MAX_SIZE: usize = CREDENTIAL_ID_BASE_SIZE + 32;
 // Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
 // Set this bit when checking user verification.
@@ -235,12 +236,10 @@ where
         credential_id: Vec<u8>,
         rp_id_hash: &[u8],
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        let has_cred_random = if credential_id.len() == CREDENTIAL_ID_BASE_SIZE {
-            false
-        } else if credential_id.len() == CREDENTIAL_ID_BASE_SIZE + 32 {
-            true
-        } else {
-            return Ok(None);
+        let has_cred_random = match credential_id.len() {
+            CREDENTIAL_ID_BASE_SIZE => false,
+            CREDENTIAL_ID_MAX_SIZE => true,
+            _ => return Ok(None),
         };
         let master_keys = self.persistent_store.master_keys()?;
         let payload_size = credential_id.len() - 32;
@@ -1154,8 +1153,7 @@ mod test {
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00, 0x00,
                 ];
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                let credential_size = CREDENTIAL_ID_BASE_SIZE + 32;
-                expected_auth_data.extend(&[0x00, credential_size as u8]);
+                expected_auth_data.extend(&[0x00, CREDENTIAL_ID_MAX_SIZE as u8]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],
                     expected_auth_data[..]
@@ -1307,10 +1305,9 @@ mod test {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let auth_data = make_credential_response.auth_data;
                 let offset = 37 + ctap_state.persistent_store.aaguid().unwrap().len();
-                let credential_size = CREDENTIAL_ID_BASE_SIZE + 32;
                 assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, credential_size);
-                auth_data[offset + 2..offset + 2 + credential_size].to_vec()
+                assert_eq!(auth_data[offset + 1] as usize, CREDENTIAL_ID_MAX_SIZE);
+                auth_data[offset + 2..offset + 2 + CREDENTIAL_ID_MAX_SIZE].to_vec()
             }
             _ => panic!("Invalid response type"),
         };

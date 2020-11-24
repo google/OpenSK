@@ -344,6 +344,33 @@ where
         }
     }
 
+    fn pin_uv_auth_precheck(
+        &mut self,
+        pin_uv_auth_param: &Option<Vec<u8>>,
+        pin_uv_auth_protocol: Option<u64>,
+        cid: ChannelID,
+    ) -> Result<(), Ctap2StatusCode> {
+        if let Some(auth_param) = &pin_uv_auth_param {
+            // This case was added in FIDO 2.1.
+            if auth_param.is_empty() {
+                (self.check_user_presence)(cid)?;
+                if self.persistent_store.pin_hash()?.is_none() {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
+                } else {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
+                }
+            }
+
+            match pin_uv_auth_protocol {
+                Some(CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION) => Ok(()),
+                Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+                None => Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     fn process_make_credential(
         &mut self,
         make_credential_params: AuthenticatorMakeCredentialParameters,
@@ -361,26 +388,7 @@ where
             pin_uv_auth_protocol,
         } = make_credential_params;
 
-        if let Some(auth_param) = &pin_uv_auth_param {
-            // This case was added in FIDO 2.1.
-            if auth_param.is_empty() {
-                (self.check_user_presence)(cid)?;
-                if self.persistent_store.pin_hash()?.is_none() {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
-                } else {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
-                }
-            }
-
-            match pin_uv_auth_protocol {
-                Some(protocol) => {
-                    if protocol != CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                    }
-                }
-                None => return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-            }
-        }
+        self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
 
         if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
@@ -564,26 +572,7 @@ where
             pin_uv_auth_protocol,
         } = get_assertion_params;
 
-        if let Some(auth_param) = &pin_uv_auth_param {
-            // This case was added in FIDO 2.1.
-            if auth_param.is_empty() {
-                (self.check_user_presence)(cid)?;
-                if self.persistent_store.pin_hash()?.is_none() {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
-                } else {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
-                }
-            }
-
-            match pin_uv_auth_protocol {
-                Some(protocol) => {
-                    if protocol != CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                    }
-                }
-                None => return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-            }
-        }
+        self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
 
         let hmac_secret_input = extensions.map(|e| e.hmac_secret).flatten();
         if hmac_secret_input.is_some() && !options.up {

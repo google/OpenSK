@@ -736,14 +736,16 @@ where
         }
         credentials.sort_unstable_by_key(|c| c.creation_order);
 
+        // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
+        // For CTAP 2.1, it was moved to a later protocol step.
+        if options.up {
+            (self.check_user_presence)(cid)?;
+        }
+
         let (credential, remaining_credentials) = credentials
             .split_last()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
         self.next_credentials = remaining_credentials.to_vec();
-
-        if options.up {
-            (self.check_user_presence)(cid)?;
-        }
 
         self.increment_global_signature_counter()?;
 

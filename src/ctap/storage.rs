@@ -552,11 +552,11 @@ impl PersistentStore {
         let entry = StoreEntry {
             tag: ATTESTATION_PRIVATE_KEY,
             data: attestation_private_key,
-            sensitive: false,
+            sensitive: true,
         };
         match self.store.find_one(&Key::AttestationPrivateKey) {
             None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         Ok(())
     }
@@ -580,7 +580,7 @@ impl PersistentStore {
         };
         match self.store.find_one(&Key::AttestationCertificate) {
             None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         Ok(())
     }

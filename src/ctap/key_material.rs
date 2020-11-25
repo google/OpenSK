@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const AAGUID: &[u8; 16] = include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
+pub const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
+pub const AAGUID_LENGTH: usize = 16;
+
+pub const AAGUID: &[u8; AAGUID_LENGTH] = include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
 
 pub const ATTESTATION_CERTIFICATE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_cert.bin"));
 
-pub const ATTESTATION_PRIVATE_KEY: &[u8; 32] =
+pub const ATTESTATION_PRIVATE_KEY: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_pkey.bin"));

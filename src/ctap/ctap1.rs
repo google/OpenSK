@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::hid::ChannelID;
-use super::key_material::{ATTESTATION_CERTIFICATE, ATTESTATION_PRIVATE_KEY};
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
 use alloc::vec::Vec;
@@ -295,14 +294,22 @@ impl Ctap1Command {
             return Err(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG);
         }
 
-        let mut response =
-            Vec::with_capacity(105 + key_handle.len() + ATTESTATION_CERTIFICATE.len());
+        let certificate = match ctap_state.persistent_store.attestation_certificate() {
+            Ok(Some(value)) => value,
+            _ => return Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+        };
+        let private_key = match ctap_state.persistent_store.attestation_private_key() {
+            Ok(Some(value)) => value,
+            _ => return Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+        };
+
+        let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
         let user_pk = pk.to_uncompressed();
         response.extend_from_slice(&user_pk);
         response.push(key_handle.len() as u8);
         response.extend(key_handle.clone());
-        response.extend_from_slice(&ATTESTATION_CERTIFICATE);
+        response.extend_from_slice(&certificate);
 
         // The first byte is reserved.
         let mut signature_data = Vec::with_capacity(66 + key_handle.len());
@@ -312,7 +319,7 @@ impl Ctap1Command {
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
-        let attestation_key = crypto::ecdsa::SecKey::from_bytes(ATTESTATION_PRIVATE_KEY).unwrap();
+        let attestation_key = crypto::ecdsa::SecKey::from_bytes(private_key).unwrap();
         let signature = attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
 
         response.extend(signature.to_asn1_der());
@@ -373,7 +380,7 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::{CREDENTIAL_ID_BASE_SIZE, USE_SIGNATURE_COUNTER};
+    use super::super::{key_material, CREDENTIAL_ID_BASE_SIZE, USE_SIGNATURE_COUNTER};
     use super::*;
     use crypto::rng256::ThreadRng256;
     use crypto::Hash256;
@@ -434,8 +441,25 @@ mod test {
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
-            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE).unwrap();
+            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        // Certificate and private key are missing
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
 
+        let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        assert!(ctap_state.persistent_store.set_attestation_private_key(&fake_key).is_ok());
+        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
+        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
+        let response =
+            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        // Certificate is still missing
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
+
+        let fake_cert = [0x99u8; 100]; // Arbitrary length
+        assert!(ctap_state.persistent_store.set_attestation_certificate(&fake_cert[..]).is_ok());
+        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
+        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
+        let response =
+            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE).unwrap();
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
         assert_eq!(response[66], CREDENTIAL_ID_BASE_SIZE as u8);
         assert!(ctap_state
@@ -447,8 +471,8 @@ mod test {
             .is_some());
         const CERT_START: usize = 67 + CREDENTIAL_ID_BASE_SIZE;
         assert_eq!(
-            &response[CERT_START..CERT_START + ATTESTATION_CERTIFICATE.len()],
-            &ATTESTATION_CERTIFICATE[..]
+            &response[CERT_START..CERT_START + fake_cert.len()],
+            &fake_cert[..]
         );
     }
 

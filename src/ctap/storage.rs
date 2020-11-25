@@ -229,6 +229,18 @@ impl PersistentStore {
                 })
                 .unwrap();
         }
+        // TODO(jmichel): remove this when vendor command is in place
+        #[cfg(not(any(test, feature = "ram_storage")))]
+        self.load_attestation_from_firmware();
+
+        if self.store.find_one(&Key::Aaguid).is_none() {
+            self.set_aaguid(key_material::AAGUID).unwrap();
+        }
+    }
+
+    // TODO(jmichel): remove this function when vendor command is in place.
+    #[cfg(not(any(test, feature = "ram_storage")))]
+    fn load_attestation_from_firmware(&mut self) {
         // The following 2 entries are meant to be written by vendor-specific commands.
         if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
             self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
@@ -237,10 +249,6 @@ impl PersistentStore {
         if self.store.find_one(&Key::AttestationCertificate).is_none() {
             self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
                 .unwrap();
-        }
-
-        if self.store.find_one(&Key::Aaguid).is_none() {
-            self.set_aaguid(key_material::AAGUID).unwrap();
         }
     }
 
@@ -1000,6 +1008,23 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
+        // Make sure the attestation are absent. There is no batch attestation in tests.
+        assert!(persistent_store
+            .attestation_private_key()
+            .unwrap()
+            .is_none());
+        assert!(persistent_store
+            .attestation_certificate()
+            .unwrap()
+            .is_none());
+
+        // Make sure the persistent keys are initialized.
+        persistent_store
+            .set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
+            .unwrap();
+        persistent_store
+            .set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
+            .unwrap();
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.

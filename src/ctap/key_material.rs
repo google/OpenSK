@@ -15,7 +15,8 @@
 pub const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 pub const AAGUID_LENGTH: usize = 16;
 
-pub const AAGUID: &[u8; AAGUID_LENGTH] = include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
+pub const AAGUID: &[u8; AAGUID_LENGTH] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
 
 pub const ATTESTATION_CERTIFICATE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_cert.bin"));

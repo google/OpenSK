@@ -440,22 +440,26 @@ mod test {
         let message = create_register_message(&application);
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
-        let response =
-            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        assert!(ctap_state.persistent_store.set_attestation_private_key(&fake_key).is_ok());
+        assert!(ctap_state
+            .persistent_store
+            .set_attestation_private_key(&fake_key)
+            .is_ok());
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
-        let response =
-            Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate is still missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
-        assert!(ctap_state.persistent_store.set_attestation_certificate(&fake_cert[..]).is_ok());
+        assert!(ctap_state
+            .persistent_store
+            .set_attestation_certificate(&fake_cert[..])
+            .is_ok());
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =

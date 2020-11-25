@@ -522,25 +522,27 @@ where
 
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
-        // We currently use the presence of the attestation private key in the persistent storage to
-        // decide whether batch attestation is needed.
-        let (signature, x5c) = match self.persistent_store.attestation_private_key()? {
-            Some(attestation_private_key) => {
-                let attestation_key =
-                    crypto::ecdsa::SecKey::from_bytes(attestation_private_key).unwrap();
-                let attestation_certificate = self
-                    .persistent_store
-                    .attestation_certificate()?
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-                (
-                    attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
-                    Some(vec![attestation_certificate]),
-                )
-            }
-            None => (
+
+        let (signature, x5c) = if USE_BATCH_ATTESTATION {
+            let attestation_private_key = self
+                .persistent_store
+                .attestation_private_key()?
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+            let attestation_key =
+                crypto::ecdsa::SecKey::from_bytes(attestation_private_key).unwrap();
+            let attestation_certificate = self
+                .persistent_store
+                .attestation_certificate()?
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+            (
+                attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
+                Some(vec![attestation_certificate]),
+            )
+        } else {
+            (
                 sk.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
                 None,
-            ),
+            )
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,

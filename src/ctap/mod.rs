@@ -204,7 +204,7 @@ where
     }
 
     fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
-        self.stateful_command_permission = self.stateful_command_permission.check_expiration(now);
+        self.update_command_permission(now);
         if self.stateful_command_permission.is_granted(now) {
             Ok(())
         } else {

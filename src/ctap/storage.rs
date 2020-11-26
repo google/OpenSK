@@ -747,6 +747,21 @@ mod test {
     }
 
     #[test]
+    fn test_credential_order() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        let current_latest_creation = credential_source.creation_order;
+        assert!(persistent_store.store_credential(credential_source).is_ok());
+        let mut credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        credential_source.creation_order = persistent_store.new_creation_order().unwrap();
+        assert!(credential_source.creation_order > current_latest_creation);
+        let current_latest_creation = credential_source.creation_order;
+        assert!(persistent_store.store_credential(credential_source).is_ok());
+        assert!(persistent_store.new_creation_order().unwrap() > current_latest_creation);
+    }
+
+    #[test]
     #[allow(clippy::assertions_on_constants)]
     fn test_fill_store() {
         let mut rng = ThreadRng256 {};

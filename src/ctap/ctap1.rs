@@ -427,7 +427,7 @@ mod test {
     fn test_process_register() {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
@@ -456,7 +456,7 @@ mod test {
     fn test_process_register_bad_message() {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
@@ -476,7 +476,7 @@ mod test {
 
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
@@ -490,7 +490,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -508,7 +508,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -527,7 +527,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -553,7 +553,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -573,7 +573,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -593,7 +593,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -613,7 +613,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -640,7 +640,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
         let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -672,7 +672,7 @@ mod test {
 
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
@@ -689,7 +689,7 @@ mod test {
 
         let mut rng = ThreadRng256 {};
         let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
-        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence);
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
 
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);

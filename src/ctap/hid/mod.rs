@@ -200,7 +200,8 @@ impl CtapHid {
                         // Each transaction is atomic, so we process the command directly here and
                         // don't handle any other packet in the meantime.
                         // TODO: Send keep-alive packets in the meantime.
-                        let response = ctap_state.process_command(&message.payload, cid);
+                        let response =
+                            ctap_state.process_command(&message.payload, cid, clock_value);
                         if let Some(iterator) = CtapHid::split_message(Message {
                             cid,
                             cmd: CtapHid::COMMAND_CBOR,
@@ -520,7 +521,7 @@ mod test {
     fn test_spurious_continuation_packet() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
 
         let mut packet = [0x00; 64];
@@ -541,7 +542,7 @@ mod test {
     fn test_command_init() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
 
         let reply = process_messages(
@@ -586,7 +587,7 @@ mod test {
     fn test_command_init_for_sync() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
         let cid = cid_from_init(&mut ctap_hid, &mut ctap_state);
 
@@ -646,7 +647,7 @@ mod test {
     fn test_command_ping() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
         let cid = cid_from_init(&mut ctap_hid, &mut ctap_state);
 

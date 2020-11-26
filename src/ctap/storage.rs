@@ -359,7 +359,7 @@ impl PersistentStore {
             .map(|c| c.creation_order)
             .max()
             .unwrap_or(0)
-            + 1)
+            .wrapping_add(1))
     }
 
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {

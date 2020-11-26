@@ -614,7 +614,7 @@ where
     // and returns the correct Get(Next)Assertion response.
     fn assertion_response(
         &self,
-        credential: &PublicKeyCredentialSource,
+        credential: PublicKeyCredentialSource,
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -645,14 +645,14 @@ where
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
-            key_id: credential.credential_id.clone(),
+            key_id: credential.credential_id,
             transports: None, // You can set USB as a hint here.
         };
         let user = if !credential.user_handle.is_empty() {
             Some(PublicKeyCredentialUserEntity {
-                user_id: credential.user_handle.clone(),
+                user_id: credential.user_handle,
                 user_name: None,
-                user_display_name: credential.other_ui.clone(),
+                user_display_name: credential.other_ui,
                 user_icon: None,
             })
         } else {
@@ -758,7 +758,7 @@ where
         }
 
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-        let mut credentials = if let Some(allow_list) = allow_list {
+        let mut applicable_credentials = if let Some(allow_list) = allow_list {
             if let Some(credential) =
                 self.get_any_credential_from_allow_list(allow_list, &rp_id, &rp_id_hash, has_uv)?
             {
@@ -771,11 +771,11 @@ where
         };
         // Remove user identifiable information without uv.
         if !has_uv {
-            for credential in &mut credentials {
+            for credential in &mut applicable_credentials {
                 credential.other_ui = None;
             }
         }
-        credentials.sort_unstable_by_key(|c| c.creation_order);
+        applicable_credentials.sort_unstable_by_key(|c| c.creation_order);
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         // For CTAP 2.1, it was moved to a later protocol step.
@@ -783,8 +783,8 @@ where
             (self.check_user_presence)(cid)?;
         }
 
-        let (credential, remaining_credentials) = credentials
-            .split_last()
+        let credential = applicable_credentials
+            .pop()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         self.increment_global_signature_counter()?;
@@ -794,16 +794,17 @@ where
             auth_data: self.generate_auth_data(&rp_id_hash, flags)?,
             hmac_secret_input,
         };
-        let number_of_credentials = if remaining_credentials.is_empty() {
+        let number_of_credentials = if applicable_credentials.is_empty() {
             None
         } else {
+            let number_of_credentials = Some(applicable_credentials.len() + 1);
             self.stateful_command_permission =
                 TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
             self.stateful_command_type = Some(StatefulCommand::GetAssertion(AssertionState {
                 assertion_input: assertion_input.clone(),
-                next_credentials: remaining_credentials.to_vec(),
+                next_credentials: applicable_credentials,
             }));
-            Some(remaining_credentials.len() + 1)
+            number_of_credentials
         };
         self.assertion_response(credential, assertion_input, number_of_credentials)
     }
@@ -825,7 +826,7 @@ where
             } else {
                 return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
             };
-        self.assertion_response(&credential, assertion_input, None)
+        self.assertion_response(credential, assertion_input, None)
     }
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {

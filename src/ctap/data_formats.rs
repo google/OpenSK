@@ -308,7 +308,8 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -499,6 +500,7 @@ pub struct PublicKeyCredentialSource {
     pub other_ui: Option<String>,
     pub cred_random: Option<Vec<u8>>,
     pub cred_protect_policy: Option<CredentialProtectionPolicy>,
+    pub creation_order: u64,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
@@ -511,6 +513,7 @@ enum PublicKeyCredentialSourceField {
     OtherUi = 4,
     CredRandom = 5,
     CredProtectPolicy = 6,
+    CreationOrder = 7,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags: none.
@@ -534,6 +537,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::OtherUi => credential.other_ui,
             PublicKeyCredentialSourceField::CredRandom => credential.cred_random,
             PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
+            PublicKeyCredentialSourceField::CreationOrder => credential.creation_order,
         }
     }
 }
@@ -551,6 +555,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::OtherUi => other_ui,
                 PublicKeyCredentialSourceField::CredRandom => cred_random,
                 PublicKeyCredentialSourceField::CredProtectPolicy => cred_protect_policy,
+                PublicKeyCredentialSourceField::CreationOrder => creation_order,
             } = extract_map(cbor_value)?;
         }
 
@@ -568,6 +573,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
+        let creation_order = creation_order.map(extract_unsigned).unwrap_or(Ok(0))?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
         // serialization at a given version of OpenSK. This is not a problem because:
@@ -587,6 +593,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             other_ui,
             cred_random,
             cred_protect_policy,
+            creation_order,
         })
     }
 }
@@ -603,7 +610,8 @@ impl PublicKeyCredentialSource {
 // TODO(kaczmarczyck) we could decide to split this data type up
 // It depends on the algorithm though, I think.
 // So before creating a mess, this is my workaround.
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
 
 // This is the algorithm specifier that is supposed to be used in a COSE key
@@ -1355,6 +1363,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
 
         assert_eq!(

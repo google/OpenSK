@@ -342,6 +342,26 @@ impl PersistentStore {
             .count())
     }
 
+    pub fn new_creation_order(&self) -> Result<u64, Ctap2StatusCode> {
+        Ok(self
+            .store
+            .find_all(&Key::Credential {
+                rp_id: None,
+                credential_id: None,
+                user_handle: None,
+            })
+            .filter_map(|(_, entry)| {
+                debug_assert_eq!(entry.tag, TAG_CREDENTIAL);
+                let credential = deserialize_credential(entry.data);
+                debug_assert!(credential.is_some());
+                credential
+            })
+            .map(|c| c.creation_order)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1))
+    }
+
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
         Ok(self
             .store
@@ -702,6 +722,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         }
     }
 
@@ -735,6 +756,21 @@ mod test {
         let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
         assert!(persistent_store.store_credential(credential_source).is_ok());
         assert!(persistent_store.count_credentials().unwrap() > 0);
+    }
+
+    #[test]
+    fn test_credential_order() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        let current_latest_creation = credential_source.creation_order;
+        assert!(persistent_store.store_credential(credential_source).is_ok());
+        let mut credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        credential_source.creation_order = persistent_store.new_creation_order().unwrap();
+        assert!(credential_source.creation_order > current_latest_creation);
+        let current_latest_creation = credential_source.creation_order;
+        assert!(persistent_store.store_credential(credential_source).is_ok());
+        assert!(persistent_store.new_creation_order().unwrap() > current_latest_creation);
     }
 
     #[test]
@@ -865,6 +901,7 @@ mod test {
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
+            creation_order: 0,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -906,6 +943,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -925,6 +963,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            creation_order: 0,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -1102,6 +1141,7 @@ mod test {
             other_ui: None,
             cred_random: None,
             cred_protect_policy: None,
+            creation_order: 0,
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

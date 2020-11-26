@@ -230,8 +230,8 @@ impl PersistentStore {
                 .unwrap();
         }
         // TODO(jmichel): remove this when vendor command is in place
-        #[cfg(not(any(test, feature = "ram_storage")))]
-        self.load_attestation_from_firmware();
+        #[cfg(not(test))]
+        self.load_attestation_data_from_firmware();
 
         if self.store.find_one(&Key::Aaguid).is_none() {
             self.set_aaguid(key_material::AAGUID).unwrap();
@@ -239,8 +239,8 @@ impl PersistentStore {
     }
 
     // TODO(jmichel): remove this function when vendor command is in place.
-    #[cfg(not(any(test, feature = "ram_storage")))]
-    fn load_attestation_from_firmware(&mut self) {
+    #[cfg(not(test))]
+    fn load_attestation_data_from_firmware(&mut self) {
         // The following 2 entries are meant to be written by vendor-specific commands.
         if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
             self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)

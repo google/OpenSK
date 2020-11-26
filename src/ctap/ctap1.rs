@@ -35,6 +35,8 @@ pub enum Ctap1StatusCode {
     SW_WRONG_LENGTH = 0x6700,
     SW_CLA_NOT_SUPPORTED = 0x6E00,
     SW_INS_NOT_SUPPORTED = 0x6D00,
+    SW_MEMERR = 0x6501,
+    SW_COMMAND_ABORTED = 0x6F00,
     SW_VENDOR_KEY_HANDLE_TOO_LONG = 0xF000,
 }
 
@@ -49,6 +51,8 @@ impl TryFrom<u16> for Ctap1StatusCode {
             0x6700 => Ok(Ctap1StatusCode::SW_WRONG_LENGTH),
             0x6E00 => Ok(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED),
             0x6D00 => Ok(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+            0x6501 => Ok(Ctap1StatusCode::SW_MEMERR),
+            0x6F00 => Ok(Ctap1StatusCode::SW_COMMAND_ABORTED),
             0xF000 => Ok(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG),
             _ => Err(()),
         }
@@ -288,20 +292,22 @@ impl Ctap1Command {
         let pk = sk.genpk();
         let key_handle = ctap_state
             .encrypt_key_handle(sk, &application, None)
-            .map_err(|_| Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG)?;
+            .map_err(|_| Ctap1StatusCode::SW_COMMAND_ABORTED)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
             return Err(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG);
         }
 
-        let certificate = match ctap_state.persistent_store.attestation_certificate() {
-            Ok(Some(value)) => value,
-            _ => return Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
-        };
-        let private_key = match ctap_state.persistent_store.attestation_private_key() {
-            Ok(Some(value)) => value,
-            _ => return Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
-        };
+        let certificate = ctap_state
+            .persistent_store
+            .attestation_certificate()
+            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
+            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+        let private_key = ctap_state
+            .persistent_store
+            .attestation_private_key()
+            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
+            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
@@ -442,7 +448,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate and private key are missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         assert!(ctap_state
@@ -453,7 +459,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate is still missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
         assert!(ctap_state

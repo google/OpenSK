@@ -15,9 +15,9 @@
 #[cfg(feature = "with_ctap2_1")]
 use crate::ctap::data_formats::{extract_array, extract_text_string};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
+use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::{key_material, USE_BATCH_ATTESTATION};
 use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 use alloc::string::String;
 #[cfg(any(test, feature = "ram_storage", feature = "with_ctap2_1"))]
@@ -76,8 +76,6 @@ const MIN_PIN_LENGTH_RP_IDS: usize = 9;
 const NUM_TAGS: usize = 10;
 
 const MAX_PIN_RETRIES: u8 = 8;
-const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
-const AAGUID_LENGTH: usize = 16;
 #[cfg(feature = "with_ctap2_1")]
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
 // TODO(kaczmarczyck) use this for the minPinLength extension
@@ -231,19 +229,26 @@ impl PersistentStore {
                 })
                 .unwrap();
         }
-        // The following 3 entries are meant to be written by vendor-specific commands.
-        if USE_BATCH_ATTESTATION {
-            if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
-                self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
-                    .unwrap();
-            }
-            if self.store.find_one(&Key::AttestationCertificate).is_none() {
-                self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
-                    .unwrap();
-            }
-        }
+        // TODO(jmichel): remove this when vendor command is in place
+        #[cfg(not(test))]
+        self.load_attestation_data_from_firmware();
+
         if self.store.find_one(&Key::Aaguid).is_none() {
             self.set_aaguid(key_material::AAGUID).unwrap();
+        }
+    }
+
+    // TODO(jmichel): remove this function when vendor command is in place.
+    #[cfg(not(test))]
+    fn load_attestation_data_from_firmware(&mut self) {
+        // The following 2 entries are meant to be written by vendor-specific commands.
+        if self.store.find_one(&Key::AttestationPrivateKey).is_none() {
+            self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
+                .unwrap();
+        }
+        if self.store.find_one(&Key::AttestationCertificate).is_none() {
+            self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
+                .unwrap();
         }
     }
 
@@ -525,29 +530,33 @@ impl PersistentStore {
 
     pub fn attestation_private_key(
         &self,
-    ) -> Result<Option<&[u8; ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
+    ) -> Result<Option<&[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
         let data = match self.store.find_one(&Key::AttestationPrivateKey) {
             None => return Ok(None),
             Some((_, entry)) => entry.data,
         };
-        if data.len() != ATTESTATION_PRIVATE_KEY_LENGTH {
+        if data.len() != key_material::ATTESTATION_PRIVATE_KEY_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(Some(array_ref!(data, 0, ATTESTATION_PRIVATE_KEY_LENGTH)))
+        Ok(Some(array_ref!(
+            data,
+            0,
+            key_material::ATTESTATION_PRIVATE_KEY_LENGTH
+        )))
     }
 
     pub fn set_attestation_private_key(
         &mut self,
-        attestation_private_key: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH],
+        attestation_private_key: &[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
     ) -> Result<(), Ctap2StatusCode> {
         let entry = StoreEntry {
             tag: ATTESTATION_PRIVATE_KEY,
             data: attestation_private_key,
-            sensitive: false,
+            sensitive: true,
         };
         match self.store.find_one(&Key::AttestationPrivateKey) {
             None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         Ok(())
     }
@@ -571,24 +580,27 @@ impl PersistentStore {
         };
         match self.store.find_one(&Key::AttestationCertificate) {
             None => self.store.insert(entry)?,
-            Some((index, _)) => self.store.replace(index, entry)?,
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         Ok(())
     }
 
-    pub fn aaguid(&self) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
+    pub fn aaguid(&self) -> Result<[u8; key_material::AAGUID_LENGTH], Ctap2StatusCode> {
         let (_, entry) = self
             .store
             .find_one(&Key::Aaguid)
             .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
         let data = entry.data;
-        if data.len() != AAGUID_LENGTH {
+        if data.len() != key_material::AAGUID_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(*array_ref![data, 0, AAGUID_LENGTH])
+        Ok(*array_ref![data, 0, key_material::AAGUID_LENGTH])
     }
 
-    pub fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> Result<(), Ctap2StatusCode> {
+    pub fn set_aaguid(
+        &mut self,
+        aaguid: &[u8; key_material::AAGUID_LENGTH],
+    ) -> Result<(), Ctap2StatusCode> {
         let entry = StoreEntry {
             tag: AAGUID,
             data: aaguid,

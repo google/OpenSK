@@ -57,8 +57,8 @@ impl Command {
     const AUTHENTICATOR_GET_INFO: u8 = 0x04;
     const AUTHENTICATOR_CLIENT_PIN: u8 = 0x06;
     const AUTHENTICATOR_RESET: u8 = 0x07;
-    // TODO(kaczmarczyck) use or remove those constants
     const AUTHENTICATOR_GET_NEXT_ASSERTION: u8 = 0x08;
+    // TODO(kaczmarczyck) use or remove those constants
     const AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0xA0;
     const AUTHENTICATOR_SELECTION: u8 = 0xB0;

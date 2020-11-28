@@ -32,8 +32,6 @@ use std::convert::TryInto;
 /// information is printed if `debug` is set. Statistics are gathered if `stats` is set.
 pub fn fuzz(data: &[u8], debug: bool, stats: Option<&mut Stats>) {
     let mut fuzzer = Fuzzer::new(data, debug, stats);
-    fuzzer.init_counters();
-    fuzzer.record(StatKey::Entropy, data.len());
     let mut driver = fuzzer.init();
     let store = loop {
         if fuzzer.debug {
@@ -115,14 +113,17 @@ impl<'a> Fuzzer<'a> {
         let mut entropy = Entropy::new(data);
         let seed = entropy.read_slice(16);
         let values = Pcg32::from_seed(seed[..].try_into().unwrap());
-        Fuzzer {
+        let mut fuzzer = Fuzzer {
             entropy,
             values,
             init: Init::Clean,
             debug,
             stats,
             counters: HashMap::new(),
-        }
+        };
+        fuzzer.init_counters();
+        fuzzer.record(StatKey::Entropy, data.len());
+        fuzzer
     }
 
     /// Initializes the fuzzing state and returns the store driver.
@@ -395,7 +396,7 @@ impl<'a> Fuzzer<'a> {
 enum Init {
     /// Fuzzing starts from a clean storage.
     ///
-    /// All invariant are checked.
+    /// All invariants are checked.
     Clean,
 
     /// Fuzzing starts from a dirty storage.
@@ -405,7 +406,7 @@ enum Init {
 
     /// Fuzzing starts from a simulated old storage.
     ///
-    /// All invariant are checked.
+    /// All invariants are checked.
     Used {
         /// Number of simulated used cycles.
         cycle: usize,
@@ -437,9 +438,13 @@ impl Init {
 #[derive(Default, Clone, Debug)]
 struct BitStack {
     /// Bits stored in little-endian (for bytes and bits).
+    ///
+    /// The last byte only contains `len` bits.
     data: Vec<u8>,
 
-    /// Number of bits stored.
+    /// Number of bits stored in the last byte.
+    ///
+    /// It is 0 if the last byte is full, not 8.
     len: usize,
 }
 
@@ -526,8 +531,14 @@ fn bit_stack_ok() {
     assert_eq!(bits.pop(), Some(false));
     assert_eq!(bits.pop(), None);
 
-    for i in 0..27 {
+    let n = 27;
+    for i in 0..n {
         assert_eq!(bits.len(), i);
         bits.push(true);
     }
+    for i in (0..n).rev() {
+        assert_eq!(bits.pop(), Some(true));
+        assert_eq!(bits.len(), i);
+    }
+    assert_eq!(bits.pop(), None);
 }

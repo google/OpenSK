@@ -646,10 +646,12 @@ mod test {
             private_key,
             rp_id: String::from(rp_id),
             user_handle,
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         }
     }
 
@@ -801,12 +803,14 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -845,10 +849,12 @@ mod test {
             private_key: key0,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -865,10 +871,12 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -1043,10 +1051,12 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

@@ -25,13 +25,12 @@
 //!   situation where coverage takes precedence over surjectivity is for the value of insert updates
 //!   where a pseudo-random generator is used to avoid wasting entropy.
 
-// TODO(ia0): Remove when used.
-#![allow(dead_code)]
-
 mod histogram;
 mod stats;
+mod store;
 
 pub use stats::{StatKey, Stats};
+pub use store::fuzz;
 
 /// Bit-level entropy source based on a byte slice shared reference.
 ///

@@ -19,6 +19,9 @@ extern crate alloc;
 extern crate core;
 extern crate lang_items;
 
+#[macro_use]
+extern crate arrayref;
+
 mod ctap;
 pub mod embedded_flash;
 

@@ -58,8 +58,8 @@ pub struct ApduHeader {
     p2: u8,
 }
 
-impl From<&[u8]> for ApduHeader {
-    fn from(header: &[u8]) -> Self {
+impl From<&[u8; 4]> for ApduHeader {
+    fn from(header: &[u8; 4]) -> Self {
         ApduHeader {
             cla: header[0],
             ins: header[1],
@@ -120,7 +120,7 @@ impl TryFrom<&[u8]> for APDU {
         let (header, payload) = frame.split_at(APDU_HEADER_LEN);
 
         let mut apdu = APDU {
-            header: header.into(),
+            header: array_ref!(header, 0, 4).into(),
             lc: 0x00,
             data: Vec::new(),
             le: 0x00,

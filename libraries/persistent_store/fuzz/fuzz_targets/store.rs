@@ -17,5 +17,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    // TODO(ia0): Call fuzzing when implemented.
+    fuzz_store::fuzz(data, false, None);
 });

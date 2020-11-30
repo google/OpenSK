@@ -21,4 +21,3 @@ pub mod embedded_flash;
 
 #[macro_use]
 extern crate arrayref;
-

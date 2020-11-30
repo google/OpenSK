@@ -631,6 +631,22 @@ impl PinProtocolV1 {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn new_test(
+        key_agreement_key: crypto::ecdh::SecKey,
+        pin_uv_auth_token: [u8; 32],
+    ) -> PinProtocolV1 {
+        PinProtocolV1 {
+            key_agreement_key,
+            pin_uv_auth_token,
+            consecutive_pin_mismatches: 0,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions: 0xFF,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions_rp_id: None,
+        }
+    }
 }
 
 #[cfg(test)]

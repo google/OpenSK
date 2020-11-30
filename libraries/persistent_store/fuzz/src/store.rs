@@ -133,7 +133,7 @@ impl<'a> Fuzzer<'a> {
             page_size: 1 << self.entropy.read_range(5, 12),
             max_word_writes: 2,
             max_page_erases: self.entropy.read_range(0, 50000),
-            strict_write: true,
+            strict_mode: true,
         };
         let num_pages = self.entropy.read_range(3, 64);
         self.record(StatKey::PageSize, options.page_size);
@@ -156,7 +156,7 @@ impl<'a> Fuzzer<'a> {
             if self.debug {
                 println!("Start with dirty storage.");
             }
-            options.strict_write = false;
+            options.strict_mode = false;
             let storage = BufferStorage::new(storage, options);
             StoreDriver::Off(StoreDriverOff::new_dirty(storage))
         } else if self.entropy.read_bit() {

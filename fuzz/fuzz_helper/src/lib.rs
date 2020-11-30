@@ -147,7 +147,7 @@ fn process_message<CheckUserPresence>(
 pub fn process_ctap_any_type(data: &[u8]) {
     // Initialize ctap state and hid and get the allocated cid.
     let mut rng = ThreadRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
     let mut ctap_hid = CtapHid::new();
     let cid = initialize(&mut ctap_state, &mut ctap_hid);
     // Wrap input as message with the allocated cid.
@@ -165,7 +165,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
     }
     // Initialize ctap state and hid and get the allocated cid.
     let mut rng = ThreadRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present);
+    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
     let mut ctap_hid = CtapHid::new();
     let cid = initialize(&mut ctap_state, &mut ctap_hid);
     // Wrap input as message with allocated cid and command type.

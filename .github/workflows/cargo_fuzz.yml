@@ -29,3 +29,5 @@ jobs:
         run: cargo fuzz build
       - name: Cargo fuzz build (libraries/cbor)
         run: cd libraries/cbor && cargo fuzz build && cd ../..
+      - name: Cargo fuzz build (libraries/persistent_store)
+        run: cd libraries/persistent_store && cargo fuzz build && cd ../..

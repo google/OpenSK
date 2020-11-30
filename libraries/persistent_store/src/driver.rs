@@ -181,6 +181,12 @@ pub enum StoreInvariant {
     },
 }
 
+impl From<StoreError> for StoreInvariant {
+    fn from(error: StoreError) -> StoreInvariant {
+        StoreInvariant::StoreError(error)
+    }
+}
+
 impl StoreDriver {
     /// Provides read-only access to the storage.
     pub fn storage(&self) -> &BufferStorage {
@@ -249,6 +255,10 @@ impl StoreDriverOff {
     }
 
     /// Powers on the store without interruption.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store cannot be powered on.
     pub fn power_on(self) -> Result<StoreDriverOn, StoreInvariant> {
         Ok(self
             .partial_power_on(StoreInterruption::none())
@@ -506,8 +516,8 @@ impl StoreDriverOn {
     /// Checks that the store and model are in sync.
     fn check_model(&self) -> Result<(), StoreInvariant> {
         let mut model_content = self.model.content().clone();
-        for handle in self.store.iter().unwrap() {
-            let handle = handle.unwrap();
+        for handle in self.store.iter()? {
+            let handle = handle?;
             let model_value = match model_content.remove(&handle.get_key()) {
                 None => {
                     return Err(StoreInvariant::OnlyInStore {
@@ -516,7 +526,7 @@ impl StoreDriverOn {
                 }
                 Some(x) => x,
             };
-            let store_value = handle.get_value(&self.store).unwrap().into_boxed_slice();
+            let store_value = handle.get_value(&self.store)?.into_boxed_slice();
             if store_value != model_value {
                 return Err(StoreInvariant::DifferentValue {
                     key: handle.get_key(),
@@ -528,7 +538,7 @@ impl StoreDriverOn {
         if let Some(&key) = model_content.keys().next() {
             return Err(StoreInvariant::OnlyInModel { key });
         }
-        let store_capacity = self.store.capacity().unwrap().remaining();
+        let store_capacity = self.store.capacity()?.remaining();
         let model_capacity = self.model.capacity().remaining();
         if store_capacity != model_capacity {
             return Err(StoreInvariant::DifferentCapacity {
@@ -544,8 +554,8 @@ impl StoreDriverOn {
         let format = self.model.format();
         let storage = self.store.storage();
         let num_words = format.page_size() / format.word_size();
-        let head = self.store.head().unwrap();
-        let tail = self.store.tail().unwrap();
+        let head = self.store.head()?;
+        let tail = self.store.tail()?;
         for page in 0..format.num_pages() {
             // Check the erase cycle of the page.
             let store_erase = head.cycle(format) + (page < head.page(format)) as Nat;

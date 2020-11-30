@@ -56,7 +56,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
     pub user_name: Option<String>,
@@ -497,10 +497,12 @@ pub struct PublicKeyCredentialSource {
     pub private_key: ecdsa::SecKey, // TODO(kaczmarczyck) open for other algorithms
     pub rp_id: String,
     pub user_handle: Vec<u8>, // not optional, but nullable
-    pub other_ui: Option<String>,
+    pub user_display_name: Option<String>,
     pub cred_random: Option<Vec<u8>>,
     pub cred_protect_policy: Option<CredentialProtectionPolicy>,
     pub creation_order: u64,
+    pub user_name: Option<String>,
+    pub user_icon: Option<String>,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
@@ -510,10 +512,12 @@ enum PublicKeyCredentialSourceField {
     PrivateKey = 1,
     RpId = 2,
     UserHandle = 3,
-    OtherUi = 4,
+    UserDisplayName = 4,
     CredRandom = 5,
     CredProtectPolicy = 6,
     CreationOrder = 7,
+    UserName = 8,
+    UserIcon = 9,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags: none.
@@ -534,10 +538,12 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::PrivateKey => Some(private_key.to_vec()),
             PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
             PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
-            PublicKeyCredentialSourceField::OtherUi => credential.other_ui,
+            PublicKeyCredentialSourceField::UserDisplayName => credential.user_display_name,
             PublicKeyCredentialSourceField::CredRandom => credential.cred_random,
             PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
             PublicKeyCredentialSourceField::CreationOrder => credential.creation_order,
+            PublicKeyCredentialSourceField::UserName => credential.user_name,
+            PublicKeyCredentialSourceField::UserIcon => credential.user_icon,
         }
     }
 }
@@ -552,10 +558,12 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::PrivateKey => private_key,
                 PublicKeyCredentialSourceField::RpId => rp_id,
                 PublicKeyCredentialSourceField::UserHandle => user_handle,
-                PublicKeyCredentialSourceField::OtherUi => other_ui,
+                PublicKeyCredentialSourceField::UserDisplayName => user_display_name,
                 PublicKeyCredentialSourceField::CredRandom => cred_random,
                 PublicKeyCredentialSourceField::CredProtectPolicy => cred_protect_policy,
                 PublicKeyCredentialSourceField::CreationOrder => creation_order,
+                PublicKeyCredentialSourceField::UserName => user_name,
+                PublicKeyCredentialSourceField::UserIcon => user_icon,
             } = extract_map(cbor_value)?;
         }
 
@@ -568,12 +576,14 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
         let user_handle = extract_byte_string(ok_or_missing(user_handle)?)?;
-        let other_ui = other_ui.map(extract_text_string).transpose()?;
+        let user_display_name = user_display_name.map(extract_text_string).transpose()?;
         let cred_random = cred_random.map(extract_byte_string).transpose()?;
         let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
         let creation_order = creation_order.map(extract_unsigned).unwrap_or(Ok(0))?;
+        let user_name = user_name.map(extract_text_string).transpose()?;
+        let user_icon = user_icon.map(extract_text_string).transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
         // serialization at a given version of OpenSK. This is not a problem because:
@@ -590,10 +600,12 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             private_key,
             rp_id,
             user_handle,
-            other_ui,
+            user_display_name,
             cred_random,
             cred_protect_policy,
             creation_order,
+            user_name,
+            user_icon,
         })
     }
 }
@@ -1360,10 +1372,12 @@ mod test {
             private_key: crypto::ecdsa::SecKey::gensk(&mut rng),
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
 
         assert_eq!(
@@ -1372,7 +1386,7 @@ mod test {
         );
 
         let credential = PublicKeyCredentialSource {
-            other_ui: Some("other".to_string()),
+            user_display_name: Some("Display Name".to_string()),
             ..credential
         };
 
@@ -1393,6 +1407,26 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            user_name: Some("name".to_string()),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            user_icon: Some("icon".to_string()),
             ..credential
         };
 

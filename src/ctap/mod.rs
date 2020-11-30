@@ -317,10 +317,12 @@ where
             private_key: sk,
             rp_id: String::from(""),
             user_handle: vec![],
-            other_ui: None,
+            user_display_name: None,
             cred_random,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         }))
     }
 
@@ -534,12 +536,18 @@ where
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
                 // The UTF8 encoding is always preserved, so the string might end up shorter.
-                other_ui: user
+                user_display_name: user
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_random: cred_random.map(|c| c.to_vec()),
                 cred_protect_policy,
                 creation_order: self.persistent_store.new_creation_order()?,
+                user_name: user
+                    .user_name
+                    .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
+                user_icon: user
+                    .user_icon
+                    .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
             };
             self.persistent_store.store_credential(credential_source)?;
             random_id
@@ -651,9 +659,9 @@ where
         let user = if !credential.user_handle.is_empty() {
             Some(PublicKeyCredentialUserEntity {
                 user_id: credential.user_handle,
-                user_name: None,
-                user_display_name: credential.other_ui,
-                user_icon: None,
+                user_name: credential.user_name,
+                user_display_name: credential.user_display_name,
+                user_icon: credential.user_icon,
             })
         } else {
             None
@@ -772,7 +780,9 @@ where
         // Remove user identifiable information without uv.
         if !has_uv {
             for credential in &mut applicable_credentials {
-                credential.other_ui = None;
+                credential.user_name = None;
+                credential.user_display_name = None;
+                credential.user_icon = None;
             }
         }
         applicable_credentials.sort_unstable_by_key(|c| c.creation_order);
@@ -1169,10 +1179,12 @@ mod test {
             private_key: excluded_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(ctap_state
             .persistent_store
@@ -1357,9 +1369,10 @@ mod test {
         );
     }
 
-    fn check_assertion_response(
+    fn check_assertion_response_with_user(
         response: Result<ResponseData, Ctap2StatusCode>,
-        expected_user_id: Vec<u8>,
+        expected_user: PublicKeyCredentialUserEntity,
+        flags: u8,
         expected_number_of_credentials: Option<u64>,
     ) {
         match response.unwrap() {
@@ -1373,20 +1386,33 @@ mod test {
                 let expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x00, 0x00, 0x00, 0x00, 0x01,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00, 0x01,
                 ];
                 assert_eq!(auth_data, expected_auth_data);
-                let expected_user = PublicKeyCredentialUserEntity {
-                    user_id: expected_user_id,
-                    user_name: None,
-                    user_display_name: None,
-                    user_icon: None,
-                };
                 assert_eq!(user, Some(expected_user));
                 assert_eq!(number_of_credentials, expected_number_of_credentials);
             }
             _ => panic!("Invalid response type"),
         }
+    }
+
+    fn check_assertion_response(
+        response: Result<ResponseData, Ctap2StatusCode>,
+        expected_user_id: Vec<u8>,
+        expected_number_of_credentials: Option<u64>,
+    ) {
+        let expected_user = PublicKeyCredentialUserEntity {
+            user_id: expected_user_id,
+            user_name: None,
+            user_display_name: None,
+            user_icon: None,
+        };
+        check_assertion_response_with_user(
+            response,
+            expected_user,
+            0x00,
+            expected_number_of_credentials,
+        );
     }
 
     #[test]
@@ -1557,12 +1583,14 @@ mod test {
             private_key: private_key.clone(),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(ctap_state
             .persistent_store
@@ -1616,10 +1644,12 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(ctap_state
             .persistent_store
@@ -1650,21 +1680,47 @@ mod test {
     }
 
     #[test]
-    fn test_process_get_next_assertion_two_credentials() {
+    fn test_process_get_next_assertion_two_credentials_with_uv() {
         let mut rng = ThreadRng256 {};
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x88; 32];
+        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.pin_protocol_v1 = pin_protocol_v1;
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.user.user_id = vec![0x01];
+        let user1 = PublicKeyCredentialUserEntity {
+            user_id: vec![0x01],
+            user_name: Some("user1".to_string()),
+            user_display_name: Some("User One".to_string()),
+            user_icon: Some("icon1".to_string()),
+        };
+        make_credential_params.user = user1.clone();
         assert!(ctap_state
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.user.user_id = vec![0x02];
+        let user2 = PublicKeyCredentialUserEntity {
+            user_id: vec![0x02],
+            user_name: Some("user2".to_string()),
+            user_display_name: Some("User Two".to_string()),
+            user_icon: Some("icon2".to_string()),
+        };
+        make_credential_params.user = user2.clone();
         assert!(ctap_state
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
+
+        ctap_state
+            .persistent_store
+            .set_pin_hash(&[0u8; 16])
+            .unwrap();
+        let pin_uv_auth_param = Some(vec![
+            0x6F, 0x52, 0x83, 0xBF, 0x1A, 0x91, 0xEE, 0x67, 0xE9, 0xD4, 0x4C, 0x80, 0x08, 0x79,
+            0x90, 0x8D,
+        ]);
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
@@ -1673,20 +1729,20 @@ mod test {
             extensions: None,
             options: GetAssertionOptions {
                 up: false,
-                uv: false,
+                uv: true,
             },
-            pin_uv_auth_param: None,
-            pin_uv_auth_protocol: None,
+            pin_uv_auth_param,
+            pin_uv_auth_protocol: Some(1),
         };
         let get_assertion_response = ctap_state.process_get_assertion(
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        check_assertion_response(get_assertion_response, vec![0x02], Some(2));
+        check_assertion_response_with_user(get_assertion_response, user2, 0x04, Some(2));
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
-        check_assertion_response(get_assertion_response, vec![0x01], None);
+        check_assertion_response_with_user(get_assertion_response, user1, 0x04, None);
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
         assert_eq!(
@@ -1696,23 +1752,32 @@ mod test {
     }
 
     #[test]
-    fn test_process_get_next_assertion_three_credentials() {
+    fn test_process_get_next_assertion_three_credentials_no_uv() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x01];
+        make_credential_params.user.user_name = Some("removed".to_string());
+        make_credential_params.user.user_display_name = Some("removed".to_string());
+        make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x02];
+        make_credential_params.user.user_name = Some("removed".to_string());
+        make_credential_params.user.user_display_name = Some("removed".to_string());
+        make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x03];
+        make_credential_params.user.user_name = Some("removed".to_string());
+        make_credential_params.user.user_display_name = Some("removed".to_string());
+        make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
@@ -1827,10 +1892,12 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
-            other_ui: None,
+            user_display_name: None,
             cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
+            user_name: None,
+            user_icon: None,
         };
         assert!(ctap_state
             .persistent_store

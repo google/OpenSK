@@ -1257,7 +1257,7 @@ mod tests {
                 page_size: self.page_size,
                 max_word_writes: self.max_word_writes,
                 max_page_erases: self.max_page_erases,
-                strict_write: true,
+                strict_mode: true,
             };
             StoreDriverOff::new(options, self.num_pages)
         }

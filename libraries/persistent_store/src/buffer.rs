@@ -23,9 +23,9 @@ use alloc::vec;
 /// for tests and fuzzing, for which it has dedicated functionalities.
 ///
 /// This storage tracks how many times words are written between page erase cycles, how many times
-/// pages are erased, and whether an operation flips bits in the wrong direction (optional).
-/// Operations panic if those conditions are broken. This storage also permits to interrupt
-/// operations for inspection or to corrupt the operation.
+/// pages are erased, and whether an operation flips bits in the wrong direction. Operations panic
+/// if those conditions are broken (optional). This storage also permits to interrupt operations for
+/// inspection or to corrupt the operation.
 #[derive(Clone)]
 pub struct BufferStorage {
     /// Content of the storage.
@@ -59,8 +59,13 @@ pub struct BufferOptions {
     /// How many times a page can be erased.
     pub max_page_erases: usize,
 
-    /// Whether bits cannot be written from 0 to 1.
-    pub strict_write: bool,
+    /// Whether the storage should check the flash invariant.
+    ///
+    /// When set, the following conditions would panic:
+    /// - A bit is written from 0 to 1.
+    /// - A word is written more than `max_word_writes`.
+    /// - A page is erased more than `max_page_erases`.
+    pub strict_mode: bool,
 }
 
 /// Corrupts a slice given actual and expected value.
@@ -214,7 +219,10 @@ impl BufferStorage {
     ///
     /// Panics if the maximum number of erase cycles per page is reached.
     fn incr_page_erases(&mut self, page: usize) {
-        assert!(self.page_erases[page] < self.max_page_erases());
+        // Check that pages are not erased too many times.
+        if self.options.strict_mode {
+            assert!(self.page_erases[page] < self.max_page_erases());
+        }
         self.page_erases[page] += 1;
         let num_words = self.page_size() / self.word_size();
         for word in 0..num_words {
@@ -252,7 +260,10 @@ impl BufferStorage {
                 continue;
             }
             let word = index / word_size + i;
-            assert!(self.word_writes[word] < self.max_word_writes());
+            // Check that words are not written too many times.
+            if self.options.strict_mode {
+                assert!(self.word_writes[word] < self.max_word_writes());
+            }
             self.word_writes[word] += 1;
         }
     }
@@ -306,8 +317,8 @@ impl Storage for BufferStorage {
         self.interruption.tick(&operation)?;
         // Check and update counters.
         self.incr_word_writes(range.start, value, value);
-        // Check strict write.
-        if self.options.strict_write {
+        // Check that bits are correctly flipped.
+        if self.options.strict_mode {
             for (byte, &val) in range.clone().zip(value.iter()) {
                 assert_eq!(self.storage[byte] & val, val);
             }
@@ -472,7 +483,7 @@ mod tests {
         page_size: 16,
         max_word_writes: 2,
         max_page_erases: 3,
-        strict_write: true,
+        strict_mode: true,
     };
     // Those words are decreasing bit patterns. Bits are only changed from 1 to 0 and at least one
     // bit is changed.

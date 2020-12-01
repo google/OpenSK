@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod apdu;
 pub mod command;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;

@@ -122,7 +122,7 @@ impl PersistentStore {
             page_size: PAGE_SIZE,
             max_word_writes: 2,
             max_page_erases: 10000,
-            strict_write: true,
+            strict_mode: true,
         };
         Storage::new(store, options)
     }
@@ -180,9 +180,8 @@ impl PersistentStore {
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         let mut iter_result = Ok(());
         let iter = self.iter_credentials(&mut iter_result)?;
-        // TODO(reviewer): Should we return an error if we find more than one matching credential?
-        // We did not use to in the previous version (panic in debug mode, nothing in release mode)
-        // but I don't remember why. Let's document it.
+        // We don't check whether there is more than one matching credential to be able to exit
+        // early.
         let result = iter.map(|(_, credential)| credential).find(|credential| {
             credential.rp_id == rp_id && credential.credential_id == credential_id
         });
@@ -388,7 +387,7 @@ impl PersistentStore {
         Ok(self.store.insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
     }
 
-    /// TODO: Help from reviewer needed for documentation.
+    /// Returns a list of RP IDs that used to check if reading the minimum PIN length is allowed.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
@@ -401,7 +400,7 @@ impl PersistentStore {
         Ok(rp_ids.unwrap_or(vec![]))
     }
 
-    /// TODO: Help from reviewer needed for documentation.
+    /// Set a list of RP IDs that used to check if reading the minimum PIN length is allowed.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _set_min_pin_length_rp_ids(
         &mut self,
@@ -508,20 +507,22 @@ impl PersistentStore {
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {
     fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
-        use persistent_store::StoreError::*;
+        use persistent_store::StoreError;
         match error {
             // This error is expected. The store is full.
-            NoCapacity => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            StoreError::NoCapacity => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
             // This error is expected. The flash is out of life.
-            NoLifetime => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            StoreError::NoLifetime => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
             // This error is expected if we don't satisfy the store preconditions. For example we
             // try to store a credential which is too long.
-            InvalidArgument => Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+            StoreError::InvalidArgument => Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
             // This error is not expected. The storage has been tempered with. We could erase the
             // storage.
-            InvalidStorage => Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE,
+            StoreError::InvalidStorage => {
+                Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE
+            }
             // This error is not expected. The kernel is failing our syscalls.
-            StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
+            StoreError::StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
         }
     }
 }
@@ -605,7 +606,7 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
     }
 }
 
-/// TODO: Help from reviewer needed for documentation.
+/// Deserializes a list of RP IDs from storage representation.
 #[cfg(feature = "with_ctap2_1")]
 fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
     let cbor = cbor::read(data).ok()?;
@@ -617,7 +618,7 @@ fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
         .ok()
 }
 
-/// TODO: Help from reviewer needed for documentation.
+/// Serializes a list of RP IDs to storage representation.
 #[cfg(feature = "with_ctap2_1")]
 fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();

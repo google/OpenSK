@@ -82,10 +82,13 @@ make_partition! {
     /// board may configure `MAX_SUPPORTED_RESIDENTIAL_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
 
-    /// TODO: Help from reviewer needed for documentation.
+    /// List of RP IDs allowed to read the minimum PIN length.
+    #[cfg(feature = "with_ctap2_1")]
     _MIN_PIN_LENGTH_RP_IDS = 2042;
 
     /// The minimum PIN length.
+    ///
+    /// If the entry is absent, the minimum PIN length is `DEFAULT_MIN_PIN_LENGTH`.
     #[cfg(feature = "with_ctap2_1")]
     MIN_PIN_LENGTH = 2043;
 

@@ -85,7 +85,7 @@ pub enum Ctap2StatusCode {
     ///
     /// There can be multiple reasons:
     /// - The persistent storage has not been erased before its first usage.
-    /// - The persistent storage has been tempered by a third party.
+    /// - The persistent storage has been tempered with by a third party.
     /// - The flash is malfunctioning (including the Tock driver).
     ///
     /// In the first 2 cases the persistent storage should be completely erased. If the error

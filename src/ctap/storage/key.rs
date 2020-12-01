@@ -76,6 +76,12 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
+    /// Reserved for future credential-related objects.
+    ///
+    /// In particular, additional credentials could be added there by reducing the lower bound of
+    /// the credential range below as well as the upper bound of this range in a similar manner.
+    _RESERVED_CREDENTIALS = 1000..1700;
+
     /// The credentials.
     ///
     /// Depending on `MAX_SUPPORTED_RESIDENTIAL_KEYS`, only a prefix of those keys is used. Each

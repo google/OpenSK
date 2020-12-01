@@ -104,8 +104,7 @@ make_partition! {
 
     /// The encryption and hmac keys.
     ///
-    /// This entry is always present. It is generated at startup if absent. This is not a persistent
-    /// key because its value should change after a CTAP reset.
+    /// This entry is always present. It is generated at startup if absent.
     MASTER_KEYS = 2046;
 
     /// The global signature counter.

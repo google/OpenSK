@@ -387,7 +387,8 @@ impl PersistentStore {
         Ok(self.store.insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
     }
 
-    /// Returns a list of RP IDs that used to check if reading the minimum PIN length is allowed.
+    /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
+    /// allowed.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
@@ -400,7 +401,7 @@ impl PersistentStore {
         Ok(rp_ids.unwrap_or(vec![]))
     }
 
-    /// Set a list of RP IDs that used to check if reading the minimum PIN length is allowed.
+    /// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
     #[cfg(feature = "with_ctap2_1")]
     pub fn _set_min_pin_length_rp_ids(
         &mut self,

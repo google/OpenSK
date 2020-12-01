@@ -19,7 +19,6 @@ use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 #[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
-#[cfg(feature = "with_ctap2_1")]
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -74,10 +73,9 @@ fn encrypt_hmac_secret_output(
     let mut cred_random_secret = [0u8; 32];
     cred_random_secret.copy_from_slice(cred_random);
 
-    // Initialization of 4 blocks in any case makes this function more readable.
-    let mut blocks = [[0u8; 16]; 4];
     // With the if clause restriction above, block_len can only be 2 or 4.
     let block_len = salt_enc.len() / 16;
+    let mut blocks = vec![[0u8; 16]; block_len];
     for i in 0..block_len {
         blocks[i].copy_from_slice(&salt_enc[16 * i..16 * (i + 1)]);
     }
@@ -85,8 +83,8 @@ fn encrypt_hmac_secret_output(
 
     let mut decrypted_salt1 = [0u8; 32];
     decrypted_salt1[..16].copy_from_slice(&blocks[0]);
-    let output1 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt1[..]);
     decrypted_salt1[16..].copy_from_slice(&blocks[1]);
+    let output1 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt1[..]);
     for i in 0..2 {
         blocks[i].copy_from_slice(&output1[16 * i..16 * (i + 1)]);
     }
@@ -633,24 +631,65 @@ impl PinProtocolV1 {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn new_test(
+        key_agreement_key: crypto::ecdh::SecKey,
+        pin_uv_auth_token: [u8; 32],
+    ) -> PinProtocolV1 {
+        PinProtocolV1 {
+            key_agreement_key,
+            pin_uv_auth_token,
+            consecutive_pin_mismatches: 0,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions: 0xFF,
+            #[cfg(feature = "with_ctap2_1")]
+            permissions_rp_id: None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use arrayref::array_refs;
     use crypto::rng256::ThreadRng256;
 
     // Stores a PIN hash corresponding to the dummy PIN "1234".
     fn set_standard_pin(persistent_store: &mut PersistentStore) {
         let mut pin = [0u8; 64];
-        pin[0] = 0x31;
-        pin[1] = 0x32;
-        pin[2] = 0x33;
-        pin[3] = 0x34;
+        pin[..4].copy_from_slice(b"1234");
         let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
         persistent_store.set_pin_hash(&pin_hash).unwrap();
+    }
+
+    // Encrypts the message with a zero IV and key derived from shared_secret.
+    fn encrypt_message(shared_secret: &[u8; 32], message: &[u8]) -> Vec<u8> {
+        assert!(message.len() % 16 == 0);
+        let block_len = message.len() / 16;
+        let mut blocks = vec![[0u8; 16]; block_len];
+        for i in 0..block_len {
+            blocks[i][..].copy_from_slice(&message[i * 16..(i + 1) * 16]);
+        }
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
+        let iv = [0u8; 16];
+        cbc_encrypt(&aes_enc_key, iv, &mut blocks);
+        blocks.iter().flatten().cloned().collect::<Vec<u8>>()
+    }
+
+    // Decrypts the message with a zero IV and key derived from shared_secret.
+    fn decrypt_message(shared_secret: &[u8; 32], message: &[u8]) -> Vec<u8> {
+        assert!(message.len() % 16 == 0);
+        let block_len = message.len() / 16;
+        let mut blocks = vec![[0u8; 16]; block_len];
+        for i in 0..block_len {
+            blocks[i][..].copy_from_slice(&message[i * 16..(i + 1) * 16]);
+        }
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
+        let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
+        let iv = [0u8; 16];
+        cbc_decrypt(&aes_dec_key, iv, &mut blocks);
+        blocks.iter().flatten().cloned().collect::<Vec<u8>>()
     }
 
     // Fails on PINs bigger than 64 bytes.
@@ -658,16 +697,7 @@ mod test {
         assert!(pin.len() <= 64);
         let mut padded_pin = [0u8; 64];
         padded_pin[..pin.len()].copy_from_slice(&pin[..]);
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
-        let mut blocks = [[0u8; 16]; 4];
-        let (b0, b1, b2, b3) = array_refs!(&padded_pin, 16, 16, 16, 16);
-        blocks[0][..].copy_from_slice(b0);
-        blocks[1][..].copy_from_slice(b1);
-        blocks[2][..].copy_from_slice(b2);
-        blocks[3][..].copy_from_slice(b3);
-        let iv = [0u8; 16];
-        cbc_encrypt(&aes_enc_key, iv, &mut blocks);
-        blocks.iter().flatten().cloned().collect::<Vec<u8>>()
+        encrypt_message(shared_secret, &padded_pin)
     }
 
     // Encrypts the dummy PIN "1234".
@@ -677,22 +707,10 @@ mod test {
 
     // Encrypts the PIN hash corresponding to the dummy PIN "1234".
     fn encrypt_standard_pin_hash(shared_secret: &[u8; 32]) -> Vec<u8> {
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
         let mut pin = [0u8; 64];
-        pin[0] = 0x31;
-        pin[1] = 0x32;
-        pin[2] = 0x33;
-        pin[3] = 0x34;
+        pin[..4].copy_from_slice(b"1234");
         let pin_hash = Sha256::hash(&pin);
-
-        let mut blocks = [[0u8; 16]; 1];
-        blocks[0].copy_from_slice(&pin_hash[..16]);
-        let iv = [0u8; 16];
-        cbc_encrypt(&aes_enc_key, iv, &mut blocks);
-
-        let mut encrypted_pin_hash = Vec::with_capacity(16);
-        encrypted_pin_hash.extend(&blocks[0]);
-        encrypted_pin_hash
+        encrypt_message(shared_secret, &pin_hash[..16])
     }
 
     #[test]
@@ -1184,6 +1202,56 @@ mod test {
             output,
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
         );
+
+        let mut salt_enc = [0x00; 32];
+        let cred_random = [0xC9; 32];
+
+        // Test values to check for reproducibility.
+        let salt1 = [0x01; 32];
+        let salt2 = [0x02; 32];
+        let expected_output1 = hmac_256::<Sha256>(&cred_random, &salt1);
+        let expected_output2 = hmac_256::<Sha256>(&cred_random, &salt2);
+
+        let salt_enc1 = encrypt_message(&shared_secret, &salt1);
+        salt_enc.copy_from_slice(salt_enc1.as_slice());
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random).unwrap();
+        let output_dec = decrypt_message(&shared_secret, &output);
+        assert_eq!(&output_dec, &expected_output1);
+
+        let salt_enc2 = &encrypt_message(&shared_secret, &salt2);
+        salt_enc.copy_from_slice(salt_enc2.as_slice());
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random).unwrap();
+        let output_dec = decrypt_message(&shared_secret, &output);
+        assert_eq!(&output_dec, &expected_output2);
+
+        let mut salt_enc = [0x00; 64];
+        let mut salt12 = [0x00; 64];
+        salt12[..32].copy_from_slice(&salt1);
+        salt12[32..].copy_from_slice(&salt2);
+        let salt_enc12 = encrypt_message(&shared_secret, &salt12);
+        salt_enc.copy_from_slice(salt_enc12.as_slice());
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random).unwrap();
+        let output_dec = decrypt_message(&shared_secret, &output);
+        assert_eq!(&output_dec[..32], &expected_output1);
+        assert_eq!(&output_dec[32..], &expected_output2);
+
+        let mut salt_enc = [0x00; 64];
+        let mut salt02 = [0x00; 64];
+        salt02[32..].copy_from_slice(&salt2);
+        let salt_enc02 = encrypt_message(&shared_secret, &salt02);
+        salt_enc.copy_from_slice(salt_enc02.as_slice());
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random).unwrap();
+        let output_dec = decrypt_message(&shared_secret, &output);
+        assert_eq!(&output_dec[32..], &expected_output2);
+
+        let mut salt_enc = [0x00; 64];
+        let mut salt10 = [0x00; 64];
+        salt10[..32].copy_from_slice(&salt1);
+        let salt_enc10 = encrypt_message(&shared_secret, &salt10);
+        salt_enc.copy_from_slice(salt_enc10.as_slice());
+        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random).unwrap();
+        let output_dec = decrypt_message(&shared_secret, &output);
+        assert_eq!(&output_dec[..32], &expected_output1);
     }
 
     #[cfg(feature = "with_ctap2_1")]

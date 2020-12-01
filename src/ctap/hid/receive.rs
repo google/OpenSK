@@ -586,5 +586,33 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_init_sync() {
+        let mut assembler = MessageAssembler::new();
+        // Ping packet with a length longer than one packet.
+        assert_eq!(
+            assembler.parse_packet(
+                &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x02, 0x00], 0x51),
+                DUMMY_TIMESTAMP
+            ),
+            Ok(None)
+        );
+        // Init packet on the same channel.
+        assert_eq!(
+            assembler.parse_packet(
+                &zero_extend(&[
+                    0x12, 0x34, 0x56, 0x78, 0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+                    0xDE, 0xF0
+                ]),
+                DUMMY_TIMESTAMP
+            ),
+            Ok(Some(Message {
+                cid: [0x12, 0x34, 0x56, 0x78],
+                cmd: 0x06,
+                payload: vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]
+            }))
+        );
+    }
+
     // TODO: more tests
 }

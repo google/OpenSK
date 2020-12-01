@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
-pub const AAGUID_LENGTH: usize = 16;
+#![no_main]
 
-pub const AAGUID: &[u8; AAGUID_LENGTH] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
+use libfuzzer_sys::fuzz_target;
 
-pub const ATTESTATION_CERTIFICATE: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_cert.bin"));
-
-pub const ATTESTATION_PRIVATE_KEY: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_pkey.bin"));
+fuzz_target!(|data: &[u8]| {
+    fuzz_store::fuzz(data, false, None);
+});

@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use super::data_formats::{
-    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
-    ok_or_missing, ClientPinSubCommand, CoseKey, GetAssertionExtensions, GetAssertionOptions,
-    MakeCredentialExtensions, MakeCredentialOptions, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameter, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+    extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
+    extract_unsigned, ok_or_missing, ClientPinSubCommand, CoseKey, GetAssertionExtensions,
+    GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialUserEntity,
 };
+use super::key_material;
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
+use arrayref::array_ref;
 use cbor::destructure_cbor_map;
 use core::convert::TryFrom;
 
@@ -41,6 +44,8 @@ pub enum Command {
     #[cfg(feature = "with_ctap2_1")]
     AuthenticatorSelection,
     // TODO(kaczmarczyck) implement FIDO 2.1 commands (see below consts)
+    // Vendor specific commands
+    AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
 }
 
 impl From<cbor::reader::DecoderError> for Ctap2StatusCode {
@@ -63,7 +68,8 @@ impl Command {
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0xA0;
     const AUTHENTICATOR_SELECTION: u8 = 0xB0;
     const AUTHENTICATOR_CONFIG: u8 = 0xC0;
-    const AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
+    const AUTHENTICATOR_VENDOR_CONFIGURE: u8 = 0x40;
+    const AUTHENTICATOR_VENDOR_FIRST_UNUSED: u8 = 0x41;
     const AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
     pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
@@ -108,6 +114,12 @@ impl Command {
             Command::AUTHENTICATOR_SELECTION => {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorSelection)
+            }
+            Command::AUTHENTICATOR_VENDOR_CONFIGURE => {
+                let decoded_cbor = cbor::read(&bytes[1..])?;
+                Ok(Command::AuthenticatorVendorConfigure(
+                    AuthenticatorVendorConfigureParameters::try_from(decoded_cbor)?,
+                ))
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
@@ -368,6 +380,62 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             permissions,
             #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id,
+        })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct AuthenticatorAttestationMaterial {
+    pub certificate: Vec<u8>,
+    pub private_key: [u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                1 => certificate,
+                2 => private_key,
+            } = extract_map(cbor_value)?;
+        }
+        let certificate = certificate.map(extract_byte_string).transpose()?.unwrap();
+        let private_key = private_key.map(extract_byte_string).transpose()?.unwrap();
+        if private_key.len() != key_material::ATTESTATION_PRIVATE_KEY_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
+        }
+        let private_key = array_ref!(private_key, 0, key_material::ATTESTATION_PRIVATE_KEY_LENGTH);
+        Ok(AuthenticatorAttestationMaterial {
+            certificate,
+            private_key: *private_key,
+        })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct AuthenticatorVendorConfigureParameters {
+    pub lockdown: bool,
+    pub attestation_material: Option<AuthenticatorAttestationMaterial>,
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorVendorConfigureParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                1 => lockdown,
+                2 => attestation_material,
+            } = extract_map(cbor_value)?;
+        }
+        let lockdown = lockdown.map_or(Ok(false), extract_bool)?;
+        let attestation_material = attestation_material
+            .map(AuthenticatorAttestationMaterial::try_from)
+            .transpose()?;
+        Ok(AuthenticatorVendorConfigureParameters {
+            lockdown,
+            attestation_material,
         })
     }
 }

@@ -34,6 +34,7 @@ pub enum ResponseData {
     AuthenticatorReset,
     #[cfg(feature = "with_ctap2_1")]
     AuthenticatorSelection,
+    AuthenticatorVendor(AuthenticatorVendorResponse),
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -48,6 +49,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorReset => None,
             #[cfg(feature = "with_ctap2_1")]
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
     }
 }
@@ -227,6 +229,30 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
             1 => key_agreement.map(|cose_key| cbor_map_btree!(cose_key.0)),
             2 => pin_token,
             3 => retries,
+        }
+    }
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct AuthenticatorVendorResponse {
+    pub cert_programmed: bool,
+    pub pkey_programmed: bool,
+    pub lockdown_enabled: bool,
+}
+
+impl From<AuthenticatorVendorResponse> for cbor::Value {
+    fn from(vendor_response: AuthenticatorVendorResponse) -> Self {
+        let AuthenticatorVendorResponse {
+            cert_programmed,
+            pkey_programmed,
+            lockdown_enabled,
+        } = vendor_response;
+
+        cbor_map_options! {
+            1 => cert_programmed,
+            2 => pkey_programmed,
+            3 => lockdown_enabled,
         }
     }
 }

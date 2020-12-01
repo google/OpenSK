@@ -132,10 +132,10 @@ impl TryFrom<&[u8]> for APDU {
         };
 
         if payload.is_empty() {
-            // This branch is for Lc = 0
+            // Lc is zero-bytes in length
             apdu.case_type = ApduType::Instruction;
         } else {
-            // Lc is not equal to zero, let's figure out how long it is
+            // Lc is not zero-bytes in length, let's figure out how long it is
             let byte_0 = payload[0];
             if payload.len() == 1 {
                 // There is only one byte in the payload, that byte cannot be Lc because that would

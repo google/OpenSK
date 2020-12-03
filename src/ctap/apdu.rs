@@ -59,8 +59,8 @@ pub struct ApduHeader {
     p2: u8,
 }
 
-impl From<&[u8; 4]> for ApduHeader {
-    fn from(header: &[u8; 4]) -> Self {
+impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
+    fn from(header: &[u8; APDU_HEADER_LEN]) -> Self {
         ApduHeader {
             cla: header[0],
             ins: header[1],

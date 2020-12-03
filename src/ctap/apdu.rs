@@ -151,7 +151,7 @@ impl TryFrom<&[u8]> for APDU {
                     case_type: ApduType::Short(Case::Le1),
                 });
             }
-            if payload.len() == (1 + byte_0) as usize && byte_0 != 0 {
+            if payload.len() == 1 + (byte_0 as usize) && byte_0 != 0 {
                 // Lc is one-byte long and since the size specified by Lc covers the rest of the
                 // payload there's no Le at the end
                 return Ok(APDU {
@@ -162,7 +162,7 @@ impl TryFrom<&[u8]> for APDU {
                     le: 0,
                 });
             }
-            if payload.len() == (1 + byte_0 + 1) as usize && byte_0 != 0 {
+            if payload.len() == 2 + (byte_0 as usize) && byte_0 != 0 {
                 // Lc is one-byte long and since the size specified by Lc covers the rest of the
                 // payload with ONE additional byte that byte must be Le
                 let last_byte: u32 = (*payload.last().unwrap()).into();

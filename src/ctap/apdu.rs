@@ -124,7 +124,7 @@ impl TryFrom<&[u8]> for APDU {
         let (header, payload) = frame.split_at(APDU_HEADER_LEN);
 
         let mut apdu = APDU {
-            header: array_ref!(header, 0, 4).into(),
+            header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
             lc: 0x00,
             data: Vec::new(),
             le: 0x00,

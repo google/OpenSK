@@ -18,3 +18,6 @@ extern crate alloc;
 
 pub mod ctap;
 pub mod embedded_flash;
+
+#[macro_use]
+extern crate arrayref;

@@ -205,20 +205,20 @@ impl TryFrom<&[u8]> for APDU {
                             3 => BigEndian::read_u32(
                                 &payload[payload.len() - extended_apdu_le_len..],
                             ),
-                            _ => 0,
+                            _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
                         },
                         case_type: ApduType::Extended(match extended_apdu_le_len {
                             0 => Case::Lc3Data,
                             1 => Case::Lc3DataLe1,
                             2 => Case::Lc3DataLe2,
                             3 => Case::Le3,
-                            _ => return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED),
+                            _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
                         }),
                     });
                 }
             }
         }
-        return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED);
+        return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
     }
 }
 

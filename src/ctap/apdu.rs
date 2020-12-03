@@ -195,7 +195,7 @@ impl TryFrom<&[u8]> for APDU {
                         2 => {
                             let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
                             if le_parsed == 0x00 {
-                                0x100
+                                0x10000
                             } else {
                                 le_parsed as u32
                             }
@@ -396,7 +396,7 @@ mod test {
             },
             lc: 0xb1,
             data: payload.to_vec(),
-            le: 0x100,
+            le: 0x10000,
             case_type: ApduType::Extended(Case::Lc3DataLe2),
         };
         assert_eq!(Ok(expected), response);
@@ -423,7 +423,7 @@ mod test {
             },
             lc: 0x40,
             data: payload.to_vec(),
-            le: 0x100,
+            le: 0x10000,
             case_type: ApduType::Extended(Case::Lc3DataLe2),
         };
         assert_eq!(Ok(expected), response);

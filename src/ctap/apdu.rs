@@ -80,7 +80,7 @@ pub enum Case {
     Lc3Data,
     Lc3DataLe1,
     Lc3DataLe2,
-    Lc3DataLe3,
+    Le3,
     Unknown,
 }
 

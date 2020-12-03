@@ -123,48 +123,56 @@ impl TryFrom<&[u8]> for APDU {
         //        +-----+-----+----+----+
         let (header, payload) = frame.split_at(APDU_HEADER_LEN);
 
-        let mut apdu = APDU {
-            header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-            lc: 0x00,
-            data: Vec::new(),
-            le: 0x00,
-            case_type: ApduType::default(),
-        };
-
         if payload.is_empty() {
             // Lc is zero-bytes in length
-            apdu.case_type = ApduType::Instruction;
+            return Ok(APDU {
+                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                lc: 0x00,
+                data: Vec::new(),
+                le: 0x00,
+                case_type: ApduType::Instruction,
+            });
         } else {
             // Lc is not zero-bytes in length, let's figure out how long it is
             let byte_0 = payload[0];
             if payload.len() == 1 {
                 // There is only one byte in the payload, that byte cannot be Lc because that would
                 // entail at *least* one another byte in the payload (for the command data)
-                apdu.case_type = ApduType::Short(Case::Le1);
-                apdu.le = if byte_0 == 0x00 {
-                    // Ne = 256
-                    0x100
-                } else {
-                    byte_0.into()
-                }
+                return Ok(APDU {
+                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                    lc: 0x00,
+                    data: Vec::new(),
+                    le: if byte_0 == 0x00 {
+                        // Ne = 256
+                        0x100
+                    } else {
+                        byte_0.into()
+                    },
+                    case_type: ApduType::Short(Case::Le1),
+                });
             }
             if payload.len() == (1 + byte_0) as usize && byte_0 != 0 {
                 // Lc is one-byte long and since the size specified by Lc covers the rest of the
                 // payload there's no Le at the end
-                apdu.case_type = ApduType::Short(Case::Lc1Data);
-                apdu.lc = byte_0.into();
-                apdu.data = payload[1..].to_vec();
+                return Ok(APDU {
+                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                    lc: byte_0.into(),
+                    data: payload[1..].to_vec(),
+                    case_type: ApduType::Short(Case::Lc1Data),
+                    le: 0,
+                });
             }
             if payload.len() == (1 + byte_0 + 1) as usize && byte_0 != 0 {
                 // Lc is one-byte long and since the size specified by Lc covers the rest of the
                 // payload with ONE additional byte that byte must be Le
-                apdu.case_type = ApduType::Short(Case::Lc1DataLe1);
-                apdu.lc = byte_0.into();
-                apdu.data = payload[1..(payload.len() - 1)].to_vec();
-                apdu.le = (*payload.last().unwrap()).into();
-                if apdu.le == 0x00 {
-                    apdu.le = 0x100;
-                }
+                let last_byte: u32 = (*payload.last().unwrap()).into();
+                return Ok(APDU {
+                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                    lc: byte_0.into(),
+                    data: payload[1..(payload.len() - 1)].to_vec(),
+                    le: if last_byte == 0x00 { 0x100 } else { last_byte },
+                    case_type: ApduType::Short(Case::Lc1DataLe1),
+                });
             }
             if payload.len() > 2 {
                 // Lc is possibly three-bytes long
@@ -178,30 +186,40 @@ impl TryFrom<&[u8]> for APDU {
                     // If first byte is zero AND the next two bytes can be parsed as a big-endian
                     // length that covers the rest of the block (plus few additional bytes for Le), we
                     // have an extended-length APDU
-                    apdu.case_type = ApduType::Extended(match extended_apdu_le_len {
-                        0 => Case::Lc3Data,
-                        1 => Case::Lc3DataLe1,
-                        2 => Case::Lc3DataLe2,
-                        3 => Case::Lc3DataLe3,
-                        _ => Case::Unknown,
+                    let last_byte: u32 = (*payload.last().unwrap()).into();
+                    return Ok(APDU {
+                        header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                        lc: extended_apdu_lc as u16,
+                        data: payload[3..(payload.len() - extended_apdu_le_len)].to_vec(),
+                        le: match extended_apdu_le_len {
+                            0 => 0,
+                            1 => {
+                                if last_byte == 0x00 {
+                                    0x100
+                                } else {
+                                    last_byte
+                                }
+                            }
+                            2 => BigEndian::read_u16(
+                                &payload[payload.len() - extended_apdu_le_len..],
+                            ) as u32,
+                            3 => BigEndian::read_u32(
+                                &payload[payload.len() - extended_apdu_le_len..],
+                            ),
+                            _ => 0,
+                        },
+                        case_type: ApduType::Extended(match extended_apdu_le_len {
+                            0 => Case::Lc3Data,
+                            1 => Case::Lc3DataLe1,
+                            2 => Case::Lc3DataLe2,
+                            3 => Case::Le3,
+                            _ => Case::Unknown,
+                        }),
                     });
-                    apdu.data = payload[3..(payload.len() - extended_apdu_le_len)].to_vec();
-                    apdu.lc = extended_apdu_lc as u16;
-                    apdu.le = match extended_apdu_le_len {
-                        0 => 0,
-                        1 => (*payload.last().unwrap()).into(),
-                        2 => BigEndian::read_u16(&payload[payload.len() - extended_apdu_le_len..])
-                            as u32,
-                        3 => BigEndian::read_u32(&payload[payload.len() - extended_apdu_le_len..]),
-                        _ => 0,
-                    }
                 }
             }
         }
-        if apdu.case_type == ApduType::default() {
-            return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED);
-        }
-        Ok(apdu)
+        return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED);
     }
 }
 

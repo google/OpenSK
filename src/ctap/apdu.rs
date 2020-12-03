@@ -192,12 +192,27 @@ impl TryFrom<&[u8]> for APDU {
                                     last_byte
                                 }
                             }
-                            2 => BigEndian::read_u16(
-                                &payload[payload.len() - extended_apdu_le_len..],
-                            ) as u32,
-                            3 => BigEndian::read_u32(
-                                &payload[payload.len() - extended_apdu_le_len..],
-                            ),
+                            2 => {
+                                let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
+                                if le_parsed == 0x00 {
+                                    0x100
+                                } else {
+                                    le_parsed as u32
+                                }
+                            }
+                            3 => {
+                                let le_first_byte: u32 =
+                                    (*payload.get(payload.len() - 3).unwrap()).into();
+                                if le_first_byte != 0x00 {
+                                    return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
+                                }
+                                let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
+                                if le_parsed == 0x00 {
+                                    0x10000
+                                } else {
+                                    le_parsed as u32
+                                }
+                            }
                             _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
                         },
                         case_type: ApduType::Extended(match extended_apdu_le_len {
@@ -381,7 +396,7 @@ mod test {
             },
             lc: 0xb1,
             data: payload.to_vec(),
-            le: 0x00,
+            le: 0x100,
             case_type: ApduType::Extended(Case::Lc3DataLe2),
         };
         assert_eq!(Ok(expected), response);
@@ -408,7 +423,7 @@ mod test {
             },
             lc: 0x40,
             data: payload.to_vec(),
-            le: 0x00,
+            le: 0x100,
             case_type: ApduType::Extended(Case::Lc3DataLe2),
         };
         assert_eq!(Ok(expected), response);

@@ -90,18 +90,11 @@ pub enum ApduType {
     Instruction,
     Short(Case),
     Extended(Case),
-    Unknown,
-}
-
-impl Default for ApduType {
-    fn default() -> ApduType {
-        ApduType::Unknown
-    }
 }
 
 #[cfg_attr(test, derive(Clone, Debug))]
 #[allow(dead_code)]
-#[derive(Default, PartialEq)]
+#[derive(PartialEq)]
 pub struct APDU {
     header: ApduHeader,
     lc: u16,

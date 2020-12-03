@@ -378,7 +378,7 @@ mod test {
             0x8a, 0xf2, 0x5f, 0xe8, 0x59, 0x2e, 0x0b, 0xc6, 0x85, 0xc6, 0xf7, 0x0e, 0x9e, 0xdb,
             0xb6, 0x2b, 0x00, 0x00,
         ];
-        let payload = array_ref!(frame, 7, 186 - 7 - 2);
+        let payload: &[u8] = &frame[7..frame.len() - 2];
         let response = pass_frame(&frame);
         let expected = APDU {
             header: ApduHeader {
@@ -405,7 +405,7 @@ mod test {
             0xe8, 0xb5, 0x83, 0xfb, 0xe0, 0x66, 0x98, 0x4d, 0x98, 0x81, 0xf7, 0xb5, 0x49, 0x4d,
             0xcb, 0x00, 0x00,
         ];
-        let payload = array_ref!(frame, 7, 73 - 7 - 2);
+        let payload: &[u8] = &frame[7..frame.len() - 2];
         let response = pass_frame(&frame);
         let expected = APDU {
             header: ApduHeader {

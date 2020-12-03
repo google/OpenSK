@@ -81,7 +81,6 @@ pub enum Case {
     Lc3DataLe1,
     Lc3DataLe2,
     Le3,
-    Unknown,
 }
 
 #[cfg_attr(test, derive(Clone, Debug))]
@@ -213,7 +212,7 @@ impl TryFrom<&[u8]> for APDU {
                             1 => Case::Lc3DataLe1,
                             2 => Case::Lc3DataLe2,
                             3 => Case::Le3,
-                            _ => Case::Unknown,
+                            _ => return Err(ApduStatusCode::SW_COND_USE_NOT_SATISFIED),
                         }),
                     });
                 }

@@ -124,108 +124,108 @@ impl TryFrom<&[u8]> for APDU {
                 le: 0x00,
                 case_type: ApduType::Instruction,
             });
-        } else {
-            // Lc is not zero-bytes in length, let's figure out how long it is
-            let byte_0 = payload[0];
-            if payload.len() == 1 {
-                // There is only one byte in the payload, that byte cannot be Lc because that would
-                // entail at *least* one another byte in the payload (for the command data)
-                return Ok(APDU {
-                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                    lc: 0x00,
-                    data: Vec::new(),
-                    le: if byte_0 == 0x00 {
-                        // Ne = 256
-                        0x100
-                    } else {
-                        byte_0.into()
-                    },
-                    case_type: ApduType::Short(Case::Le1),
-                });
-            }
-            if payload.len() == 1 + (byte_0 as usize) && byte_0 != 0 {
-                // Lc is one-byte long and since the size specified by Lc covers the rest of the
-                // payload there's no Le at the end
-                return Ok(APDU {
-                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                    lc: byte_0.into(),
-                    data: payload[1..].to_vec(),
-                    case_type: ApduType::Short(Case::Lc1Data),
-                    le: 0,
-                });
-            }
-            if payload.len() == 2 + (byte_0 as usize) && byte_0 != 0 {
-                // Lc is one-byte long and since the size specified by Lc covers the rest of the
-                // payload with ONE additional byte that byte must be Le
+        }
+        // Lc is not zero-bytes in length, let's figure out how long it is
+        let byte_0 = payload[0];
+        if payload.len() == 1 {
+            // There is only one byte in the payload, that byte cannot be Lc because that would
+            // entail at *least* one another byte in the payload (for the command data)
+            return Ok(APDU {
+                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                lc: 0x00,
+                data: Vec::new(),
+                le: if byte_0 == 0x00 {
+                    // Ne = 256
+                    0x100
+                } else {
+                    byte_0.into()
+                },
+                case_type: ApduType::Short(Case::Le1),
+            });
+        }
+        if payload.len() == 1 + (byte_0 as usize) && byte_0 != 0 {
+            // Lc is one-byte long and since the size specified by Lc covers the rest of the
+            // payload there's no Le at the end
+            return Ok(APDU {
+                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                lc: byte_0.into(),
+                data: payload[1..].to_vec(),
+                case_type: ApduType::Short(Case::Lc1Data),
+                le: 0,
+            });
+        }
+        if payload.len() == 2 + (byte_0 as usize) && byte_0 != 0 {
+            // Lc is one-byte long and since the size specified by Lc covers the rest of the
+            // payload with ONE additional byte that byte must be Le
+            let last_byte: u32 = (*payload.last().unwrap()).into();
+            return Ok(APDU {
+                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                lc: byte_0.into(),
+                data: payload[1..(payload.len() - 1)].to_vec(),
+                le: if last_byte == 0x00 { 0x100 } else { last_byte },
+                case_type: ApduType::Short(Case::Lc1DataLe1),
+            });
+        }
+        if payload.len() > 2 {
+            // Lc is possibly three-bytes long
+            let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..]) as usize;
+            let extended_apdu_le_len: usize = if payload.len() > extended_apdu_lc {
+                payload.len() - extended_apdu_lc - 3
+            } else {
+                0
+            };
+            if byte_0 == 0 && extended_apdu_le_len <= 3 {
+                // If first byte is zero AND the next two bytes can be parsed as a big-endian
+                // length that covers the rest of the block (plus few additional bytes for Le), we
+                // have an extended-length APDU
                 let last_byte: u32 = (*payload.last().unwrap()).into();
                 return Ok(APDU {
                     header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                    lc: byte_0.into(),
-                    data: payload[1..(payload.len() - 1)].to_vec(),
-                    le: if last_byte == 0x00 { 0x100 } else { last_byte },
-                    case_type: ApduType::Short(Case::Lc1DataLe1),
+                    lc: extended_apdu_lc as u16,
+                    data: payload[3..(payload.len() - extended_apdu_le_len)].to_vec(),
+                    le: match extended_apdu_le_len {
+                        0 => 0,
+                        1 => {
+                            if last_byte == 0x00 {
+                                0x100
+                            } else {
+                                last_byte
+                            }
+                        }
+                        2 => {
+                            let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
+                            if le_parsed == 0x00 {
+                                0x100
+                            } else {
+                                le_parsed as u32
+                            }
+                        }
+                        3 => {
+                            let le_first_byte: u32 =
+                                (*payload.get(payload.len() - 3).unwrap()).into();
+                            if le_first_byte != 0x00 {
+                                return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
+                            }
+                            let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
+                            if le_parsed == 0x00 {
+                                0x10000
+                            } else {
+                                le_parsed as u32
+                            }
+                        }
+                        _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
+                    },
+                    case_type: ApduType::Extended(match extended_apdu_le_len {
+                        0 => Case::Lc3Data,
+                        1 => Case::Lc3DataLe1,
+                        2 => Case::Lc3DataLe2,
+                        3 => Case::Le3,
+                        _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
+                    }),
                 });
             }
-            if payload.len() > 2 {
-                // Lc is possibly three-bytes long
-                let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..]) as usize;
-                let extended_apdu_le_len: usize = if payload.len() > extended_apdu_lc {
-                    payload.len() - extended_apdu_lc - 3
-                } else {
-                    0
-                };
-                if byte_0 == 0 && extended_apdu_le_len <= 3 {
-                    // If first byte is zero AND the next two bytes can be parsed as a big-endian
-                    // length that covers the rest of the block (plus few additional bytes for Le), we
-                    // have an extended-length APDU
-                    let last_byte: u32 = (*payload.last().unwrap()).into();
-                    return Ok(APDU {
-                        header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                        lc: extended_apdu_lc as u16,
-                        data: payload[3..(payload.len() - extended_apdu_le_len)].to_vec(),
-                        le: match extended_apdu_le_len {
-                            0 => 0,
-                            1 => {
-                                if last_byte == 0x00 {
-                                    0x100
-                                } else {
-                                    last_byte
-                                }
-                            }
-                            2 => {
-                                let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
-                                if le_parsed == 0x00 {
-                                    0x100
-                                } else {
-                                    le_parsed as u32
-                                }
-                            }
-                            3 => {
-                                let le_first_byte: u32 =
-                                    (*payload.get(payload.len() - 3).unwrap()).into();
-                                if le_first_byte != 0x00 {
-                                    return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
-                                }
-                                let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
-                                if le_parsed == 0x00 {
-                                    0x10000
-                                } else {
-                                    le_parsed as u32
-                                }
-                            }
-                            _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
-                        },
-                        case_type: ApduType::Extended(match extended_apdu_le_len {
-                            0 => Case::Lc3Data,
-                            1 => Case::Lc3DataLe1,
-                            2 => Case::Lc3DataLe2,
-                            3 => Case::Le3,
-                            _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
-                        }),
-                    });
-                }
-            }
         }
+
         return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
     }
 }

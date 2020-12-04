@@ -294,10 +294,11 @@ impl PersistentStore {
 
     /// Returns the global signature counter.
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
-        Ok(match self.store.find(key::GLOBAL_SIGNATURE_COUNTER)? {
-            None => 0,
-            Some(value) => u32::from_ne_bytes(*array_ref!(&value, 0, 4)),
-        })
+        match self.store.find(key::GLOBAL_SIGNATURE_COUNTER)? {
+            None => Ok(0),
+            Some(value) if value.len() == 4 => Ok(u32::from_ne_bytes(*array_ref!(&value, 0, 4))),
+            Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE),
+        }
     }
 
     /// Increments the global signature counter.

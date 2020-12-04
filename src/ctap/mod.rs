@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod apdu;
 pub mod command;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
@@ -80,6 +81,7 @@ const USE_BATCH_ATTESTATION: bool = false;
 // need a flash storage friendly way to implement this feature. The implemented
 // solution is a compromise to be compatible with U2F and not wasting storage.
 const USE_SIGNATURE_COUNTER: bool = true;
+pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
 // Our credential ID consists of
 // - 16 byte initialization vector for AES-256,
 // - 32 byte ECDSA private key for the credential,
@@ -214,7 +216,9 @@ where
 
     pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
         if USE_SIGNATURE_COUNTER {
-            self.persistent_store.incr_global_signature_counter()?;
+            let increment = self.rng.gen_uniform_u32x8()[0] % 8 + 1;
+            self.persistent_store
+                .incr_global_signature_counter(increment)?;
         }
         Ok(())
     }
@@ -1095,8 +1099,9 @@ mod test {
                 let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00, 0x00,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00,
                 ];
+                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, 0x20]);
                 assert_eq!(
@@ -1132,8 +1137,9 @@ mod test {
                 let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00, 0x00,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00,
                 ];
+                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, CREDENTIAL_ID_BASE_SIZE as u8]);
                 assert_eq!(
@@ -1281,8 +1287,9 @@ mod test {
                 let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00, 0x00,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00,
                 ];
+                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, CREDENTIAL_ID_MAX_SIZE as u8]);
                 assert_eq!(
@@ -1330,8 +1337,9 @@ mod test {
                 let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00, 0x00,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00,
                 ];
+                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
                 expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
                 expected_auth_data.extend(&[0x00, 0x20]);
                 assert_eq!(
@@ -1373,6 +1381,7 @@ mod test {
         response: Result<ResponseData, Ctap2StatusCode>,
         expected_user: PublicKeyCredentialUserEntity,
         flags: u8,
+        signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
     ) {
         match response.unwrap() {
@@ -1383,11 +1392,16 @@ mod test {
                     number_of_credentials,
                     ..
                 } = get_assertion_response;
-                let expected_auth_data = vec![
+                let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00, 0x01,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00, 0x00,
                 ];
+                let signature_counter_position = expected_auth_data.len() - 4;
+                BigEndian::write_u32(
+                    &mut expected_auth_data[signature_counter_position..],
+                    signature_counter,
+                );
                 assert_eq!(auth_data, expected_auth_data);
                 assert_eq!(user, Some(expected_user));
                 assert_eq!(number_of_credentials, expected_number_of_credentials);
@@ -1399,6 +1413,7 @@ mod test {
     fn check_assertion_response(
         response: Result<ResponseData, Ctap2StatusCode>,
         expected_user_id: Vec<u8>,
+        signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
     ) {
         let expected_user = PublicKeyCredentialUserEntity {
@@ -1411,6 +1426,7 @@ mod test {
             response,
             expected_user,
             0x00,
+            signature_counter,
             expected_number_of_credentials,
         );
     }
@@ -1443,7 +1459,11 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        check_assertion_response(get_assertion_response, vec![0x1D], None);
+        let signature_counter = ctap_state
+            .persistent_store
+            .global_signature_counter()
+            .unwrap();
+        check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
     }
 
     #[test]
@@ -1636,7 +1656,11 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        check_assertion_response(get_assertion_response, vec![0x1D], None);
+        let signature_counter = ctap_state
+            .persistent_store
+            .global_signature_counter()
+            .unwrap();
+        check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -1739,10 +1763,26 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        check_assertion_response_with_user(get_assertion_response, user2, 0x04, Some(2));
+        let signature_counter = ctap_state
+            .persistent_store
+            .global_signature_counter()
+            .unwrap();
+        check_assertion_response_with_user(
+            get_assertion_response,
+            user2,
+            0x04,
+            signature_counter,
+            Some(2),
+        );
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
-        check_assertion_response_with_user(get_assertion_response, user1, 0x04, None);
+        check_assertion_response_with_user(
+            get_assertion_response,
+            user1,
+            0x04,
+            signature_counter,
+            None,
+        );
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
         assert_eq!(
@@ -1799,13 +1839,22 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        check_assertion_response(get_assertion_response, vec![0x03], Some(3));
+        let signature_counter = ctap_state
+            .persistent_store
+            .global_signature_counter()
+            .unwrap();
+        check_assertion_response(
+            get_assertion_response,
+            vec![0x03],
+            signature_counter,
+            Some(3),
+        );
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
-        check_assertion_response(get_assertion_response, vec![0x02], None);
+        check_assertion_response(get_assertion_response, vec![0x02], signature_counter, None);
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
-        check_assertion_response(get_assertion_response, vec![0x01], None);
+        check_assertion_response(get_assertion_response, vec![0x01], signature_counter, None);
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
         assert_eq!(
@@ -2039,6 +2088,28 @@ mod test {
                 .decrypt_credential_source(modified_id, &rp_id_hash)
                 .unwrap()
                 .is_none());
+        }
+    }
+
+    #[test]
+    fn test_signature_counter() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+
+        let mut last_counter = ctap_state
+            .persistent_store
+            .global_signature_counter()
+            .unwrap();
+        assert!(last_counter > 0);
+        for _ in 0..100 {
+            assert!(ctap_state.increment_global_signature_counter().is_ok());
+            let next_counter = ctap_state
+                .persistent_store
+                .global_signature_counter()
+                .unwrap();
+            assert!(next_counter > last_counter);
+            last_counter = next_counter;
         }
     }
 }

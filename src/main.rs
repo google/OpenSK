@@ -18,6 +18,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate core;
 extern crate lang_items;
+#[macro_use]
+extern crate arrayref;
+extern crate byteorder;
 
 mod ctap;
 pub mod embedded_flash;

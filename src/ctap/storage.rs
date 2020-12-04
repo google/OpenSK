@@ -20,6 +20,7 @@ use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialS
 use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 #[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
 #[cfg(any(test, feature = "ram_storage", feature = "with_ctap2_1"))]
@@ -295,17 +296,17 @@ impl PersistentStore {
     /// Returns the global signature counter.
     pub fn global_signature_counter(&self) -> Result<u32, Ctap2StatusCode> {
         match self.store.find(key::GLOBAL_SIGNATURE_COUNTER)? {
-            None => Ok(0),
+            None => Ok(INITIAL_SIGNATURE_COUNTER),
             Some(value) if value.len() == 4 => Ok(u32::from_ne_bytes(*array_ref!(&value, 0, 4))),
             Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE),
         }
     }
 
     /// Increments the global signature counter.
-    pub fn incr_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
+    pub fn incr_global_signature_counter(&mut self, increment: u32) -> Result<(), Ctap2StatusCode> {
         let old_value = self.global_signature_counter()?;
         // In hopes that servers handle the wrapping gracefully.
-        let new_value = old_value.wrapping_add(1);
+        let new_value = old_value.wrapping_add(increment);
         self.store
             .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
         Ok(())
@@ -1042,6 +1043,28 @@ mod test {
             }
         }
         assert_eq!(persistent_store._min_pin_length_rp_ids().unwrap(), rp_ids);
+    }
+
+    #[test]
+    fn test_global_signature_counter() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        let mut counter_value = 1;
+        assert_eq!(
+            persistent_store.global_signature_counter().unwrap(),
+            counter_value
+        );
+        for increment in 1..10 {
+            assert!(persistent_store
+                .incr_global_signature_counter(increment)
+                .is_ok());
+            counter_value += increment;
+            assert_eq!(
+                persistent_store.global_signature_counter().unwrap(),
+                counter_value
+            );
+        }
     }
 
     #[test]

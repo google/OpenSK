@@ -642,6 +642,14 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
+    fn check_signature_counter(response: &[u8; 4], signature_counter: u32) {
+        if USE_SIGNATURE_COUNTER {
+            assert_eq!(u32::from_be_bytes(*response), signature_counter);
+        } else {
+            assert_eq!(response, &[0x00, 0x00, 0x00, 0x00]);
+        }
+    }
+
     #[test]
     fn test_process_authenticate_enforce() {
         let mut rng = ThreadRng256 {};
@@ -662,11 +670,13 @@ mod test {
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE).unwrap();
         assert_eq!(response[0], 0x01);
-        if USE_SIGNATURE_COUNTER {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x01]);
-        } else {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x00]);
-        }
+        check_signature_counter(
+            array_ref!(response, 1, 4),
+            ctap_state
+                .persistent_store
+                .global_signature_counter()
+                .unwrap(),
+        );
     }
 
     #[test]
@@ -690,11 +700,13 @@ mod test {
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE).unwrap();
         assert_eq!(response[0], 0x01);
-        if USE_SIGNATURE_COUNTER {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x01]);
-        } else {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x00]);
-        }
+        check_signature_counter(
+            array_ref!(response, 1, 4),
+            ctap_state
+                .persistent_store
+                .global_signature_counter()
+                .unwrap(),
+        );
     }
 
     #[test]

@@ -226,7 +226,7 @@ impl TryFrom<&[u8]> for APDU {
             }
         }
 
-        return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
+        Err(ApduStatusCode::SW_INTERNAL_EXCEPTION)
     }
 }
 

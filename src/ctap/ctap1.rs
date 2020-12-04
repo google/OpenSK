@@ -388,6 +388,7 @@ impl Ctap1Command {
 mod test {
     use super::super::{key_material, CREDENTIAL_ID_BASE_SIZE, USE_SIGNATURE_COUNTER};
     use super::*;
+    use byteorder::{BigEndian, ByteOrder};
     use crypto::rng256::ThreadRng256;
     use crypto::Hash256;
 
@@ -642,6 +643,16 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
+    fn check_signature_counter(response: &[u8; 4], signature_counter: u32) {
+        if USE_SIGNATURE_COUNTER {
+            let mut signature_counter_bytes = [0u8; 4];
+            BigEndian::write_u32(&mut signature_counter_bytes, signature_counter);
+            assert_eq!(response, &signature_counter_bytes);
+        } else {
+            assert_eq!(response, &[0x00, 0x00, 0x00, 0x00]);
+        }
+    }
+
     #[test]
     fn test_process_authenticate_enforce() {
         let mut rng = ThreadRng256 {};
@@ -662,11 +673,13 @@ mod test {
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE).unwrap();
         assert_eq!(response[0], 0x01);
-        if USE_SIGNATURE_COUNTER {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x01]);
-        } else {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x00]);
-        }
+        check_signature_counter(
+            array_ref!(response, 1, 4),
+            ctap_state
+                .persistent_store
+                .global_signature_counter()
+                .unwrap(),
+        );
     }
 
     #[test]
@@ -690,11 +703,13 @@ mod test {
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE).unwrap();
         assert_eq!(response[0], 0x01);
-        if USE_SIGNATURE_COUNTER {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x01]);
-        } else {
-            assert_eq!(response[1..5], [0x00, 0x00, 0x00, 0x00]);
-        }
+        check_signature_counter(
+            array_ref!(response, 1, 4),
+            ctap_state
+                .persistent_store
+                .global_signature_counter()
+                .unwrap(),
+        );
     }
 
     #[test]

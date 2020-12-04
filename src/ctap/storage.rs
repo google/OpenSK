@@ -18,6 +18,7 @@ use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialS
 use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 use crate::embedded_flash::{self, StoreConfig, StoreEntry, StoreError};
 use alloc::string::String;
 #[cfg(any(test, feature = "ram_storage", feature = "with_ctap2_1"))]
@@ -366,16 +367,16 @@ impl PersistentStore {
         Ok(self
             .store
             .find_one(&Key::GlobalSignatureCounter)
-            .map_or(0, |(_, entry)| {
+            .map_or(INITIAL_SIGNATURE_COUNTER, |(_, entry)| {
                 u32::from_ne_bytes(*array_ref!(entry.data, 0, 4))
             }))
     }
 
-    pub fn incr_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
+    pub fn incr_global_signature_counter(&mut self, increment: u32) -> Result<(), Ctap2StatusCode> {
         let mut buffer = [0; core::mem::size_of::<u32>()];
         match self.store.find_one(&Key::GlobalSignatureCounter) {
             None => {
-                buffer.copy_from_slice(&1u32.to_ne_bytes());
+                buffer.copy_from_slice(&(increment + INITIAL_SIGNATURE_COUNTER).to_ne_bytes());
                 self.store.insert(StoreEntry {
                     tag: GLOBAL_SIGNATURE_COUNTER,
                     data: &buffer,
@@ -385,7 +386,7 @@ impl PersistentStore {
             Some((index, entry)) => {
                 let value = u32::from_ne_bytes(*array_ref!(entry.data, 0, 4));
                 // In hopes that servers handle the wrapping gracefully.
-                buffer.copy_from_slice(&value.wrapping_add(1).to_ne_bytes());
+                buffer.copy_from_slice(&value.wrapping_add(increment).to_ne_bytes());
                 self.store.replace(
                     index,
                     StoreEntry {
@@ -1134,6 +1135,28 @@ mod test {
             }
         }
         assert_eq!(persistent_store._min_pin_length_rp_ids().unwrap(), rp_ids);
+    }
+
+    #[test]
+    fn test_global_signature_counter() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        let mut counter_value = 1;
+        assert_eq!(
+            persistent_store.global_signature_counter().unwrap(),
+            counter_value
+        );
+        for increment in 1..10 {
+            assert!(persistent_store
+                .incr_global_signature_counter(increment)
+                .is_ok());
+            counter_value += increment;
+            assert_eq!(
+                persistent_store.global_signature_counter().unwrap(),
+                counter_value
+            );
+        }
     }
 
     #[test]

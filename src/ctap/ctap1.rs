@@ -388,7 +388,6 @@ impl Ctap1Command {
 mod test {
     use super::super::{key_material, CREDENTIAL_ID_BASE_SIZE, USE_SIGNATURE_COUNTER};
     use super::*;
-    use byteorder::{BigEndian, ByteOrder};
     use crypto::rng256::ThreadRng256;
     use crypto::Hash256;
 
@@ -645,9 +644,7 @@ mod test {
 
     fn check_signature_counter(response: &[u8; 4], signature_counter: u32) {
         if USE_SIGNATURE_COUNTER {
-            let mut signature_counter_bytes = [0u8; 4];
-            BigEndian::write_u32(&mut signature_counter_bytes, signature_counter);
-            assert_eq!(response, &signature_counter_bytes);
+            assert_eq!(u32::from_be_bytes(*response), signature_counter);
         } else {
             assert_eq!(response, &[0x00, 0x00, 0x00, 0x00]);
         }

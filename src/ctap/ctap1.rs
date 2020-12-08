@@ -159,7 +159,7 @@ impl TryFrom<&[u8]> for U2fCommand {
 
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
-        if lc != apdu.data.len() && (lc as usize) + 2 != apdu.data.len() {
+        if lc != apdu.data.len() && lc + 2 != apdu.data.len() {
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
@@ -187,7 +187,7 @@ impl TryFrom<&[u8]> for U2fCommand {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 let handle_length = apdu.data[64] as usize;
-                if lc as usize != 65 + handle_length {
+                if lc != 65 + handle_length {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 let flag = Ctap1Flags::try_from(apdu.header.p1)?;

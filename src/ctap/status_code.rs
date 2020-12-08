@@ -81,17 +81,10 @@ pub enum Ctap2StatusCode {
     /// This type of error is unexpected and the current state is undefined.
     CTAP2_ERR_VENDOR_INTERNAL_ERROR = 0xF2,
 
-    /// The persistent storage invariant is broken.
+    /// The hardware is malfunctioning.
     ///
-    /// There can be multiple reasons:
-    /// - The persistent storage has not been erased before its first usage.
-    /// - The persistent storage has been tempered with by a third party.
-    /// - The flash is malfunctioning (including the Tock driver).
-    ///
-    /// In the first 2 cases the persistent storage should be completely erased. If the error
-    /// reproduces, it may indicate a software bug or a hardware deficiency. In both cases, the
-    /// error should be reported.
-    CTAP2_ERR_VENDOR_INVALID_PERSISTENT_STORAGE = 0xF3,
+    /// It may be possible that some of those errors are actually internal errors.
+    CTAP2_ERR_VENDOR_HARDWARE_FAILURE = 0xF3,
 
     CTAP2_ERR_VENDOR_LAST = 0xFF,
 }

@@ -72,9 +72,10 @@ const AAGUID: usize = 7;
 const MIN_PIN_LENGTH: usize = 8;
 #[cfg(feature = "with_ctap2_1")]
 const MIN_PIN_LENGTH_RP_IDS: usize = 9;
+const CRED_RANDOM_SECRET: usize = 10;
 // Different NUM_TAGS depending on the CTAP version make the storage incompatible,
 // so we use the maximum.
-const NUM_TAGS: usize = 10;
+const NUM_TAGS: usize = 11;
 
 const MAX_PIN_RETRIES: u8 = 8;
 #[cfg(feature = "with_ctap2_1")]
@@ -108,6 +109,7 @@ enum Key {
     MinPinLength,
     #[cfg(feature = "with_ctap2_1")]
     MinPinLengthRpIds,
+    CredRandomSecret,
 }
 
 pub struct MasterKeys {
@@ -166,6 +168,7 @@ impl StoreConfig for Config {
             MIN_PIN_LENGTH => add(Key::MinPinLength),
             #[cfg(feature = "with_ctap2_1")]
             MIN_PIN_LENGTH_RP_IDS => add(Key::MinPinLengthRpIds),
+            CRED_RANDOM_SECRET => add(Key::CredRandomSecret),
             _ => debug_assert!(false),
         }
     }
@@ -230,6 +233,22 @@ impl PersistentStore {
                 })
                 .unwrap();
         }
+
+        if self.store.find_one(&Key::CredRandomSecret).is_none() {
+            let cred_random_with_uv = rng.gen_uniform_u8x32();
+            let cred_random_without_uv = rng.gen_uniform_u8x32();
+            let mut cred_random = Vec::with_capacity(64);
+            cred_random.extend_from_slice(&cred_random_without_uv);
+            cred_random.extend_from_slice(&cred_random_with_uv);
+            self.store
+                .insert(StoreEntry {
+                    tag: CRED_RANDOM_SECRET,
+                    data: &cred_random,
+                    sensitive: true,
+                })
+                .unwrap();
+        }
+
         // TODO(jmichel): remove this when vendor command is in place
         #[cfg(not(test))]
         self.load_attestation_data_from_firmware();
@@ -409,6 +428,15 @@ impl PersistentStore {
             encryption: *array_ref![entry.data, 0, 32],
             hmac: *array_ref![entry.data, 32, 32],
         })
+    }
+
+    pub fn cred_random_secret(&self, has_uv: bool) -> Result<[u8; 32], Ctap2StatusCode> {
+        let (_, entry) = self.store.find_one(&Key::CredRandomSecret).unwrap();
+        if entry.data.len() != 64 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        let offset = if has_uv { 32 } else { 0 };
+        Ok(*array_ref![entry.data, offset, 32])
     }
 
     pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
@@ -721,7 +749,6 @@ mod test {
             rp_id: String::from(rp_id),
             user_handle,
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,
@@ -900,7 +927,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
@@ -946,7 +972,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,
@@ -968,7 +993,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
             creation_order: 0,
             user_name: None,
@@ -987,7 +1011,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // Master keys stay the same between resets.
+        // Master keys stay the same between calls.
         let master_keys_1 = persistent_store.master_keys().unwrap();
         let master_keys_2 = persistent_store.master_keys().unwrap();
         assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
@@ -1001,6 +1025,28 @@ mod test {
         let master_keys_3 = persistent_store.master_keys().unwrap();
         assert!(master_keys_3.encryption != master_encryption_key.as_slice());
         assert!(master_keys_3.hmac != master_hmac_key.as_slice());
+    }
+
+    #[test]
+    fn test_cred_random_secret() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        // Master keys stay the same between calls.
+        let cred_random_with_uv_1 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_1 = persistent_store.cred_random_secret(false).unwrap();
+        let cred_random_with_uv_2 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_2 = persistent_store.cred_random_secret(false).unwrap();
+        assert_eq!(cred_random_with_uv_1, cred_random_with_uv_2);
+        assert_eq!(cred_random_without_uv_1, cred_random_without_uv_2);
+
+        // Master keys change after reset. This test may fail if the random generator produces the
+        // same keys.
+        persistent_store.reset(&mut rng).unwrap();
+        let cred_random_with_uv_3 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_3 = persistent_store.cred_random_secret(false).unwrap();
+        assert!(cred_random_with_uv_1 != cred_random_with_uv_3);
+        assert!(cred_random_without_uv_1 != cred_random_without_uv_3);
     }
 
     #[test]
@@ -1170,7 +1216,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,

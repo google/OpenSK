@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::apdu::{ApduStatusCode, APDU};
 use super::hid::ChannelID;
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
@@ -118,11 +119,16 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
-        if message.len() < Ctap1Command::APDU_HEADER_LEN as usize {
-            return Err(Ctap1StatusCode::SW_WRONG_DATA);
-        }
-
-        let (apdu, payload) = message.split_at(Ctap1Command::APDU_HEADER_LEN as usize);
+        let apdu: APDU = match APDU::try_from(message) {
+            Ok(apdu) => apdu,
+            // Todo: Better conversion between ApduStatusCode and Ctap1StatusCode
+            // Maybe use TryFrom?
+            Err(apdu_status_code) => match apdu_status_code {
+                ApduStatusCode::SW_WRONG_LENGTH => return Err(Ctap1StatusCode::SW_WRONG_LENGTH),
+                ApduStatusCode::SW_WRONG_DATA => return Err(Ctap1StatusCode::SW_WRONG_DATA),
+                _ => return Err(Ctap1StatusCode::SW_COMMAND_ABORTED),
+            },
+        };
 
         // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always
         // encodes the length on 3 bytes and doesn't use the field "Le" (Length Expected).
@@ -131,30 +137,29 @@ impl TryFrom<&[u8]> for U2fCommand {
         // +-----+-----+----+----+-----+-----+-----+
         // | CLA | INS | P1 | P2 | Lc1 | Lc2 | Lc3 |
         // +-----+-----+----+----+-----+-----+-----+
-        if apdu[0] != Ctap1Command::CTAP1_CLA {
+        if apdu.header.cla != Ctap1Command::CTAP1_CLA {
             return Err(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED);
         }
 
-        let lc = (((apdu[4] as u32) << 16) | ((apdu[5] as u32) << 8) | (apdu[6] as u32)) as usize;
-
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
-        if lc != payload.len() && lc + 2 != payload.len() {
+        // Todo: support extended APDUs now that the new parser can work with those
+        if apdu.lc as usize != apdu.data.len() && (apdu.lc as usize) + 2 != apdu.data.len() {
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
-        match apdu[1] {
+        match apdu.header.ins {
             // U2F raw message format specification, Section 4.1
             // +-----------------+-------------------+
             // + Challenge (32B) | Application (32B) |
             // +-----------------+-------------------+
             Ctap1Command::U2F_REGISTER => {
-                if lc != 64 {
+                if apdu.lc != 64 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Register {
-                    challenge: *array_ref!(payload, 0, 32),
-                    application: *array_ref!(payload, 32, 32),
+                    challenge: *array_ref!(apdu.data, 0, 32),
+                    application: *array_ref!(apdu.data, 32, 32),
                 })
             }
 
@@ -163,25 +168,25 @@ impl TryFrom<&[u8]> for U2fCommand {
             // + Challenge (32B) | Application (32B) | key handle len (1B) | key handle |
             // +-----------------+-------------------+---------------------+------------+
             Ctap1Command::U2F_AUTHENTICATE => {
-                if lc < 65 {
+                if apdu.lc < 65 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
-                let handle_length = payload[64] as usize;
-                if lc != 65 + handle_length {
+                let handle_length = apdu.data[64] as usize;
+                if apdu.lc as usize != 65 + handle_length {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
-                let flag = Ctap1Flags::try_from(apdu[2])?;
+                let flag = Ctap1Flags::try_from(apdu.header.p1)?;
                 Ok(Self::Authenticate {
-                    challenge: *array_ref!(payload, 0, 32),
-                    application: *array_ref!(payload, 32, 32),
-                    key_handle: payload[65..lc].to_vec(),
+                    challenge: *array_ref!(apdu.data, 0, 32),
+                    application: *array_ref!(apdu.data, 32, 32),
+                    key_handle: apdu.data[65..].to_vec(),
                     flags: flag,
                 })
             }
 
             // U2F raw message format specification, Section 6.1
             Ctap1Command::U2F_VERSION => {
-                if lc != 0 {
+                if apdu.lc != 0 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Version)
@@ -190,7 +195,7 @@ impl TryFrom<&[u8]> for U2fCommand {
             // For Vendor specific command.
             Ctap1Command::VENDOR_SPECIFIC_FIRST..=Ctap1Command::VENDOR_SPECIFIC_LAST => {
                 Ok(Self::VendorSpecific {
-                    payload: payload.to_vec(),
+                    payload: apdu.data.to_vec(),
                 })
             }
 
@@ -202,8 +207,6 @@ impl TryFrom<&[u8]> for U2fCommand {
 pub struct Ctap1Command {}
 
 impl Ctap1Command {
-    const APDU_HEADER_LEN: u32 = 7; // CLA + INS + P1 + P2 + LC1-3
-
     const CTAP1_CLA: u8 = 0;
     // This byte is used in Register, but only serves backwards compatibility.
     const LEGACY_BYTE: u8 = 0x05;
@@ -571,13 +574,7 @@ mod test {
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
-        message.push(0x00);
-        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
-
-        // Two extra zeros are okay, they could encode the expected response length.
-        message.push(0x00);
-        message.push(0x00);
+        message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
     }

@@ -53,10 +53,10 @@ pub enum ApduInstructions {
 #[allow(dead_code)]
 #[derive(Default, PartialEq)]
 pub struct ApduHeader {
-    cla: u8,
-    ins: u8,
-    p1: u8,
-    p2: u8,
+    pub cla: u8,
+    pub ins: u8,
+    pub p1: u8,
+    pub p2: u8,
 }
 
 impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
@@ -96,11 +96,11 @@ pub enum ApduType {
 #[allow(dead_code)]
 #[derive(PartialEq)]
 pub struct APDU {
-    header: ApduHeader,
-    lc: u16,
-    data: Vec<u8>,
-    le: u32,
-    case_type: ApduType,
+    pub header: ApduHeader,
+    pub lc: u16,
+    pub data: Vec<u8>,
+    pub le: u32,
+    pub case_type: ApduType,
 }
 
 impl TryFrom<&[u8]> for APDU {
@@ -168,12 +168,17 @@ impl TryFrom<&[u8]> for APDU {
         }
         if payload.len() > 2 {
             // Lc is possibly three-bytes long
-            let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..]) as usize;
-            let extended_apdu_le_len: usize = if payload.len() > extended_apdu_lc {
-                payload.len() - extended_apdu_lc - 3
-            } else {
-                0
+            let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..3]) as usize;
+            if payload.len() < extended_apdu_lc + 3 {
+                return Err(ApduStatusCode::SW_WRONG_LENGTH);
+            }
+            let extended_apdu_le_len: usize = match payload.len() - extended_apdu_lc {
+                // There's some possible Le bytes at the end
+                2..=5 => payload.len() - extended_apdu_lc - 3,
+                // There are more bytes than even Le3 can consume, return an error
+                _ => return Err(ApduStatusCode::SW_WRONG_LENGTH),
             };
+
             if byte_0 == 0 && extended_apdu_le_len <= 3 {
                 // If first byte is zero AND the next two bytes can be parsed as a big-endian
                 // length that covers the rest of the block (plus few additional bytes for Le), we

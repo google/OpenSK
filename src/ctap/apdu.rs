@@ -172,9 +172,9 @@ impl TryFrom<&[u8]> for APDU {
             if payload.len() < extended_apdu_lc + 3 {
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }
-            let extended_apdu_le_len: usize = match payload.len() - extended_apdu_lc {
+            let extended_apdu_le_len: usize = match payload.len() - extended_apdu_lc - 3 {
                 // There's some possible Le bytes at the end
-                2..=5 => payload.len() - extended_apdu_lc - 3,
+                0..=3 => payload.len() - extended_apdu_lc - 3,
                 // There are more bytes than even Le3 can consume, return an error
                 _ => return Err(ApduStatusCode::SW_WRONG_LENGTH),
             };

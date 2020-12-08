@@ -144,6 +144,8 @@ impl TryFrom<&[u8]> for U2fCommand {
             }
         };
 
+        let lc = apdu.lc as usize;
+
         // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always
         // encodes the length on 3 bytes and doesn't use the field "Le" (Length Expected).
         // We keep the 2 byte of "Le" for the packet length in mind, but always ignore its value.
@@ -157,8 +159,7 @@ impl TryFrom<&[u8]> for U2fCommand {
 
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
-        // Todo: support extended APDUs now that the new parser can work with those
-        if apdu.lc as usize != apdu.data.len() && (apdu.lc as usize) + 2 != apdu.data.len() {
+        if lc != apdu.data.len() && (lc as usize) + 2 != apdu.data.len() {
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
@@ -168,7 +169,7 @@ impl TryFrom<&[u8]> for U2fCommand {
             // + Challenge (32B) | Application (32B) |
             // +-----------------+-------------------+
             Ctap1Command::U2F_REGISTER => {
-                if apdu.lc != 64 {
+                if lc != 64 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Register {
@@ -182,11 +183,11 @@ impl TryFrom<&[u8]> for U2fCommand {
             // + Challenge (32B) | Application (32B) | key handle len (1B) | key handle |
             // +-----------------+-------------------+---------------------+------------+
             Ctap1Command::U2F_AUTHENTICATE => {
-                if apdu.lc < 65 {
+                if lc < 65 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 let handle_length = apdu.data[64] as usize;
-                if apdu.lc as usize != 65 + handle_length {
+                if lc as usize != 65 + handle_length {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 let flag = Ctap1Flags::try_from(apdu.header.p1)?;
@@ -200,7 +201,7 @@ impl TryFrom<&[u8]> for U2fCommand {
 
             // U2F raw message format specification, Section 6.1
             Ctap1Command::U2F_VERSION => {
-                if apdu.lc != 0 {
+                if lc != 0 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Version)

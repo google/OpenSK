@@ -60,6 +60,24 @@ impl TryFrom<u16> for Ctap1StatusCode {
     }
 }
 
+impl TryFrom<ApduStatusCode> for Ctap1StatusCode {
+    type Error = ();
+
+    fn try_from(apdu_status_code: ApduStatusCode) -> Result<Ctap1StatusCode, ()> {
+        match apdu_status_code {
+            ApduStatusCode::SW_WRONG_LENGTH => Ok(Ctap1StatusCode::SW_WRONG_LENGTH),
+            ApduStatusCode::SW_WRONG_DATA => Ok(Ctap1StatusCode::SW_WRONG_DATA),
+            ApduStatusCode::SW_CLA_INVALID => Ok(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED),
+            ApduStatusCode::SW_INS_INVALID => Ok(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+            ApduStatusCode::SW_COND_USE_NOT_SATISFIED => {
+                Ok(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED)
+            }
+            ApduStatusCode::SW_SUCCESS => Ok(Ctap1StatusCode::SW_NO_ERROR),
+            _ => Ok(Ctap1StatusCode::SW_COMMAND_ABORTED),
+        }
+    }
+}
+
 impl Into<u16> for Ctap1StatusCode {
     fn into(self) -> u16 {
         self as u16
@@ -121,13 +139,9 @@ impl TryFrom<&[u8]> for U2fCommand {
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
         let apdu: APDU = match APDU::try_from(message) {
             Ok(apdu) => apdu,
-            // Todo: Better conversion between ApduStatusCode and Ctap1StatusCode
-            // Maybe use TryFrom?
-            Err(apdu_status_code) => match apdu_status_code {
-                ApduStatusCode::SW_WRONG_LENGTH => return Err(Ctap1StatusCode::SW_WRONG_LENGTH),
-                ApduStatusCode::SW_WRONG_DATA => return Err(Ctap1StatusCode::SW_WRONG_DATA),
-                _ => return Err(Ctap1StatusCode::SW_COMMAND_ABORTED),
-            },
+            Err(apdu_status_code) => {
+                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
+            }
         };
 
         // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always

@@ -168,7 +168,7 @@ impl TryFrom<&[u8]> for APDU {
         }
         if payload.len() > 2 {
             // Lc is possibly three-bytes long
-            let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..3]) as usize;
+            let extended_apdu_lc = BigEndian::read_u16(&payload[1..3]) as usize;
             if payload.len() < extended_apdu_lc + 3 {
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }

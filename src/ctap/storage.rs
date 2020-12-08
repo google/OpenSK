@@ -1011,7 +1011,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // Master keys stay the same between calls.
+        // Master keys stay the same within the same CTAP reset cycle.
         let master_keys_1 = persistent_store.master_keys().unwrap();
         let master_keys_2 = persistent_store.master_keys().unwrap();
         assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
@@ -1032,7 +1032,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // Master keys stay the same between calls.
+        // CredRandom secrets stay the same within the same CTAP reset cycle.
         let cred_random_with_uv_1 = persistent_store.cred_random_secret(true).unwrap();
         let cred_random_without_uv_1 = persistent_store.cred_random_secret(false).unwrap();
         let cred_random_with_uv_2 = persistent_store.cred_random_secret(true).unwrap();
@@ -1040,7 +1040,7 @@ mod test {
         assert_eq!(cred_random_with_uv_1, cred_random_with_uv_2);
         assert_eq!(cred_random_without_uv_1, cred_random_without_uv_2);
 
-        // Master keys change after reset. This test may fail if the random generator produces the
+        // CredRandom secrets change after reset. This test may fail if the random generator produces the
         // same keys.
         persistent_store.reset(&mut rng).unwrap();
         let cred_random_with_uv_3 = persistent_store.cred_random_secret(true).unwrap();

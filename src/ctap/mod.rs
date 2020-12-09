@@ -238,15 +238,14 @@ where
         let mut iv = [0; 16];
         iv.copy_from_slice(&self.rng.gen_uniform_u8x32()[..16]);
 
-        let block_len = 4;
-        let mut blocks = vec![[0u8; 16]; block_len];
+        let mut blocks = [[0u8; 16]; 4];
         blocks[0].copy_from_slice(&sk_bytes[..16]);
         blocks[1].copy_from_slice(&sk_bytes[16..]);
         blocks[2].copy_from_slice(&application[..16]);
         blocks[3].copy_from_slice(&application[16..]);
         cbc_encrypt(&aes_enc_key, iv, &mut blocks);
 
-        let mut encrypted_id = Vec::with_capacity(16 * (block_len + 3));
+        let mut encrypted_id = Vec::with_capacity(0x70);
         encrypted_id.extend(&iv);
         for b in &blocks {
             encrypted_id.extend(b);
@@ -280,9 +279,8 @@ where
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
         let mut iv = [0; 16];
         iv.copy_from_slice(&credential_id[..16]);
-        let block_len = 4;
-        let mut blocks = vec![[0u8; 16]; block_len];
-        for i in 0..block_len {
+        let mut blocks = [[0u8; 16]; 4];
+        for i in 0..4 {
             blocks[i].copy_from_slice(&credential_id[16 * (i + 1)..16 * (i + 2)]);
         }
 
@@ -608,7 +606,7 @@ where
         let mut private_key_bytes = [0u8; 32];
         private_key.to_bytes(&mut private_key_bytes);
         let key = self.persistent_store.cred_random_secret(has_uv)?;
-        Ok(hmac_256::<Sha256>(&key, &private_key_bytes[..]))
+        Ok(hmac_256::<Sha256>(&key, &private_key_bytes))
     }
 
     // Processes the input of a get_assertion operation for a given credential

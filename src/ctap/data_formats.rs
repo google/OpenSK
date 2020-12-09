@@ -498,7 +498,6 @@ pub struct PublicKeyCredentialSource {
     pub rp_id: String,
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub user_display_name: Option<String>,
-    pub cred_random: Option<Vec<u8>>,
     pub cred_protect_policy: Option<CredentialProtectionPolicy>,
     pub creation_order: u64,
     pub user_name: Option<String>,
@@ -513,14 +512,14 @@ enum PublicKeyCredentialSourceField {
     RpId = 2,
     UserHandle = 3,
     UserDisplayName = 4,
-    CredRandom = 5,
     CredProtectPolicy = 6,
     CreationOrder = 7,
     UserName = 8,
     UserIcon = 9,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
-    // Reserved tags: none.
+    // Reserved tags:
+    // - CredRandom = 5,
 }
 
 impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
@@ -539,7 +538,6 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
             PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
             PublicKeyCredentialSourceField::UserDisplayName => credential.user_display_name,
-            PublicKeyCredentialSourceField::CredRandom => credential.cred_random,
             PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
             PublicKeyCredentialSourceField::CreationOrder => credential.creation_order,
             PublicKeyCredentialSourceField::UserName => credential.user_name,
@@ -559,7 +557,6 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::RpId => rp_id,
                 PublicKeyCredentialSourceField::UserHandle => user_handle,
                 PublicKeyCredentialSourceField::UserDisplayName => user_display_name,
-                PublicKeyCredentialSourceField::CredRandom => cred_random,
                 PublicKeyCredentialSourceField::CredProtectPolicy => cred_protect_policy,
                 PublicKeyCredentialSourceField::CreationOrder => creation_order,
                 PublicKeyCredentialSourceField::UserName => user_name,
@@ -577,7 +574,6 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
         let user_handle = extract_byte_string(ok_or_missing(user_handle)?)?;
         let user_display_name = user_display_name.map(extract_text_string).transpose()?;
-        let cred_random = cred_random.map(extract_byte_string).transpose()?;
         let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
@@ -601,7 +597,6 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             rp_id,
             user_handle,
             user_display_name,
-            cred_random,
             cred_protect_policy,
             creation_order,
             user_name,
@@ -1373,7 +1368,6 @@ mod test {
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,
@@ -1387,16 +1381,6 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             user_display_name: Some("Display Name".to_string()),
-            ..credential
-        };
-
-        assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
-            Ok(credential.clone())
-        );
-
-        let credential = PublicKeyCredentialSource {
-            cred_random: Some(vec![0x00; 32]),
             ..credential
         };
 

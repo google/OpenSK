@@ -607,10 +607,8 @@ where
     ) -> Result<[u8; 32], Ctap2StatusCode> {
         let mut private_key_bytes = [0u8; 32];
         private_key.to_bytes(&mut private_key_bytes);
-        let salt = crypto::sha256::Sha256::hash(&private_key_bytes);
-        // TODO(kaczmarczyck) KDF? hash salt together with rp_id_hash?
         let key = self.persistent_store.cred_random_secret(has_uv)?;
-        Ok(hmac_256::<Sha256>(&key, &salt[..]))
+        Ok(hmac_256::<Sha256>(&key, &private_key_bytes[..]))
     }
 
     // Processes the input of a get_assertion operation for a given credential

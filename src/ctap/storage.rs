@@ -23,7 +23,6 @@ use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 #[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
-#[cfg(any(test, feature = "ram_storage", feature = "with_ctap2_1"))]
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -206,12 +205,19 @@ impl PersistentStore {
     ) -> Result<(), Ctap2StatusCode> {
         // Holds the key of the existing credential if this is an update.
         let mut old_key = None;
-        // Holds the unordered list of used keys.
-        let mut keys = Vec::new();
+        let min_key = key::CREDENTIALS.start;
+        // Holds whether a key is used (indices are shifted by min_key).
+        let mut keys = vec![false; MAX_SUPPORTED_RESIDENTIAL_KEYS];
         let mut iter_result = Ok(());
         let iter = self.iter_credentials(&mut iter_result)?;
         for (key, credential) in iter {
-            keys.push(key);
+            if key < min_key
+                || key - min_key >= MAX_SUPPORTED_RESIDENTIAL_KEYS
+                || keys[key - min_key]
+            {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
+            keys[key - min_key] = true;
             if credential.rp_id == new_credential.rp_id
                 && credential.user_handle == new_credential.user_handle
             {
@@ -222,15 +228,17 @@ impl PersistentStore {
             }
         }
         iter_result?;
-        if old_key.is_none() && keys.len() >= MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        if old_key.is_none()
+            && keys.iter().filter(|&&x| x).count() >= MAX_SUPPORTED_RESIDENTIAL_KEYS
+        {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
         let key = match old_key {
             // This is a new credential being added, we need to allocate a free key. We choose the
-            // first available key. This is quadratic in the number of existing keys.
+            // first available key.
             None => key::CREDENTIALS
                 .take(MAX_SUPPORTED_RESIDENTIAL_KEYS)
-                .find(|key| !keys.contains(key))
+                .find(|key| !keys[key - min_key])
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
             // This is an existing credential being updated, we reuse its key.
             Some(x) => x,

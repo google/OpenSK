@@ -56,22 +56,15 @@ fn verify_pin_auth(hmac_key: &[u8], hmac_contents: &[u8], pin_auth: &[u8]) -> bo
 fn encrypt_hmac_secret_output(
     shared_secret: &[u8; 32],
     salt_enc: &[u8],
-    cred_random: &[u8],
+    cred_random: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     if salt_enc.len() != 32 && salt_enc.len() != 64 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
-    }
-    if cred_random.len() != 32 {
-        // We are strict here. We need at least 32 byte, but expect exactly 32.
         return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
     }
     let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
     let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
     // The specification specifically asks for a zero IV.
     let iv = [0u8; 16];
-
-    let mut cred_random_secret = [0u8; 32];
-    cred_random_secret.copy_from_slice(cred_random);
 
     // With the if clause restriction above, block_len can only be 2 or 4.
     let block_len = salt_enc.len() / 16;
@@ -84,7 +77,7 @@ fn encrypt_hmac_secret_output(
     let mut decrypted_salt1 = [0u8; 32];
     decrypted_salt1[..16].copy_from_slice(&blocks[0]);
     decrypted_salt1[16..].copy_from_slice(&blocks[1]);
-    let output1 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt1[..]);
+    let output1 = hmac_256::<Sha256>(&cred_random[..], &decrypted_salt1[..]);
     for i in 0..2 {
         blocks[i].copy_from_slice(&output1[16 * i..16 * (i + 1)]);
     }
@@ -93,7 +86,7 @@ fn encrypt_hmac_secret_output(
         let mut decrypted_salt2 = [0u8; 32];
         decrypted_salt2[..16].copy_from_slice(&blocks[2]);
         decrypted_salt2[16..].copy_from_slice(&blocks[3]);
-        let output2 = hmac_256::<Sha256>(&cred_random_secret, &decrypted_salt2[..]);
+        let output2 = hmac_256::<Sha256>(&cred_random[..], &decrypted_salt2[..]);
         for i in 0..2 {
             blocks[i + 2].copy_from_slice(&output2[16 * i..16 * (i + 1)]);
         }
@@ -588,7 +581,7 @@ impl PinProtocolV1 {
     pub fn process_hmac_secret(
         &self,
         hmac_secret_input: GetAssertionHmacSecretInput,
-        cred_random: &Option<Vec<u8>>,
+        cred_random: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let GetAssertionHmacSecretInput {
             key_agreement,
@@ -602,12 +595,7 @@ impl PinProtocolV1 {
             // Hard to tell what the correct error code here is.
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
         }
-
-        match cred_random {
-            Some(cr) => encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cr),
-            // This is the case if the credential was not created with HMAC-secret.
-            None => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION),
-        }
+        encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cred_random)
     }
 
     #[cfg(feature = "with_ctap2_1")]
@@ -1194,14 +1182,6 @@ mod test {
         let salt_enc = [0x5E; 64];
         let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
         assert_eq!(output.unwrap().len(), 64);
-
-        let salt_enc = [0x5E; 32];
-        let cred_random = [0xC9; 33];
-        let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
-        assert_eq!(
-            output,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
-        );
 
         let mut salt_enc = [0x00; 32];
         let cred_random = [0xC9; 32];

@@ -88,6 +88,9 @@ make_partition! {
     /// board may configure `MAX_SUPPORTED_RESIDENTIAL_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
 
+    /// The secret of the CredRandom feature.
+    CRED_RANDOM_SECRET = 2041;
+
     /// List of RP IDs allowed to read the minimum PIN length.
     #[cfg(feature = "with_ctap2_1")]
     _MIN_PIN_LENGTH_RP_IDS = 2042;

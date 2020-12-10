@@ -138,6 +138,17 @@ impl PersistentStore {
             master_keys.extend_from_slice(&master_hmac_key);
             self.store.insert(key::MASTER_KEYS, &master_keys)?;
         }
+
+        // Generate and store the CredRandom secrets if they are missing.
+        if self.store.find_handle(key::CRED_RANDOM_SECRET)?.is_none() {
+            let cred_random_with_uv = rng.gen_uniform_u8x32();
+            let cred_random_without_uv = rng.gen_uniform_u8x32();
+            let mut cred_random = Vec::with_capacity(64);
+            cred_random.extend_from_slice(&cred_random_without_uv);
+            cred_random.extend_from_slice(&cred_random_with_uv);
+            self.store.insert(key::CRED_RANDOM_SECRET, &cred_random)?;
+        }
+
         // TODO(jmichel): remove this when vendor command is in place
         #[cfg(not(test))]
         self.load_attestation_data_from_firmware()?;
@@ -333,6 +344,19 @@ impl PersistentStore {
             encryption: *array_ref![master_keys, 0, 32],
             hmac: *array_ref![master_keys, 32, 32],
         })
+    }
+
+    /// Returns the CredRandom secret.
+    pub fn cred_random_secret(&self, has_uv: bool) -> Result<[u8; 32], Ctap2StatusCode> {
+        let cred_random_secret = self
+            .store
+            .find(key::CRED_RANDOM_SECRET)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        if cred_random_secret.len() != 64 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        let offset = if has_uv { 32 } else { 0 };
+        Ok(*array_ref![cred_random_secret, offset, 32])
     }
 
     /// Returns the PIN hash if defined.
@@ -657,7 +681,6 @@ mod test {
             rp_id: String::from(rp_id),
             user_handle,
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,
@@ -814,7 +837,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
             ),
@@ -860,7 +882,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,
@@ -882,7 +903,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
             creation_order: 0,
             user_name: None,
@@ -901,7 +921,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // Master keys stay the same between resets.
+        // Master keys stay the same within the same CTAP reset cycle.
         let master_keys_1 = persistent_store.master_keys().unwrap();
         let master_keys_2 = persistent_store.master_keys().unwrap();
         assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
@@ -915,6 +935,28 @@ mod test {
         let master_keys_3 = persistent_store.master_keys().unwrap();
         assert!(master_keys_3.encryption != master_encryption_key.as_slice());
         assert!(master_keys_3.hmac != master_hmac_key.as_slice());
+    }
+
+    #[test]
+    fn test_cred_random_secret() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        // CredRandom secrets stay the same within the same CTAP reset cycle.
+        let cred_random_with_uv_1 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_1 = persistent_store.cred_random_secret(false).unwrap();
+        let cred_random_with_uv_2 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_2 = persistent_store.cred_random_secret(false).unwrap();
+        assert_eq!(cred_random_with_uv_1, cred_random_with_uv_2);
+        assert_eq!(cred_random_without_uv_1, cred_random_without_uv_2);
+
+        // CredRandom secrets change after reset. This test may fail if the random generator produces the
+        // same keys.
+        persistent_store.reset(&mut rng).unwrap();
+        let cred_random_with_uv_3 = persistent_store.cred_random_secret(true).unwrap();
+        let cred_random_without_uv_3 = persistent_store.cred_random_secret(false).unwrap();
+        assert!(cred_random_with_uv_1 != cred_random_with_uv_3);
+        assert!(cred_random_without_uv_1 != cred_random_without_uv_3);
     }
 
     #[test]
@@ -1084,7 +1126,6 @@ mod test {
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
-            cred_random: None,
             cred_protect_policy: None,
             creation_order: 0,
             user_name: None,

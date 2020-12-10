@@ -863,14 +863,6 @@ if __name__ == "__main__":
             "This is useful to allow flashing multiple OpenSK authenticators "
             "in a row without them being considered clones."),
   )
-  main_parser.add_argument(
-      "--no-persistent-storage",
-      action="append_const",
-      const="ram_storage",
-      dest="features",
-      help=("Compiles and installs the OpenSK application without persistent "
-            "storage (i.e. unplugging the key will reset the key)."),
-  )
 
   main_parser.add_argument(
       "--elf2tab-output",

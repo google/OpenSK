@@ -19,10 +19,10 @@ extern crate lang_items;
 
 use alloc::vec;
 use core::fmt::Write;
-use ctap2::embedded_flash::SyscallStorage;
+use ctap2::embedded_flash::{new_storage, Storage};
 use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
-use persistent_store::{Storage, Store};
+use persistent_store::Store;
 
 fn timestamp(timer: &Timer) -> Timestamp<f64> {
     Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
@@ -36,10 +36,11 @@ fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>
 }
 
 // Only use one store at a time.
-unsafe fn boot_store(num_pages: usize, erase: bool) -> Store<SyscallStorage> {
-    let mut storage = SyscallStorage::new(num_pages).unwrap();
+unsafe fn boot_store(num_pages: usize, erase: bool) -> Store<Storage> {
+    let mut storage = new_storage(num_pages);
     if erase {
-        for page in 0..storage.num_pages() {
+        for page in 0..num_pages {
+            use persistent_store::Storage;
             storage.erase_page(page).unwrap();
         }
     }

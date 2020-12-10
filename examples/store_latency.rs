@@ -57,10 +57,14 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
 
     let mut store = unsafe { boot_store(num_pages, true) };
     let total_capacity = store.capacity().unwrap().total();
+    assert_eq!(store.capacity().unwrap().used(), 0);
+    assert_eq!(store.lifetime().unwrap().used(), 0);
 
     // Burn N words to align the end of the user capacity with the virtual capacity.
     store.insert(0, &vec![0; 4 * (num_pages - 1)]).unwrap();
     store.remove(0).unwrap();
+    assert_eq!(store.capacity().unwrap().used(), 0);
+    assert_eq!(store.lifetime().unwrap().used(), num_pages);
 
     // Insert entries until there is space for one more.
     let count = total_capacity / (1 + word_length) - 1;
@@ -82,6 +86,10 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
         store.insert(key, &vec![0; 4 * word_length]).unwrap()
     });
     writeln!(console, "Insert: {:.1}ms.", time.ms()).unwrap();
+    assert_eq!(
+        store.lifetime().unwrap().used(),
+        num_pages + (1 + count) * (1 + word_length)
+    );
 
     // Measure latency of boot.
     let (mut store, time) = measure(&timer, || unsafe { boot_store(num_pages, false) });
@@ -98,8 +106,11 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
         store.insert(0, &vec![0; 4 * (length - 1)]).unwrap();
         store.remove(0).unwrap();
     }
+    assert!(store.capacity().unwrap().remaining() > 0);
+    assert_eq!(store.lifetime().unwrap().used(), num_pages + total_capacity);
     let ((), time) = measure(timer, || store.prepare(1).unwrap());
     writeln!(console, "Compaction: {:.1}ms.", time.ms()).unwrap();
+    assert!(store.lifetime().unwrap().used() > total_capacity + num_pages);
 }
 
 fn main() {

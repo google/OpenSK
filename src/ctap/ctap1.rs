@@ -586,10 +586,25 @@ mod test {
         let key_handle = ctap_state
             .encrypt_key_handle(sk, &application, None)
             .unwrap();
-        let mut message =
-            create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
+        let mut message = create_authenticate_message(
+            &application,
+            Ctap1Flags::DontEnforceUpAndSign,
+            &key_handle,
+        );
 
-        message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        message.push(0x00);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert!(response.is_ok());
+
+        message.push(0x00);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert!(response.is_ok());
+
+        message.push(0x00);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert!(response.is_ok());
+
+        message.push(0x00);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
     }

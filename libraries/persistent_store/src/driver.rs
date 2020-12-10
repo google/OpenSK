@@ -311,31 +311,15 @@ impl StoreDriverOff {
         })
     }
 
-    /// Returns a mapping from delay time to number of modified bits.
+    /// Returns the number of storage operations to power on.
     ///
-    /// For example if the `i`-th value is `n`, it means that the `i`-th operation modifies `n` bits
-    /// in the storage. For convenience, the vector always ends with `0` for one past the last
-    /// operation. This permits to choose a random index in the vector and then a random set of bit
-    /// positions among the number of modified bits to simulate any possible corruption (including
-    /// no corruption with the last index).
-    pub fn delay_map(&self) -> Result<Vec<usize>, (usize, BufferStorage)> {
-        let mut result = Vec::new();
-        loop {
-            let delay = result.len();
-            let mut storage = self.storage.clone();
-            storage.arm_interruption(delay);
-            match Store::new(storage) {
-                Err((StoreError::StorageError, x)) => storage = x,
-                Err((StoreError::InvalidStorage, mut storage)) => {
-                    storage.reset_interruption();
-                    return Err((delay, storage));
-                }
-                Ok(_) | Err(_) => break,
-            }
-            result.push(count_modified_bits(&mut storage));
-        }
-        result.push(0);
-        Ok(result)
+    /// Returns `None` if the store cannot power on successfully.
+    pub fn count_operations(&self) -> Option<usize> {
+        let initial_delay = usize::MAX;
+        let mut storage = self.storage.clone();
+        storage.arm_interruption(initial_delay);
+        let mut store = Store::new(storage).ok()?;
+        Some(initial_delay - store.storage_mut().disarm_interruption())
     }
 }
 
@@ -422,29 +406,15 @@ impl StoreDriverOn {
         })
     }
 
-    /// Returns a mapping from delay time to number of modified bits.
+    /// Returns the number of storage operations to apply a store operation.
     ///
-    /// See the documentation of [`StoreDriverOff::delay_map`] for details.
-    ///
-    /// [`StoreDriverOff::delay_map`]: struct.StoreDriverOff.html#method.delay_map
-    pub fn delay_map(
-        &self,
-        operation: &StoreOperation,
-    ) -> Result<Vec<usize>, (usize, BufferStorage)> {
-        let mut result = Vec::new();
-        loop {
-            let delay = result.len();
-            let mut store = self.store.clone();
-            store.storage_mut().arm_interruption(delay);
-            match store.apply(operation).1 {
-                Err(StoreError::StorageError) => (),
-                Err(StoreError::InvalidStorage) => return Err((delay, store.extract_storage())),
-                Ok(()) | Err(_) => break,
-            }
-            result.push(count_modified_bits(store.storage_mut()));
-        }
-        result.push(0);
-        Ok(result)
+    /// Returns `None` if the store cannot apply the operation successfully.
+    pub fn count_operations(&self, operation: &StoreOperation) -> Option<usize> {
+        let initial_delay = usize::MAX;
+        let mut store = self.store.clone();
+        store.storage_mut().arm_interruption(initial_delay);
+        store.apply(operation).1.ok()?;
+        Some(initial_delay - store.storage_mut().disarm_interruption())
     }
 
     /// Powers off the store.
@@ -628,23 +598,4 @@ impl<'a> StoreInterruption<'a> {
             corrupt: Box::new(|_, _| {}),
         }
     }
-}
-
-/// Counts the number of bits modified by an interrupted operation.
-///
-/// # Panics
-///
-/// Panics if an interruption did not trigger.
-fn count_modified_bits(storage: &mut BufferStorage) -> usize {
-    let mut modified_bits = 0;
-    storage.corrupt_operation(Box::new(|before, after| {
-        modified_bits = before
-            .iter()
-            .zip(after.iter())
-            .map(|(x, y)| (x ^ y).count_ones() as usize)
-            .sum();
-    }));
-    // We should never write the same slice or erase an erased page.
-    assert!(modified_bits > 0);
-    modified_bits
 }

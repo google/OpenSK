@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(test, feature = "ram_storage")))]
+#[cfg(not(feature = "std"))]
 mod syscall;
 
-#[cfg(not(any(test, feature = "ram_storage")))]
+#[cfg(not(feature = "std"))]
 pub use self::syscall::SyscallStorage;

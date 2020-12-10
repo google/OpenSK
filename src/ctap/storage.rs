@@ -31,9 +31,9 @@ use cbor::cbor_array_vec;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
 
-#[cfg(any(test, feature = "ram_storage"))]
+#[cfg(feature = "std")]
 type Storage = persistent_store::BufferStorage;
-#[cfg(not(any(test, feature = "ram_storage")))]
+#[cfg(not(feature = "std"))]
 type Storage = crate::embedded_flash::SyscallStorage;
 
 // Those constants may be modified before compilation to tune the behavior of the key.
@@ -54,9 +54,6 @@ type Storage = crate::embedded_flash::SyscallStorage;
 // We have: I = (P * 4084 - 5107 - K * S) / 8 * C
 //
 // With P=20 and K=150, we have I=2M which is enough for 500 increments per day for 10 years.
-#[cfg(feature = "ram_storage")]
-const NUM_PAGES: usize = 3;
-#[cfg(not(feature = "ram_storage"))]
 const NUM_PAGES: usize = 20;
 const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
 
@@ -92,9 +89,9 @@ impl PersistentStore {
     ///
     /// This should be at most one instance of persistent store per program lifetime.
     pub fn new(rng: &mut impl Rng256) -> PersistentStore {
-        #[cfg(not(any(test, feature = "ram_storage")))]
+        #[cfg(not(feature = "std"))]
         let storage = PersistentStore::new_prod_storage();
-        #[cfg(any(test, feature = "ram_storage"))]
+        #[cfg(feature = "std")]
         let storage = PersistentStore::new_test_storage();
         let mut store = PersistentStore {
             store: persistent_store::Store::new(storage).ok().unwrap(),
@@ -104,17 +101,14 @@ impl PersistentStore {
     }
 
     /// Creates a syscall storage in flash.
-    #[cfg(not(any(test, feature = "ram_storage")))]
+    #[cfg(not(feature = "std"))]
     fn new_prod_storage() -> Storage {
         Storage::new(NUM_PAGES).unwrap()
     }
 
     /// Creates a buffer storage in RAM.
-    #[cfg(any(test, feature = "ram_storage"))]
+    #[cfg(feature = "std")]
     fn new_test_storage() -> Storage {
-        #[cfg(not(test))]
-        const PAGE_SIZE: usize = 0x100;
-        #[cfg(test)]
         const PAGE_SIZE: usize = 0x1000;
         let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
         let options = persistent_store::BufferOptions {

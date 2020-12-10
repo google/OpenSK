@@ -566,7 +566,7 @@ where
                 .attestation_private_key()?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             let attestation_key =
-                crypto::ecdsa::SecKey::from_bytes(attestation_private_key).unwrap();
+                crypto::ecdsa::SecKey::from_bytes(&attestation_private_key).unwrap();
             let attestation_certificate = self
                 .persistent_store
                 .attestation_certificate()?

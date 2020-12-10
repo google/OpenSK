@@ -81,5 +81,10 @@ pub enum Ctap2StatusCode {
     /// This type of error is unexpected and the current state is undefined.
     CTAP2_ERR_VENDOR_INTERNAL_ERROR = 0xF2,
 
+    /// The hardware is malfunctioning.
+    ///
+    /// It may be possible that some of those errors are actually internal errors.
+    CTAP2_ERR_VENDOR_HARDWARE_FAILURE = 0xF3,
+
     CTAP2_ERR_VENDOR_LAST = 0xFF,
 }

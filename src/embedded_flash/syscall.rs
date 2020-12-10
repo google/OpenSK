@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Index, Storage, StorageError, StorageResult};
 use alloc::vec::Vec;
 use libtock_core::syscalls;
+use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const DRIVER_NUMBER: usize = 0x50003;
 
@@ -42,15 +42,13 @@ mod memop_nr {
 
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
     let code = syscalls::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg);
-    code.map_err(|e| StorageError::KernelError {
-        code: e.return_code,
-    })
+    code.map_err(|_| StorageError::CustomError)
 }
 
 fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
     let code = unsafe { syscalls::raw::memop(nr, arg) };
     if code < 0 {
-        Err(StorageError::KernelError { code })
+        Err(StorageError::CustomError)
     } else {
         Ok(code as usize)
     }
@@ -70,7 +68,7 @@ impl SyscallStorage {
     ///
     /// # Errors
     ///
-    /// Returns `BadFlash` if any of the following conditions do not hold:
+    /// Returns `CustomError` if any of the following conditions do not hold:
     /// - The word size is a power of two.
     /// - The page size is a power of two.
     /// - The page size is a multiple of the word size.
@@ -90,13 +88,13 @@ impl SyscallStorage {
             || !syscall.page_size.is_power_of_two()
             || !syscall.is_word_aligned(syscall.page_size)
         {
-            return Err(StorageError::BadFlash);
+            return Err(StorageError::CustomError);
         }
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
             let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
             let max_storage_len = memop(memop_nr::STORAGE_LEN, i)?;
             if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(max_storage_len) {
-                return Err(StorageError::BadFlash);
+                return Err(StorageError::CustomError);
             }
             let storage_len = core::cmp::min(num_pages * syscall.page_size, max_storage_len);
             num_pages -= storage_len / syscall.page_size;
@@ -141,12 +139,12 @@ impl Storage for SyscallStorage {
         self.max_page_erases
     }
 
-    fn read_slice(&self, index: Index, length: usize) -> StorageResult<&[u8]> {
+    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
         let start = index.range(length, self)?.start;
         find_slice(&self.storage_locations, start, length)
     }
 
-    fn write_slice(&mut self, index: Index, value: &[u8]) -> StorageResult<()> {
+    fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
         if !self.is_word_aligned(index.byte) || !self.is_word_aligned(value.len()) {
             return Err(StorageError::NotAligned);
         }
@@ -163,28 +161,24 @@ impl Storage for SyscallStorage {
             )
         };
         if code < 0 {
-            return Err(StorageError::KernelError { code });
+            return Err(StorageError::CustomError);
         }
 
         let code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len());
-        if let Err(e) = code {
-            return Err(StorageError::KernelError {
-                code: e.return_code,
-            });
+        if code.is_err() {
+            return Err(StorageError::CustomError);
         }
 
         Ok(())
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
-        let index = Index { page, byte: 0 };
+        let index = StorageIndex { page, byte: 0 };
         let length = self.page_size();
         let ptr = self.read_slice(index, length)?.as_ptr() as usize;
         let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length);
-        if let Err(e) = code {
-            return Err(StorageError::KernelError {
-                code: e.return_code,
-            });
+        if code.is_err() {
+            return Err(StorageError::CustomError);
         }
         Ok(())
     }

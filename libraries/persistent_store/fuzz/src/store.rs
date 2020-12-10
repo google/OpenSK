@@ -26,6 +26,9 @@ use std::convert::TryInto;
 // NOTE: We should be able to improve coverage by only checking the last operation. Because
 // operations before the last could be checked with a shorter entropy.
 
+// NOTE: Maybe we should split the fuzz target in smaller parts (like one per init). We should also
+// name the fuzz targets with action names.
+
 /// Checks the store against a sequence of manipulations.
 ///
 /// The entropy to generate the sequence of manipulation should be provided in `data`. Debugging
@@ -181,7 +184,7 @@ impl<'a> Fuzzer<'a> {
             println!("Power on the store.");
         }
         self.increment(StatKey::PowerOnCount);
-        let interruption = self.interruption(driver.delay_map());
+        let interruption = self.interruption(driver.count_operations());
         match driver.partial_power_on(interruption) {
             Err((storage, _)) if self.init.is_dirty() => {
                 self.entropy.consume_all();
@@ -198,7 +201,7 @@ impl<'a> Fuzzer<'a> {
         if self.debug {
             println!("{:?}", operation);
         }
-        let interruption = self.interruption(driver.delay_map(&operation));
+        let interruption = self.interruption(driver.count_operations(&operation));
         match driver.partial_apply(operation, interruption) {
             Err((store, _)) if self.init.is_dirty() => {
                 self.entropy.consume_all();
@@ -334,58 +337,47 @@ impl<'a> Fuzzer<'a> {
 
     /// Generates an interruption.
     ///
-    /// The `delay_map` describes the number of modified bits by the upcoming sequence of store
-    /// operations.
-    // TODO(ia0): We use too much CPU to compute the delay map. We should be able to just count the
-    // number of storage operations by checking the remaining delay. We can then use the entropy
-    // directly from the corruption function because it's called at most once.
-    fn interruption(
-        &mut self,
-        delay_map: Result<Vec<usize>, (usize, BufferStorage)>,
-    ) -> StoreInterruption {
+    /// The `max_delay` describes the number of storage operations.
+    fn interruption(&mut self, max_delay: Option<usize>) -> StoreInterruption {
         if self.init.is_dirty() {
             // We only test that the store can power on without crashing. If it would get
             // interrupted then it's like powering up with a different initial state, which would be
             // tested with another fuzzing input.
             return StoreInterruption::none();
         }
-        let delay_map = match delay_map {
-            Ok(x) => x,
-            Err((delay, storage)) => {
-                print!("{}", storage);
-                panic!("delay={}", delay);
-            }
+        let max_delay = match max_delay {
+            Some(x) => x,
+            None => return StoreInterruption::none(),
         };
-        let delay = self.entropy.read_range(0, delay_map.len() - 1);
-        let mut complete_bits = BitStack::default();
-        for _ in 0..delay_map[delay] {
-            complete_bits.push(self.entropy.read_bit());
-        }
+        let delay = self.entropy.read_range(0, max_delay);
         if self.debug {
-            if delay == delay_map.len() - 1 {
-                assert!(complete_bits.is_empty());
+            if delay == max_delay {
                 println!("Do not interrupt.");
             } else {
-                println!(
-                    "Interrupt after {} operations with complete mask {}.",
-                    delay, complete_bits
-                );
+                println!("Interrupt after {} operations.", delay);
             }
         }
-        if delay < delay_map.len() - 1 {
+        if delay < max_delay {
             self.increment(StatKey::InterruptionCount);
         }
         let corrupt = Box::new(move |old: &mut [u8], new: &[u8]| {
+            let mut count = 0;
+            let mut total = 0;
             for (old, new) in old.iter_mut().zip(new.iter()) {
                 for bit in 0..8 {
                     let mask = 1 << bit;
                     if *old & mask == *new & mask {
                         continue;
                     }
-                    if complete_bits.pop().unwrap() {
+                    total += 1;
+                    if self.entropy.read_bit() {
+                        count += 1;
                         *old ^= mask;
                     }
                 }
+            }
+            if self.debug {
+                println!("Flip {} bits out of {}.", count, total);
             }
         });
         StoreInterruption { delay, corrupt }
@@ -431,114 +423,4 @@ impl Init {
             _ => 0,
         }
     }
-}
-
-/// Compact stack of bits.
-// NOTE: This would probably go away once the delay map is simplified.
-#[derive(Default, Clone, Debug)]
-struct BitStack {
-    /// Bits stored in little-endian (for bytes and bits).
-    ///
-    /// The last byte only contains `len` bits.
-    data: Vec<u8>,
-
-    /// Number of bits stored in the last byte.
-    ///
-    /// It is 0 if the last byte is full, not 8.
-    len: usize,
-}
-
-impl BitStack {
-    /// Returns whether the stack is empty.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns the length of the stack.
-    fn len(&self) -> usize {
-        if self.len == 0 {
-            8 * self.data.len()
-        } else {
-            8 * (self.data.len() - 1) + self.len
-        }
-    }
-
-    /// Pushes a bit to the stack.
-    fn push(&mut self, value: bool) {
-        if self.len == 0 {
-            self.data.push(0);
-        }
-        if value {
-            *self.data.last_mut().unwrap() |= 1 << self.len;
-        }
-        self.len += 1;
-        if self.len == 8 {
-            self.len = 0;
-        }
-    }
-
-    /// Pops a bit from the stack.
-    fn pop(&mut self) -> Option<bool> {
-        if self.len == 0 {
-            if self.data.is_empty() {
-                return None;
-            }
-            self.len = 8;
-        }
-        self.len -= 1;
-        let result = self.data.last().unwrap() & 1 << self.len;
-        if self.len == 0 {
-            self.data.pop().unwrap();
-        }
-        Some(result != 0)
-    }
-}
-
-impl std::fmt::Display for BitStack {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        let mut bits = self.clone();
-        while let Some(bit) = bits.pop() {
-            write!(f, "{}", bit as usize)?;
-        }
-        write!(f, " ({} bits)", self.len())?;
-        Ok(())
-    }
-}
-
-#[test]
-fn bit_stack_ok() {
-    let mut bits = BitStack::default();
-
-    assert_eq!(bits.pop(), None);
-
-    bits.push(true);
-    assert_eq!(bits.pop(), Some(true));
-    assert_eq!(bits.pop(), None);
-
-    bits.push(false);
-    assert_eq!(bits.pop(), Some(false));
-    assert_eq!(bits.pop(), None);
-
-    bits.push(true);
-    bits.push(false);
-    assert_eq!(bits.pop(), Some(false));
-    assert_eq!(bits.pop(), Some(true));
-    assert_eq!(bits.pop(), None);
-
-    bits.push(false);
-    bits.push(true);
-    assert_eq!(bits.pop(), Some(true));
-    assert_eq!(bits.pop(), Some(false));
-    assert_eq!(bits.pop(), None);
-
-    let n = 27;
-    for i in 0..n {
-        assert_eq!(bits.len(), i);
-        bits.push(true);
-    }
-    for i in (0..n).rev() {
-        assert_eq!(bits.pop(), Some(true));
-        assert_eq!(bits.len(), i);
-    }
-    assert_eq!(bits.pop(), None);
 }

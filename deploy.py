@@ -908,6 +908,12 @@ if __name__ == "__main__":
       help=("Compiles and installs the crypto_bench example that benchmarks "
             "the performance of the cryptographic algorithms on the board."))
   apps_group.add_argument(
+      "--store_latency",
+      dest="application",
+      action="store_const",
+      const="store_latency",
+      help=("Compiles and installs the store_latency example."))
+  apps_group.add_argument(
       "--panic_test",
       dest="application",
       action="store_const",

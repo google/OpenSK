@@ -532,7 +532,7 @@ struct IterCredentials<'a> {
     store: &'a persistent_store::Store<Storage>,
 
     /// The store iterator.
-    iter: persistent_store::StoreIter<'a, Storage>,
+    iter: persistent_store::StoreIter<'a>,
 
     /// The iteration result.
     ///

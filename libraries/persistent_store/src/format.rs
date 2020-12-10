@@ -1077,4 +1077,12 @@ mod tests {
             0xff800000
         );
     }
+
+    #[test]
+    fn position_offsets_fit_in_a_halfword() {
+        // The store stores the entry positions as their offset from the head. Those offsets are
+        // represented as u16. The bound below is a large over-approximation of the maximal offset
+        // but it already fits.
+        assert_eq!((MAX_PAGE_INDEX + 1) * MAX_VIRT_PAGE_SIZE, 0xff80);
+    }
 }

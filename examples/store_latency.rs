@@ -124,15 +124,15 @@ fn main() {
     compute_latency(&timer, 20, 1, 50);
     // Those overwritten 1 word entries simulate counters.
     compute_latency(&timer, 3, 0, 1);
-    compute_latency(&timer, 6, 0, 1);
+    compute_latency(&timer, 20, 0, 1);
     writeln!(Console::new(), "\nDone.").unwrap();
 
     // Results on nrf52840dk:
     //
-    // | Pages | Overwrite | Length    | Boot     | Compaction | Insert  | Remove  |
-    // | ----- | --------- | --------- | -------  | ---------- | ------  | ------- |
-    // | 3     | no        | 50 words  | 2.0 ms   | 132.5 ms   | 4.8 ms  | 1.2 ms  |
-    // | 20    | no        | 50 words  | 7.4 ms   | 135.5 ms   | 10.2 ms | 3.9 ms  |
-    // | 3     | yes       | 1 word    | 21.9 ms  | 94.5 ms    | 12.4 ms | 5.9 ms  |
-    // | 6     | yes       | 1 word    | 55.2 ms  | 100.8 ms   | 24.8 ms | 12.1 ms |
+    // | Pages | Overwrite | Length    | Boot     | Compaction | Insert  | Remove |
+    // | ----- | --------- | --------- | -------  | ---------- | ------  | ------ |
+    // | 3     | no        | 50 words  | 2.0 ms   | 132.8 ms   | 4.3 ms  | 1.2 ms |
+    // | 20    | no        | 50 words  | 7.8 ms   | 135.7 ms   | 9.9 ms  | 4.0 ms |
+    // | 3     | yes       | 1 word    | 19.6 ms  | 90.8 ms    | 4.7 ms  | 2.3 ms |
+    // | 20    | yes       | 1 word    | 183.3 ms | 90.9 ms    | 4.8 ms  | 2.3 ms |
 }

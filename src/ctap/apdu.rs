@@ -2,44 +2,25 @@ use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 
-type ByteArray = &'static [u8];
-
 const APDU_HEADER_LEN: usize = 4;
 
 #[cfg_attr(test, derive(Clone, Debug))]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 #[derive(PartialEq)]
 pub enum ApduStatusCode {
-    SW_SUCCESS,
+    SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
     /// available and can be requested using GET RESPONSE.
-    SW_GET_RESPONSE,
-    SW_WRONG_DATA,
-    SW_WRONG_LENGTH,
-    SW_COND_USE_NOT_SATISFIED,
-    SW_FILE_NOT_FOUND,
-    SW_INCORRECT_P1P2,
+    SW_GET_RESPONSE = 0x61_00,
+    SW_WRONG_DATA = 0x6a_80,
+    SW_WRONG_LENGTH = 0x67_00,
+    SW_COND_USE_NOT_SATISFIED = 0x69_85,
+    SW_FILE_NOT_FOUND = 0x6a_82,
+    SW_INCORRECT_P1P2 = 0x6a_86,
     /// Instruction code not supported or invalid
-    SW_INS_INVALID,
-    SW_CLA_INVALID,
-    SW_INTERNAL_EXCEPTION,
-}
-
-impl From<ApduStatusCode> for ByteArray {
-    fn from(status_code: ApduStatusCode) -> ByteArray {
-        match status_code {
-            ApduStatusCode::SW_SUCCESS => b"\x90\x00",
-            ApduStatusCode::SW_GET_RESPONSE => b"\x61\x00",
-            ApduStatusCode::SW_WRONG_DATA => b"\x6A\x80",
-            ApduStatusCode::SW_WRONG_LENGTH => b"\x67\x00",
-            ApduStatusCode::SW_COND_USE_NOT_SATISFIED => b"\x69\x85",
-            ApduStatusCode::SW_FILE_NOT_FOUND => b"\x6a\x82",
-            ApduStatusCode::SW_INCORRECT_P1P2 => b"\x6a\x86",
-            ApduStatusCode::SW_INS_INVALID => b"\x6d\x00",
-            ApduStatusCode::SW_CLA_INVALID => b"\x6e\x00",
-            ApduStatusCode::SW_INTERNAL_EXCEPTION => b"\x6f\x00",
-        }
-    }
+    SW_INS_INVALID = 0x6d_00,
+    SW_CLA_INVALID = 0x6e_00,
+    SW_INTERNAL_EXCEPTION = 0x6f_00,
 }
 
 #[allow(dead_code)]

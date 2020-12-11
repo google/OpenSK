@@ -1,6 +1,5 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-[![Build Status](https://travis-ci.org/google/OpenSK.svg?branch=master)](https://travis-ci.org/google/OpenSK)
 ![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=master)
 ![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=master)
 ![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=master)
@@ -31,7 +30,8 @@ our implementation was not reviewed nor officially tested and doesn't claim to
 be FIDO Certified.
 We started adding features of the upcoming next version of the
 [CTAP2.1 specifications](https://fidoalliance.org/specs/fido2/fido-client-to-authenticator-protocol-v2.1-rd-20191217.html).
-The development is currently between 2.0 and 2.1, with updates hidden behind a feature flag.
+The development is currently between 2.0 and 2.1, with updates hidden behind
+a feature flag.
 Please add the flag `--ctap2.1` to the deploy command to include them.
 
 ### Cryptography
@@ -58,8 +58,8 @@ For a more detailed guide, please refer to our
     ./setup.sh
     ```
 
-2.  Next step is to install Tock OS as well as the OpenSK application on your
-    board (**Warning**: it will erase the locally stored credentials). Run:
+1.  Next step is to install Tock OS as well as the OpenSK application on your
+    board. Run:
 
     ```shell
     # Nordic nRF52840-DK board
@@ -68,7 +68,17 @@ For a more detailed guide, please refer to our
     ./deploy.py --board=nrf52840_dongle --opensk
     ```
 
-3.  On Linux, you may want to avoid the need for `root` privileges to interact
+1.  Finally you need to inejct the cryptographic material if you enabled
+    batch attestation or CTAP1/U2F compatibility (which is the case by
+    default):
+
+    ```shell
+    ./tools/configure.py \
+        --certificate=crypto_data/opensk_cert.pem \
+        --private-key=crypto_data/opensk.key
+    ```
+
+1.  On Linux, you may want to avoid the need for `root` privileges to interact
     with the key. For that purpose we provide a udev rule file that can be
     installed with the following command:
 
@@ -148,7 +158,7 @@ operation.
 
 The additional output looks like the following.
 
-```
+```text
 # Allocation of 256 byte(s), aligned on 1 byte(s). The allocated address is
 # 0x2002401c. After this operation, 2 pointers have been allocated, totalling
 # 384 bytes (the total heap usage may be larger, due to alignment and
@@ -163,12 +173,12 @@ A tool is provided to analyze such reports, in `tools/heapviz`. This tool
 parses the console output, identifies the lines corresponding to (de)allocation
 operations, and first computes some statistics:
 
-- Address range used by the heap over this run of the program,
-- Peak heap usage (how many useful bytes are allocated),
-- Peak heap consumption (how many bytes are used by the heap, including
-  unavailable bytes between allocated blocks, due to alignment constraints and
-  memory fragmentation),
-- Fragmentation overhead (difference between heap consumption and usage).
+*   Address range used by the heap over this run of the program,
+*   Peak heap usage (how many useful bytes are allocated),
+*   Peak heap consumption (how many bytes are used by the heap, including
+    unavailable bytes between allocated blocks, due to alignment constraints and
+    memory fragmentation),
+*   Fragmentation overhead (difference between heap consumption and usage).
 
 Then, the `heapviz` tool displays an animated "movie" of the allocated bytes in
 heap memory. Each frame in this "movie" shows bytes that are currently
@@ -177,10 +187,11 @@ allocated. A new frame is generated for each (de)allocation operation. This tool
 uses the `ncurses` library, that you may have to install beforehand.
 
 You can control the tool with the following parameters:
-- `--logfile` (required) to provide the file which contains the console output
-  to parse,
-- `--fps` (optional) to customize the number of frames per second in the movie
-  animation.
+
+*   `--logfile` (required) to provide the file which contains the console output
+    to parse,
+*   `--fps` (optional) to customize the number of frames per second in the movie
+    animation.
 
 ```shell
 cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fps 50

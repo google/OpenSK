@@ -125,6 +125,7 @@ This is the expected content after running our `setup.sh` script:
 
 File              | Purpose
 ----------------- | --------------------------------------------------------
+`aaguid.txt`      | Text file containaing the AAGUID value
 `opensk_ca.csr`   | Certificate sign request for the Root CA
 `opensk_ca.key`   | ECC secp256r1 private key used for the Root CA
 `opensk_ca.pem`   | PEM encoded certificate of the Root CA
@@ -136,9 +137,11 @@ File              | Purpose
 If you want to use your own attestation certificate and private key, simply
 replace `opensk_cert.pem` and `opensk.key` files.
 
-Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
-`opensk.key` files into raw data that is then used by the Rust file:
-`src/ctap/key_material.rs`.
+Our build script `build.rs` is responsible for converting `aaguid.txt` file
+into raw data that is then used by the Rust file `src/ctap/key_material.rs`.
+
+Our configuration script `tools/configure.py` is responsible for configuring
+an OpenSK device with the correct certificate and private key.
 
 ### Flashing a firmware
 

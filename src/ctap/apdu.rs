@@ -174,7 +174,8 @@ impl TryFrom<&[u8]> for APDU {
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }
 
-            let extended_apdu_le_len: usize = payload.len() - extended_apdu_lc - 3;
+            let extended_apdu_le_len: usize =
+                payload.len().checked_sub(extended_apdu_lc + 3).unwrap_or(0);
             if extended_apdu_le_len > 3 {
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }

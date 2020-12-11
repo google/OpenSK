@@ -173,14 +173,10 @@ impl TryFrom<&[u8]> for APDU {
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }
 
-            let possible_le_len = payload.len() as i32 - extended_apdu_lc as i32 - 3;
-
-            let extended_apdu_le_len: usize = match possible_le_len {
-                // There's some possible Le bytes at the end
-                0..=3 => possible_le_len as usize,
-                // There are more bytes than even Le3 can consume, return an error
-                _ => return Err(ApduStatusCode::SW_WRONG_LENGTH),
-            };
+            let extended_apdu_le_len: usize = payload.len() - extended_apdu_lc - 3;
+            if extended_apdu_le_len > 3 {
+                return Err(ApduStatusCode::SW_WRONG_LENGTH);
+            }
 
             if byte_0 == 0 && extended_apdu_le_len <= 3 {
                 // If first byte is zero AND the next two bytes can be parsed as a big-endian

@@ -238,7 +238,6 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
 pub struct AuthenticatorVendorResponse {
     pub cert_programmed: bool,
     pub pkey_programmed: bool,
-    pub lockdown_enabled: bool,
 }
 
 impl From<AuthenticatorVendorResponse> for cbor::Value {
@@ -246,13 +245,11 @@ impl From<AuthenticatorVendorResponse> for cbor::Value {
         let AuthenticatorVendorResponse {
             cert_programmed,
             pkey_programmed,
-            lockdown_enabled,
         } = vendor_response;
 
         cbor_map_options! {
             1 => cert_programmed,
             2 => pkey_programmed,
-            3 => lockdown_enabled,
         }
     }
 }

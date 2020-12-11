@@ -931,22 +931,64 @@ where
         (self.check_user_presence)(cid)?;
 
         // Sanity checks
-        let has_priv_key = self.persistent_store.attestation_private_key()?.is_some();
-        let has_cert = self.persistent_store.attestation_certificate()?.is_some();
+        let current_priv_key = self.persistent_store.attestation_private_key()?;
+        let current_cert = self.persistent_store.attestation_certificate()?;
 
-        if params.attestation_material.is_some() {
+        let response = if params.attestation_material.is_some() {
             let data = params.attestation_material.unwrap();
-            if !has_cert {
-                self.persistent_store
-                    .set_attestation_certificate(&data.certificate)?;
+
+            match (current_cert, current_priv_key) {
+                (Some(_), Some(_)) => {
+                    // Device is fully programmed.
+                    // We don't compare values to avoid giving an oracle
+                    // about the private key.
+                    AuthenticatorVendorResponse {
+                        cert_programmed: true,
+                        pkey_programmed: true,
+                    }
+                }
+                // Device is not programmed.
+                (None, None) => {
+                    self.persistent_store
+                        .set_attestation_certificate(&data.certificate)?;
+                    self.persistent_store
+                        .set_attestation_private_key(&data.private_key)?;
+                    AuthenticatorVendorResponse {
+                        cert_programmed: true,
+                        pkey_programmed: true,
+                    }
+                }
+                // Device is partially programmed. Ensure the programmed value
+                // matched the given one before programming anything.
+                (Some(cert), None) => {
+                    if cert != data.certificate {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                    self.persistent_store
+                        .set_attestation_private_key(&data.private_key)?;
+                    AuthenticatorVendorResponse {
+                        cert_programmed: true,
+                        pkey_programmed: true,
+                    }
+                }
+                (None, Some(key)) => {
+                    if key != data.private_key {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                    self.persistent_store
+                        .set_attestation_certificate(&data.certificate)?;
+                    AuthenticatorVendorResponse {
+                        cert_programmed: true,
+                        pkey_programmed: true,
+                    }
+                }
             }
-            if !has_priv_key {
-                self.persistent_store
-                    .set_attestation_private_key(&data.private_key)?;
+        } else {
+            AuthenticatorVendorResponse {
+                cert_programmed: current_cert.is_some(),
+                pkey_programmed: current_priv_key.is_some(),
             }
         };
-        let has_priv_key = self.persistent_store.attestation_private_key()?.is_some();
-        let has_cert = self.persistent_store.attestation_certificate()?.is_some();
         if params.lockdown {
             // To avoid bricking the authenticator, we only allow lockdown
             // to happen if both values are programmed or if both U2F/CTAP1 and
@@ -956,28 +998,13 @@ where
             #[cfg(not(feature = "with_ctap1"))]
             let need_certificate = USE_BATCH_ATTESTATION;
 
-            if (need_certificate && !(has_priv_key && has_cert))
+            if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
                 || libtock_drivers::crp::protect().is_err()
             {
-                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-            } else {
-                Ok(ResponseData::AuthenticatorVendor(
-                    AuthenticatorVendorResponse {
-                        cert_programmed: has_cert,
-                        pkey_programmed: has_priv_key,
-                        lockdown_enabled: true,
-                    },
-                ))
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
-        } else {
-            Ok(ResponseData::AuthenticatorVendor(
-                AuthenticatorVendorResponse {
-                    cert_programmed: has_cert,
-                    pkey_programmed: has_priv_key,
-                    lockdown_enabled: false,
-                },
-            ))
         }
+        Ok(ResponseData::AuthenticatorVendor(response))
     }
 
     pub fn generate_auth_data(
@@ -2135,7 +2162,6 @@ mod test {
                 AuthenticatorVendorResponse {
                     cert_programmed: false,
                     pkey_programmed: false,
-                    lockdown_enabled: false
                 }
             ))
         );
@@ -2159,7 +2185,6 @@ mod test {
                 AuthenticatorVendorResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
-                    lockdown_enabled: false
                 }
             ))
         );
@@ -2180,7 +2205,7 @@ mod test {
             dummy_key
         );
 
-        // Try to inject other dummy values and check that intial values are retained.
+        // Try to inject other dummy values and check that initial values are retained.
         let other_dummy_key = [0x44u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         let response = ctap_state.process_vendor_configure(
             AuthenticatorVendorConfigureParameters {
@@ -2198,7 +2223,6 @@ mod test {
                 AuthenticatorVendorResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
-                    lockdown_enabled: false
                 }
             ))
         );
@@ -2233,7 +2257,6 @@ mod test {
                 AuthenticatorVendorResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
-                    lockdown_enabled: true
                 }
             ))
         );

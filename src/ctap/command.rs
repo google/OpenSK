@@ -400,10 +400,10 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
                 2 => private_key,
             } = extract_map(cbor_value)?;
         }
-        let certificate = certificate.map(extract_byte_string).transpose()?.unwrap();
-        let private_key = private_key.map(extract_byte_string).transpose()?.unwrap();
+        let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
+        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
         if private_key.len() != key_material::ATTESTATION_PRIVATE_KEY_LENGTH {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let private_key = array_ref!(private_key, 0, key_material::ATTESTATION_PRIVATE_KEY_LENGTH);
         Ok(AuthenticatorAttestationMaterial {
@@ -637,5 +637,84 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_SELECTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorSelection));
+    }
+
+    #[test]
+    fn test_vendor_configure() {
+        // Incomplete command
+        let mut cbor_bytes = vec![Command::AUTHENTICATOR_VENDOR_CONFIGURE];
+        let command = Command::deserialize(&cbor_bytes);
+        assert_eq!(command, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR));
+
+        cbor_bytes.extend(&[0xA1, 0x01, 0xF5]);
+        let command = Command::deserialize(&cbor_bytes);
+        assert_eq!(
+            command,
+            Ok(Command::AuthenticatorVendorConfigure(
+                AuthenticatorVendorConfigureParameters {
+                    lockdown: true,
+                    attestation_material: None
+                }
+            ))
+        );
+
+        let dummy_cert = [0xddu8; 20];
+        let dummy_pkey = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+
+        // Attestation key is too short.
+        let cbor_value = cbor_map! {
+            1 => false,
+            2 => cbor_map! {
+                1 => dummy_cert,
+                2 => dummy_pkey[..key_material::ATTESTATION_PRIVATE_KEY_LENGTH - 1]
+            }
+        };
+        assert_eq!(
+            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // Missing private key
+        let cbor_value = cbor_map! {
+            1 => false,
+            2 => cbor_map! {
+                1 => dummy_cert
+            }
+        };
+        assert_eq!(
+            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+
+        // Missing certificate
+        let cbor_value = cbor_map! {
+            1 => false,
+            2 => cbor_map! {
+                2 => dummy_pkey
+            }
+        };
+        assert_eq!(
+            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+
+        // Valid
+        let cbor_value = cbor_map! {
+            1 => false,
+            2 => cbor_map! {
+                1 => dummy_cert,
+                2 => dummy_pkey
+            }
+        };
+        assert_eq!(
+            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
+            Ok(AuthenticatorVendorConfigureParameters {
+                lockdown: false,
+                attestation_material: Some(AuthenticatorAttestationMaterial {
+                    certificate: dummy_cert.to_vec(),
+                    private_key: dummy_pkey
+                })
+            })
+        );
     }
 }

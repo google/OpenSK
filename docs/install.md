@@ -137,7 +137,7 @@ File              | Purpose
 If you want to use your own attestation certificate and private key, simply
 replace `opensk_cert.pem` and `opensk.key` files.
 
-Our build script `build.rs` is responsible for converting `aaguid.txt` file
+Our build script `build.rs` is responsible for converting the `aaguid.txt` file
 into raw data that is then used by the Rust file `src/ctap/key_material.rs`.
 
 Our configuration script `tools/configure.py` is responsible for configuring

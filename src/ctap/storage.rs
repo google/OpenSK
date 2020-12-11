@@ -964,8 +964,7 @@ mod test {
             .unwrap()
             .is_none());
 
-        // Make sure the persistent keys are initialized.
-        // Put dummy values
+        // Make sure the persistent keys are initialized to dummy values.
         let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         let dummy_cert = [0xddu8; 20];
         persistent_store

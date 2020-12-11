@@ -68,7 +68,7 @@ For a more detailed guide, please refer to our
     ./deploy.py --board=nrf52840_dongle --opensk
     ```
 
-1.  Finally you need to inejct the cryptographic material if you enabled
+1.  Finally you need to inject the cryptographic material if you enabled
     batch attestation or CTAP1/U2F compatibility (which is the case by
     default):
 

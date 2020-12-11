@@ -75,11 +75,11 @@ def get_opensk_devices(batch_mode):
 
 
 def get_private_key(data, password=None):
-  # First we try without password
+  # First we try without password.
   try:
     return serialization.load_pem_private_key(data, password=None)
   except TypeError:
-    # Maybe we need a password then
+    # Maybe we need a password then.
     if sys.stdin.isatty():
       password = getpass.getpass(prompt="Private key password: ")
     else:
@@ -134,7 +134,7 @@ def main(args):
 
   for authenticator in tqdm(get_opensk_devices(args.batch)):
     # If the device supports it, wink to show which device
-    # we're going to program
+    # we're going to program.
     if authenticator.device.capabilities & hid.CAPABILITY.WINK:
       authenticator.device.wink()
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
@@ -149,11 +149,20 @@ def main(args):
       )
       info("Certificate: {}".format("Present" if result[1] else "Missing"))
       info("Private Key: {}".format("Present" if result[2] else "Missing"))
-      if result[3]:
-        info("Device locked down!")
+      if args.lock:
+        info("Device is now locked down!")
     except ctap.CtapError as ex:
       if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
         error("Failed to configure OpenSK (unsupported command).")
+      elif ex.code.value == 0xF2:  # VENDOR_INTERNAL_ERROR
+        error(("Failed to configure OpenSK (lockdown conditions not met "
+               "or hardware error)."))
+      elif ex.code.value == ctap.CtapError.ERR.INVALID_PARAMETER:
+        error(
+            ("Failed to configure OpenSK (device is partially programmed but "
+             "the given cert/key don't match the ones currently programmed)."))
+      else:
+        error("Failed to configure OpenSK (unknown error: {}".format(ex))
 
 
 if __name__ == "__main__":
@@ -174,7 +183,7 @@ if __name__ == "__main__":
       metavar="PEM_FILE",
       dest="certificate",
       help=("PEM file containing the certificate to inject into "
-            "OpenSK authenticator."),
+            "the OpenSK authenticator."),
   )
   parser.add_argument(
       "--private-key",

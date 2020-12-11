@@ -38,8 +38,8 @@ pub enum ApduStatusCode {
 }
 
 impl From<ApduStatusCode> for u16 {
-    fn from(_: ApduStatusCode) -> Self {
-        0
+    fn from(code: ApduStatusCode) -> Self {
+        code as u16
     }
 }
 

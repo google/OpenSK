@@ -1,0 +1,57 @@
+{
+        "folders": [
+                {
+                        "name": "OpenSK",
+                        "path": "."
+                },
+                {
+                        "name": "tock",
+                        "path": "third_party/tock"
+                },
+                {
+                        "name": "libtock-rs",
+                        "path": "third_party/libtock-rs"
+                },
+                {
+                        "name": "libtock-drivers",
+                        "path": "third_party/libtock-drivers"
+                }
+        ],
+        "settings": {
+                "clang-format.fallbackStyle": "google",
+                "editor.detectIndentation": true,
+                "editor.formatOnPaste": false,
+                "editor.formatOnSave": true,
+                "editor.formatOnType": true,
+                "editor.insertSpaces": true,
+                "editor.tabSize": 4,
+                "files.insertFinalNewline": true,
+                "files.trimTrailingWhitespace": true,
+                // Ensure we use the toolchain we set in rust-toolchain file
+                "rust-client.channel": "default",
+                // The toolchain is updated from time to time so let's make sure that RLS is updated too
+                "rust-client.updateOnStartup": true,
+                "rust.clippy_preference": "on",
+                "rust.target": "thumbv7em-none-eabi",
+                "rust.all_targets": false,
+                // Try to make VSCode formating as close as possible to the Google style.
+                "python.formatting.provider": "yapf",
+                "python.formatting.yapfArgs": [
+                        "--style=yapf"
+                ],
+                "python.linting.enabled": true,
+                "python.linting.lintOnSave": true,
+                "python.linting.pylintEnabled": true,
+                "python.linting.pylintPath": "pylint",
+                "[python]": {
+                        "editor.tabSize": 2
+                },
+        },
+        "extensions": {
+                "recommendations": [
+                        "davidanson.vscode-markdownlint",
+                        "rust-lang.rust",
+                        "ms-python.python"
+                ]
+        }
+}

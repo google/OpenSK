@@ -863,14 +863,6 @@ if __name__ == "__main__":
             "This is useful to allow flashing multiple OpenSK authenticators "
             "in a row without them being considered clones."),
   )
-  main_parser.add_argument(
-      "--no-persistent-storage",
-      action="append_const",
-      const="ram_storage",
-      dest="features",
-      help=("Compiles and installs the OpenSK application without persistent "
-            "storage (i.e. unplugging the key will reset the key)."),
-  )
 
   main_parser.add_argument(
       "--elf2tab-output",
@@ -907,6 +899,12 @@ if __name__ == "__main__":
       const="crypto_bench",
       help=("Compiles and installs the crypto_bench example that benchmarks "
             "the performance of the cryptographic algorithms on the board."))
+  apps_group.add_argument(
+      "--store_latency",
+      dest="application",
+      action="store_const",
+      const="store_latency",
+      help=("Compiles and installs the store_latency example."))
   apps_group.add_argument(
       "--panic_test",
       dest="application",

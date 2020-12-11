@@ -424,4 +424,34 @@ mod test {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
         assert_eq!(response_cbor, None);
     }
+
+    #[test]
+    fn test_vendor_response_into_cbor() {
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: true,
+                pkey_programmed: false,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => true,
+                2 => false,
+            })
+        );
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: false,
+                pkey_programmed: true,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => false,
+                2 => true,
+            })
+        );
+    }
 }

@@ -67,6 +67,7 @@ use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
@@ -934,59 +935,43 @@ where
         let current_priv_key = self.persistent_store.attestation_private_key()?;
         let current_cert = self.persistent_store.attestation_certificate()?;
 
-        let response = if params.attestation_material.is_some() {
-            let data = params.attestation_material.unwrap();
-
-            match (current_cert, current_priv_key) {
-                (Some(_), Some(_)) => {
-                    // Device is fully programmed.
-                    // We don't compare values to avoid giving an oracle
-                    // about the private key.
-                    AuthenticatorVendorResponse {
-                        cert_programmed: true,
-                        pkey_programmed: true,
-                    }
-                }
-                // Device is not programmed.
-                (None, None) => {
-                    self.persistent_store
-                        .set_attestation_certificate(&data.certificate)?;
-                    self.persistent_store
-                        .set_attestation_private_key(&data.private_key)?;
-                    AuthenticatorVendorResponse {
-                        cert_programmed: true,
-                        pkey_programmed: true,
-                    }
-                }
-                // Device is partially programmed. Ensure the programmed value
-                // matched the given one before programming anything.
-                (Some(cert), None) => {
-                    if cert != data.certificate {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                    self.persistent_store
-                        .set_attestation_private_key(&data.private_key)?;
-                    AuthenticatorVendorResponse {
-                        cert_programmed: true,
-                        pkey_programmed: true,
-                    }
-                }
-                (None, Some(key)) => {
-                    if key != data.private_key {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                    self.persistent_store
-                        .set_attestation_certificate(&data.certificate)?;
-                    AuthenticatorVendorResponse {
-                        cert_programmed: true,
-                        pkey_programmed: true,
-                    }
-                }
-            }
-        } else {
-            AuthenticatorVendorResponse {
+        let response = match params.attestation_material {
+            // Only reading values.
+            None => AuthenticatorVendorResponse {
                 cert_programmed: current_cert.is_some(),
                 pkey_programmed: current_priv_key.is_some(),
+            },
+            // Device is already fully programmed. We don't leak information.
+            Some(_) if current_cert.is_some() && current_priv_key.is_some() => {
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            }
+            // Device is partially or not programmed. We complete the process.
+            Some(data) => {
+                if let Some(current_cert) = &current_cert {
+                    if current_cert != &data.certificate {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                }
+                if let Some(current_priv_key) = &current_priv_key {
+                    if current_priv_key != &data.private_key {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                }
+                if current_cert.is_none() {
+                    self.persistent_store
+                        .set_attestation_certificate(&data.certificate)?;
+                }
+                if current_priv_key.is_none() {
+                    self.persistent_store
+                        .set_attestation_private_key(&data.private_key)?;
+                }
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
             }
         };
         if params.lockdown {
@@ -999,7 +984,7 @@ where
             let need_certificate = USE_BATCH_ATTESTATION;
 
             if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
-                || libtock_drivers::crp::protect().is_err()
+                || crp::set_protection(crp::ProtectionLevel::FullyLocked).is_err()
             {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }

@@ -1,9 +1,9 @@
 diff --git a/boards/components/src/firmware_protection.rs b/boards/components/src/firmware_protection.rs
 new file mode 100644
-index 0000000..5eda591
+index 0000000..58695af
 --- /dev/null
 +++ b/boards/components/src/firmware_protection.rs
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,70 @@
 +//! Component for firmware protection syscall interface.
 +//!
 +//! This provides one Component, `FirmwareProtectionComponent`, which implements a
@@ -35,12 +35,13 @@ index 0000000..5eda591
 +    ($C:ty) => {{
 +        use capsules::firmware_protection;
 +        use core::mem::MaybeUninit;
-+        static mut BUF: MaybeUninit<firmware_protection::FirmwareProtection<'static, $C>> = MaybeUninit::uninit();
++        static mut BUF: MaybeUninit<firmware_protection::FirmwareProtection<$C>> =
++            MaybeUninit::uninit();
 +        &mut BUF
 +    };};
 +}
 +
-+pub struct FirmwareProtectionComponent<C: 'static + hil::firmware_protection::FirmwareProtection> {
++pub struct FirmwareProtectionComponent<C: hil::firmware_protection::FirmwareProtection> {
 +    board_kernel: &'static kernel::Kernel,
 +    crp: C,
 +}
@@ -54,16 +55,18 @@ index 0000000..5eda591
 +    }
 +}
 +
-+impl<C: 'static + hil::firmware_protection::FirmwareProtection> Component for FirmwareProtectionComponent<C> {
-+    type StaticInput = &'static mut MaybeUninit<firmware_protection::FirmwareProtection<'static, C>>;
-+    type Output = &'static firmware_protection::FirmwareProtection<'static, C>;
++impl<C: 'static + hil::firmware_protection::FirmwareProtection> Component
++    for FirmwareProtectionComponent<C>
++{
++    type StaticInput = &'static mut MaybeUninit<firmware_protection::FirmwareProtection<C>>;
++    type Output = &'static firmware_protection::FirmwareProtection<C>;
 +
 +    unsafe fn finalize(self, static_buffer: Self::StaticInput) -> Self::Output {
 +        let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 +
 +        static_init_half!(
 +            static_buffer,
-+            firmware_protection::FirmwareProtection<'static, C>,
++            firmware_protection::FirmwareProtection<C>,
 +            firmware_protection::FirmwareProtection::new(
 +                self.crp,
 +                self.board_kernel.create_grant(&grant_cap),
@@ -84,21 +87,18 @@ index 917497a..520408f 100644
  pub mod gpio;
  pub mod hd44780;
 diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
-index 118ea6d..f340dd1 100644
+index 118ea6d..76436f3 100644
 --- a/boards/nordic/nrf52840_dongle/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle/src/main.rs
-@@ -112,6 +112,10 @@ pub struct Platform {
+@@ -112,6 +112,7 @@ pub struct Platform {
          'static,
          nrf52840::usbd::Usbd<'static>,
      >,
-+    crp: &'static capsules::firmware_protection::FirmwareProtection<
-+        'static,
-+        nrf52840::uicr::Uicr,
-+    >,
++    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
  }
  
  impl kernel::Platform for Platform {
-@@ -132,6 +136,7 @@ impl kernel::Platform for Platform {
+@@ -132,6 +133,7 @@ impl kernel::Platform for Platform {
              capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
              nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
              capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
@@ -106,7 +106,7 @@ index 118ea6d..f340dd1 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -355,6 +360,12 @@ pub unsafe fn reset_handler() {
+@@ -355,6 +357,14 @@ pub unsafe fn reset_handler() {
      )
      .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
  
@@ -114,12 +114,14 @@ index 118ea6d..f340dd1 100644
 +        board_kernel,
 +        nrf52840::uicr::Uicr::new(),
 +    )
-+    .finalize(components::firmware_protection_component_helper!(nrf52840::uicr::Uicr));
++    .finalize(components::firmware_protection_component_helper!(
++        nrf52840::uicr::Uicr
++    ));
 +
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -371,6 +382,7 @@ pub unsafe fn reset_handler() {
+@@ -371,6 +381,7 @@ pub unsafe fn reset_handler() {
          analog_comparator,
          nvmc,
          usb,
@@ -128,21 +130,18 @@ index 118ea6d..f340dd1 100644
      };
  
 diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
-index b1d0d3c..a37d180 100644
+index b1d0d3c..3cfb38d 100644
 --- a/boards/nordic/nrf52840dk/src/main.rs
 +++ b/boards/nordic/nrf52840dk/src/main.rs
-@@ -180,6 +180,10 @@ pub struct Platform {
+@@ -180,6 +180,7 @@ pub struct Platform {
          'static,
          nrf52840::usbd::Usbd<'static>,
      >,
-+    crp: &'static capsules::firmware_protection::FirmwareProtection<
-+        'static,
-+        nrf52840::uicr::Uicr,
-+    >,
++    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
  }
  
  impl kernel::Platform for Platform {
-@@ -201,6 +205,7 @@ impl kernel::Platform for Platform {
+@@ -201,6 +202,7 @@ impl kernel::Platform for Platform {
              capsules::nonvolatile_storage_driver::DRIVER_NUM => f(Some(self.nonvolatile_storage)),
              nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
              capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
@@ -150,7 +149,7 @@ index b1d0d3c..a37d180 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -480,6 +485,12 @@ pub unsafe fn reset_handler() {
+@@ -480,6 +482,14 @@ pub unsafe fn reset_handler() {
      )
      .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
  
@@ -158,12 +157,14 @@ index b1d0d3c..a37d180 100644
 +        board_kernel,
 +        nrf52840::uicr::Uicr::new(),
 +    )
-+    .finalize(components::firmware_protection_component_helper!(nrf52840::uicr::Uicr));
++    .finalize(components::firmware_protection_component_helper!(
++        nrf52840::uicr::Uicr
++    ));
 +
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -497,6 +508,7 @@ pub unsafe fn reset_handler() {
+@@ -497,6 +507,7 @@ pub unsafe fn reset_handler() {
          nonvolatile_storage,
          nvmc,
          usb,
@@ -185,10 +186,10 @@ index ae458b3..f536dad 100644
      Ipc                   = 0x10000,
 diff --git a/capsules/src/firmware_protection.rs b/capsules/src/firmware_protection.rs
 new file mode 100644
-index 0000000..2c61d06
+index 0000000..dc46a13
 --- /dev/null
 +++ b/capsules/src/firmware_protection.rs
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,85 @@
 +//! Provides userspace control of firmware protection on a board.
 +//!
 +//! This allows an application to enable firware readout protection,
@@ -213,7 +214,7 @@ index 0000000..2c61d06
 +//! Syscall Interface
 +//! -----------------
 +//!
-+//! - Stability: 2 - Stable
++//! - Stability: 0 - Draft
 +//!
 +//! ### Command
 +//!
@@ -222,10 +223,10 @@ index 0000000..2c61d06
 +//! #### `command_num`
 +//!
 +//! - `0`: Driver check.
-+//! - `1`: Enable firmware readout protection (aka CRP).
++//! - `1`: Get current firmware readout protection (aka CRP) state.
++//! - `2`: Set current firmware readout protection (aka CRP) state.
 +//!
 +
-+use core::marker::PhantomData;
 +use kernel::hil;
 +use kernel::{AppId, Callback, Driver, Grant, ReturnCode};
 +
@@ -233,43 +234,41 @@ index 0000000..2c61d06
 +use crate::driver;
 +pub const DRIVER_NUM: usize = driver::NUM::FirmwareProtection as usize;
 +
-+pub struct FirmwareProtection<'a, C: hil::firmware_protection::FirmwareProtection> {
++pub struct FirmwareProtection<C: hil::firmware_protection::FirmwareProtection> {
 +    crp_unit: C,
 +    apps: Grant<Option<Callback>>,
-+    _phantom: PhantomData<&'a C>,
 +}
 +
-+impl<'a, C: hil::firmware_protection::FirmwareProtection> FirmwareProtection<'a, C> {
-+    pub fn new(
-+        crp_unit: C,
-+        apps: Grant<Option<Callback>>,
-+    ) -> Self {
-+        Self {
-+            crp_unit,
-+            apps,
-+            _phantom: PhantomData,
-+        }
++impl<C: hil::firmware_protection::FirmwareProtection> FirmwareProtection<C> {
++    pub fn new(crp_unit: C, apps: Grant<Option<Callback>>) -> Self {
++        Self { crp_unit, apps }
 +    }
 +}
 +
-+impl<'a, C: hil::firmware_protection::FirmwareProtection> Driver for FirmwareProtection<'a, C> {
++impl<C: hil::firmware_protection::FirmwareProtection> Driver for FirmwareProtection<C> {
 +    ///
 +    /// ### Command numbers
 +    ///
 +    ///   * `0`: Returns non-zero to indicate the driver is present.
-+    ///   * `1`: Enable firmware protection.
-+    fn command(&self, command_num: usize, _: usize, _: usize, appid: AppId) -> ReturnCode {
++    ///   * `1`: Gets firmware protection state.
++    ///   * `2`: Sets firmware protection state.
++    fn command(&self, command_num: usize, data: usize, _: usize, appid: AppId) -> ReturnCode {
 +        match command_num {
 +            // return if driver is available
 +            0 => ReturnCode::SUCCESS,
 +
-+            // enable firmware protection
-+            1 => {
-+                self.apps.enter(appid, |_, _| {
-+                    self.crp_unit.protect()
++            1 => self
++                .apps
++                .enter(appid, |_, _| ReturnCode::SuccessWithValue {
++                    value: self.crp_unit.get_protection() as usize,
 +                })
-+                .unwrap_or_else(|err| err.into())
-+            }
++                .unwrap_or_else(|err| err.into()),
++
++            // sets firmware protection
++            2 => self
++                .apps
++                .enter(appid, |_, _| self.crp_unit.set_protection(data.into()))
++                .unwrap_or_else(|err| err.into()),
 +
 +            // default
 +            _ => ReturnCode::ENOSUPPORT,
@@ -289,10 +288,18 @@ index e4423fe..7538aad 100644
  pub mod ft6x06;
  pub mod fxos8700cq;
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 3bb8b5a..b8895d3 100644
+index 3bb8b5a..19c2e90 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
-@@ -8,6 +8,7 @@ use kernel::hil;
+@@ -1,13 +1,14 @@
+ //! User information configuration registers
+ 
+-
+ use enum_primitive::cast::FromPrimitive;
++use hil::firmware_protection::ProtectionLevel;
+ use kernel::common::registers::{register_bitfields, register_structs, ReadWrite};
+ use kernel::common::StaticRef;
+ use kernel::hil;
  use kernel::ReturnCode;
  
  use crate::gpio::Pin;
@@ -300,21 +307,47 @@ index 3bb8b5a..b8895d3 100644
  
  const UICR_BASE: StaticRef<UicrRegisters> =
      unsafe { StaticRef::new(0x10001000 as *const UicrRegisters) };
-@@ -210,3 +211,20 @@ impl Uicr {
+@@ -210,3 +211,46 @@ impl Uicr {
          self.registers.approtect.write(ApProtect::PALL::ENABLED);
      }
  }
 +
 +impl hil::firmware_protection::FirmwareProtection for Uicr {
-+    fn protect(&self) -> ReturnCode {
++    fn get_protection(&self) -> ProtectionLevel {
++        let ap_protect_state = self.is_ap_protect_enabled();
++        let cpu_debug_state = self
++            .registers
++            .debugctrl
++            .matches_all(DebugControl::CPUNIDEN::ENABLED + DebugControl::CPUFPBEN::ENABLED);
++        match (ap_protect_state, cpu_debug_state) {
++            (false, _) => ProtectionLevel::NoProtection,
++            (true, true) => ProtectionLevel::JtagDisabled,
++            (true, false) => ProtectionLevel::FullyLocked,
++        }
++    }
++
++    fn set_protection(&self, level: ProtectionLevel) -> ReturnCode {
++        let current_level = self.get_protection();
++        if current_level > level || level == ProtectionLevel::Unknown {
++            return ReturnCode::EINVAL;
++        }
++        if current_level == level {
++            return ReturnCode::EALREADY;
++        }
 +        unsafe { NVMC.configure_writeable() };
-+        self.set_ap_protect();
-+        // Prevent CPU debug
-+        self.registers.debugctrl.write(
-+            DebugControl::CPUNIDEN::DISABLED + DebugControl::CPUFPBEN::DISABLED);
-+        // TODO(jmichel): Kill bootloader if present
++        if level >= ProtectionLevel::JtagDisabled {
++            self.set_ap_protect();
++        }
++        if level >= ProtectionLevel::FullyLocked {
++            // Prevent CPU debug and flash patching. Leaving these enabled could
++            // allow to circumvent protection.
++            self.registers
++                .debugctrl
++                .write(DebugControl::CPUNIDEN::DISABLED + DebugControl::CPUFPBEN::DISABLED);
++            // TODO(jmichel): Kill bootloader if present
++        }
 +        unsafe { NVMC.configure_readonly() };
-+        if self.is_ap_protect_enabled() {
++        if self.get_protection() == level {
 +            ReturnCode::SUCCESS
 +        } else {
 +            ReturnCode::FAIL
@@ -323,17 +356,57 @@ index 3bb8b5a..b8895d3 100644
 +}
 diff --git a/kernel/src/hil/firmware_protection.rs b/kernel/src/hil/firmware_protection.rs
 new file mode 100644
-index 0000000..e43fdf0
+index 0000000..de08246
 --- /dev/null
 +++ b/kernel/src/hil/firmware_protection.rs
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,48 @@
 +//! Interface for Firmware Protection, also called Code Readout Protection.
 +
 +use crate::returncode::ReturnCode;
 +
++#[derive(PartialOrd, PartialEq)]
++pub enum ProtectionLevel {
++    /// Unsupported feature
++    Unknown = 0,
++    /// This should be the factory default for the chip.
++    NoProtection = 1,
++    /// At this level, only JTAG/SWD are disabled but other debugging
++    /// features may still be enabled.
++    JtagDisabled = 2,
++    /// This is the maximum level of protection the chip supports.
++    /// At this level, JTAG and all other features are expected to be
++    /// disabled and only a full chip erase may allow to recover from
++    /// that state.
++    FullyLocked = 0xff,
++}
++
++impl From<usize> for ProtectionLevel {
++    fn from(value: usize) -> Self {
++        match value {
++            1 => ProtectionLevel::NoProtection,
++            2 => ProtectionLevel::JtagDisabled,
++            0xff => ProtectionLevel::FullyLocked,
++            _ => ProtectionLevel::Unknown,
++        }
++    }
++}
++
 +pub trait FirmwareProtection {
-+    /// Disable debug ports and protects the device.
-+    fn protect(&self) -> ReturnCode;
++    /// Gets the current firmware protection level.
++    /// This doesn't fail and always returns a value.
++    fn get_protection(&self) -> ProtectionLevel;
++
++    /// Sets the firmware protection level.
++    /// There are four valid return values:
++    ///   - SUCCESS: protection level has been set to `level`
++    ///   - FAIL: something went wrong while setting the protection
++    ///     level and the effective protection level is not the one
++    ///     that was requested.
++    ///   - EALREADY: the requested protection level is already the
++    ///     level that is set.
++    ///   - EINVAL: unsupported protection level or the requested
++    ///     protection level is lower than the currently set one.
++    fn set_protection(&self, level: ProtectionLevel) -> ReturnCode;
 +}
 diff --git a/kernel/src/hil/mod.rs b/kernel/src/hil/mod.rs
 index 4f42afa..83e7702 100644

@@ -117,9 +117,8 @@ impl CtapHid {
     // CTAP specification (version 20190130) section 8.1.9.1.3
     const PROTOCOL_VERSION: u8 = 2;
 
-    // The device version number is vendor-defined. For now we define them to be zero.
-    // TODO: Update with device version?
-    const DEVICE_VERSION_MAJOR: u8 = 0;
+    // The device version number is vendor-defined.
+    const DEVICE_VERSION_MAJOR: u8 = 1;
     const DEVICE_VERSION_MINOR: u8 = 0;
     const DEVICE_VERSION_BUILD: u8 = 0;
 
@@ -574,7 +573,7 @@ mod test {
                     0x00,
                     0x01,
                     0x02, // Protocol version
-                    0x00, // Device version
+                    0x01, // Device version
                     0x00,
                     0x00,
                     CtapHid::CAPABILITIES
@@ -634,7 +633,7 @@ mod test {
                     cid[2],
                     cid[3],
                     0x02, // Protocol version
-                    0x00, // Device version
+                    0x01, // Device version
                     0x00,
                     0x00,
                     CtapHid::CAPABILITIES

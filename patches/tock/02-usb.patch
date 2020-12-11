@@ -117,7 +117,7 @@ index d72d20482..118ea6d68 100644
 +    // Product
 +    "OpenSK",
 +    // Serial number
-+    "v0.1",
++    "v1.0",
 +];
 +
  // State for loading and holding applications.
@@ -189,7 +189,7 @@ index 2ebb384d8..4a7bfffdd 100644
 +    // Product
 +    "OpenSK",
 +    // Serial number
-+    "v0.1",
++    "v1.0",
 +];
 +
  // State for loading and holding applications.

@@ -23,66 +23,11 @@ use core::convert::TryFrom;
 use crypto::rng256::Rng256;
 use libtock_drivers::timer::ClockValue;
 
+// For now, they're the same thing with apdu.rs containing the authoritative definition
+pub type Ctap1StatusCode = ApduStatusCode;
+
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
-
-// status codes specification (version 20170411) section 3.3
-#[allow(non_camel_case_types)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub enum Ctap1StatusCode {
-    SW_NO_ERROR = 0x9000,
-    SW_CONDITIONS_NOT_SATISFIED = 0x6985,
-    SW_WRONG_DATA = 0x6A80,
-    SW_WRONG_LENGTH = 0x6700,
-    SW_CLA_NOT_SUPPORTED = 0x6E00,
-    SW_INS_NOT_SUPPORTED = 0x6D00,
-    SW_MEMERR = 0x6501,
-    SW_COMMAND_ABORTED = 0x6F00,
-    SW_VENDOR_KEY_HANDLE_TOO_LONG = 0xF000,
-}
-
-impl TryFrom<u16> for Ctap1StatusCode {
-    type Error = ();
-
-    fn try_from(value: u16) -> Result<Ctap1StatusCode, ()> {
-        match value {
-            0x9000 => Ok(Ctap1StatusCode::SW_NO_ERROR),
-            0x6985 => Ok(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED),
-            0x6A80 => Ok(Ctap1StatusCode::SW_WRONG_DATA),
-            0x6700 => Ok(Ctap1StatusCode::SW_WRONG_LENGTH),
-            0x6E00 => Ok(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED),
-            0x6D00 => Ok(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
-            0x6501 => Ok(Ctap1StatusCode::SW_MEMERR),
-            0x6F00 => Ok(Ctap1StatusCode::SW_COMMAND_ABORTED),
-            0xF000 => Ok(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG),
-            _ => Err(()),
-        }
-    }
-}
-
-impl TryFrom<ApduStatusCode> for Ctap1StatusCode {
-    type Error = ();
-
-    fn try_from(apdu_status_code: ApduStatusCode) -> Result<Ctap1StatusCode, ()> {
-        match apdu_status_code {
-            ApduStatusCode::SW_WRONG_LENGTH => Ok(Ctap1StatusCode::SW_WRONG_LENGTH),
-            ApduStatusCode::SW_WRONG_DATA => Ok(Ctap1StatusCode::SW_WRONG_DATA),
-            ApduStatusCode::SW_CLA_INVALID => Ok(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED),
-            ApduStatusCode::SW_INS_INVALID => Ok(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
-            ApduStatusCode::SW_COND_USE_NOT_SATISFIED => {
-                Ok(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED)
-            }
-            ApduStatusCode::SW_SUCCESS => Ok(Ctap1StatusCode::SW_NO_ERROR),
-            _ => Ok(Ctap1StatusCode::SW_COMMAND_ABORTED),
-        }
-    }
-}
-
-impl Into<u16> for Ctap1StatusCode {
-    fn into(self) -> u16 {
-        self as u16
-    }
-}
 
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug))]
 #[derive(PartialEq)]
@@ -154,7 +99,7 @@ impl TryFrom<&[u8]> for U2fCommand {
         // | CLA | INS | P1 | P2 | Lc1 | Lc2 | Lc3 |
         // +-----+-----+----+----+-----+-----+-----+
         if apdu.header.cla != Ctap1Command::CTAP1_CLA {
-            return Err(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED);
+            return Err(Ctap1StatusCode::SW_CLA_INVALID);
         }
 
         // Since there is always request data, the expected length is either omitted or
@@ -214,7 +159,7 @@ impl TryFrom<&[u8]> for U2fCommand {
                 })
             }
 
-            _ => Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+            _ => Err(Ctap1StatusCode::SW_INS_INVALID),
         }
     }
 }
@@ -252,7 +197,7 @@ impl Ctap1Command {
                 application,
             } => {
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
-                    return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
                 Ctap1Command::process_register(challenge, application, ctap_state)
             }
@@ -267,7 +212,7 @@ impl Ctap1Command {
                 if flags == Ctap1Flags::EnforceUpAndSign
                     && !ctap_state.u2f_up_state.consume_up(clock_value)
                 {
-                    return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
                 Ctap1Command::process_authenticate(
                     challenge,
@@ -282,7 +227,7 @@ impl Ctap1Command {
             U2fCommand::Version => Ok(Vec::<u8>::from(super::U2F_VERSION_STRING)),
 
             // TODO: should we return an error instead such as SW_INS_NOT_SUPPORTED?
-            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_NO_ERROR),
+            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION),
         }
     }
 
@@ -310,22 +255,22 @@ impl Ctap1Command {
         let pk = sk.genpk();
         let key_handle = ctap_state
             .encrypt_key_handle(sk, &application, None)
-            .map_err(|_| Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
-            return Err(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG);
+            return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
         let certificate = ctap_state
             .persistent_store
             .attestation_certificate()
-            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let private_key = ctap_state
             .persistent_store
             .attestation_private_key()
-            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
@@ -380,14 +325,14 @@ impl Ctap1Command {
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             if flags == Ctap1Flags::CheckOnly {
-                return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }
             ctap_state
                 .increment_global_signature_counter()
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             let mut signature_data = ctap_state
                 .generate_auth_data(&application, Ctap1Command::USER_PRESENCE_INDICATOR_BYTE)
-                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
+                .map_err(|_| Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED)?;
             signature_data.extend(&challenge);
             let signature = credential_source
                 .private_key
@@ -466,7 +411,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate and private key are missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         assert!(ctap_state
@@ -477,7 +422,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate is still missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
         assert!(ctap_state
@@ -534,7 +479,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
     #[test]
@@ -552,7 +497,7 @@ mod test {
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
     #[test]
@@ -626,7 +571,7 @@ mod test {
         message[0] = 0xEE;
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_CLA_INVALID));
     }
 
     #[test]
@@ -646,7 +591,7 @@ mod test {
         message[1] = 0xEE;
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_INVALID));
     }
 
     #[test]
@@ -768,6 +713,6 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 }

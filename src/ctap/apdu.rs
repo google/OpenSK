@@ -23,6 +23,12 @@ pub enum ApduStatusCode {
     SW_INTERNAL_EXCEPTION = 0x6f_00,
 }
 
+impl From<ApduStatusCode> for u16 {
+    fn from(_: ApduStatusCode) -> Self {
+        0
+    }
+}
+
 #[allow(dead_code)]
 pub enum ApduInstructions {
     Select = 0xA4,

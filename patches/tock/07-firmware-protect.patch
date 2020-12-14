@@ -186,7 +186,7 @@ index ae458b3..f536dad 100644
      Ipc                   = 0x10000,
 diff --git a/capsules/src/firmware_protection.rs b/capsules/src/firmware_protection.rs
 new file mode 100644
-index 0000000..dc46a13
+index 0000000..8cf63d6
 --- /dev/null
 +++ b/capsules/src/firmware_protection.rs
 @@ -0,0 +1,85 @@
@@ -204,8 +204,8 @@ index 0000000..dc46a13
 +//! # use kernel::static_init;
 +//!
 +//! let crp = static_init!(
-+//!     capsules::firware_protection::FirmwareProtection<'static>,
-+//!     capsules::firware_protection::FirmwareProtection::new(
++//!     capsules::firmware_protection::FirmwareProtection,
++//!     capsules::firmware_protection::FirmwareProtection::new(
 +//!         nrf52840::uicr::Uicr,
 +//!         board_kernel.create_grant(&grant_cap),
 +//!     );
@@ -288,7 +288,7 @@ index e4423fe..7538aad 100644
  pub mod ft6x06;
  pub mod fxos8700cq;
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 3bb8b5a..19c2e90 100644
+index 3bb8b5a..ea96cb2 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
 @@ -1,13 +1,14 @@
@@ -307,7 +307,7 @@ index 3bb8b5a..19c2e90 100644
  
  const UICR_BASE: StaticRef<UicrRegisters> =
      unsafe { StaticRef::new(0x10001000 as *const UicrRegisters) };
-@@ -210,3 +211,46 @@ impl Uicr {
+@@ -210,3 +211,49 @@ impl Uicr {
          self.registers.approtect.write(ApProtect::PALL::ENABLED);
      }
  }
@@ -334,19 +334,22 @@ index 3bb8b5a..19c2e90 100644
 +        if current_level == level {
 +            return ReturnCode::EALREADY;
 +        }
++
 +        unsafe { NVMC.configure_writeable() };
 +        if level >= ProtectionLevel::JtagDisabled {
 +            self.set_ap_protect();
 +        }
++
 +        if level >= ProtectionLevel::FullyLocked {
 +            // Prevent CPU debug and flash patching. Leaving these enabled could
 +            // allow to circumvent protection.
 +            self.registers
 +                .debugctrl
 +                .write(DebugControl::CPUNIDEN::DISABLED + DebugControl::CPUFPBEN::DISABLED);
-+            // TODO(jmichel): Kill bootloader if present
++            // TODO(jmichel): prevent returning into bootloader if present
 +        }
 +        unsafe { NVMC.configure_readonly() };
++
 +        if self.get_protection() == level {
 +            ReturnCode::SUCCESS
 +        } else {

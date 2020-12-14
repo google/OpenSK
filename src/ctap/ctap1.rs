@@ -542,7 +542,7 @@ mod test {
 
         message.push(0x00);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
     }
 
     #[test]

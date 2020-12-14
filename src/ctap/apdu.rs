@@ -179,6 +179,9 @@ impl TryFrom<&[u8]> for APDU {
                 .len()
                 .checked_sub(extended_apdu_lc + 3)
                 .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
+            if extended_apdu_le_len > 3 {
+                return Err(ApduStatusCode::SW_WRONG_LENGTH);
+            }
 
             if byte_0 == 0 && extended_apdu_le_len <= 3 {
                 // If first byte is zero AND the next two bytes can be parsed as a big-endian

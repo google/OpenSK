@@ -227,7 +227,7 @@ impl Ctap1Command {
             U2fCommand::Version => Ok(Vec::<u8>::from(super::U2F_VERSION_STRING)),
 
             // TODO: should we return an error instead such as SW_INS_NOT_SUPPORTED?
-            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION),
+            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_SUCCESS),
         }
     }
 
@@ -258,13 +258,13 @@ impl Ctap1Command {
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
-            return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
+            return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION);
         }
 
         let certificate = ctap_state
             .persistent_store
             .attestation_certificate()
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let private_key = ctap_state
             .persistent_store
@@ -332,7 +332,7 @@ impl Ctap1Command {
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             let mut signature_data = ctap_state
                 .generate_auth_data(&application, Ctap1Command::USER_PRESENCE_INDICATOR_BYTE)
-                .map_err(|_| Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED)?;
+                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
             let signature = credential_source
                 .private_key
@@ -542,7 +542,7 @@ mod test {
 
         message.push(0x00);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
     }
 
     #[test]

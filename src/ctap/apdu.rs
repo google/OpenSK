@@ -26,6 +26,7 @@ pub enum ApduStatusCode {
     /// Command successfully executed; 'XX' bytes of data are
     /// available and can be requested using GET RESPONSE.
     SW_GET_RESPONSE = 0x61_00,
+    SW_MEMERR = 0x65_01,
     SW_WRONG_DATA = 0x6a_80,
     SW_WRONG_LENGTH = 0x67_00,
     SW_COND_USE_NOT_SATISFIED = 0x69_85,
@@ -177,10 +178,7 @@ impl TryFrom<&[u8]> for APDU {
             let extended_apdu_le_len: usize = payload
                 .len()
                 .checked_sub(extended_apdu_lc + 3)
-                .unwrap_or(0xff);
-            if extended_apdu_le_len > 3 {
-                return Err(ApduStatusCode::SW_WRONG_LENGTH);
-            }
+                .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
 
             if byte_0 == 0 && extended_apdu_le_len <= 3 {
                 // If first byte is zero AND the next two bytes can be parsed as a big-endian

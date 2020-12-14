@@ -1468,4 +1468,22 @@ mod tests {
         driver = driver.power_off().power_on().unwrap();
         driver.check().unwrap();
     }
+
+    #[test]
+    fn entries_ok() {
+        let mut driver = MINIMAL.new_driver().power_on().unwrap();
+
+        // The store is initially empty.
+        assert!(driver.store().entries.as_ref().unwrap().is_empty());
+
+        // Inserted elements are added.
+        const LEN: usize = 6;
+        driver.insert(0, &[0x38; (LEN - 1) * 4]).unwrap();
+        driver.insert(1, &[0x5c; 4]).unwrap();
+        assert_eq!(driver.store().entries, Some(vec![0, LEN as u16]));
+
+        // Deleted elements are removed.
+        driver.remove(0).unwrap();
+        assert_eq!(driver.store().entries, Some(vec![LEN as u16]));
+    }
 }

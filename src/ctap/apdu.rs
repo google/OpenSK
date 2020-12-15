@@ -16,43 +16,31 @@ use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 
-type ByteArray = &'static [u8];
-
 const APDU_HEADER_LEN: usize = 4;
 
 #[cfg_attr(test, derive(Clone, Debug))]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 #[derive(PartialEq)]
 pub enum ApduStatusCode {
-    SW_SUCCESS,
+    SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
     /// available and can be requested using GET RESPONSE.
-    SW_GET_RESPONSE,
-    SW_WRONG_DATA,
-    SW_WRONG_LENGTH,
-    SW_COND_USE_NOT_SATISFIED,
-    SW_FILE_NOT_FOUND,
-    SW_INCORRECT_P1P2,
+    SW_GET_RESPONSE = 0x61_00,
+    SW_MEMERR = 0x65_01,
+    SW_WRONG_DATA = 0x6a_80,
+    SW_WRONG_LENGTH = 0x67_00,
+    SW_COND_USE_NOT_SATISFIED = 0x69_85,
+    SW_FILE_NOT_FOUND = 0x6a_82,
+    SW_INCORRECT_P1P2 = 0x6a_86,
     /// Instruction code not supported or invalid
-    SW_INS_INVALID,
-    SW_CLA_INVALID,
-    SW_INTERNAL_EXCEPTION,
+    SW_INS_INVALID = 0x6d_00,
+    SW_CLA_INVALID = 0x6e_00,
+    SW_INTERNAL_EXCEPTION = 0x6f_00,
 }
 
-impl From<ApduStatusCode> for ByteArray {
-    fn from(status_code: ApduStatusCode) -> ByteArray {
-        match status_code {
-            ApduStatusCode::SW_SUCCESS => b"\x90\x00",
-            ApduStatusCode::SW_GET_RESPONSE => b"\x61\x00",
-            ApduStatusCode::SW_WRONG_DATA => b"\x6A\x80",
-            ApduStatusCode::SW_WRONG_LENGTH => b"\x67\x00",
-            ApduStatusCode::SW_COND_USE_NOT_SATISFIED => b"\x69\x85",
-            ApduStatusCode::SW_FILE_NOT_FOUND => b"\x6a\x82",
-            ApduStatusCode::SW_INCORRECT_P1P2 => b"\x6a\x86",
-            ApduStatusCode::SW_INS_INVALID => b"\x6d\x00",
-            ApduStatusCode::SW_CLA_INVALID => b"\x6e\x00",
-            ApduStatusCode::SW_INTERNAL_EXCEPTION => b"\x6f\x00",
-        }
+impl From<ApduStatusCode> for u16 {
+    fn from(code: ApduStatusCode) -> Self {
+        code as u16
     }
 }
 
@@ -67,10 +55,10 @@ pub enum ApduInstructions {
 #[allow(dead_code)]
 #[derive(Default, PartialEq)]
 pub struct ApduHeader {
-    cla: u8,
-    ins: u8,
-    p1: u8,
-    p2: u8,
+    pub cla: u8,
+    pub ins: u8,
+    pub p1: u8,
+    pub p2: u8,
 }
 
 impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
@@ -110,11 +98,11 @@ pub enum ApduType {
 #[allow(dead_code)]
 #[derive(PartialEq)]
 pub struct APDU {
-    header: ApduHeader,
-    lc: u16,
-    data: Vec<u8>,
-    le: u32,
-    case_type: ApduType,
+    pub header: ApduHeader,
+    pub lc: u16,
+    pub data: Vec<u8>,
+    pub le: u32,
+    pub case_type: ApduType,
 }
 
 impl TryFrom<&[u8]> for APDU {
@@ -182,12 +170,19 @@ impl TryFrom<&[u8]> for APDU {
         }
         if payload.len() > 2 {
             // Lc is possibly three-bytes long
-            let extended_apdu_lc: usize = BigEndian::read_u16(&payload[1..]) as usize;
-            let extended_apdu_le_len: usize = if payload.len() > extended_apdu_lc {
-                payload.len() - extended_apdu_lc - 3
-            } else {
-                0
-            };
+            let extended_apdu_lc = BigEndian::read_u16(&payload[1..3]) as usize;
+            if payload.len() < extended_apdu_lc + 3 {
+                return Err(ApduStatusCode::SW_WRONG_LENGTH);
+            }
+
+            let extended_apdu_le_len: usize = payload
+                .len()
+                .checked_sub(extended_apdu_lc + 3)
+                .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
+            if extended_apdu_le_len > 3 {
+                return Err(ApduStatusCode::SW_WRONG_LENGTH);
+            }
+
             if byte_0 == 0 && extended_apdu_le_len <= 3 {
                 // If first byte is zero AND the next two bytes can be parsed as a big-endian
                 // length that covers the rest of the block (plus few additional bytes for Le), we

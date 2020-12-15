@@ -417,7 +417,7 @@ impl CtapHid {
     #[cfg(feature = "with_ctap1")]
     fn ctap1_success_message(cid: ChannelID, payload: &[u8]) -> HidPacketIterator {
         let mut response = payload.to_vec();
-        let code: u16 = ctap1::Ctap1StatusCode::SW_NO_ERROR.into();
+        let code: u16 = ctap1::Ctap1StatusCode::SW_SUCCESS.into();
         response.extend_from_slice(&code.to_be_bytes());
         CtapHid::split_message(Message {
             cid,

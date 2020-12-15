@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::apdu::{ApduStatusCode, APDU};
 use super::hid::ChannelID;
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
@@ -22,48 +23,11 @@ use core::convert::TryFrom;
 use crypto::rng256::Rng256;
 use libtock_drivers::timer::ClockValue;
 
+// For now, they're the same thing with apdu.rs containing the authoritative definition
+pub type Ctap1StatusCode = ApduStatusCode;
+
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
-
-// status codes specification (version 20170411) section 3.3
-#[allow(non_camel_case_types)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub enum Ctap1StatusCode {
-    SW_NO_ERROR = 0x9000,
-    SW_CONDITIONS_NOT_SATISFIED = 0x6985,
-    SW_WRONG_DATA = 0x6A80,
-    SW_WRONG_LENGTH = 0x6700,
-    SW_CLA_NOT_SUPPORTED = 0x6E00,
-    SW_INS_NOT_SUPPORTED = 0x6D00,
-    SW_MEMERR = 0x6501,
-    SW_COMMAND_ABORTED = 0x6F00,
-    SW_VENDOR_KEY_HANDLE_TOO_LONG = 0xF000,
-}
-
-impl TryFrom<u16> for Ctap1StatusCode {
-    type Error = ();
-
-    fn try_from(value: u16) -> Result<Ctap1StatusCode, ()> {
-        match value {
-            0x9000 => Ok(Ctap1StatusCode::SW_NO_ERROR),
-            0x6985 => Ok(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED),
-            0x6A80 => Ok(Ctap1StatusCode::SW_WRONG_DATA),
-            0x6700 => Ok(Ctap1StatusCode::SW_WRONG_LENGTH),
-            0x6E00 => Ok(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED),
-            0x6D00 => Ok(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
-            0x6501 => Ok(Ctap1StatusCode::SW_MEMERR),
-            0x6F00 => Ok(Ctap1StatusCode::SW_COMMAND_ABORTED),
-            0xF000 => Ok(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG),
-            _ => Err(()),
-        }
-    }
-}
-
-impl Into<u16> for Ctap1StatusCode {
-    fn into(self) -> u16 {
-        self as u16
-    }
-}
 
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug))]
 #[derive(PartialEq)]
@@ -118,11 +82,14 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
-        if message.len() < Ctap1Command::APDU_HEADER_LEN as usize {
-            return Err(Ctap1StatusCode::SW_WRONG_DATA);
-        }
+        let apdu: APDU = match APDU::try_from(message) {
+            Ok(apdu) => apdu,
+            Err(apdu_status_code) => {
+                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
+            }
+        };
 
-        let (apdu, payload) = message.split_at(Ctap1Command::APDU_HEADER_LEN as usize);
+        let lc = apdu.lc as usize;
 
         // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always
         // encodes the length on 3 bytes and doesn't use the field "Le" (Length Expected).
@@ -131,19 +98,17 @@ impl TryFrom<&[u8]> for U2fCommand {
         // +-----+-----+----+----+-----+-----+-----+
         // | CLA | INS | P1 | P2 | Lc1 | Lc2 | Lc3 |
         // +-----+-----+----+----+-----+-----+-----+
-        if apdu[0] != Ctap1Command::CTAP1_CLA {
-            return Err(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED);
+        if apdu.header.cla != Ctap1Command::CTAP1_CLA {
+            return Err(Ctap1StatusCode::SW_CLA_INVALID);
         }
-
-        let lc = (((apdu[4] as u32) << 16) | ((apdu[5] as u32) << 8) | (apdu[6] as u32)) as usize;
 
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
-        if lc != payload.len() && lc + 2 != payload.len() {
+        if lc != apdu.data.len() && lc + 2 != apdu.data.len() {
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
-        match apdu[1] {
+        match apdu.header.ins {
             // U2F raw message format specification, Section 4.1
             // +-----------------+-------------------+
             // + Challenge (32B) | Application (32B) |
@@ -153,8 +118,8 @@ impl TryFrom<&[u8]> for U2fCommand {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Register {
-                    challenge: *array_ref!(payload, 0, 32),
-                    application: *array_ref!(payload, 32, 32),
+                    challenge: *array_ref!(apdu.data, 0, 32),
+                    application: *array_ref!(apdu.data, 32, 32),
                 })
             }
 
@@ -166,15 +131,15 @@ impl TryFrom<&[u8]> for U2fCommand {
                 if lc < 65 {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
-                let handle_length = payload[64] as usize;
+                let handle_length = apdu.data[64] as usize;
                 if lc != 65 + handle_length {
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
-                let flag = Ctap1Flags::try_from(apdu[2])?;
+                let flag = Ctap1Flags::try_from(apdu.header.p1)?;
                 Ok(Self::Authenticate {
-                    challenge: *array_ref!(payload, 0, 32),
-                    application: *array_ref!(payload, 32, 32),
-                    key_handle: payload[65..lc].to_vec(),
+                    challenge: *array_ref!(apdu.data, 0, 32),
+                    application: *array_ref!(apdu.data, 32, 32),
+                    key_handle: apdu.data[65..].to_vec(),
                     flags: flag,
                 })
             }
@@ -190,11 +155,11 @@ impl TryFrom<&[u8]> for U2fCommand {
             // For Vendor specific command.
             Ctap1Command::VENDOR_SPECIFIC_FIRST..=Ctap1Command::VENDOR_SPECIFIC_LAST => {
                 Ok(Self::VendorSpecific {
-                    payload: payload.to_vec(),
+                    payload: apdu.data.to_vec(),
                 })
             }
 
-            _ => Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED),
+            _ => Err(Ctap1StatusCode::SW_INS_INVALID),
         }
     }
 }
@@ -202,8 +167,6 @@ impl TryFrom<&[u8]> for U2fCommand {
 pub struct Ctap1Command {}
 
 impl Ctap1Command {
-    const APDU_HEADER_LEN: u32 = 7; // CLA + INS + P1 + P2 + LC1-3
-
     const CTAP1_CLA: u8 = 0;
     // This byte is used in Register, but only serves backwards compatibility.
     const LEGACY_BYTE: u8 = 0x05;
@@ -234,7 +197,7 @@ impl Ctap1Command {
                 application,
             } => {
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
-                    return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
                 Ctap1Command::process_register(challenge, application, ctap_state)
             }
@@ -249,7 +212,7 @@ impl Ctap1Command {
                 if flags == Ctap1Flags::EnforceUpAndSign
                     && !ctap_state.u2f_up_state.consume_up(clock_value)
                 {
-                    return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
                 Ctap1Command::process_authenticate(
                     challenge,
@@ -264,7 +227,7 @@ impl Ctap1Command {
             U2fCommand::Version => Ok(Vec::<u8>::from(super::U2F_VERSION_STRING)),
 
             // TODO: should we return an error instead such as SW_INS_NOT_SUPPORTED?
-            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_NO_ERROR),
+            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_SUCCESS),
         }
     }
 
@@ -292,22 +255,22 @@ impl Ctap1Command {
         let pk = sk.genpk();
         let key_handle = ctap_state
             .encrypt_key_handle(sk, &application)
-            .map_err(|_| Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
-            return Err(Ctap1StatusCode::SW_VENDOR_KEY_HANDLE_TOO_LONG);
+            return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION);
         }
 
         let certificate = ctap_state
             .persistent_store
             .attestation_certificate()
             .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let private_key = ctap_state
             .persistent_store
             .attestation_private_key()
-            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_COMMAND_ABORTED)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
@@ -362,7 +325,7 @@ impl Ctap1Command {
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             if flags == Ctap1Flags::CheckOnly {
-                return Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED);
+                return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }
             ctap_state
                 .increment_global_signature_counter()
@@ -448,7 +411,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate and private key are missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         assert!(ctap_state
@@ -459,7 +422,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         // Certificate is still missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_ABORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
         assert!(ctap_state
@@ -513,7 +476,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
     #[test]
@@ -529,7 +492,7 @@ mod test {
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
     #[test]
@@ -559,15 +522,24 @@ mod test {
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
         let key_handle = ctap_state.encrypt_key_handle(sk, &application).unwrap();
-        let mut message =
-            create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
+        let mut message = create_authenticate_message(
+            &application,
+            Ctap1Flags::DontEnforceUpAndSign,
+            &key_handle,
+        );
 
         message.push(0x00);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
+        assert!(response.is_ok());
 
-        // Two extra zeros are okay, they could encode the expected response length.
         message.push(0x00);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert!(response.is_ok());
+
+        message.push(0x00);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert!(response.is_ok());
+
         message.push(0x00);
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
@@ -588,7 +560,7 @@ mod test {
         message[0] = 0xEE;
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CLA_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_CLA_INVALID));
     }
 
     #[test]
@@ -606,7 +578,7 @@ mod test {
         message[1] = 0xEE;
 
         let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_NOT_SUPPORTED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_INS_INVALID));
     }
 
     #[test]
@@ -722,6 +694,6 @@ mod test {
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
             Ctap1Command::process_command(&message, &mut ctap_state, TIMEOUT_CLOCK_VALUE);
-        assert_eq!(response, Err(Ctap1StatusCode::SW_CONDITIONS_NOT_SATISFIED));
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 }

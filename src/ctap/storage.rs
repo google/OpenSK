@@ -115,32 +115,8 @@ impl PersistentStore {
             self.store.insert(key::CRED_RANDOM_SECRET, &cred_random)?;
         }
 
-        // TODO(jmichel): remove this when vendor command is in place
-        #[cfg(not(test))]
-        self.load_attestation_data_from_firmware()?;
         if self.store.find_handle(key::AAGUID)?.is_none() {
             self.set_aaguid(key_material::AAGUID)?;
-        }
-        Ok(())
-    }
-
-    // TODO(jmichel): remove this function when vendor command is in place.
-    #[cfg(not(test))]
-    fn load_attestation_data_from_firmware(&mut self) -> Result<(), Ctap2StatusCode> {
-        // The following 2 entries are meant to be written by vendor-specific commands.
-        if self
-            .store
-            .find_handle(key::ATTESTATION_PRIVATE_KEY)?
-            .is_none()
-        {
-            self.set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)?;
-        }
-        if self
-            .store
-            .find_handle(key::ATTESTATION_CERTIFICATE)?
-            .is_none()
-        {
-            self.set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)?;
         }
         Ok(())
     }
@@ -988,12 +964,14 @@ mod test {
             .unwrap()
             .is_none());
 
-        // Make sure the persistent keys are initialized.
+        // Make sure the persistent keys are initialized to dummy values.
+        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_cert = [0xddu8; 20];
         persistent_store
-            .set_attestation_private_key(key_material::ATTESTATION_PRIVATE_KEY)
+            .set_attestation_private_key(&dummy_key)
             .unwrap();
         persistent_store
-            .set_attestation_certificate(key_material::ATTESTATION_CERTIFICATE)
+            .set_attestation_certificate(&dummy_cert)
             .unwrap();
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
@@ -1001,11 +979,11 @@ mod test {
         persistent_store.reset(&mut rng).unwrap();
         assert_eq!(
             &persistent_store.attestation_private_key().unwrap().unwrap(),
-            key_material::ATTESTATION_PRIVATE_KEY
+            &dummy_key
         );
         assert_eq!(
             persistent_store.attestation_certificate().unwrap().unwrap(),
-            key_material::ATTESTATION_CERTIFICATE
+            &dummy_cert
         );
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
     }

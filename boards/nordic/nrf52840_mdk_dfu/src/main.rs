@@ -48,7 +48,7 @@ static STRINGS: &'static [&'static str] = &[
     // Product
     "OpenSK",
     // Serial number
-    "v0.1",
+    "v1.0",
 ];
 
 // State for loading and holding applications.

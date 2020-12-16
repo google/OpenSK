@@ -29,7 +29,7 @@ mod timed_permission;
 use self::command::MAX_CREDENTIAL_COUNT_IN_LIST;
 use self::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
-    AuthenticatorMakeCredentialParameters, Command,
+    AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
 };
 #[cfg(feature = "with_ctap2_1")]
 use self::data_formats::AuthenticatorTransport;
@@ -44,7 +44,7 @@ use self::pin_protocol_v1::PinPermission;
 use self::pin_protocol_v1::PinProtocolV1;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
-    AuthenticatorMakeCredentialResponse, ResponseData,
+    AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
 use self::storage::PersistentStore;
@@ -67,6 +67,7 @@ use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
@@ -358,6 +359,10 @@ where
                     #[cfg(feature = "with_ctap2_1")]
                     Command::AuthenticatorSelection => self.process_selection(cid),
                     // TODO(kaczmarczyck) implement FIDO 2.1 commands
+                    // Vendor specific commands
+                    Command::AuthenticatorVendorConfigure(params) => {
+                        self.process_vendor_configure(params, cid)
+                    }
                 };
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
@@ -919,6 +924,74 @@ where
         Ok(ResponseData::AuthenticatorSelection)
     }
 
+    fn process_vendor_configure(
+        &mut self,
+        params: AuthenticatorVendorConfigureParameters,
+        cid: ChannelID,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        (self.check_user_presence)(cid)?;
+
+        // Sanity checks
+        let current_priv_key = self.persistent_store.attestation_private_key()?;
+        let current_cert = self.persistent_store.attestation_certificate()?;
+
+        let response = match params.attestation_material {
+            // Only reading values.
+            None => AuthenticatorVendorResponse {
+                cert_programmed: current_cert.is_some(),
+                pkey_programmed: current_priv_key.is_some(),
+            },
+            // Device is already fully programmed. We don't leak information.
+            Some(_) if current_cert.is_some() && current_priv_key.is_some() => {
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            }
+            // Device is partially or not programmed. We complete the process.
+            Some(data) => {
+                if let Some(current_cert) = &current_cert {
+                    if current_cert != &data.certificate {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                }
+                if let Some(current_priv_key) = &current_priv_key {
+                    if current_priv_key != &data.private_key {
+                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                    }
+                }
+                if current_cert.is_none() {
+                    self.persistent_store
+                        .set_attestation_certificate(&data.certificate)?;
+                }
+                if current_priv_key.is_none() {
+                    self.persistent_store
+                        .set_attestation_private_key(&data.private_key)?;
+                }
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            }
+        };
+        if params.lockdown {
+            // To avoid bricking the authenticator, we only allow lockdown
+            // to happen if both values are programmed or if both U2F/CTAP1 and
+            // batch attestation are disabled.
+            #[cfg(feature = "with_ctap1")]
+            let need_certificate = true;
+            #[cfg(not(feature = "with_ctap1"))]
+            let need_certificate = USE_BATCH_ATTESTATION;
+
+            if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
+                || crp::set_protection(crp::ProtectionLevel::FullyLocked).is_err()
+            {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
+        }
+        Ok(ResponseData::AuthenticatorVendor(response))
+    }
+
     pub fn generate_auth_data(
         &self,
         rp_id_hash: &[u8],
@@ -941,6 +1014,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::command::AuthenticatorAttestationMaterial;
     use super::data_formats::{
         CoseKey, GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions,
         MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
@@ -2051,5 +2125,125 @@ mod test {
             assert!(next_counter > last_counter);
             last_counter = next_counter;
         }
+    }
+
+    #[test]
+    fn test_vendor_configure() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+
+        // Nothing should be configured at the beginning
+        let response = ctap_state.process_vendor_configure(
+            AuthenticatorVendorConfigureParameters {
+                lockdown: false,
+                attestation_material: None,
+            },
+            DUMMY_CHANNEL_ID,
+        );
+        assert_eq!(
+            response,
+            Ok(ResponseData::AuthenticatorVendor(
+                AuthenticatorVendorResponse {
+                    cert_programmed: false,
+                    pkey_programmed: false,
+                }
+            ))
+        );
+
+        // Inject dummy values
+        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_cert = [0xddu8; 20];
+        let response = ctap_state.process_vendor_configure(
+            AuthenticatorVendorConfigureParameters {
+                lockdown: false,
+                attestation_material: Some(AuthenticatorAttestationMaterial {
+                    certificate: dummy_cert.to_vec(),
+                    private_key: dummy_key,
+                }),
+            },
+            DUMMY_CHANNEL_ID,
+        );
+        assert_eq!(
+            response,
+            Ok(ResponseData::AuthenticatorVendor(
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            ))
+        );
+        assert_eq!(
+            ctap_state
+                .persistent_store
+                .attestation_certificate()
+                .unwrap()
+                .unwrap(),
+            dummy_cert
+        );
+        assert_eq!(
+            ctap_state
+                .persistent_store
+                .attestation_private_key()
+                .unwrap()
+                .unwrap(),
+            dummy_key
+        );
+
+        // Try to inject other dummy values and check that initial values are retained.
+        let other_dummy_key = [0x44u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let response = ctap_state.process_vendor_configure(
+            AuthenticatorVendorConfigureParameters {
+                lockdown: false,
+                attestation_material: Some(AuthenticatorAttestationMaterial {
+                    certificate: dummy_cert.to_vec(),
+                    private_key: other_dummy_key,
+                }),
+            },
+            DUMMY_CHANNEL_ID,
+        );
+        assert_eq!(
+            response,
+            Ok(ResponseData::AuthenticatorVendor(
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            ))
+        );
+        assert_eq!(
+            ctap_state
+                .persistent_store
+                .attestation_certificate()
+                .unwrap()
+                .unwrap(),
+            dummy_cert
+        );
+        assert_eq!(
+            ctap_state
+                .persistent_store
+                .attestation_private_key()
+                .unwrap()
+                .unwrap(),
+            dummy_key
+        );
+
+        // Now try to lock the device
+        let response = ctap_state.process_vendor_configure(
+            AuthenticatorVendorConfigureParameters {
+                lockdown: true,
+                attestation_material: None,
+            },
+            DUMMY_CHANNEL_ID,
+        );
+        assert_eq!(
+            response,
+            Ok(ResponseData::AuthenticatorVendor(
+                AuthenticatorVendorResponse {
+                    cert_programmed: true,
+                    pkey_programmed: true,
+                }
+            ))
+        );
     }
 }

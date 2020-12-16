@@ -34,6 +34,7 @@ pub enum ResponseData {
     AuthenticatorReset,
     #[cfg(feature = "with_ctap2_1")]
     AuthenticatorSelection,
+    AuthenticatorVendor(AuthenticatorVendorResponse),
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -48,6 +49,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorReset => None,
             #[cfg(feature = "with_ctap2_1")]
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
     }
 }
@@ -231,6 +233,27 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct AuthenticatorVendorResponse {
+    pub cert_programmed: bool,
+    pub pkey_programmed: bool,
+}
+
+impl From<AuthenticatorVendorResponse> for cbor::Value {
+    fn from(vendor_response: AuthenticatorVendorResponse) -> Self {
+        let AuthenticatorVendorResponse {
+            cert_programmed,
+            pkey_programmed,
+        } = vendor_response;
+
+        cbor_map_options! {
+            1 => cert_programmed,
+            2 => pkey_programmed,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::data_formats::PackedAttestationStatement;
@@ -400,5 +423,35 @@ mod test {
     fn test_selection_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
         assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_vendor_response_into_cbor() {
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: true,
+                pkey_programmed: false,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => true,
+                2 => false,
+            })
+        );
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: false,
+                pkey_programmed: true,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => false,
+                2 => true,
+            })
+        );
     }
 }

@@ -1,0 +1,1172 @@
+commit 2d3e715ea3a560c5ff93fe0f616e210a4ce0871c
+Author: Kamran Khan <kamranrkhan@google.com>
+Date:   Fri Mar 26 14:33:35 2021 -0700
+
+    Apply OpenSK patch 09-nfc-type4-support
+
+diff --git a/boards/components/src/lib.rs b/boards/components/src/lib.rs
+index 5e4f330aa..4112f1053 100644
+--- a/boards/components/src/lib.rs
++++ b/boards/components/src/lib.rs
+@@ -24,6 +24,7 @@ pub mod lsm303dlhc;
+ pub mod mlx90614;
+ pub mod mx25r6435f;
+ pub mod nfc;
++pub mod nfc_type4;
+ pub mod ninedof;
+ pub mod nonvolatile_storage;
+ pub mod nrf51822;
+diff --git a/boards/components/src/nfc_type4.rs b/boards/components/src/nfc_type4.rs
+new file mode 100644
+index 000000000..753251a05
+--- /dev/null
++++ b/boards/components/src/nfc_type4.rs
+@@ -0,0 +1,76 @@
++//! Component for NFC Tag.
++//!
++//! Usage
++//! -----
++//! ```rust
++//! let nfct_type4 = components::nfct_type4::NfcType4Component::new(board_kernel, &nrf52840::nfct::NFCT).finalize(());
++//! ```
++
++use capsules::{nfc, nfc_type4};
++use kernel::capabilities;
++use kernel::common::dynamic_deferred_call::DynamicDeferredCall;
++use kernel::component::Component;
++use kernel::create_capability;
++use kernel::hil::nfc_type4::NfcType4Tag;
++use kernel::static_init;
++
++#[allow(dead_code)]
++pub struct NfcType4Component {
++    board_kernel: &'static kernel::Kernel,
++    base_driver: &'static nfc::NfcDriver<'static>,
++    nfct_type4: &'static dyn NfcType4Tag<'static>,
++    deferred_caller: &'static DynamicDeferredCall,
++}
++
++impl NfcType4Component {
++    pub fn new(
++        board_kernel: &'static kernel::Kernel,
++        base_driver: &'static nfc::NfcDriver<'static>,
++        nfct_type4: &'static dyn NfcType4Tag<'static>,
++        deferred_caller: &'static DynamicDeferredCall,
++    ) -> NfcType4Component {
++        NfcType4Component {
++            board_kernel,
++            base_driver,
++            nfct_type4,
++            deferred_caller,
++        }
++    }
++}
++
++impl Component for NfcType4Component {
++    type StaticInput = ();
++    type Output = &'static nfc_type4::NfcType4Driver<'static>;
++
++    unsafe fn finalize(self, _static_buffer: Self::StaticInput) -> Self::Output {
++        let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
++
++        let tx_buffer = static_init!([u8; nfc_type4::MAX_LENGTH], [0u8; nfc_type4::MAX_LENGTH]);
++        let app_tx_buffer = static_init!([u8; nfc_type4::MAX_LENGTH], [0u8; nfc_type4::MAX_LENGTH]);
++        let rx_buffer = static_init!([u8; nfc_type4::MAX_LENGTH], [0u8; nfc_type4::MAX_LENGTH]);
++        let app_rx_buffer = static_init!([u8; nfc_type4::MAX_LENGTH], [0u8; nfc_type4::MAX_LENGTH]);
++
++        let nfct_type4 = static_init!(
++            // Supply to the capsule: the driver and a grant
++            nfc_type4::NfcType4Driver<'static>,
++            nfc_type4::NfcType4Driver::new(
++                self.base_driver,
++                self.nfct_type4,
++                self.deferred_caller,
++                tx_buffer,
++                app_tx_buffer,
++                rx_buffer,
++                app_rx_buffer,
++                self.board_kernel.create_grant(&grant_cap)
++            )
++        );
++        nfct_type4.initialize_callback_handle(
++            self.deferred_caller
++                .register(nfct_type4)
++                .expect("no deferred call slot available for uart mux"),
++        );
++        self.base_driver.driver.set_client(nfct_type4);
++        self.nfct_type4.set_client(nfct_type4);
++        nfct_type4
++    }
++}
+diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
+index 430b5a310..0ce2c01ed 100644
+--- a/boards/nordic/nrf52840dk/src/main.rs
++++ b/boards/nordic/nrf52840dk/src/main.rs
+@@ -175,6 +175,7 @@ pub struct Platform {
+     >,
+     nonvolatile_storage: &'static capsules::nonvolatile_storage_driver::NonvolatileStorage<'static>,
+     nfc: &'static capsules::nfc::NfcDriver<'static>,
++    nfc_type4: &'static capsules::nfc_type4::NfcType4Driver<'static>,
+     nvmc: &'static nrf52840::nvmc::SyscallDriver,
+     usb: &'static capsules::usb::usb_ctap::CtapUsbSyscallDriver<
+         'static,
+@@ -202,6 +203,7 @@ impl kernel::Platform for Platform {
+             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
+             capsules::nonvolatile_storage_driver::DRIVER_NUM => f(Some(self.nonvolatile_storage)),
+             capsules::nfc::DRIVER_NUM => f(Some(self.nfc)),
++            capsules::nfc_type4::DRIVER_NUM => f(Some(self.nfc_type4)),
+             nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
+             capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
+             capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
+@@ -391,6 +393,14 @@ pub unsafe fn reset_handler() {
+     let nfc_driver =
+         components::nfc::NfcComponent::new(board_kernel, &nrf52840::nfct::NFCT).finalize(());
+ 
++    let nfc_type4_driver = components::nfc_type4::NfcType4Component::new(
++        board_kernel,
++        &nfc_driver,
++        &nrf52840::nfct_type4::NFCT_TYPE4,
++        dynamic_deferred_caller,
++    )
++    .finalize(());
++
+     let (ieee802154_radio, _mux_mac) = components::ieee802154::Ieee802154Component::new(
+         board_kernel,
+         &nrf52840::ieee802154_radio::RADIO,
+@@ -513,6 +523,7 @@ pub unsafe fn reset_handler() {
+         nvmc,
+         usb,
+         nfc: nfc_driver,
++        nfc_type4: nfc_type4_driver,
+         crp,
+         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
+     };
+diff --git a/capsules/src/driver.rs b/capsules/src/driver.rs
+index 9702cba47..e3481eee3 100644
+--- a/capsules/src/driver.rs
++++ b/capsules/src/driver.rs
+@@ -34,6 +34,7 @@ pub enum NUM {
+     Ieee802154            = 0x30001,
+     Udp                   = 0x30002,
+     NFC                   = 0x30003,
++    NFCType4              = 0x30004,
+ 
+     // Cryptography
+     Rng                   = 0x40001,
+diff --git a/capsules/src/lib.rs b/capsules/src/lib.rs
+index b3338b330..6da684085 100644
+--- a/capsules/src/lib.rs
++++ b/capsules/src/lib.rs
+@@ -47,6 +47,7 @@ pub mod mcp230xx;
+ pub mod mlx90614;
+ pub mod mx25r6435f;
+ pub mod nfc;
++pub mod nfc_type4;
+ pub mod ninedof;
+ pub mod nonvolatile_storage_driver;
+ pub mod nonvolatile_to_pages;
+diff --git a/capsules/src/nfc.rs b/capsules/src/nfc.rs
+index 617992244..961aa5087 100644
+--- a/capsules/src/nfc.rs
++++ b/capsules/src/nfc.rs
+@@ -20,7 +20,7 @@ pub struct App {
+ pub const MAX_LENGTH: usize = 256;
+ 
+ pub struct NfcDriver<'a> {
+-    driver: &'a dyn nfc::NfcTag<'a>,
++    pub driver: &'a dyn nfc::NfcTag<'a>,
+     application: Grant<App>,
+     tx_in_progress: OptionalCell<AppId>,
+     tx_buffer: TakeCell<'static, [u8]>,
+diff --git a/capsules/src/nfc_type4.rs b/capsules/src/nfc_type4.rs
+new file mode 100644
+index 000000000..af6efe527
+--- /dev/null
++++ b/capsules/src/nfc_type4.rs
+@@ -0,0 +1,812 @@
++use crate::nfc as base_nfc_capsule;
++use core::cell::Cell;
++use core::cmp;
++use kernel::common::cells::{OptionalCell, TakeCell};
++use kernel::common::dynamic_deferred_call::{
++    DeferredCallHandle, DynamicDeferredCall, DynamicDeferredCallClient,
++};
++use kernel::debug;
++use kernel::hil::{nfc, nfc_type4};
++use kernel::{AppId, AppSlice, Callback, Driver, Grant, ReturnCode, Shared};
++
++/// Syscall driver number.
++use crate::driver;
++pub const DRIVER_NUM: usize = driver::NUM::NFCType4 as usize;
++
++#[derive(Default)]
++pub struct App {
++    tx_callback: Option<Callback>,
++    tx_buffer: Option<AppSlice<Shared, u8>>,
++    rx_callback: Option<Callback>,
++    rx_buffer: Option<AppSlice<Shared, u8>>,
++}
++
++pub const MAX_LENGTH: usize = base_nfc_capsule::MAX_LENGTH;
++
++#[allow(dead_code)]
++pub struct NfcType4Driver<'a> {
++    base_nfc_driver: &'a base_nfc_capsule::NfcDriver<'a>,
++    driver: &'a dyn nfc_type4::NfcType4Tag<'a>,
++    deferred_caller: &'static DynamicDeferredCall,
++    deferred_call_handle: OptionalCell<DeferredCallHandle>,
++    application: Grant<App>,
++    app_tx_in_progress: OptionalCell<AppId>,
++    tx_in_progress: OptionalCell<AppId>,
++    tx_buffer: TakeCell<'static, [u8]>,
++    app_tx_buffer: TakeCell<'static, [u8]>,
++    rx_in_progress: OptionalCell<AppId>,
++    app_rx_in_progress: OptionalCell<AppId>,
++    rx_buffer: TakeCell<'static, [u8]>,
++    app_rx_buffer: TakeCell<'static, [u8]>,
++    driver_selected: Cell<bool>,
++    tag_configured: Cell<bool>,
++    current_field: Cell<nfc_type4::NfcType4FieldState>,
++    appid: OptionalCell<AppId>,
++}
++
++fn copy_slice<T: Copy>(src: &[T], dest: &mut [T]) -> usize {
++    let mut count: usize = 0;
++    for (i, c) in src.as_ref().iter().enumerate() {
++        dest[i] = *c;
++        count += 1;
++    }
++    count
++}
++
++impl<'a> NfcType4Driver<'a> {
++    pub fn new(
++        base_nfc_driver: &'a base_nfc_capsule::NfcDriver<'a>,
++        driver: &'a dyn nfc_type4::NfcType4Tag<'a>,
++        deferred_caller: &'static DynamicDeferredCall,
++        tx_buffer: &'static mut [u8; MAX_LENGTH],
++        app_tx_buffer: &'static mut [u8; MAX_LENGTH],
++        rx_buffer: &'static mut [u8; MAX_LENGTH],
++        app_rx_buffer: &'static mut [u8; MAX_LENGTH],
++        grant: Grant<App>,
++    ) -> NfcType4Driver<'a> {
++        NfcType4Driver {
++            base_nfc_driver,
++            driver,
++            deferred_caller,
++            deferred_call_handle: OptionalCell::empty(),
++            application: grant,
++            app_tx_in_progress: OptionalCell::empty(),
++            tx_in_progress: OptionalCell::empty(),
++            tx_buffer: TakeCell::new(tx_buffer),
++            app_tx_buffer: TakeCell::new(app_tx_buffer),
++            rx_in_progress: OptionalCell::empty(),
++            app_rx_in_progress: OptionalCell::empty(),
++            rx_buffer: TakeCell::new(rx_buffer),
++            app_rx_buffer: TakeCell::new(app_rx_buffer),
++            driver_selected: Cell::new(false),
++            tag_configured: Cell::new(false),
++            current_field: Cell::new(nfc_type4::NfcType4FieldState::None),
++            appid: OptionalCell::empty(),
++        }
++    }
++
++    pub fn initialize_callback_handle(&self, handle: DeferredCallHandle) {
++        self.deferred_call_handle.replace(handle);
++    }
++
++    fn do_next_op(&self) {
++        debug!("::::> [C][N1] DEFERRED CALL INVOKED");
++        if self.rx_in_progress.is_some() {
++            debug!("::> [C][N2] RX ALREADY IN PROGRESS, NOT SCHEDULING NEXT OP");
++            return;
++        }
++        if self.tx_in_progress.is_some() {
++            debug!("::> [C][N3] TX ALREADY IN PROGRESS, NOT SCHEDULING NEXT OP");
++            return;
++        }
++        if self.app_tx_in_progress.is_some() {
++            debug!("::> [C][N4] APP TX ALREADY IN PROGRESS, NOT SCHEDULING NEXT OP");
++            return;
++        }
++        debug!("::::> [C][N5] NOTHING IS IN PROGRESS, SCHEDULING SELF RECEIVE");
++        self.receive_self_packet();
++    }
++
++    fn do_next_op_async(&self) {
++        self.deferred_call_handle
++            .map(|handle| self.deferred_caller.set(*handle));
++    }
++
++    fn generate_type4_reply(&self, request: &[u8], reply: &mut [u8]) -> usize {
++        // CONVERSATION 1
++        // READER -> TAG: RATS
++        // TAG -> READER: ATS
++        //
++        // CONVERSATION 2
++        // READER -> TAG: CAN YOU SELECT NFC TYPE 4
++        // TAG -> READER: YES, WE CAN! 0x9000
++        //
++        // CONVERSATION 3
++        // READER -> TAG: SELECT FILE CAPAGBILITY CONTAINER
++        // TAG -> READER: OK FILE SELECTED
++        //
++        // CONVERSATION 4
++        // READER -> TAG: READ FROM THE SELECTED FILE AT OFFSET 0
++        // TAG -> READER: HERE ARE THE CONTENTS OF THE SELECTED FILE (CAPABILITY CONTAINER)
++        //
++        // CONVERSATION 5
++        // READER -> TAG: SELECT FILE NDEF
++        // TAG -> READER: OK FILE SELECTED (BUT REALLY NOT!)
++        //
++        // CONVERSATION 6.1
++        // READER -> TAG: READ 2 BYTES FROM THE SELECTED FILE (NDEF) AT OFFSET 0 TO GET FILE SIZE
++        // TAG -> READER: HERE ARE THE CONTENTS OF THE SELECTED FILE (NDEF)
++        //
++        // CONVERSATION 6.2
++        // READER -> TAG: READ N BYTES FROM THE SELECTED FILE (NDEF) AT OFFSET 2
++        // TAG -> READER: HERE ARE THE CONTENTS OF THE SELECTED FILE (NDEF)
++        //
++        // CONVERASTION 7
++        // READER -> TAG: SELECT APPLET FIDO_2_0
++        // TAG -> READER: OK I HAVE SELECTED FIDO_2_0
++        //
++        // OK, ONWARDS TO THE APPLICATION
++
++        if request.len() == 0 {
++            debug!("XX> [C] EMPTY FRAME");
++            return 0;
++        }
++
++        if request.len() < 3 && (request[0] == 0x02 || request[0] == 0x03) {
++            debug!("XX> [C] FRAME IS TOO SHORT, ASSUMING IT'S S-FRAME");
++            return copy_slice(&[0xf2, 0xfb][..], reply);
++        }
++
++        if request[0] == 0xA2
++            || request[0] == 0xA3
++            || request[0] == 0xB2
++            || request[0] == 0xB3
++            || request[0] == 0xC2
++            || request[0] == 0xD2
++        {
++            debug!("XX> [C] GOOD THINGS ARE HAPPENING, CONTINUING");
++            return copy_slice(&[0xf2, 0xfb][..], reply);
++        }
++
++        match request[0] {
++            0xe0 /* RATS */=> {
++                // CONVERSATION 1
++                debug!("XX> [C] RATS, CONVERSATION 1");
++                self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                copy_slice(&[0x05, 0x78, 0x80, 0xF1, 0x00][..], reply)
++            }
++            0xc2 /* DESELECT */ => {
++                // Ignore the request
++                debug!("XX> [C] DESELECT");
++                // self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                // copy_slice(&[0x6A, 0x81][..], reply)
++                0
++            }
++            0x02 | 0x03 /* APDU Prefix */ => match request[2] {
++                // If the received packet is applet selection command (FIDO 2)
++                0xa4 /* SELECT */ => if request[3] == 0x04 && request[5] == 0x08 && request[6] == 0xa0 {
++                    // CONVERSATION 7
++                    // Vesion: "U2F_V2"
++                    debug!("XX> [C] APDU -> SELECT, CONVERSATION 7");
++                    self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                    copy_slice(&[request[0],0x55, 0x32, 0x46, 0x5f, 0x56, 0x32, 0x90, 0x00,][..], reply)
++                } else if (request[6] == 0xd2 && request[7] == 0x76) || (request[6] == 0xe1 && (request[7] == 0x03 || request[7] == 0x04)){
++                    // CONVERSATION 2
++                    debug!("XX> [C] APDU -> SELECT, CONVERSATION 2");
++                    self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                    copy_slice(&[request[0], 0x90, 0x00][..], reply)
++                } else /* Unknown file */ {
++                    debug!("XX> [C] APDU -> SELECT, UNKNOWN");
++                    self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                    copy_slice(&[request[0], 0x6a, 0x82][..], reply)
++                }
++                0xb0 /* READ */ =>  match request[5] {
++                    0x02 => {
++                        // CONVERSATION 6.1
++                        debug!("XX> [C] APDU -> READ, CONVERSATION 6.1");
++                        self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                        copy_slice(&[request[0], 0x12, 0x90, 0x00,][..], reply)
++                    }
++                    0x12 => {
++                        // CONVERSATION 6.2
++                        debug!("XX> [C] APDU -> READ, CONVERSATION 6.2");
++                        self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                        copy_slice(&[request[0], 0xd1, 0x01, 0x0e, 0x55, 0x77, 0x77, 0x77, 0x2e, 0x6f, 0x70, 0x65,
++                            0x6e, 0x73, 0x6b, 0x2e, 0x64, 0x65, 0x76, 0x90, 0x00,][..], reply)
++                    }
++                    0x0f => {
++                        // CONVERSATION 4
++                        debug!("XX> [C] APDU -> READ, CONVERSATION 4");
++                        self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                        copy_slice(&[request[0], 0x00, 0x0f, 0x20, 0x00, 0x7f, 0x00, 0x7f, 0x04, 0x06, 0xe1, 0x04,
++                            0x00, 0x7f, 0x00, 0x00, 0x90, 0x00,][..], reply)
++                    }
++                    _ => {
++                        // CONVERSATION 3 & 5
++                        if request[1] == 0x00 && request[2] == 0x01 && request[3] == 0x00 {
++                            debug!("XX> [C] APDU -> READ -> ELSE, SETTING PASSTHROUGH");
++                            self.current_field.set(nfc_type4::NfcType4FieldState::Passthrough(request[0]));
++                            0
++                        } else {
++                            debug!("XX> [C] APDU -> READ -> ELSE, CONVERSATION 3/5");
++                            self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                            copy_slice(&[request[0], 0x90, 0x00][..], reply)
++                        }
++                    }
++                }
++                _ => {
++                    if request[1] == 0x00 && request[2] == 0x01 && request[3] == 0x00 {
++                        debug!("XX> [C] APDU -> ELSE, SETTING PASSTHROUGH");
++                        self.current_field.set(nfc_type4::NfcType4FieldState::Passthrough(request[0]));
++                        copy_slice(&[0xf2, 0xfb][..], reply)
++                    } else {
++                        debug!("XX> [C] APDU -> ELSE, BOGUS ACKNOWLEDGE");
++                        self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                        copy_slice(&[request[0], 0x90, 0x00][..], reply)
++                    }
++                }
++            }
++            0x26 | 0x52 | 0x50 /* REQA | WUPA | Halt */ => {
++                debug!("XX> [C] REQA | WUPA | Halt");
++                self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                0
++            },
++            0xf2 /*SFRAME*/ => {
++                debug!("XX> [C] SFRAME");
++                self.current_field.set(nfc_type4::NfcType4FieldState::Type4HandshakeInProgress);
++                copy_slice(&[0xf2, 0xfb][..], reply)
++            },
++            _ => {
++                debug!("XX> [C] ELSE, SETTING PASSTHROUGH");
++                self.current_field.set(nfc_type4::NfcType4FieldState::Passthrough(request[0]));
++                0
++            },
++        }
++    }
++
++    fn reset(&self) {
++        self.driver_selected.set(false);
++        self.current_field.set(nfc_type4::NfcType4FieldState::Off);
++        self.tag_configured.set(false);
++    }
++
++    pub fn transmit_slice(&self, buffer: &'static mut [u8], slice: &[u8]) -> ReturnCode {
++        debug!("----> [C] TRANSMITTING TYPE 4 RESPONSE: {:02X?}", &slice);
++        for (i, c) in slice.as_ref().iter().enumerate() {
++            buffer[i] = *c;
++        }
++        let result = self
++            .base_nfc_driver
++            .driver
++            .transmit_buffer(buffer, slice.len());
++        if result.is_err() {
++            debug!("----> [C] ERROR TRANSMITTING TYPE 4 RESPONSE");
++            let (err, buf) = result.unwrap_err();
++            self.tx_buffer.replace(buf);
++            return err;
++        }
++        debug!("----> [C] SUCCESSFULLY TRANSMITTED TYPE 4 RESPONSE");
++        ReturnCode::SUCCESS
++    }
++
++    pub fn transmit_internal(
++        &self,
++        buffer: &'static mut [u8],
++        slice: AppSlice<Shared, u8>,
++        len: usize,
++    ) -> ReturnCode {
++        debug!("----> [C][TI1] TRANSMITTING {} BYTES FROM THE APP", len);
++        for (i, c) in slice.as_ref().iter().enumerate() {
++            buffer[i] = *c;
++        }
++        let result = self
++            .base_nfc_driver
++            .driver
++            .transmit_buffer(buffer, slice.len());
++        if result.is_err() {
++            let (err, buf) = result.unwrap_err();
++            self.tx_buffer.replace(buf);
++            return err;
++        }
++        ReturnCode::SUCCESS
++    }
++
++    /// Internal helper function for setting up frame transmission
++    pub fn transmit_new(&self, app_id: AppId, app: &mut App, len: usize) -> ReturnCode {
++        if self.current_field.get() == nfc_type4::NfcType4FieldState::Off {
++            return ReturnCode::ECANCEL;
++        }
++        // Driver not ready yet
++        if !self.driver_selected.get() {
++            return ReturnCode::EOFF;
++        }
++        if self.app_tx_in_progress.is_some() {
++            return ReturnCode::EBUSY;
++        }
++        match app.tx_buffer.take() {
++            Some(slice) => self.transmit(app_id, app, slice, len),
++            None => ReturnCode::EBUSY,
++        }
++    }
++
++    /// Internal helper function for data transmission
++    pub fn transmit(
++        &self,
++        app_id: AppId,
++        app: &mut App,
++        slice: AppSlice<Shared, u8>,
++        len: usize,
++    ) -> ReturnCode {
++        if self.app_tx_in_progress.is_none() {
++            self.app_tx_in_progress.set(app_id);
++            self.tx_buffer
++                .take()
++                .map(|buffer| self.transmit_internal(buffer, slice, len))
++                .unwrap()
++        } else {
++            app.tx_buffer = Some(slice);
++            ReturnCode::EBUSY
++        }
++    }
++
++    pub fn receive_slice(&self, buffer: &'static mut [u8]) -> ReturnCode {
++        debug!("====> [C] RECEIVING TYPE 4 RESPONSE");
++        let result = self.base_nfc_driver.driver.receive_buffer(buffer);
++        if result.is_err() {
++            debug!("====> [C] ERROR RECEIVING TYPE 4 RESPONSE");
++            let (err, buf) = result.unwrap_err();
++            self.rx_buffer.replace(buf);
++            return err;
++        }
++        debug!("====> [C] SUCCESSFULLY KICKED OFF TYPE 4 RECEIVE");
++        ReturnCode::SUCCESS
++    }
++
++    pub fn receive_internal(&self, buffer: &'static mut [u8]) -> ReturnCode {
++        let result = self.base_nfc_driver.driver.receive_buffer(buffer);
++        if result.is_err() {
++            let (err, buf) = result.unwrap_err();
++            self.rx_buffer.replace(buf);
++            return err;
++        }
++        ReturnCode::SUCCESS
++    }
++
++    /// Internal helper function for starting a receive operation
++    pub fn receive_new(&self, app_id: AppId, app: &mut App, _len: usize) -> ReturnCode {
++        if !self.tag_configured.get() {
++            return ReturnCode::EOFF;
++        }
++        if self.current_field.get() != nfc_type4::NfcType4FieldState::On {
++            return ReturnCode::ECANCEL;
++        }
++        // Driver not ready yet
++        if !self.driver_selected.get() {
++            return ReturnCode::EBUSY;
++        }
++        if self.rx_in_progress.is_some() || self.app_rx_in_progress.is_some() {
++            return ReturnCode::EBUSY;
++        }
++        if self.tx_in_progress.is_some() {
++            panic!("Trying to receive while transmit is in progress");
++        }
++        if app.rx_buffer.is_some() {
++            self.rx_buffer
++                .take()
++                .map(|buffer| {
++                    self.app_rx_in_progress.set(app_id);
++                    self.receive_internal(buffer)
++                })
++                .unwrap()
++        } else {
++            debug!(" >> FAIL: no application buffer supplied!");
++            // Must supply buffer before performing receive operation
++            ReturnCode::EINVAL
++        }
++    }
++
++    fn bubble_received_frame(&'a self, buffer: &[u8], rx_len: usize, result: ReturnCode) {
++        match self.current_field.get() {
++            nfc_type4::NfcType4FieldState::Passthrough(_) => {
++                debug!("==> [C][RB1] TYPE 4 PASSTHROUGH MODE WAS SET, BUBBLING UP THE BUFFER JUST RECEIVED ({} bytes)", rx_len);
++
++                self.app_rx_in_progress.take().map(|appid| {
++                    let _ = self.application.enter(appid, |app, _| {
++                        app.rx_buffer = app.rx_buffer.take().map(|mut rb| {
++                            // Figure out length to copy.
++                            let max_len = cmp::min(rx_len, rb.len());
++                            // Copy over data to app buffer.
++                            for idx in 0..max_len {
++                                rb.as_mut()[idx] = buffer[idx];
++                            }
++                            debug!("==> [C][RB2] TYPE 4 BUFFER COPIED TO APP BUFFER, SCHEDULING CALLBACK ({} bytes)", rx_len);
++                            app.rx_callback
++                                .map(|mut cb| cb.schedule(result.into(), max_len, 0));
++                            rb
++                        });
++                    });
++                });
++            }
++            _ => {
++                debug!("==> [C][RB3] TYPE 4 PASSTHROUGH MODE WAS NOT SET, LEAVING THE JUST RECEIVED BUFFER ALONE ({} bytes)", rx_len);
++            }
++        }
++    }
++
++    fn bubble_transmitted_frame(&'a self, _buffer: &[u8], result: ReturnCode) {
++        debug!("--> [C][TB1] TYPE 4 BUBBLING UP TRANSMITTED FRAME");
++        self.app_tx_in_progress.take().map(|appid| {
++            let _ = self.application.enter(appid, |app, _| {
++                app.tx_callback
++                    .map(|mut cb| cb.schedule(result.into(), 0, 0));
++            });
++        });
++    }
++
++    fn transmit_self_packet(&'a self, slice: &[u8]) {
++        if self.tx_in_progress.is_some() {
++            debug!("--> [C][TH1] SELF TRANSMIT ALREADY IN PROGRESS, REFUSING TO TRANSMIT");
++            return;
++        }
++
++        if self.tx_buffer.is_none() {
++            debug!("--> [C][TH2] SELF TX BUFFER NOT AVAILAIBLE, REFUSING TO TRANSMIT");
++            return;
++        }
++
++        self.appid
++            .take()
++            .map(|appid| {
++                self.tx_buffer
++                    .take()
++                    .map(|tx_buffer| {
++                        debug!("--> [C][TH3] TRANSMITTING TYPE 4 SLICE");
++                        self.tx_in_progress.set(appid);
++                        self.transmit_slice(tx_buffer, slice);
++                    })
++                    .unwrap();
++                self.appid.set(appid);
++            })
++            .unwrap();
++    }
++
++    fn receive_self_packet(&self) {
++        if self.rx_in_progress.is_some() {
++            debug!("==> [C][RH1] SELF RECEIVE ALREADY IN PROGRESS, REFUSING TO RECEIVE AGAIN");
++            return;
++        }
++
++        if self.rx_buffer.is_none() {
++            debug!("==> [C][RH2] SELF RX BUFFER NOT AVAILAIBLE, REFUSING TO RECEIVE");
++            return;
++        }
++
++        self.appid
++            .take()
++            .map(|appid| {
++                self.rx_buffer
++                    .take()
++                    .map(|rx_buffer| {
++                        debug!("==> [C][RH3] RECEIVING TYPE 4 SLICE");
++                        self.rx_in_progress.set(appid);
++                        self.receive_slice(rx_buffer);
++                    })
++                    .unwrap();
++                self.appid.set(appid);
++            })
++            .unwrap();
++    }
++
++    fn frame_received_helper(
++        &'a self,
++        buffer: &'static mut [u8],
++        rx_len_total: usize,
++        result: ReturnCode,
++    ) {
++        let mut bufcopy: [u8; base_nfc_capsule::MAX_LENGTH] = [0; base_nfc_capsule::MAX_LENGTH];
++        let rx_len = cmp::min(rx_len_total, buffer.len());
++        copy_slice(&buffer[..rx_len], &mut bufcopy[..rx_len]);
++
++        debug!(
++            "==> [C][R1] TYPE 4 FRAME RECEIVED: {:02X?}",
++            &buffer[..rx_len]
++        );
++
++        debug!("==> [C][R2] REPLACING SELF RX_BUFFER");
++        self.rx_buffer.replace(buffer);
++
++        debug!("==> [C][R3] CLEARING SELF RX_IN_PROGRESS");
++        self.rx_in_progress.clear();
++
++        let mut reply: [u8; MAX_LENGTH] = [0; MAX_LENGTH];
++        let reply_len = self.generate_type4_reply(&bufcopy[..rx_len], &mut reply);
++
++        if bufcopy[0] == 0x03 {
++            for i in 0..rx_len - 1 {
++                bufcopy[i] = bufcopy[i + 1];
++            }
++            debug!("==> [C][R4] BUBBLING UP FRAME");
++            self.bubble_received_frame(&bufcopy[..], rx_len, result);
++        }
++
++        if reply_len > 0 {
++            debug!(
++                "==> [C][R5] TRANSMITTING TYPE 4 REPLY: {:02X?}",
++                &reply[..reply_len]
++            );
++            self.transmit_self_packet(&reply[..reply_len]);
++        } else {
++            debug!("==> [C][R6] SCHEDULING NEXT OP ASYNCLY");
++            self.do_next_op_async();
++        }
++    }
++
++    fn frame_transmitted_helper(&'a self, buffer: &'static mut [u8], result: ReturnCode) {
++        let mut bufcopy: [u8; base_nfc_capsule::MAX_LENGTH] = [0; base_nfc_capsule::MAX_LENGTH];
++        let tx_len = cmp::min(base_nfc_capsule::MAX_LENGTH, buffer.len());
++        copy_slice(&buffer[..tx_len], &mut bufcopy[..tx_len]);
++
++        if buffer[0] != 0xf2 {
++            debug!(
++                "--> [C][T1] TYPE 4 REPLY TRANSMITTED ({} bytes): {:02X?} ...",
++                tx_len,
++                &buffer[..8]
++            );
++        }
++
++        debug!("--> [C][T2] REPLACING SELF TX_BUFFER");
++        self.tx_buffer.replace(buffer);
++
++        debug!("--> [C][T3] CLEARING SELF TX_IN_PROGRESS");
++        self.tx_in_progress.clear();
++
++        if self.app_tx_in_progress.is_some() {
++            self.bubble_transmitted_frame(&bufcopy[..], result);
++        }
++
++        debug!("--> [C][T5] SCHEDULING NEXT OP ASYNCLY");
++        self.do_next_op_async();
++    }
++
++    fn field_lost_helper(
++        &'a self,
++        rx_buffer: Option<&'static mut [u8]>,
++        tx_buffer: Option<&'static mut [u8]>,
++    ) {
++        debug!(
++            "..> [C][L1] RX [ARG][SELF|PROGRESS] [APP|APP_PROGRESS]: [{}] [{}|{}] [{}|{}]",
++            rx_buffer.is_some(),
++            self.rx_buffer.is_some(),
++            self.rx_in_progress.is_some(),
++            self.app_rx_buffer.is_some(),
++            self.app_rx_in_progress.is_some()
++        );
++        debug!(
++            "..> [C][L2] TX [ARG][SELF|PROGRESS] [APP|APP_PROGRESS]: [{}] [{}|{}] [{}|{}]",
++            tx_buffer.is_some(),
++            self.tx_buffer.is_some(),
++            self.tx_in_progress.is_some(),
++            self.app_tx_buffer.is_some(),
++            self.app_tx_in_progress.is_some()
++        );
++
++        if rx_buffer.is_none() && self.rx_buffer.is_none() {
++            debug!("..> [C][L3] NO RX BUFFER RECEIVED IN ARG AND SELF RX BUFFER IS EMPTY");
++        }
++        if tx_buffer.is_none() && self.tx_buffer.is_none() {
++            debug!("..> [C][L4] NO TX BUFFER RECEIVED IN ARG AND SELF TX BUFFER IS EMPTY");
++        }
++
++        if rx_buffer.is_some() {
++            self.rx_buffer.replace(rx_buffer.unwrap());
++        }
++        if self.rx_in_progress.is_some() {
++            self.rx_in_progress.clear();
++        }
++        if self.app_rx_in_progress.is_some() {
++            self.app_rx_in_progress.take().map(|appid| {
++                let _ = self.application.enter(appid, |app, _| {
++                    app.rx_callback
++                        .map(|mut cb| cb.schedule((ReturnCode::ECANCEL).into(), 0, 0));
++                });
++            });
++        }
++
++        if tx_buffer.is_some() {
++            self.tx_buffer.replace(tx_buffer.unwrap());
++        }
++        if self.tx_in_progress.is_some() {
++            self.tx_in_progress.clear();
++        }
++        if self.app_tx_in_progress.is_some() {
++            self.app_tx_in_progress.take().map(|appid| {
++                let _ = self.application.enter(appid, |app, _| {
++                    app.tx_callback
++                        .map(|mut cb| cb.schedule((ReturnCode::ECANCEL).into(), 0, 0));
++                });
++            });
++        }
++
++        self.reset();
++    }
++}
++
++impl<'a> DynamicDeferredCallClient for NfcType4Driver<'a> {
++    fn call(&self, _handle: DeferredCallHandle) {
++        self.do_next_op();
++    }
++}
++
++impl<'a> nfc_type4::Type4Client<'a> for NfcType4Driver<'a> {
++    fn frame_received(&self, _buffer: &'static mut [u8], _rx_len: usize, _result: ReturnCode) {
++        debug!("::::> [C][X] TYPE 4 CLIENT INVOKED, FRAME RECEIVED, WHAT THE FUCK IS HAPPENING?");
++    }
++
++    fn frame_transmitted(&self, _buffer: &'static mut [u8], _result: ReturnCode) {
++        debug!(
++            "::::> [C][X] TYPE 4 CLIENT INVOKED, FRAME TRANSMITTED, WHAT THE FUCK IS HAPPENING?"
++        );
++    }
++}
++
++impl Driver for NfcType4Driver<'_> {
++    /// Setup shared buffers.
++    ///
++    /// ### `allow_num`
++    ///
++    /// - `1`: Readable buffer for transmission buffer, if
++    ///        provided buffer length is more than MAX_LENGTH then
++    ///        return EINVAL
++    /// - `2`: Writeable buffer for reception buffer, if
++    ///        provided buffer length is not MAX_LENGTH then
++    ///        return EINVAL
++    fn allow(
++        &self,
++        appid: AppId,
++        allow_num: usize,
++        slice: Option<AppSlice<Shared, u8>>,
++    ) -> ReturnCode {
++        self.appid.set(appid);
++        match allow_num {
++            1 => self
++                .application
++                .enter(appid, |app, _| {
++                    if let Some(buf) = &slice {
++                        if buf.len() > MAX_LENGTH {
++                            return ReturnCode::EINVAL;
++                        }
++                    }
++                    app.tx_buffer = slice;
++                    ReturnCode::SUCCESS
++                })
++                .unwrap_or_else(|err| err.into()),
++            2 => self
++                .application
++                .enter(appid, |app, _| {
++                    if let Some(buf) = &slice {
++                        if buf.len() != MAX_LENGTH {
++                            return ReturnCode::EINVAL;
++                        }
++                    }
++                    app.rx_buffer = slice;
++                    ReturnCode::SUCCESS
++                })
++                .unwrap_or_else(|err| err.into()),
++            _ => ReturnCode::ENOSUPPORT,
++        }
++    }
++
++    /// Setup callbacks.
++    ///
++    /// ### `subscribe_num`
++    ///
++    /// - `1`: Frame transmission completed callback
++    /// - `2`: Frame reception completed callback
++    fn subscribe(
++        &self,
++        subscribe_num: usize,
++        callback: Option<Callback>,
++        appid: AppId,
++    ) -> ReturnCode {
++        self.appid.set(appid);
++        match subscribe_num {
++            1 => self
++                .application
++                .enter(appid, |app, _| {
++                    app.tx_callback = callback;
++                    ReturnCode::SUCCESS
++                })
++                .unwrap_or_else(|err| err.into()),
++            2 => self
++                .application
++                .enter(appid, |app, _| {
++                    app.rx_callback = callback;
++                    ReturnCode::SUCCESS
++                })
++                .unwrap_or_else(|err| err.into()),
++            _ => ReturnCode::ENOSUPPORT,
++        }
++    }
++
++    /// NFC control
++    ///
++    /// ### `command_num`
++    ///
++    /// - `0`: Driver check.
++    /// - `1`: Transmits a buffer passed via `allow`, up to the length
++    ///        passed in `arg1`.
++    /// - `2`: Receives into a buffer passed via `allow`, up to the length
++    ///        passed in `arg1`.
++    /// - `3`: Controls tag emulation, enables it if the value in `arg1`
++    ///        is positive, disables it in case of 0.
++    /// - `4`: Configures the tag based on the value of `arg1`.
++    fn command(&self, command_num: usize, arg1: usize, _: usize, appid: AppId) -> ReturnCode {
++        self.appid.set(appid);
++        match command_num {
++            0 /* check if present */ => ReturnCode::SUCCESS,
++            1 => {
++                let len = arg1;
++                self.application.enter(appid, |app, _| {
++                    self.transmit_new(appid, app, len)
++                }).unwrap_or_else(|err| err.into())
++            },
++            2 => {
++                let len = arg1;
++                self.application.enter(appid, |app, _| {
++                    self.receive_new(appid, app, len)
++                }).unwrap_or_else(|err| err.into())
++            },
++            3 /* enable tag emulation */=> {
++                self.application.enter(appid, |_, _| {
++                    match arg1 as u8 {
++                        0 /* false */ => self.base_nfc_driver.driver.deactivate(),
++                        _ /* true */ => self.base_nfc_driver.driver.activate(),
++                    }
++                    ReturnCode::SUCCESS
++                }).unwrap_or_else(|err| err.into())
++            }
++            4 /* tag type configuration */ => {
++                self.application.enter(appid, |_, _| {
++                    self.tag_configured.set(true);
++                    let tag_type = arg1;
++                    self.base_nfc_driver.driver.configure(tag_type as u8)
++                }).unwrap_or_else(|err| err.into())
++            }
++            _ => ReturnCode::ENOSUPPORT,
++        }
++    }
++}
++
++impl<'a> nfc::Client<'a> for NfcType4Driver<'a> {
++    fn tag_selected(&'a self) {
++        self.driver_selected.set(true);
++        // 0xfffff results in 1048575 / 13.56e6 = 77ms
++        // The anti-collision is finished, we can now
++        // set the frame delay to the maximum value
++        self.base_nfc_driver.driver.set_framedelaymax(0xfffff);
++    }
++
++    fn tag_deactivated(&'a self) {
++        self.reset();
++    }
++
++    fn field_detected(&'a self) {
++        self.current_field.set(nfc_type4::NfcType4FieldState::On);
++    }
++
++    fn field_lost(
++        &'a self,
++        rx_buffer: Option<&'static mut [u8]>,
++        tx_buffer: Option<&'static mut [u8]>,
++    ) {
++        self.field_lost_helper(rx_buffer, tx_buffer)
++    }
++
++    fn frame_received(&'a self, buffer: &'static mut [u8], rx_len: usize, result: ReturnCode) {
++        self.frame_received_helper(buffer, rx_len, result)
++    }
++
++    fn frame_transmitted(&'a self, buffer: &'static mut [u8], result: ReturnCode) {
++        self.frame_transmitted_helper(buffer, result)
++    }
++}
+diff --git a/chips/nrf52/src/lib.rs b/chips/nrf52/src/lib.rs
+index 1677939bf..e4aa791e6 100644
+--- a/chips/nrf52/src/lib.rs
++++ b/chips/nrf52/src/lib.rs
+@@ -15,6 +15,7 @@ pub mod i2c;
+ pub mod ieee802154_radio;
+ pub mod interrupt_service;
+ pub mod nfct;
++pub mod nfct_type4;
+ pub mod nvmc;
+ pub mod power;
+ pub mod ppi;
+diff --git a/chips/nrf52/src/nfct_type4.rs b/chips/nrf52/src/nfct_type4.rs
+new file mode 100644
+index 000000000..19780502b
+--- /dev/null
++++ b/chips/nrf52/src/nfct_type4.rs
+@@ -0,0 +1,63 @@
++//! Near Field Communication Tag (NFCT)
++//!
++//! Author
++//! -------------------
++//!
++//! * Jean-Michel Picod <jmichel@google.com>
++//! * Mirna Al-Shetairy <mshetairy@google.com>
++
++use crate::nfct::NFCT;
++use core::cell::Cell;
++use kernel::common::cells::OptionalCell;
++use kernel::hil::{nfc, nfc_type4};
++use kernel::ReturnCode;
++
++#[derive(Copy, Clone, Debug, PartialEq)]
++pub enum NfcType4State {
++    Initialized,
++}
++
++pub static mut NFCT_TYPE4: NfcType4Tag = NfcType4Tag::new();
++
++#[allow(dead_code)]
++pub struct NfcType4Tag<'a> {
++    client: OptionalCell<&'a dyn nfc_type4::Type4Client<'a>>,
++    // To keep additional code-related states
++    state: Cell<NfcType4State>,
++}
++
++impl<'a> NfcType4Tag<'a> {
++    pub const fn new() -> Self {
++        Self {
++            client: OptionalCell::empty(),
++            state: Cell::new(NfcType4State::Initialized),
++        }
++    }
++}
++
++impl<'a> nfc_type4::NfcType4Tag<'a> for NfcType4Tag<'a> {
++    fn set_client(&self, client: &'a dyn nfc_type4::Type4Client<'a>) {
++        self.client.set(client);
++    }
++
++    #[allow(dead_code, unused_variables)]
++    fn transmit_buffer(
++        &self,
++        buf: &'static mut [u8],
++        amount: usize,
++    ) -> Result<usize, (ReturnCode, &'static mut [u8])> {
++        unsafe {
++            (&NFCT as &dyn nfc::NfcTag).transmit_buffer(buf, amount)
++        }
++    }
++
++    #[allow(dead_code, unused_variables)]
++    fn receive_buffer(
++        &self,
++        buf: &'static mut [u8],
++    ) -> Result<(), (ReturnCode, &'static mut [u8])> {
++        unsafe {
++            (&NFCT as &dyn nfc::NfcTag).receive_buffer(buf)
++        }
++    }
++}
+diff --git a/chips/nrf52840/src/lib.rs b/chips/nrf52840/src/lib.rs
+index 628a33567..d2805251c 100644
+--- a/chips/nrf52840/src/lib.rs
++++ b/chips/nrf52840/src/lib.rs
+@@ -1,7 +1,7 @@
+ #![no_std]
+ 
+ pub use nrf52::{
+-    acomp, adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nfct,
++    acomp, adc, aes, ble_radio, clock, constants, crt1, ficr, i2c, ieee802154_radio, init, nfct, nfct_type4,
+     nvmc, pinmux, power, ppi, pwm, rtc, spi, temperature, timer, trng, uart, uicr, usbd,
+ };
+ pub mod chip;
+diff --git a/kernel/src/hil/mod.rs b/kernel/src/hil/mod.rs
+index 7fcfe4d4e..8f05e408d 100644
+--- a/kernel/src/hil/mod.rs
++++ b/kernel/src/hil/mod.rs
+@@ -16,6 +16,7 @@ pub mod i2c;
+ pub mod led;
+ pub mod log;
+ pub mod nfc;
++pub mod nfc_type4;
+ pub mod nonvolatile_storage;
+ pub mod pwm;
+ pub mod radio;
+diff --git a/kernel/src/hil/nfc_type4.rs b/kernel/src/hil/nfc_type4.rs
+new file mode 100644
+index 000000000..fcfe5da01
+--- /dev/null
++++ b/kernel/src/hil/nfc_type4.rs
+@@ -0,0 +1,62 @@
++use crate::returncode::ReturnCode;
++
++#[derive(Copy, Clone, Debug, PartialEq)]
++/// An enum to keep track of the NFC field status
++pub enum NfcType4FieldState {
++    /// Initial value that indicates no NFCT field events.
++    None,
++    /// The NFCT FIELDLOST event has been set.
++    On,
++    /// The NFCT FIELDDETECTED event has been set.
++    Off,
++    /// Both NFCT field events have been set - ambiguous state.
++    Unknown,
++    /// We are in the middle of a type 4 "handshake"
++    Type4HandshakeInProgress,
++    /// Passthrough all frames to the application
++    Passthrough(u8),
++}
++
++/// Controls an NFC type4 tag
++/// Uses the `nfc` capsule for providing the underlying functionality
++pub trait NfcType4Tag<'a> {
++    /// Set the client instance that will handle callbacks
++    fn set_client(&self, client: &'a dyn Type4Client<'a>);
++
++    /// Pass the buffer to be transmitted and the amount of data and take
++    /// ownership of it. Subscribe to the relevant interrupt and trigger
++    /// the task for transmission.
++    ///
++    /// On success returns the length of data to be sent.
++    /// On failure returns an error code and the buffer passed in.
++    fn transmit_buffer(
++        &self,
++        tx_buffer: &'static mut [u8],
++        tx_amount: usize,
++    ) -> Result<usize, (ReturnCode, &'static mut [u8])>;
++
++    /// Pass a buffer for receiving data and take ownership of it.
++    ///
++    /// On success returns nothing.
++    /// On failure returns an error code and the buffer passed in.
++    fn receive_buffer(
++        &self,
++        rx_buffer: &'static mut [u8],
++    ) -> Result<(), (ReturnCode, &'static mut [u8])>;
++}
++
++/// Implement this trait and use `set_client()` in order to receive callbacks.
++pub trait Type4Client<'a> {
++    /// Called when a frame is received.
++    /// This will return the buffer passed into `receive_buffer()`.
++    /// If the buffer length is smaller then the data length the buffer will only contain part
++    /// of the frame the `result` will contain an `ENOMEM` error. If the received frame contained
++    /// errors the `result` will contain a `FAIL` error.
++    fn frame_received(&'a self, buffer: &'static mut [u8], rx_len: usize, result: ReturnCode);
++
++    /// Called when a frame has finished transmitting.
++    /// This will return the buffer passed into `transmit_buffer()`.
++    /// If not all of the data could be sent because of a timeout the `result` will contain
++    /// a `FAIL` error.
++    fn frame_transmitted(&'a self, buffer: &'static mut [u8], result: ReturnCode);
++}

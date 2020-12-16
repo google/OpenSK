@@ -15,11 +15,13 @@
 use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
+use core::fmt::Write;
+use libtock_drivers::console::Console;
 
 const APDU_HEADER_LEN: usize = 4;
 
-#[derive(Clone, Debug, PartialEq)]
 #[allow(non_camel_case_types, dead_code)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ApduStatusCode {
     SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
@@ -51,8 +53,8 @@ pub enum ApduInstructions {
     GetResponse = 0xC0,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
 #[allow(dead_code)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct ApduHeader {
     pub cla: u8,
     pub ins: u8,
@@ -83,16 +85,16 @@ pub enum Case {
     Le3,
 }
 
-#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ApduType {
     Instruction,
     Short(Case),
     Extended(Case),
 }
 
-#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct APDU {
     pub header: ApduHeader,
     pub lc: u16,
@@ -105,7 +107,11 @@ impl TryFrom<&[u8]> for APDU {
     type Error = ApduStatusCode;
 
     fn try_from(frame: &[u8]) -> Result<Self, ApduStatusCode> {
+        let mut console = Console::new();
+        writeln!(console, "::::::::::::> Trying to decode APDU").unwrap();
+
         if frame.len() < APDU_HEADER_LEN as usize {
+            writeln!(console, "::::::::::::> APDU wrong header length").unwrap();
             return Err(ApduStatusCode::SW_WRONG_DATA);
         }
         //        +-----+-----+----+----+
@@ -168,6 +174,7 @@ impl TryFrom<&[u8]> for APDU {
             // Lc is possibly three-bytes long
             let extended_apdu_lc = BigEndian::read_u16(&payload[1..3]) as usize;
             if payload.len() < extended_apdu_lc + 3 {
+                writeln!(console, "::::::::::::> APDU wrong length for payload").unwrap();
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }
 
@@ -176,6 +183,11 @@ impl TryFrom<&[u8]> for APDU {
                 .checked_sub(extended_apdu_lc + 3)
                 .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
             if extended_apdu_le_len > 3 {
+                writeln!(
+                    console,
+                    "::::::::::::> APDU wrong length for remaining bytes"
+                )
+                .unwrap();
                 return Err(ApduStatusCode::SW_WRONG_LENGTH);
             }
 

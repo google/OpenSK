@@ -25,6 +25,7 @@ extern crate byteorder;
 mod ctap;
 pub mod embedded_flash;
 
+use alloc::vec::Vec;
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
@@ -37,7 +38,11 @@ use libtock_drivers::buttons;
 use libtock_drivers::buttons::ButtonState;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+use libtock_drivers::ctap_transport;
+use libtock_drivers::ctap_transport::SendOrRecvStatus;
 use libtock_drivers::led;
+#[cfg(feature = "with_nfc")]
+use libtock_drivers::nfc::NfcTag;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer;
 use libtock_drivers::timer::Duration;
@@ -45,11 +50,32 @@ use libtock_drivers::timer::Duration;
 use libtock_drivers::timer::Timer;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::timer::Timestamp;
-use libtock_drivers::usb_ctap_hid;
+#[cfg(not(feature = "with_nfc"))]
+use libtock_drivers::usb_ctap_hid::UsbTransport;
 
 const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
+#[allow(dead_code)]
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
+
+macro_rules! print_to_console {
+    ($x:ident, $($tts:tt)*) => {
+        writeln!($x, $($tts)*).unwrap();
+        $x.flush();
+    }
+}
+
+/// Helper function to write on console the received packet.
+fn print_buffer(buf: &mut [u8]) {
+    if let Some((last, bytes)) = buf.split_last() {
+        let mut console = Console::new();
+        for byte in bytes {
+            write!(console, " {:02x?}", byte).unwrap();
+        }
+        writeln!(console, " {:02x?}", last).unwrap();
+        console.flush();
+    }
+}
 
 fn main() {
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
@@ -57,23 +83,42 @@ fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().flex_unwrap();
 
-    // Setup USB driver.
-    if !usb_ctap_hid::setup() {
-        panic!("Cannot setup USB driver");
-    }
-
     let boot_time = timer.get_current_clock().flex_unwrap();
     let mut rng = TockRng256 {};
+    #[cfg(feature = "with_nfc")]
+    let mut ctap_state = CtapState::new(&mut rng, |_| Ok(()), boot_time);
+    #[cfg(not(feature = "with_nfc"))]
     let mut ctap_state = CtapState::new(&mut rng, check_user_presence, boot_time);
     let mut ctap_hid = CtapHid::new();
 
     let mut led_counter = 0;
     let mut last_led_increment = boot_time;
 
+    #[cfg(feature = "with_nfc")]
+    let transport = NfcTag {};
+    #[cfg(not(feature = "with_nfc"))]
+    let transport = UsbTransport {};
+    ctap_transport::initialize_transport(transport);
+
+    let mut console = Console::new();
+
+    writeln!(
+        console,
+        "================================================================="
+    )
+    .unwrap();
+    console.flush();
+
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
     // making consistent blinking patterns and sending keepalives harder.
     loop {
+        writeln!(
+            console,
+            "-----------------------------------------------------------------"
+        )
+        .unwrap();
+        console.flush();
         // Create the button callback, used for CTAP1.
         #[cfg(feature = "with_ctap1")]
         let button_touched = Cell::new(false);
@@ -92,16 +137,34 @@ fn main() {
             button.enable().flex_unwrap();
         }
 
-        let mut pkt_request = [0; 64];
-        let has_packet = match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY) {
-            Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
-                #[cfg(feature = "debug_ctap")]
-                print_packet_notice("Received packet", &timer);
-                true
-            }
-            Some(_) => panic!("Error receiving packet"),
-            None => false,
-        };
+        let mut pkt_request: [u8; libtock_drivers::nfc::MAX_LENGTH] =
+            [0; libtock_drivers::nfc::MAX_LENGTH];
+        let has_packet: bool;
+        let rx_amount: usize;
+
+        #[cfg(feature = "with_nfc")]
+        {
+            print_to_console!(console, "************> RECEIVING FROM NFC");
+            rx_amount = libtock_drivers::nfc::NfcTag::receive_bytes(&mut pkt_request[..]);
+            has_packet = rx_amount > 0;
+        }
+
+        #[cfg(not(feature = "with_nfc"))]
+        {
+            has_packet = match ctap_transport::recv_with_timeout(
+                transport,
+                &mut pkt_request,
+                KEEPALIVE_DELAY,
+            ) {
+                Some(SendOrRecvStatus::Received) | Some(SendOrRecvStatus::ReceivedBytes(_)) => {
+                    #[cfg(feature = "debug_ctap")]
+                    print_packet_notice("Received packet", &timer);
+                    true
+                }
+                Some(_) => panic!("Error receiving packet"),
+                None => false,
+            };
+        }
 
         let now = timer.get_current_clock().flex_unwrap();
         #[cfg(feature = "with_ctap1")]
@@ -119,16 +182,118 @@ fn main() {
             drop(buttons_callback);
         }
 
+        // Always grant user presence for NFC
+        #[cfg(feature = "with_nfc")]
+        ctap_state.u2f_up_state.grant_up(now);
+
         // These calls are making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
         ctap_state.update_timeouts(now);
         ctap_hid.wink_permission = ctap_hid.wink_permission.check_expiration(now);
 
+        let mut console = Console::new();
+        #[cfg(feature = "with_nfc")]
         if has_packet {
-            let reply = ctap_hid.process_hid_packet(&pkt_request, now, &mut ctap_state);
+            print_to_console!(console, "************> CTAP bytes received:");
+            print_buffer(&mut pkt_request.clone()[..rx_amount]);
+            console.flush();
+            let mut t4reply: Vec<u8> = Vec::new();
+            let mut t4prefix: u8 = 0x13;
+
+            // Prefix
+            t4reply.push(t4prefix);
+            t4prefix = 0x12;
+
+            // Error
+            // t4reply.push(0x6A);
+            // t4reply.push(0x80);
+
+            // Valid Response
+            let empty: [u8; 0] = [];
+            let mut reply = ctap::ctap1::Ctap1Command::process_command(
+                &pkt_request[..rx_amount],
+                &mut ctap_state,
+                now,
+            )
+            .unwrap_or(empty.into());
+            if reply.len() == 0 {
+                print_to_console!(console, "************> Empty CTAP reply generated");
+                continue;
+            }
+            t4reply.append(&mut reply);
+
+            print_to_console!(console, "**********> Response: {:02x?}", t4reply);
+
+            let frame_size = 40;
+            let mut current_start = 0;
+            let mut current_end = current_start + frame_size;
+            loop {
+                let last_iteration = current_end > t4reply.len();
+                t4prefix = match t4prefix {
+                    0x13 => 0x12,
+                    0x12 => 0x13,
+                    _ => 0x13,
+                };
+                if last_iteration {
+                    print_to_console!(
+                        console,
+                        "************> REACHED THE END, TURNING OFF CHAINING"
+                    );
+                    current_end = t4reply.len();
+                    t4prefix = match t4prefix {
+                        0x13 => 0x03,
+                        0x12 => 0x02,
+                        _ => 0x03,
+                    };
+                    t4reply.push(0x90);
+                    t4reply.push(0x00);
+                    current_end += 2;
+                }
+                print_to_console!(
+                    console,
+                    "************> Transmitting {}..{} bytes",
+                    current_start,
+                    current_end
+                );
+                let adjusted_start = if current_start > 0 {
+                    current_start - 1
+                } else {
+                    0
+                };
+                if adjusted_start != 0 {
+                    t4reply[adjusted_start] = t4prefix;
+                }
+                libtock_drivers::nfc::NfcTag::transmit_bytes(
+                    &mut t4reply[adjusted_start..current_end],
+                );
+                current_start += frame_size;
+                current_end += frame_size;
+
+                if last_iteration {
+                    break;
+                }
+            }
+        }
+
+        #[cfg(not(feature = "with_nfc"))]
+        if has_packet {
+            console.flush();
+            print_buffer(&mut pkt_request.clone()[..]);
+            console.flush();
+            let reply =
+                ctap_hid.process_hid_packet(array_ref!(&pkt_request, 0, 256), now, &mut ctap_state);
+            let reply_pkts_total = ctap_hid
+                .process_hid_packet(array_ref!(&pkt_request, 0, 256), now, &mut ctap_state)
+                .count();
+            let mut have_reply = false;
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT);
+                let status = ctap_transport::send_or_recv_with_timeout(
+                    transport,
+                    &mut pkt_reply,
+                    SEND_TIMEOUT,
+                );
+                have_reply = true;
                 match status {
                     None => {
                         #[cfg(feature = "debug_ctap")]
@@ -137,12 +302,12 @@ fn main() {
                         // Since sending the packet timed out, we cancel this reply.
                         break;
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending packet"),
-                    Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+                    Some(SendOrRecvStatus::Error) => panic!("Error sending packet"),
+                    Some(SendOrRecvStatus::Sent) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sent packet", &timer);
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+                    Some(SendOrRecvStatus::Received) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Received an UNEXPECTED packet", &timer);
                         // TODO: handle this unexpected packet.
@@ -185,6 +350,7 @@ fn main() {
 }
 
 #[cfg(feature = "debug_ctap")]
+#[allow(dead_code)]
 fn print_packet_notice(notice_text: &str, timer: &Timer) {
     let now = timer.get_current_clock().flex_unwrap();
     let now_us = (Timestamp::<f64>::from_clock_value(now).ms() * 1000.0) as u64;
@@ -199,25 +365,30 @@ fn print_packet_notice(notice_text: &str, timer: &Timer) {
 }
 
 // Returns whether the keepalive was sent, or false if cancelled.
+#[allow(dead_code)]
 fn send_keepalive_up_needed(
     cid: ChannelID,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
+    #[cfg(feature = "with_nfc")]
+    let transport = NfcTag {};
+    #[cfg(not(feature = "with_nfc"))]
+    let transport = UsbTransport {};
     for mut pkt in keepalive_msg {
-        let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout);
+        let status = ctap_transport::send_or_recv_with_timeout(transport, &mut pkt, timeout);
         match status {
             None => {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(Console::new(), "Sending a KEEPALIVE packet timed out").unwrap();
                 // TODO: abort user presence test?
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
-            Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+            Some(SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
+            Some(SendOrRecvStatus::Sent) => {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(Console::new(), "Sent KEEPALIVE packet").unwrap();
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+            Some(SendOrRecvStatus::Received) | Some(SendOrRecvStatus::ReceivedBytes(_)) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {
@@ -311,6 +482,7 @@ fn switch_off_leds() {
     }
 }
 
+#[allow(dead_code)]
 fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize = ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;

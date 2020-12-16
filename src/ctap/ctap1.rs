@@ -20,7 +20,9 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::Into;
 use core::convert::TryFrom;
+use core::fmt::Write;
 use crypto::rng256::Rng256;
+use libtock_drivers::console::Console;
 use libtock_drivers::timer::ClockValue;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
@@ -81,10 +83,26 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
+        let mut console = Console::new();
+        writeln!(console, "::::::::::::> Trying to decode U2fCommand").unwrap();
         let apdu: APDU = match APDU::try_from(message) {
-            Ok(apdu) => apdu,
+            Ok(apdu) => {
+                writeln!(
+                    console,
+                    "::::::::::::> APDU successfully decoded: {:?}",
+                    apdu
+                )
+                .unwrap();
+                apdu
+            }
             Err(apdu_status_code) => {
-                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
+                writeln!(
+                    console,
+                    "::::::::::::> Error decoding APDU: {:?}",
+                    apdu_status_code
+                )
+                .unwrap();
+                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap());
             }
         };
 
@@ -98,12 +116,14 @@ impl TryFrom<&[u8]> for U2fCommand {
         // | CLA | INS | P1 | P2 | Lc1 | Lc2 | Lc3 |
         // +-----+-----+----+----+-----+-----+-----+
         if apdu.header.cla != Ctap1Command::CTAP1_CLA {
+            writeln!(console, "::::::::::::> Error parsing U2f: Invalid CLA").unwrap();
             return Err(Ctap1StatusCode::SW_CLA_INVALID);
         }
 
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
         if lc != apdu.data.len() && lc + 2 != apdu.data.len() {
+            writeln!(console, "::::::::::::> Error parsing U2f: Invalid Length").unwrap();
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
@@ -113,7 +133,13 @@ impl TryFrom<&[u8]> for U2fCommand {
             // + Challenge (32B) | Application (32B) |
             // +-----------------+-------------------+
             Ctap1Command::U2F_REGISTER => {
+                writeln!(console, "::::::::::::> Received U2F Register command").unwrap();
                 if lc != 64 {
+                    writeln!(
+                        console,
+                        "::::::::::::> Error parsing U2f Register Instruction: Invalid Length"
+                    )
+                    .unwrap();
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Register {
@@ -195,16 +221,31 @@ impl Ctap1Command {
         {
             return Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED);
         }
+        let mut console = Console::new();
         let command = U2fCommand::try_from(message)?;
         match command {
             U2fCommand::Register {
                 challenge,
                 application,
             } => {
+                #[cfg(not(feature = "with_nfc"))]
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
+                    writeln!(
+                        console,
+                        "************> User presence condition not satisfied"
+                    )
+                    .unwrap();
                     return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
-                Ctap1Command::process_register(challenge, application, ctap_state)
+                let result =
+                    Ctap1Command::process_register(challenge, application, ctap_state).unwrap();
+                writeln!(
+                    console,
+                    "************> Result of processing register command: {} bytes",
+                    result.len()
+                )
+                .unwrap();
+                Ok(result)
             }
 
             U2fCommand::Authenticate {

@@ -68,8 +68,8 @@ pub struct CtapHid {
     // vendor specific.
     // We allocate them incrementally, that is all `cid` such that 1 <= cid <= allocated_cids are
     // allocated.
-    // In packets, the ids are then encoded with the native endianness (with the
-    // u32::to/from_ne_bytes methods).
+    // In packets, the ID encoding is Big Endian to match what is used throughout CTAP (with the
+    // u32::to/from_be_bytes methods).
     allocated_cids: usize,
     pub wink_permission: TimedPermission,
 }
@@ -235,7 +235,7 @@ impl CtapHid {
                         let new_cid = if cid == CtapHid::CHANNEL_BROADCAST {
                             // TODO: Prevent allocating 2^32 channels.
                             self.allocated_cids += 1;
-                            (self.allocated_cids as u32).to_ne_bytes()
+                            (self.allocated_cids as u32).to_be_bytes()
                         } else {
                             // Sync the channel and discard the current transaction.
                             cid
@@ -342,7 +342,7 @@ impl CtapHid {
     }
 
     fn is_allocated_channel(&self, cid: ChannelID) -> bool {
-        cid != CtapHid::CHANNEL_RESERVED && u32::from_ne_bytes(cid) as usize <= self.allocated_cids
+        cid != CtapHid::CHANNEL_RESERVED && u32::from_be_bytes(cid) as usize <= self.allocated_cids
     }
 
     fn error_message(cid: ChannelID, error_code: u8) -> HidPacketIterator {
@@ -569,10 +569,10 @@ mod test {
                     0xBC,
                     0xDE,
                     0xF0,
-                    0x01, // Allocated CID
+                    0x00, // Allocated CID
                     0x00,
                     0x00,
-                    0x00,
+                    0x01,
                     0x02, // Protocol version
                     0x00, // Device version
                     0x00,

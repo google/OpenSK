@@ -59,7 +59,7 @@ fn encrypt_hmac_secret_output(
     cred_random: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     if salt_enc.len() != 32 && salt_enc.len() != 64 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
     let aes_enc_key = crypto::aes256::EncryptionKey::new(shared_secret);
     let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
@@ -232,7 +232,7 @@ impl PinProtocolV1 {
                 }
             }
             // This status code is not explicitly mentioned in the specification.
-            None => return Err(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED),
+            None => return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED),
         }
         persistent_store.reset_pin_retries()?;
         self.consecutive_pin_mismatches = 0;
@@ -400,7 +400,7 @@ impl PinProtocolV1 {
         pin_auth: Option<Vec<u8>>,
     ) -> Result<(), Ctap2StatusCode> {
         if min_pin_length_rp_ids.is_some() {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         if persistent_store.pin_hash()?.is_some() {
             match pin_auth {
@@ -419,7 +419,7 @@ impl PinProtocolV1 {
                     // TODO(kaczmarczyck) commented code is useful for the extension
                     // https://github.com/google/OpenSK/issues/129
                     // if !cbor::write(cbor_array_vec!(min_pin_length_rp_ids), &mut message) {
-                    //     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
+                    //     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
                     // }
                     if !verify_pin_auth(&self.pin_uv_auth_token, &message, &pin_auth) {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
@@ -593,7 +593,7 @@ impl PinProtocolV1 {
         // HMAC-secret does the same 16 byte truncated check.
         if !verify_pin_auth(&shared_secret, &salt_enc, &salt_auth) {
             // Hard to tell what the correct error code here is.
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cred_random)
     }
@@ -1174,10 +1174,7 @@ mod test {
 
         let salt_enc = [0x5E; 48];
         let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);
-        assert_eq!(
-            output,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
-        );
+        assert_eq!(output, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         let salt_enc = [0x5E; 64];
         let output = encrypt_hmac_secret_output(&shared_secret, &salt_enc, &cred_random);

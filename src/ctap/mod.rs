@@ -371,10 +371,8 @@ where
                         let mut response_vec = vec![0x00];
                         if let Some(value) = response_data.into() {
                             if !cbor::write(value, &mut response_vec) {
-                                response_vec = vec![
-                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR
-                                        as u8,
-                                ];
+                                response_vec =
+                                    vec![Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8];
                             }
                         }
                         response_vec
@@ -496,7 +494,7 @@ where
             }
             None => {
                 if self.persistent_store.pin_hash()?.is_some() {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED);
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 if options.uv {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
@@ -542,13 +540,13 @@ where
         auth_data.extend(&self.persistent_store.aaguid()?);
         // The length is fixed to 0x20 or 0x70 and fits one byte.
         if credential_id.len() > 0xFF {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG);
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
         let cose_key = match pk.to_cose_key() {
             Some(cose_key) => cose_key,
-            None => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR),
+            None => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         };
         auth_data.extend(cose_key);
         if has_extension_output {
@@ -558,7 +556,7 @@ where
                 "credProtect" => cred_protect_policy,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
 
@@ -639,7 +637,7 @@ where
                 "hmac-secret" => encrypted_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR);
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
 
@@ -722,7 +720,7 @@ where
         let hmac_secret_input = extensions.map(|e| e.hmac_secret).flatten();
         if hmac_secret_input.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION);
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION);
         }
 
         // The user verification bit depends on the existance of PIN auth, since we do
@@ -1592,7 +1590,7 @@ mod test {
 
         assert_eq!(
             get_assertion_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION)
         );
     }
 
@@ -1643,7 +1641,7 @@ mod test {
 
         assert_eq!(
             get_assertion_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_EXTENSION)
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION)
         );
     }
 

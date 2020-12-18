@@ -38,11 +38,11 @@ use crypto::rng256::Rng256;
 // number of pages. This may improve in the future. Currently, using 20 pages gives between 20ms and
 // 240ms per operation. The rule of thumb is between 1ms and 12ms per additional page.
 //
-// Limiting the number of residential keys permits to ensure a minimum number of counter increments.
+// Limiting the number of resident keys permits to ensure a minimum number of counter increments.
 // Let:
 // - P the number of pages (NUM_PAGES)
-// - K the maximum number of residential keys (MAX_SUPPORTED_RESIDENTIAL_KEYS)
-// - S the maximum size of a residential key (about 500)
+// - K the maximum number of resident keys (MAX_SUPPORTED_RESIDENT_KEYS)
+// - S the maximum size of a resident key (about 500)
 // - C the number of erase cycles (10000)
 // - I the minimum number of counter increments
 //
@@ -50,7 +50,7 @@ use crypto::rng256::Rng256;
 //
 // With P=20 and K=150, we have I=2M which is enough for 500 increments per day for 10 years.
 const NUM_PAGES: usize = 20;
-const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
+const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
 
 const MAX_PIN_RETRIES: u8 = 8;
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
@@ -132,7 +132,7 @@ impl PersistentStore {
     /// Returns `CTAP2_ERR_VENDOR_INTERNAL_ERROR` if the key does not hold a valid credential.
     pub fn get_credential(&self, key: usize) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
         let min_key = key::CREDENTIALS.start;
-        if key < min_key || key >= min_key + MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        if key < min_key || key >= min_key + MAX_SUPPORTED_RESIDENT_KEYS {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         let credential_entry = self
@@ -200,13 +200,11 @@ impl PersistentStore {
         let mut old_key = None;
         let min_key = key::CREDENTIALS.start;
         // Holds whether a key is used (indices are shifted by min_key).
-        let mut keys = vec![false; MAX_SUPPORTED_RESIDENTIAL_KEYS];
+        let mut keys = vec![false; MAX_SUPPORTED_RESIDENT_KEYS];
         let mut iter_result = Ok(());
         let iter = self.iter_credentials(&mut iter_result)?;
         for (key, credential) in iter {
-            if key < min_key
-                || key - min_key >= MAX_SUPPORTED_RESIDENTIAL_KEYS
-                || keys[key - min_key]
+            if key < min_key || key - min_key >= MAX_SUPPORTED_RESIDENT_KEYS || keys[key - min_key]
             {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
@@ -221,16 +219,14 @@ impl PersistentStore {
             }
         }
         iter_result?;
-        if old_key.is_none()
-            && keys.iter().filter(|&&x| x).count() >= MAX_SUPPORTED_RESIDENTIAL_KEYS
-        {
+        if old_key.is_none() && keys.iter().filter(|&&x| x).count() >= MAX_SUPPORTED_RESIDENT_KEYS {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
         let key = match old_key {
             // This is a new credential being added, we need to allocate a free key. We choose the
             // first available key.
             None => key::CREDENTIALS
-                .take(MAX_SUPPORTED_RESIDENTIAL_KEYS)
+                .take(MAX_SUPPORTED_RESIDENT_KEYS)
                 .find(|key| !keys[key - min_key])
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
             // This is an existing credential being updated, we reuse its key.
@@ -280,7 +276,7 @@ impl PersistentStore {
 
     /// Returns the estimated number of credentials that can still be stored.
     pub fn remaining_credentials(&self) -> Result<usize, Ctap2StatusCode> {
-        MAX_SUPPORTED_RESIDENTIAL_KEYS
+        MAX_SUPPORTED_RESIDENT_KEYS
             .checked_sub(self.count_credentials()?)
             .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
     }
@@ -714,7 +710,7 @@ mod test {
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
         let mut credential_ids = vec![];
-        for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = i.to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
@@ -788,7 +784,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
-        for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = i.to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
@@ -797,7 +793,7 @@ mod test {
         let credential_source = create_credential_source(
             &mut rng,
             "example.com",
-            vec![MAX_SUPPORTED_RESIDENTIAL_KEYS as u8],
+            vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
         );
         assert_eq!(
             persistent_store.store_credential(credential_source),
@@ -805,7 +801,7 @@ mod test {
         );
         assert_eq!(
             persistent_store.count_credentials().unwrap(),
-            MAX_SUPPORTED_RESIDENTIAL_KEYS
+            MAX_SUPPORTED_RESIDENT_KEYS
         );
     }
 
@@ -837,7 +833,7 @@ mod test {
             .is_some());
 
         let mut persistent_store = PersistentStore::new(&mut rng);
-        for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
+        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = i.to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
@@ -846,7 +842,7 @@ mod test {
         let credential_source = create_credential_source(
             &mut rng,
             "example.com",
-            vec![MAX_SUPPORTED_RESIDENTIAL_KEYS as u8],
+            vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
         );
         assert_eq!(
             persistent_store.store_credential(credential_source),
@@ -854,7 +850,7 @@ mod test {
         );
         assert_eq!(
             persistent_store.count_credentials().unwrap(),
-            MAX_SUPPORTED_RESIDENTIAL_KEYS
+            MAX_SUPPORTED_RESIDENT_KEYS
         );
     }
 

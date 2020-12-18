@@ -65,12 +65,13 @@ impl Command {
     const AUTHENTICATOR_GET_NEXT_ASSERTION: u8 = 0x08;
     // TODO(kaczmarczyck) use or remove those constants
     const AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
-    const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0xA0;
-    const AUTHENTICATOR_SELECTION: u8 = 0xB0;
-    const AUTHENTICATOR_CONFIG: u8 = 0xC0;
+    const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0x0A;
+    const AUTHENTICATOR_SELECTION: u8 = 0x0B;
+    const AUTHENTICATOR_LARGE_BLOBS: u8 = 0x0C;
+    const AUTHENTICATOR_CONFIG: u8 = 0x0D;
+    const _AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
     const AUTHENTICATOR_VENDOR_CONFIGURE: u8 = 0x40;
-    const AUTHENTICATOR_VENDOR_FIRST_UNUSED: u8 = 0x41;
-    const AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
+    const _AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
     pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
         if bytes.is_empty() {

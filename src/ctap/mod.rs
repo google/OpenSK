@@ -25,12 +25,12 @@ pub mod status_code;
 mod storage;
 mod timed_permission;
 
-#[cfg(feature = "with_ctap2_1")]
-use self::command::MAX_CREDENTIAL_COUNT_IN_LIST;
 use self::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
 };
+#[cfg(feature = "with_ctap2_1")]
+use self::command::{AuthenticatorCredentialManagementParameters, MAX_CREDENTIAL_COUNT_IN_LIST};
 #[cfg(feature = "with_ctap2_1")]
 use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
@@ -356,6 +356,10 @@ where
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
                     Command::AuthenticatorReset => self.process_reset(cid, now),
+                    #[cfg(feature = "with_ctap2_1")]
+                    Command::AuthenticatorCredentialManagement(params) => {
+                        self.process_credential_management(params)
+                    }
                     #[cfg(feature = "with_ctap2_1")]
                     Command::AuthenticatorSelection => self.process_selection(cid),
                     // TODO(kaczmarczyck) implement FIDO 2.1 commands
@@ -916,6 +920,14 @@ where
             );
         }
         Ok(ResponseData::AuthenticatorReset)
+    }
+
+    #[cfg(feature = "with_ctap2_1")]
+    fn process_credential_management(
+        &mut self,
+        _cred_management_params: AuthenticatorCredentialManagementParameters,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
     }
 
     #[cfg(feature = "with_ctap2_1")]

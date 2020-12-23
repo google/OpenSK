@@ -25,6 +25,7 @@ use enum_iterator::IntoEnumIterator;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(all(test, feature = "with_ctap2_1"), derive(Clone))]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
     pub rp_name: Option<String>,
@@ -52,6 +53,17 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
             rp_name,
             rp_icon,
         })
+    }
+}
+
+#[cfg(feature = "with_ctap2_1")]
+impl From<PublicKeyCredentialRpEntity> for cbor::Value {
+    fn from(entity: PublicKeyCredentialRpEntity) -> Self {
+        cbor_map_options! {
+            "id" => entity.rp_id,
+            "name" => entity.rp_name,
+            "icon" => entity.rp_icon,
+        }
     }
 }
 

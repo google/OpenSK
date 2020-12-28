@@ -18,7 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use cbor::{cbor_array_vec, cbor_bytes_lit, cbor_map_options, destructure_cbor_map};
-use core::convert::TryFrom;
+use core::convert::{TryFrom, TryInto};
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
@@ -646,26 +646,39 @@ const ES256_ALGORITHM: i64 = -7;
 const EC2_KEY_TYPE: i64 = 2;
 const P_256_CURVE: i64 = 1;
 
+impl TryFrom<cbor::Value> for CoseKey {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        if let cbor::Value::Map(cose_map) = cbor_value {
+            Ok(CoseKey(cose_map))
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        }
+    }
+}
+
+fn cose_key_from_bytes(x_bytes: [u8; ecdh::NBYTES], y_bytes: [u8; ecdh::NBYTES]) -> CoseKey {
+    let x_byte_cbor: cbor::Value = cbor_bytes_lit!(&x_bytes);
+    let y_byte_cbor: cbor::Value = cbor_bytes_lit!(&y_bytes);
+    // TODO(kaczmarczyck) do not write optional parameters, spec is unclear
+    let cose_cbor_value = cbor_map_options! {
+        1 => EC2_KEY_TYPE,
+        3 => ECDH_ALGORITHM,
+        -1 => P_256_CURVE,
+        -2 => x_byte_cbor,
+        -3 => y_byte_cbor,
+    };
+    // Unwrap is safe here since we know it's a map.
+    cose_cbor_value.try_into().unwrap()
+}
+
 impl From<ecdh::PubKey> for CoseKey {
     fn from(pk: ecdh::PubKey) -> Self {
         let mut x_bytes = [0; ecdh::NBYTES];
         let mut y_bytes = [0; ecdh::NBYTES];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
-        let x_byte_cbor: cbor::Value = cbor_bytes_lit!(&x_bytes);
-        let y_byte_cbor: cbor::Value = cbor_bytes_lit!(&y_bytes);
-        // TODO(kaczmarczyck) do not write optional parameters, spec is unclear
-        let cose_cbor_value = cbor_map_options! {
-            1 => EC2_KEY_TYPE,
-            3 => ECDH_ALGORITHM,
-            -1 => P_256_CURVE,
-            -2 => x_byte_cbor,
-            -3 => y_byte_cbor,
-        };
-        if let cbor::Value::Map(cose_map) = cose_cbor_value {
-            CoseKey(cose_map)
-        } else {
-            unreachable!();
-        }
+        cose_key_from_bytes(x_bytes, y_bytes)
     }
 }
 
@@ -708,6 +721,15 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
         let y_array_ref = array_ref![y_bytes.as_slice(), 0, ecdh::NBYTES];
         ecdh::PubKey::from_coordinates(x_array_ref, y_array_ref)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+    }
+}
+
+impl From<ecdsa::PubKey> for CoseKey {
+    fn from(pk: ecdsa::PubKey) -> Self {
+        let mut x_bytes = [0; ecdh::NBYTES];
+        let mut y_bytes = [0; ecdh::NBYTES];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        cose_key_from_bytes(x_bytes, y_bytes)
     }
 }
 
@@ -763,7 +785,8 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
 }
 
 #[cfg(feature = "with_ctap2_1")]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone, Copy)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialManagementSubCommand {
     GetCredsMetadata = 0x01,
@@ -1435,13 +1458,32 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_cose_key() {
+    fn test_from_into_cose_key_ecdh() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk.clone());
         let created_pk = ecdh::PubKey::try_from(cose_key);
         assert_eq!(created_pk, Ok(pk));
+    }
+
+    #[test]
+    fn test_into_cose_key_ecdsa() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
+        let cose_map = cose_key.0;
+        let template = cbor_map! {
+            1 => 0,
+            3 => 0,
+            -1 => 0,
+            -2 => 0,
+            -3 => 0,
+        };
+        for key in CoseKey::try_from(template).unwrap().0.keys() {
+            assert!(cose_map.contains_key(key));
+        }
     }
 
     #[test]

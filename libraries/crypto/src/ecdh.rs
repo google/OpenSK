@@ -88,6 +88,7 @@ impl PubKey {
             .map(|p| PubKey { p })
     }
 
+    // Writes the coordinates into the passed in arrays.
     pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
         self.p.getx().to_int().to_bin(x);
         self.p.gety().to_int().to_bin(y);

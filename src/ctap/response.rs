@@ -251,7 +251,7 @@ pub struct AuthenticatorCredentialManagementResponse {
     pub credential_id: Option<PublicKeyCredentialDescriptor>,
     pub public_key: Option<CoseKey>,
     pub total_credentials: Option<u64>,
-    pub cred_protect: Option<u64>,
+    pub cred_protect: Option<CredentialProtectionPolicy>,
     pub large_blob_key: Option<Vec<u8>>,
 }
 
@@ -527,7 +527,7 @@ mod test {
             credential_id: Some(cred_descriptor.clone()),
             public_key: Some(cose_key.clone()),
             total_credentials: Some(2),
-            cred_protect: Some(0),
+            cred_protect: Some(CredentialProtectionPolicy::UserVerificationOptional),
             large_blob_key: Some(vec![0xBB; 64]),
         };
         let response_cbor: Option<cbor::Value> =
@@ -542,7 +542,7 @@ mod test {
             0x07 => cred_descriptor,
             0x08 => cbor_map_btree!(cose_key.0),
             0x09 => 2,
-            0x0A => 0,
+            0x0A => 0x01,
             0x0B => vec![0xBB; 64],
         };
         assert_eq!(response_cbor, Some(expected_cbor));

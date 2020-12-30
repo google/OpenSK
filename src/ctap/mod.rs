@@ -944,6 +944,8 @@ where
             String::from("clientPin"),
             self.persistent_store.pin_hash()?.is_some(),
         );
+        #[cfg(feature = "with_ctap2_1")]
+        options_map.insert(String::from("credMgmt"), true);
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions: vec![
@@ -1410,9 +1412,19 @@ mod test {
             0x03, 0x50,
         ]);
         expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
+        let mut option_count = 0;
+        option_count += 3;
+        #[cfg(feature = "with_ctap2_1")]
+        {
+            option_count += 1;
+        }
+        expected_response.extend(&[0x04, 0xA0 + option_count]);
+        expected_response.extend(&[0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5]);
+        #[cfg(feature = "with_ctap2_1")]
+        expected_response.extend(&[0x68, 0x63, 0x72, 0x65, 0x64, 0x4D, 0x67, 0x6D, 0x74, 0xF5]);
         expected_response.extend(&[
-            0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
-            0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
+            0x69, 0x63, 0x6C, 0x69, 0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04,
+            0x00, 0x06, 0x81, 0x01,
         ]);
         #[cfg(feature = "with_ctap2_1")]
         expected_response.extend(

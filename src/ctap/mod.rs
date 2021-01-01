@@ -14,6 +14,8 @@
 
 pub mod apdu;
 pub mod command;
+#[cfg(feature = "with_ctap2_1")]
+mod credential_management;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 pub mod data_formats;
@@ -32,10 +34,9 @@ use self::command::{
 #[cfg(feature = "with_ctap2_1")]
 use self::command::{AuthenticatorCredentialManagementParameters, MAX_CREDENTIAL_COUNT_IN_LIST};
 #[cfg(feature = "with_ctap2_1")]
-use self::data_formats::{
-    AuthenticatorTransport, CredentialManagementSubCommand,
-    CredentialManagementSubCommandParameters, PublicKeyCredentialRpEntity,
-};
+use self::credential_management::process_credential_management_subcommand;
+#[cfg(feature = "with_ctap2_1")]
+use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
     CoseKey, CredentialProtectionPolicy, GetAssertionHmacSecretInput, PackedAttestationStatement,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
@@ -45,8 +46,6 @@ use self::hid::ChannelID;
 #[cfg(feature = "with_ctap2_1")]
 use self::pin_protocol_v1::PinPermission;
 use self::pin_protocol_v1::PinProtocolV1;
-#[cfg(feature = "with_ctap2_1")]
-use self::response::AuthenticatorCredentialManagementResponse;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
@@ -57,8 +56,6 @@ use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
 use alloc::collections::BTreeMap;
-#[cfg(feature = "with_ctap2_1")]
-use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -67,8 +64,6 @@ use byteorder::{BigEndian, ByteOrder};
 use cbor::{cbor_map, cbor_map_options};
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-#[cfg(feature = "with_ctap2_1")]
-use core::iter::FromIterator;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::rng256::Rng256;
@@ -111,7 +106,7 @@ pub const TOUCH_TIMEOUT_MS: isize = 30000;
 #[cfg(feature = "with_ctap1")]
 const U2F_UP_PROMPT_TIMEOUT: Duration<isize> = Duration::from_ms(10000);
 const RESET_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(10000);
-const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
+pub const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
 
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
@@ -153,13 +148,13 @@ struct AssertionInput {
     has_uv: bool,
 }
 
-struct AssertionState {
+pub struct AssertionState {
     assertion_input: AssertionInput,
     // Sorted by ascending order of creation, so the last element is the most recent one.
     next_credentials: Vec<PublicKeyCredentialSource>,
 }
 
-enum StatefulCommand {
+pub enum StatefulCommand {
     Reset,
     GetAssertion(AssertionState),
     #[cfg(feature = "with_ctap2_1")]
@@ -168,76 +163,16 @@ enum StatefulCommand {
     EnumerateCredentials(Vec<PublicKeyCredentialSource>),
 }
 
-#[cfg(feature = "with_ctap2_1")]
-fn enumerate_rps_response(
-    rp_id: Option<String>,
-    total_rps: Option<u64>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp = rp_id.clone().map(|rp_id| PublicKeyCredentialRpEntity {
-        rp_id,
-        rp_name: None,
-        rp_icon: None,
-    });
-    let rp_id_hash = rp_id.map(|rp_id| Sha256::hash(rp_id.as_bytes()).to_vec());
-
-    Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: None,
-        max_possible_remaining_resident_credentials_count: None,
-        rp,
-        rp_id_hash,
-        total_rps,
-        user: None,
-        credential_id: None,
-        public_key: None,
-        total_credentials: None,
-        cred_protect: None,
-        large_blob_key: None,
-    })
-}
-
-#[cfg(feature = "with_ctap2_1")]
-fn enumerate_credentials_response(
-    credential: PublicKeyCredentialSource,
-    total_credentials: Option<u64>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let PublicKeyCredentialSource {
-        key_type,
-        credential_id,
-        private_key,
-        rp_id: _,
-        user_handle,
-        user_display_name,
-        cred_protect_policy,
-        creation_order: _,
-        user_name,
-        user_icon,
-    } = credential;
-    let user = PublicKeyCredentialUserEntity {
-        user_id: user_handle,
-        user_name,
-        user_display_name,
-        user_icon,
-    };
-    let credential_id = PublicKeyCredentialDescriptor {
-        key_type,
-        key_id: credential_id,
-        transports: None, // You can set USB as a hint here.
-    };
-    let public_key = CoseKey::from(private_key.genpk());
-    Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: None,
-        max_possible_remaining_resident_credentials_count: None,
-        rp: None,
-        rp_id_hash: None,
-        total_rps: None,
-        user: Some(user),
-        credential_id: Some(credential_id),
-        public_key: Some(public_key),
-        total_credentials,
-        cred_protect: cred_protect_policy,
-        // TODO(kaczmarczyck) add when largeBlobKey is implemented
-        large_blob_key: None,
-    })
+pub fn check_command_permission(
+    stateful_command_permission: &mut TimedPermission,
+    now: ClockValue,
+) -> Result<(), Ctap2StatusCode> {
+    *stateful_command_permission = stateful_command_permission.check_expiration(now);
+    if stateful_command_permission.is_granted(now) {
+        Ok(())
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+    }
 }
 
 // This struct currently holds all state, not only the persistent memory. The persistent members are
@@ -288,15 +223,6 @@ where
 
     pub fn update_command_permission(&mut self, now: ClockValue) {
         self.stateful_command_permission = self.stateful_command_permission.check_expiration(now);
-    }
-
-    fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
-        self.update_command_permission(now);
-        if self.stateful_command_permission.is_granted(now) {
-            Ok(())
-        } else {
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        }
     }
 
     pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
@@ -919,7 +845,7 @@ where
         &mut self,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.check_command_permission(now)?;
+        check_command_permission(&mut self.stateful_command_permission, now)?;
         let (assertion_input, credential) =
             if let Some(StatefulCommand::GetAssertion(assertion_state)) =
                 &mut self.stateful_command_type
@@ -998,7 +924,7 @@ where
     ) -> Result<ResponseData, Ctap2StatusCode> {
         // Resets are only possible in the first 10 seconds after booting.
         // TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
-        self.check_command_permission(now)?;
+        check_command_permission(&mut self.stateful_command_permission, now)?;
         match &self.stateful_command_type {
             Some(StatefulCommand::Reset) => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
@@ -1018,249 +944,19 @@ where
     }
 
     #[cfg(feature = "with_ctap2_1")]
-    fn process_get_creds_metadata(
-        &mut self,
-    ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-        Ok(AuthenticatorCredentialManagementResponse {
-            existing_resident_credentials_count: Some(
-                self.persistent_store.count_credentials()? as u64
-            ),
-            max_possible_remaining_resident_credentials_count: Some(
-                self.persistent_store.remaining_credentials()? as u64,
-            ),
-            rp: None,
-            rp_id_hash: None,
-            total_rps: None,
-            user: None,
-            credential_id: None,
-            public_key: None,
-            total_credentials: None,
-            cred_protect: None,
-            large_blob_key: None,
-        })
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_enumerate_rps_begin(
-        &mut self,
-        now: ClockValue,
-    ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-        let credentials = self.persistent_store.all_credentials()?;
-        let mut rp_set = BTreeSet::new();
-        for cred in credentials {
-            rp_set.insert(cred.rp_id);
-        }
-        let mut rp_ids = Vec::from_iter(rp_set);
-        let total_rps = rp_ids.len();
-
-        // TODO(kaczmarczyck) behaviour with empty list?
-        let rp_id = rp_ids.pop();
-        if total_rps > 1 {
-            self.stateful_command_permission =
-                TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-            self.stateful_command_type = Some(StatefulCommand::EnumerateRps(rp_ids));
-        }
-        enumerate_rps_response(rp_id, Some(total_rps as u64))
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_enumerate_rps_get_next_rp(
-        &mut self,
-        now: ClockValue,
-    ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-        self.check_command_permission(now)?;
-        let rp_id =
-            if let Some(StatefulCommand::EnumerateRps(rp_ids)) = &mut self.stateful_command_type {
-                rp_ids.pop().ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-            };
-        enumerate_rps_response(Some(rp_id), None)
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_enumerate_credentials_begin(
-        &mut self,
-        sub_command_params: CredentialManagementSubCommandParameters,
-        now: ClockValue,
-    ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-        let rp_id_hash = sub_command_params
-            .rp_id_hash
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-        // TODO(kaczmarczyck) filter by rp_id_hash inside of storage?
-        let mut rp_credentials: Vec<PublicKeyCredentialSource> = self
-            .persistent_store
-            .all_credentials()?
-            .into_iter()
-            .filter(|cred| {
-                let cred_rp_id_hash = Sha256::hash(cred.rp_id.as_bytes());
-                rp_id_hash == cred_rp_id_hash
-            })
-            .collect();
-        let total_credentials = rp_credentials.len();
-
-        let credential = rp_credentials
-            .pop()
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-        if total_credentials > 1 {
-            self.stateful_command_permission =
-                TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-            self.stateful_command_type =
-                Some(StatefulCommand::EnumerateCredentials(rp_credentials));
-        }
-        enumerate_credentials_response(credential, Some(total_credentials as u64))
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_enumerate_credentials_get_next_credential(
-        &mut self,
-        now: ClockValue,
-    ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-        self.check_command_permission(now)?;
-        let credential = if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) =
-            &mut self.stateful_command_type
-        {
-            rp_credentials
-                .pop()
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?
-        } else {
-            return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-        };
-        enumerate_credentials_response(credential, None)
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_delete_credential(
-        &mut self,
-        sub_command_params: CredentialManagementSubCommandParameters,
-    ) -> Result<(), Ctap2StatusCode> {
-        let credential_id = sub_command_params
-            .credential_id
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
-            .key_id;
-        self.persistent_store.delete_credential(&credential_id)
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_update_user_information(
-        &mut self,
-        sub_command_params: CredentialManagementSubCommandParameters,
-    ) -> Result<(), Ctap2StatusCode> {
-        let credential_id = sub_command_params
-            .credential_id
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
-            .key_id;
-        let user = sub_command_params
-            .user
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-        self.persistent_store
-            .update_credential(&credential_id, user)
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn pin_uv_auth_protocol_check(
-        &self,
-        pin_uv_auth_protocol: Option<u64>,
-    ) -> Result<(), Ctap2StatusCode> {
-        match pin_uv_auth_protocol {
-            Some(CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION) => Ok(()),
-            Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-            None => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-        }
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    fn process_credential_management(
+    pub fn process_credential_management(
         &mut self,
         cred_management_params: AuthenticatorCredentialManagementParameters,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        let AuthenticatorCredentialManagementParameters {
-            sub_command,
-            sub_command_params,
-            pin_protocol,
-            pin_auth,
-        } = cred_management_params;
-
-        match (sub_command, &self.stateful_command_type) {
-            (
-                CredentialManagementSubCommand::EnumerateRpsGetNextRp,
-                Some(StatefulCommand::EnumerateRps(_)),
-            ) => (),
-            (
-                CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
-                Some(StatefulCommand::EnumerateCredentials(_)),
-            ) => (),
-            (_, _) => {
-                self.stateful_command_type = None;
-            }
-        }
-
-        match sub_command {
-            CredentialManagementSubCommand::GetCredsMetadata
-            | CredentialManagementSubCommand::EnumerateRpsBegin
-            | CredentialManagementSubCommand::DeleteCredential
-            | CredentialManagementSubCommand::EnumerateCredentialsBegin
-            | CredentialManagementSubCommand::UpdateUserInformation => {
-                self.pin_uv_auth_protocol_check(pin_protocol)?;
-                self.persistent_store
-                    .pin_hash()?
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED)?;
-                let pin_auth = pin_auth.ok_or(Ctap2StatusCode::CTAP2_ERR_PIN_REQUIRED)?;
-                let mut management_data = vec![sub_command as u8];
-                if let Some(sub_command_params) = sub_command_params.clone() {
-                    if !cbor::write(sub_command_params.into(), &mut management_data) {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-                    }
-                }
-                if !self
-                    .pin_protocol_v1
-                    .verify_pin_auth_token(&management_data, &pin_auth)
-                {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                }
-                self.pin_protocol_v1
-                    .has_permission(PinPermission::CredentialManagement)?;
-                self.pin_protocol_v1.has_no_permission_rp_id()?;
-                // TODO(kaczmarczyck) sometimes allow a RP ID
-            }
-            CredentialManagementSubCommand::EnumerateRpsGetNextRp
-            | CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {}
-        }
-
-        let response = match sub_command {
-            CredentialManagementSubCommand::GetCredsMetadata => {
-                Some(self.process_get_creds_metadata()?)
-            }
-            CredentialManagementSubCommand::EnumerateRpsBegin => {
-                Some(self.process_enumerate_rps_begin(now)?)
-            }
-            CredentialManagementSubCommand::EnumerateRpsGetNextRp => {
-                Some(self.process_enumerate_rps_get_next_rp(now)?)
-            }
-            CredentialManagementSubCommand::EnumerateCredentialsBegin => {
-                Some(self.process_enumerate_credentials_begin(
-                    sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                    now,
-                )?)
-            }
-            CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {
-                Some(self.process_enumerate_credentials_get_next_credential(now)?)
-            }
-            CredentialManagementSubCommand::DeleteCredential => {
-                self.process_delete_credential(
-                    sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?;
-                None
-            }
-            CredentialManagementSubCommand::UpdateUserInformation => {
-                self.process_update_user_information(
-                    sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?;
-                None
-            }
-        };
-        Ok(ResponseData::AuthenticatorCredentialManagement(response))
+        process_credential_management_subcommand(
+            &mut self.persistent_store,
+            &mut self.stateful_command_permission,
+            &mut self.stateful_command_type,
+            &mut self.pin_protocol_v1,
+            cred_management_params,
+            now,
+        )
     }
 
     #[cfg(feature = "with_ctap2_1")]
@@ -2402,486 +2098,6 @@ mod test {
 
         let reset_reponse = ctap_state.process_reset(DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         assert_eq!(reset_reponse, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_get_creds_metadata() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let credential_source = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x01],
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-        };
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
-            0xFB, 0x00,
-        ]);
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::GetCredsMetadata,
-            sub_command_params: None,
-            pin_protocol: Some(1),
-            pin_auth: pin_auth.clone(),
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        let initial_capacity = match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert_eq!(response.existing_resident_credentials_count, Some(0));
-                response
-                    .max_possible_remaining_resident_credentials_count
-                    .unwrap()
-            }
-            _ => panic!("Invalid response type"),
-        };
-
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::GetCredsMetadata,
-            sub_command_params: None,
-            pin_protocol: Some(1),
-            pin_auth,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert_eq!(response.existing_resident_credentials_count, Some(1));
-                assert_eq!(
-                    response.max_possible_remaining_resident_credentials_count,
-                    Some(initial_capacity - 1)
-                );
-            }
-            _ => panic!("Invalid response type"),
-        };
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_enumerate_rps_with_uv() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        let make_credential_params = create_minimal_make_credential_parameters();
-        assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
-            .is_ok());
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        let rp = PublicKeyCredentialRpEntity {
-            rp_id: "another.example.com".to_string(),
-            rp_name: None,
-            rp_icon: None,
-        };
-        make_credential_params.rp = rp;
-        assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
-            .is_ok());
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
-            0xD0, 0xD1,
-        ]);
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateRpsBegin,
-            sub_command_params: None,
-            pin_protocol: Some(1),
-            pin_auth,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        let first_rp_id = match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert_eq!(response.total_rps, Some(2));
-                let rp_id = response.rp.unwrap().rp_id;
-                let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-                assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
-                rp_id
-            }
-            _ => panic!("Invalid response type"),
-        };
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
-            sub_command_params: None,
-            pin_protocol: None,
-            pin_auth: None,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        let second_rp_id = match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert_eq!(response.total_rps, None);
-                let rp_id = response.rp.unwrap().rp_id;
-                let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-                assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
-                rp_id
-            }
-            _ => panic!("Invalid response type"),
-        };
-
-        assert!(first_rp_id != second_rp_id);
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
-            sub_command_params: None,
-            pin_protocol: None,
-            pin_auth: None,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        );
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_enumerate_credentials_with_uv() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        let make_credential_params = create_minimal_make_credential_parameters();
-        assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
-            .is_ok());
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        let user = PublicKeyCredentialUserEntity {
-            user_id: vec![0x02],
-            user_name: Some("user2".to_string()),
-            user_display_name: Some("User Two".to_string()),
-            user_icon: Some("icon2".to_string()),
-        };
-        make_credential_params.user = user;
-        assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
-            .is_ok());
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
-            0x2B, 0x68,
-        ]);
-
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: Some(Sha256::hash(b"example.com").to_vec()),
-            credential_id: None,
-            user: None,
-        };
-        // RP ID hash:
-        // A379A6F6EEAFB9A55E378C118034E2751E682FAB9F2D30AB13D2125586CE1947
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
-            sub_command_params: Some(sub_command_params),
-            pin_protocol: Some(1),
-            pin_auth,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        let first_credential_id = match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert!(response.user.is_some());
-                assert!(response.public_key.is_some());
-                assert_eq!(response.total_credentials, Some(2));
-                response.credential_id.unwrap().key_id
-            }
-            _ => panic!("Invalid response type"),
-        };
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
-            sub_command_params: None,
-            pin_protocol: None,
-            pin_auth: None,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        let second_credential_id = match cred_management_response.unwrap() {
-            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
-                assert!(response.user.is_some());
-                assert!(response.public_key.is_some());
-                assert_eq!(response.total_credentials, None);
-                response.credential_id.unwrap().key_id
-            }
-            _ => panic!("Invalid response type"),
-        };
-
-        assert!(first_credential_id != second_credential_id);
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
-            sub_command_params: None,
-            pin_protocol: None,
-            pin_auth: None,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        );
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_delete_credential() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        let credential_source = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: vec![0x1D; 32],
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x01],
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-        };
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0xBD, 0xE3, 0xEF, 0x8A, 0x77, 0x01, 0xB1, 0x69, 0x19, 0xE6, 0x62, 0xB9, 0x9B, 0x89,
-            0x9C, 0x64,
-        ]);
-
-        let credential_id = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: vec![0x1D; 32],
-            transports: None, // You can set USB as a hint here.
-        };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id),
-            user: None,
-        };
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::DeleteCredential,
-            sub_command_params: Some(sub_command_params.clone()),
-            pin_protocol: Some(1),
-            pin_auth: pin_auth.clone(),
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Ok(ResponseData::AuthenticatorCredentialManagement(None))
-        );
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::DeleteCredential,
-            sub_command_params: Some(sub_command_params),
-            pin_protocol: Some(1),
-            pin_auth,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
-        );
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_update_user_information() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        let credential_source = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: vec![0x1D; 32],
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x01],
-            user_display_name: Some("display_name".to_string()),
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: Some("name".to_string()),
-            user_icon: Some("icon".to_string()),
-        };
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0xA5, 0x55, 0x8F, 0x03, 0xC3, 0xD3, 0x73, 0x1C, 0x07, 0xDA, 0x1F, 0x8C, 0xC7, 0xBD,
-            0x9D, 0xB7,
-        ]);
-
-        let credential_id = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: vec![0x1D; 32],
-            transports: None, // You can set USB as a hint here.
-        };
-        let new_user = PublicKeyCredentialUserEntity {
-            user_id: vec![0xFF],
-            user_name: Some("new_name".to_string()),
-            user_display_name: Some("new_display_name".to_string()),
-            user_icon: Some("new_icon".to_string()),
-        };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id),
-            user: Some(new_user.clone()),
-        };
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::UpdateUserInformation,
-            sub_command_params: Some(sub_command_params.clone()),
-            pin_protocol: Some(1),
-            pin_auth: pin_auth.clone(),
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Ok(ResponseData::AuthenticatorCredentialManagement(None))
-        );
-
-        let updated_credential = ctap_state
-            .persistent_store
-            .find_credential("example.com", &[0x1D; 32], false)
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated_credential.user_handle, vec![0x01]);
-        assert_eq!(&updated_credential.user_name.unwrap(), "new_name");
-        assert_eq!(
-            &updated_credential.user_display_name.unwrap(),
-            "new_display_name"
-        );
-        assert_eq!(&updated_credential.user_icon.unwrap(), "new_icon");
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_credential_management_invalid_pin_protocol() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-        let pin_auth = Some(vec![
-            0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
-            0xFB, 0x00,
-        ]);
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::GetCredsMetadata,
-            sub_command_params: None,
-            pin_protocol: Some(123456),
-            pin_auth,
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_process_credential_management_invalid_pin_auth() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::GetCredsMetadata,
-            sub_command_params: None,
-            pin_protocol: Some(1),
-            pin_auth: Some(vec![0u8; 16]),
-        };
-        let cred_management_response =
-            ctap_state.process_credential_management(cred_management_params, DUMMY_CLOCK_VALUE);
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
     }
 
     #[cfg(feature = "with_ctap2_1")]

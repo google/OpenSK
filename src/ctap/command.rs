@@ -22,6 +22,7 @@ use super::data_formats::{
 };
 use super::key_material;
 use super::status_code::Ctap2StatusCode;
+use super::storage::MAX_LARGE_BLOB_ARRAY_SIZE;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -32,6 +33,9 @@ use core::convert::TryFrom;
 // MakeCredential and GetAssertion. This affects allowList and excludeList.
 // You might also want to set the max credential size in process_get_info then.
 pub const MAX_CREDENTIAL_COUNT_IN_LIST: Option<usize> = None;
+
+// This constant is a consequence of the structure of messages.
+const MIN_LARGE_BLOB_LEN: usize = 17;
 
 // CTAP specification (version 20190130) section 6.1
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -44,8 +48,8 @@ pub enum Command {
     AuthenticatorGetNextAssertion,
     AuthenticatorCredentialManagement(AuthenticatorCredentialManagementParameters),
     AuthenticatorSelection,
+    AuthenticatorLargeBlobs(AuthenticatorLargeBlobsParameters),
     AuthenticatorConfig(AuthenticatorConfigParameters),
-    // TODO(kaczmarczyck) implement FIDO 2.1 commands (see below consts)
     // Vendor specific commands
     AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
 }
@@ -56,8 +60,6 @@ impl From<cbor::reader::DecoderError> for Ctap2StatusCode {
     }
 }
 
-// TODO: Remove this `allow(dead_code)` once the constants are used.
-#[allow(dead_code)]
 impl Command {
     const AUTHENTICATOR_MAKE_CREDENTIAL: u8 = 0x01;
     const AUTHENTICATOR_GET_ASSERTION: u8 = 0x02;
@@ -65,8 +67,8 @@ impl Command {
     const AUTHENTICATOR_CLIENT_PIN: u8 = 0x06;
     const AUTHENTICATOR_RESET: u8 = 0x07;
     const AUTHENTICATOR_GET_NEXT_ASSERTION: u8 = 0x08;
-    // TODO(kaczmarczyck) use or remove those constants
-    const AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
+    // Implement Bio Enrollment when your hardware supports biometrics.
+    const _AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0x0A;
     const AUTHENTICATOR_SELECTION: u8 = 0x0B;
     const AUTHENTICATOR_LARGE_BLOBS: u8 = 0x0C;
@@ -122,6 +124,12 @@ impl Command {
             Command::AUTHENTICATOR_SELECTION => {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorSelection)
+            }
+            Command::AUTHENTICATOR_LARGE_BLOBS => {
+                let decoded_cbor = cbor::read(&bytes[1..])?;
+                Ok(Command::AuthenticatorLargeBlobs(
+                    AuthenticatorLargeBlobsParameters::try_from(decoded_cbor)?,
+                ))
             }
             Command::AUTHENTICATOR_CONFIG => {
                 let decoded_cbor = cbor::read(&bytes[1..])?;
@@ -347,6 +355,81 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             pin_hash_enc,
             permissions,
             permissions_rp_id,
+        })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct AuthenticatorLargeBlobsParameters {
+    pub get: Option<usize>,
+    pub set: Option<Vec<u8>>,
+    pub offset: usize,
+    pub length: Option<usize>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
+    pub pin_uv_auth_protocol: Option<u64>,
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                1 => get,
+                2 => set,
+                3 => offset,
+                4 => length,
+                5 => pin_uv_auth_param,
+                6 => pin_uv_auth_protocol,
+            } = extract_map(cbor_value)?;
+        }
+
+        // careful: some missing parameters here are CTAP1_ERR_INVALID_PARAMETER
+        let get = get.map(extract_unsigned).transpose()?.map(|u| u as usize);
+        let set = set.map(extract_byte_string).transpose()?;
+        let offset =
+            extract_unsigned(offset.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?)? as usize;
+        let length = length
+            .map(extract_unsigned)
+            .transpose()?
+            .map(|u| u as usize);
+        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+
+        if get.is_none() && set.is_none() {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+        if get.is_some() && set.is_some() {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+        if get.is_some()
+            && (length.is_some() || pin_uv_auth_param.is_some() || pin_uv_auth_protocol.is_some())
+        {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+        if set.is_some() && offset == 0 {
+            match length {
+                None => return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+                Some(len) if len > MAX_LARGE_BLOB_ARRAY_SIZE => {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
+                }
+                Some(len) if len < MIN_LARGE_BLOB_LEN => {
+                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+                }
+                Some(_) => (),
+            }
+        }
+        if set.is_some() && offset != 0 && length.is_some() {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+
+        Ok(AuthenticatorLargeBlobsParameters {
+            get,
+            set,
+            offset,
+            length,
+            pin_uv_auth_param,
+            pin_uv_auth_protocol,
         })
     }
 }
@@ -696,6 +779,149 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_SELECTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorSelection));
+    }
+
+    #[test]
+    fn test_from_cbor_large_blobs_parameters() {
+        // successful get
+        let cbor_value = cbor_map! {
+            1 => 2,
+            3 => 4,
+        };
+        let returned_large_blobs_parameters =
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
+        let expected_large_blobs_parameters = AuthenticatorLargeBlobsParameters {
+            get: Some(2),
+            set: None,
+            offset: 4,
+            length: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        assert_eq!(
+            returned_large_blobs_parameters,
+            expected_large_blobs_parameters
+        );
+
+        // successful first set
+        let cbor_value = cbor_map! {
+            2 => vec! [0x5E],
+            3 => 0,
+            4 => MIN_LARGE_BLOB_LEN as u64,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        let returned_large_blobs_parameters =
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
+        let expected_large_blobs_parameters = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(vec![0x5E]),
+            offset: 0,
+            length: Some(MIN_LARGE_BLOB_LEN),
+            pin_uv_auth_param: Some(vec![0xA9]),
+            pin_uv_auth_protocol: Some(1),
+        };
+        assert_eq!(
+            returned_large_blobs_parameters,
+            expected_large_blobs_parameters
+        );
+
+        // successful next set
+        let cbor_value = cbor_map! {
+            2 => vec! [0x5E],
+            3 => 1,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        let returned_large_blobs_parameters =
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
+        let expected_large_blobs_parameters = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(vec![0x5E]),
+            offset: 1,
+            length: None,
+            pin_uv_auth_param: Some(vec![0xA9]),
+            pin_uv_auth_protocol: Some(1),
+        };
+        assert_eq!(
+            returned_large_blobs_parameters,
+            expected_large_blobs_parameters
+        );
+
+        // failing with neither get nor set
+        let cbor_value = cbor_map! {
+            3 => 4,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // failing with get and set
+        let cbor_value = cbor_map! {
+            1 => 2,
+            2 => vec! [0x5E],
+            3 => 4,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // failing with get and length
+        let cbor_value = cbor_map! {
+            1 => 2,
+            3 => 4,
+            4 => MIN_LARGE_BLOB_LEN as u64,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // failing with zero offset and no length present
+        let cbor_value = cbor_map! {
+            2 => vec! [0x5E],
+            3 => 0,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // failing with length smaller than minimum
+        let cbor_value = cbor_map! {
+            2 => vec! [0x5E],
+            3 => 0,
+            4 => MIN_LARGE_BLOB_LEN as u64 - 1,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // failing with non-zero offset and length present
+        let cbor_value = cbor_map! {
+            2 => vec! [0x5E],
+            3 => 4,
+            4 => MIN_LARGE_BLOB_LEN as u64,
+            5 => vec! [0xA9],
+            6 => 1,
+        };
+        assert_eq!(
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 
     #[test]

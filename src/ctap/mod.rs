@@ -21,6 +21,7 @@ mod ctap1;
 pub mod data_formats;
 pub mod hid;
 mod key_material;
+mod large_blobs;
 mod pin_protocol_v1;
 pub mod response;
 pub mod status_code;
@@ -41,6 +42,7 @@ use self::data_formats::{
     SignatureAlgorithm,
 };
 use self::hid::ChannelID;
+use self::large_blobs::{LargeBlobs, MAX_MSG_SIZE};
 use self::pin_protocol_v1::{PinPermission, PinProtocolV1};
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
@@ -293,6 +295,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     pub u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission,
+    large_blobs: LargeBlobs,
 }
 
 impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
@@ -318,6 +321,7 @@ where
                 Duration::from_ms(TOUCH_TIMEOUT_MS),
             ),
             stateful_command_permission: StatefulPermission::new_reset(now),
+            large_blobs: LargeBlobs::new(),
         }
     }
 
@@ -484,12 +488,16 @@ where
                         )
                     }
                     Command::AuthenticatorSelection => self.process_selection(cid),
+                    Command::AuthenticatorLargeBlobs(params) => self.large_blobs.process_command(
+                        &mut self.persistent_store,
+                        &mut self.pin_protocol_v1,
+                        params,
+                    ),
                     Command::AuthenticatorConfig(params) => process_config(
                         &mut self.persistent_store,
                         &mut self.pin_protocol_v1,
                         params,
                     ),
-                    // TODO(kaczmarczyck) implement FIDO 2.1 commands
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
                         self.process_vendor_configure(params, cid)
@@ -1026,7 +1034,7 @@ where
                 ]),
                 aaguid: self.persistent_store.aaguid()?,
                 options: Some(options_map),
-                max_msg_size: Some(1024),
+                max_msg_size: Some(MAX_MSG_SIZE as u64),
                 pin_protocols: Some(vec![PIN_PROTOCOL_VERSION]),
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),

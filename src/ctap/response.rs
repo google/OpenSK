@@ -33,6 +33,7 @@ pub enum ResponseData {
     AuthenticatorReset,
     AuthenticatorCredentialManagement(Option<AuthenticatorCredentialManagementResponse>),
     AuthenticatorSelection,
+    AuthenticatorLargeBlobs(Option<AuthenticatorLargeBlobsResponse>),
     // TODO(kaczmarczyck) dummy, extend
     AuthenticatorConfig,
     AuthenticatorVendor(AuthenticatorVendorResponse),
@@ -49,6 +50,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorReset => None,
             ResponseData::AuthenticatorCredentialManagement(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorLargeBlobs(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorConfig => None,
             ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
@@ -200,6 +202,22 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
             1 => key_agreement.map(cbor::Value::from),
             2 => pin_token,
             3 => retries,
+        }
+    }
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct AuthenticatorLargeBlobsResponse {
+    pub config: Vec<u8>,
+}
+
+impl From<AuthenticatorLargeBlobsResponse> for cbor::Value {
+    fn from(platform_large_blobs_response: AuthenticatorLargeBlobsResponse) -> Self {
+        let AuthenticatorLargeBlobsResponse { config } = platform_large_blobs_response;
+
+        cbor_map_options! {
+            0x01 => config,
         }
     }
 }
@@ -507,6 +525,23 @@ mod test {
     #[test]
     fn test_selection_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_large_blobs_into_cbor() {
+        let large_blobs_response = AuthenticatorLargeBlobsResponse { config: vec![0xC0] };
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorLargeBlobs(Some(large_blobs_response)).into();
+        let expected_cbor = cbor_map_options! {
+            0x01 => vec![0xC0],
+        };
+        assert_eq!(response_cbor, Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_empty_large_blobs_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorLargeBlobs(None).into();
         assert_eq!(response_cbor, None);
     }
 

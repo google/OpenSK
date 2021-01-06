@@ -219,7 +219,7 @@ impl CtapHid {
                                 cid,
                                 cmd: CtapHid::COMMAND_CBOR,
                                 payload: vec![
-                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG as u8,
+                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8,
                                 ],
                             })
                             .unwrap()

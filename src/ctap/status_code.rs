@@ -31,9 +31,7 @@ pub enum Ctap2StatusCode {
     CTAP2_ERR_INVALID_CBOR = 0x12,
     CTAP2_ERR_MISSING_PARAMETER = 0x14,
     CTAP2_ERR_LIMIT_EXCEEDED = 0x15,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_FP_DATABASE_FULL = 0x17,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_LARGE_BLOB_STORAGE_FULL = 0x18,
     CTAP2_ERR_CREDENTIAL_EXCLUDED = 0x19,
     CTAP2_ERR_PROCESSING = 0x21,
@@ -63,13 +61,9 @@ pub enum Ctap2StatusCode {
     CTAP2_ERR_ACTION_TIMEOUT = 0x3A,
     CTAP2_ERR_UP_REQUIRED = 0x3B,
     CTAP2_ERR_UV_BLOCKED = 0x3C,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_INTEGRITY_FAILURE = 0x3D,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_INVALID_SUBCOMMAND = 0x3E,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_UV_INVALID = 0x3F,
-    #[cfg(feature = "with_ctap2_1")]
     CTAP2_ERR_UNAUTHORIZED_PERMISSION = 0x40,
     CTAP1_ERR_OTHER = 0x7F,
     _CTAP2_ERR_SPEC_LAST = 0xDF,

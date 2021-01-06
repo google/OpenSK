@@ -51,27 +51,3 @@ jobs:
           command: test
           args: --features std,with_ctap1
 
-      - name: Unit testing of CTAP2 (release mode + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --features std,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (debug mode + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (release mode + CTAP1 + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --features std,with_ctap1,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (debug mode + CTAP1 + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap1,with_ctap2_1
-

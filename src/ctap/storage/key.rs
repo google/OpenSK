@@ -92,13 +92,11 @@ make_partition! {
     CRED_RANDOM_SECRET = 2041;
 
     /// List of RP IDs allowed to read the minimum PIN length.
-    #[cfg(feature = "with_ctap2_1")]
     _MIN_PIN_LENGTH_RP_IDS = 2042;
 
     /// The minimum PIN length.
     ///
     /// If the entry is absent, the minimum PIN length is `DEFAULT_MIN_PIN_LENGTH`.
-    #[cfg(feature = "with_ctap2_1")]
     MIN_PIN_LENGTH = 2043;
 
     /// The number of PIN retries.

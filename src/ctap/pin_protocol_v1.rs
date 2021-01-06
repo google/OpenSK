@@ -17,7 +17,6 @@ use super::data_formats::{ClientPinSubCommand, CoseKey, GetAssertionHmacSecretIn
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
-#[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -28,7 +27,7 @@ use crypto::hmac::{hmac_256, verify_hmac_256_first_128bits};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-#[cfg(all(test, feature = "with_ctap2_1"))]
+#[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 use subtle::ConstantTimeEq;
 
@@ -141,10 +140,7 @@ fn check_and_store_new_pin(
     let pin = decrypt_pin(aes_dec_key, new_pin_enc)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
 
-    #[cfg(feature = "with_ctap2_1")]
     let min_pin_length = persistent_store.min_pin_length()? as usize;
-    #[cfg(not(feature = "with_ctap2_1"))]
-    let min_pin_length = 4;
     if pin.len() < min_pin_length || pin.len() == PIN_PADDED_LENGTH {
         // TODO(kaczmarczyck) check 4 code point minimum instead
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
@@ -155,7 +151,6 @@ fn check_and_store_new_pin(
     Ok(())
 }
 
-#[cfg(feature = "with_ctap2_1")]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 // TODO remove when all variants are used
 #[allow(dead_code)]
@@ -173,9 +168,7 @@ pub struct PinProtocolV1 {
     key_agreement_key: crypto::ecdh::SecKey,
     pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
     consecutive_pin_mismatches: u8,
-    #[cfg(feature = "with_ctap2_1")]
     permissions: u8,
-    #[cfg(feature = "with_ctap2_1")]
     permissions_rp_id: Option<String>,
 }
 
@@ -187,9 +180,7 @@ impl PinProtocolV1 {
             key_agreement_key,
             pin_uv_auth_token,
             consecutive_pin_mismatches: 0,
-            #[cfg(feature = "with_ctap2_1")]
             permissions: 0,
-            #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id: None,
         }
     }
@@ -345,11 +336,8 @@ impl PinProtocolV1 {
         cbc_encrypt(&token_encryption_key, iv, &mut blocks);
         let pin_token: Vec<u8> = blocks.iter().flatten().cloned().collect();
 
-        #[cfg(feature = "with_ctap2_1")]
-        {
-            self.permissions = 0x03;
-            self.permissions_rp_id = None;
-        }
+        self.permissions = 0x03;
+        self.permissions_rp_id = None;
 
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
@@ -358,7 +346,6 @@ impl PinProtocolV1 {
         })
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     fn process_get_pin_uv_auth_token_using_uv_with_permissions(
         &self,
         // If you want to support local user verification, implement this function.
@@ -368,30 +355,14 @@ impl PinProtocolV1 {
         _permissions_rp_id: Option<String>,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         // User verifications is only supported through PIN currently.
-        #[cfg(not(feature = "with_ctap2_1"))]
-        {
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
-        }
-        #[cfg(feature = "with_ctap2_1")]
-        {
-            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
-        }
+        Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     fn process_get_uv_retries(&self) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         // User verifications is only supported through PIN currently.
-        #[cfg(not(feature = "with_ctap2_1"))]
-        {
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)
-        }
-        #[cfg(feature = "with_ctap2_1")]
-        {
-            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
-        }
+        Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     fn process_set_min_pin_length(
         &mut self,
         persistent_store: &mut PersistentStore,
@@ -440,7 +411,6 @@ impl PinProtocolV1 {
         Ok(())
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     fn process_get_pin_uv_auth_token_using_pin_with_permissions(
         &mut self,
         rng: &mut impl Rng256,
@@ -480,20 +450,13 @@ impl PinProtocolV1 {
             pin_auth,
             new_pin_enc,
             pin_hash_enc,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length_rp_ids,
-            #[cfg(feature = "with_ctap2_1")]
             permissions,
-            #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id,
         } = client_pin_params;
 
         if pin_protocol != 1 {
-            #[cfg(not(feature = "with_ctap2_1"))]
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-            #[cfg(feature = "with_ctap2_1")]
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 
@@ -528,7 +491,6 @@ impl PinProtocolV1 {
                 key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                 pin_hash_enc.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
             )?),
-            #[cfg(feature = "with_ctap2_1")]
             ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_uv_with_permissions(
                     key_agreement.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
@@ -536,9 +498,7 @@ impl PinProtocolV1 {
                     permissions_rp_id,
                 )?,
             ),
-            #[cfg(feature = "with_ctap2_1")]
             ClientPinSubCommand::GetUvRetries => Some(self.process_get_uv_retries()?),
-            #[cfg(feature = "with_ctap2_1")]
             ClientPinSubCommand::SetMinPinLength => {
                 self.process_set_min_pin_length(
                     persistent_store,
@@ -548,7 +508,6 @@ impl PinProtocolV1 {
                 )?;
                 None
             }
-            #[cfg(feature = "with_ctap2_1")]
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_pin_with_permissions(
                     rng,
@@ -571,11 +530,8 @@ impl PinProtocolV1 {
         self.key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
         self.pin_uv_auth_token = rng.gen_uniform_u8x32();
         self.consecutive_pin_mismatches = 0;
-        #[cfg(feature = "with_ctap2_1")]
-        {
-            self.permissions = 0;
-            self.permissions_rp_id = None;
-        }
+        self.permissions = 0;
+        self.permissions_rp_id = None;
     }
 
     pub fn process_hmac_secret(
@@ -598,7 +554,6 @@ impl PinProtocolV1 {
         encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cred_random)
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
         // Relies on the fact that all permissions are represented by powers of two.
         if permission as u8 & self.permissions != 0 {
@@ -608,7 +563,6 @@ impl PinProtocolV1 {
         }
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     pub fn has_permission_for_rp_id(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
         if let Some(permissions_rp_id) = &self.permissions_rp_id {
             if rp_id != permissions_rp_id {
@@ -629,9 +583,7 @@ impl PinProtocolV1 {
             key_agreement_key,
             pin_uv_auth_token,
             consecutive_pin_mismatches: 0,
-            #[cfg(feature = "with_ctap2_1")]
             permissions: 0xFF,
-            #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id: None,
         }
     }
@@ -919,7 +871,6 @@ mod test {
         );
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_process_get_pin_uv_auth_token_using_pin_with_permissions() {
         let mut rng = ThreadRng256 {};
@@ -963,7 +914,7 @@ mod test {
                 &mut rng,
                 &mut persistent_store,
                 key_agreement.clone(),
-                pin_hash_enc.clone(),
+                pin_hash_enc,
                 0x03,
                 None,
             ),
@@ -984,7 +935,6 @@ mod test {
         );
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_process_set_min_pin_length() {
         let mut rng = ThreadRng256 {};
@@ -1031,13 +981,9 @@ mod test {
             pin_auth: None,
             new_pin_enc: None,
             pin_hash_enc: None,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length: None,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length_rp_ids: None,
-            #[cfg(feature = "with_ctap2_1")]
             permissions: None,
-            #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id: None,
         };
         assert!(pin_protocol_v1
@@ -1051,18 +997,11 @@ mod test {
             pin_auth: None,
             new_pin_enc: None,
             pin_hash_enc: None,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length: None,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length_rp_ids: None,
-            #[cfg(feature = "with_ctap2_1")]
             permissions: None,
-            #[cfg(feature = "with_ctap2_1")]
             permissions_rp_id: None,
         };
-        #[cfg(not(feature = "with_ctap2_1"))]
-        let error_code = Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID;
-        #[cfg(feature = "with_ctap2_1")]
         let error_code = Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER;
         assert_eq!(
             pin_protocol_v1.process_subcommand(&mut rng, &mut persistent_store, client_pin_params),
@@ -1231,7 +1170,6 @@ mod test {
         assert_eq!(&output_dec[..32], &expected_output1);
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_has_permission() {
         let mut rng = ThreadRng256 {};
@@ -1249,7 +1187,6 @@ mod test {
         }
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_has_permission_for_rp_id() {
         let mut rng = ThreadRng256 {};

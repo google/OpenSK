@@ -882,14 +882,6 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
-      "--ctap2.1",
-      action="append_const",
-      const="with_ctap2_1",
-      dest="features",
-      help=("Compiles the OpenSK application with backward compatible "
-            "support for CTAP2.1 protocol."),
-  )
-  main_parser.add_argument(
       "--nfc",
       action="append_const",
       const="with_nfc",

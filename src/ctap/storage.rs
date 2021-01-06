@@ -577,7 +577,7 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
     if cbor::write(credential.into(), &mut data) {
         Ok(data)
     } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR)
+        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
     }
 }
 
@@ -600,7 +600,7 @@ fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap
     if cbor::write(cbor_array_vec!(rp_ids), &mut data) {
         Ok(data)
     } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_CANNOT_WRITE_CBOR)
+        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
     }
 }
 

@@ -14,20 +14,18 @@
 
 mod key;
 
-#[cfg(feature = "with_ctap2_1")]
-use crate::ctap::data_formats::{extract_array, extract_text_string};
-use crate::ctap::data_formats::{CredentialProtectionPolicy, PublicKeyCredentialSource};
+use crate::ctap::data_formats::{
+    extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
+};
 use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 use crate::embedded_flash::{new_storage, Storage};
-#[cfg(feature = "with_ctap2_1")]
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-#[cfg(feature = "with_ctap2_1")]
 use cbor::cbor_array_vec;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
@@ -54,14 +52,11 @@ const NUM_PAGES: usize = 20;
 const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
 
 const MAX_PIN_RETRIES: u8 = 8;
-#[cfg(feature = "with_ctap2_1")]
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
 // TODO(kaczmarczyck) use this for the minPinLength extension
 // https://github.com/google/OpenSK/issues/129
-#[cfg(feature = "with_ctap2_1")]
 const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 // TODO(kaczmarczyck) Check whether this constant is necessary, or replace it accordingly.
-#[cfg(feature = "with_ctap2_1")]
 const _MAX_RP_IDS_LENGTH: usize = 8;
 
 /// Wrapper for master keys.
@@ -348,7 +343,6 @@ impl PersistentStore {
     }
 
     /// Returns the minimum PIN length.
-    #[cfg(feature = "with_ctap2_1")]
     pub fn min_pin_length(&self) -> Result<u8, Ctap2StatusCode> {
         match self.store.find(key::MIN_PIN_LENGTH)? {
             None => Ok(DEFAULT_MIN_PIN_LENGTH),
@@ -358,14 +352,12 @@ impl PersistentStore {
     }
 
     /// Sets the minimum PIN length.
-    #[cfg(feature = "with_ctap2_1")]
     pub fn set_min_pin_length(&mut self, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
         Ok(self.store.insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
     }
 
     /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
     /// allowed.
-    #[cfg(feature = "with_ctap2_1")]
     pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
             .store
@@ -374,11 +366,10 @@ impl PersistentStore {
                 _deserialize_min_pin_length_rp_ids(&value)
             });
         debug_assert!(rp_ids.is_some());
-        Ok(rp_ids.unwrap_or(vec![]))
+        Ok(rp_ids.unwrap_or_default())
     }
 
     /// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
-    #[cfg(feature = "with_ctap2_1")]
     pub fn _set_min_pin_length_rp_ids(
         &mut self,
         min_pin_length_rp_ids: Vec<String>,
@@ -582,7 +573,6 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
 }
 
 /// Deserializes a list of RP IDs from storage representation.
-#[cfg(feature = "with_ctap2_1")]
 fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
     let cbor = cbor::read(data).ok()?;
     extract_array(cbor)
@@ -594,7 +584,6 @@ fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
 }
 
 /// Serializes a list of RP IDs to storage representation.
-#[cfg(feature = "with_ctap2_1")]
 fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     if cbor::write(cbor_array_vec!(rp_ids), &mut data) {
@@ -988,7 +977,6 @@ mod test {
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_min_pin_length() {
         let mut rng = ThreadRng256 {};
@@ -1011,7 +999,6 @@ mod test {
         );
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_min_pin_length_rp_ids() {
         let mut rng = ThreadRng256 {};
@@ -1080,7 +1067,6 @@ mod test {
         assert_eq!(credential, reconstructed);
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_serialize_deserialize_min_pin_length_rp_ids() {
         let rp_ids = vec![String::from("example.com")];

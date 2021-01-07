@@ -133,11 +133,12 @@ fn process_enumerate_rps_begin(
     stateful_command_type: &mut Option<StatefulCommand>,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let credentials = persistent_store.all_credentials()?;
     let mut rp_set = BTreeSet::new();
-    for cred in credentials {
-        rp_set.insert(cred.rp_id);
+    let mut iter_result = Ok(());
+    for (_, credential) in persistent_store.iter_credentials(&mut iter_result)? {
+        rp_set.insert(credential.rp_id);
     }
+    iter_result?;
     let mut rp_ids = Vec::from_iter(rp_set);
     let total_rps = rp_ids.len();
 
@@ -158,12 +159,12 @@ fn process_enumerate_rps_get_next_rp(
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     check_command_permission(stateful_command_permission, now)?;
-    let rp_id = if let Some(StatefulCommand::EnumerateRps(rp_ids)) = stateful_command_type {
-        rp_ids.pop().ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?
+    if let Some(StatefulCommand::EnumerateRps(rp_ids)) = stateful_command_type {
+        let rp_id = rp_ids.pop().ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+        enumerate_rps_response(Some(rp_id), None)
     } else {
-        return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-    };
-    enumerate_rps_response(Some(rp_id), None)
+        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+    }
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
@@ -177,15 +178,19 @@ fn process_enumerate_credentials_begin(
     let rp_id_hash = sub_command_params
         .rp_id_hash
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-    // TODO(kaczmarczyck) filter by rp_id_hash inside of storage?
-    let mut rp_credentials: Vec<PublicKeyCredentialSource> = persistent_store
-        .all_credentials()?
-        .into_iter()
-        .filter(|cred| {
-            let cred_rp_id_hash = Sha256::hash(cred.rp_id.as_bytes());
-            rp_id_hash == cred_rp_id_hash
+    let mut iter_result = Ok(());
+    let iter = persistent_store.iter_credentials(&mut iter_result)?;
+    let mut rp_credentials: Vec<PublicKeyCredentialSource> = iter
+        .filter_map(|(_, credential)| {
+            let cred_rp_id_hash = Sha256::hash(credential.rp_id.as_bytes());
+            if &cred_rp_id_hash == rp_id_hash.as_slice() {
+                Some(credential)
+            } else {
+                None
+            }
         })
         .collect();
+    iter_result?;
     let total_credentials = rp_credentials.len();
 
     let credential = rp_credentials
@@ -206,16 +211,15 @@ fn process_enumerate_credentials_get_next_credential(
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     check_command_permission(stateful_command_permission, now)?;
-    let credential = if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) =
-        &mut stateful_command_type
+    if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut stateful_command_type
     {
-        rp_credentials
+        let credential = rp_credentials
             .pop()
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+        enumerate_credentials_response(credential, None)
     } else {
-        return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-    };
-    enumerate_credentials_response(credential, None)
+        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+    }
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.

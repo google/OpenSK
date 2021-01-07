@@ -281,16 +281,6 @@ impl PersistentStore {
         Ok(result)
     }
 
-    /// Returns the list of all credentials.
-    #[cfg(feature = "with_ctap2_1")]
-    pub fn all_credentials(&self) -> Result<Vec<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        let mut iter_result = Ok(());
-        let iter = self.iter_credentials(&mut iter_result)?;
-        let result = iter.map(|(_, credential)| credential).collect();
-        iter_result?;
-        Ok(result)
-    }
-
     /// Returns the number of credentials.
     #[cfg(any(test, feature = "with_ctap2_1"))]
     pub fn count_credentials(&self) -> Result<usize, Ctap2StatusCode> {
@@ -312,7 +302,7 @@ impl PersistentStore {
     /// Iterates through the credentials.
     ///
     /// If an error is encountered during iteration, it is written to `result`.
-    fn iter_credentials<'a>(
+    pub fn iter_credentials<'a>(
         &'a self,
         result: &'a mut Result<(), Ctap2StatusCode>,
     ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
@@ -577,7 +567,7 @@ impl From<persistent_store::StoreError> for Ctap2StatusCode {
 }
 
 /// Iterator for credentials.
-struct IterCredentials<'a> {
+pub struct IterCredentials<'a> {
     /// The store being iterated.
     store: &'a persistent_store::Store<Storage>,
 
@@ -716,18 +706,15 @@ mod test {
 
     #[cfg(feature = "with_ctap2_1")]
     #[test]
-    #[allow(clippy::assertions_on_constants)]
-    fn test_delete() {
+    fn test_delete_credential() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
-        // To make this test work for bigger storages, implement better int -> Vec conversion.
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
         let mut credential_ids = vec![];
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
-            let credential_source =
-                create_credential_source(&mut rng, "example.com", vec![i as u8]);
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
@@ -768,18 +755,15 @@ mod test {
         assert_eq!(stored_credential.user_display_name, None);
         assert_eq!(stored_credential.user_icon, None);
         assert!(persistent_store
-            .update_credential(&credential_id, user)
+            .update_credential(&credential_id, user.clone())
             .is_ok());
         let stored_credential = persistent_store
             .find_credential("example.com", &credential_id, false)
             .unwrap()
             .unwrap();
-        assert_eq!(stored_credential.user_name, Some("name".to_string()));
-        assert_eq!(
-            stored_credential.user_display_name,
-            Some("display_name".to_string())
-        );
-        assert_eq!(stored_credential.user_icon, Some("icon".to_string()));
+        assert_eq!(stored_credential.user_name, user.user_name);
+        assert_eq!(stored_credential.user_display_name, user.user_display_name);
+        assert_eq!(stored_credential.user_icon, user.user_icon);
     }
 
     #[test]
@@ -798,17 +782,14 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn test_fill_store() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
-        // To make this test work for bigger storages, implement better int -> Vec conversion.
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
-            let credential_source =
-                create_credential_source(&mut rng, "example.com", vec![i as u8]);
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
@@ -828,7 +809,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn test_overwrite() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
@@ -852,11 +832,10 @@ mod test {
             &[expected_credential]
         );
 
-        // To make this test work for bigger storages, implement better int -> Vec conversion.
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
+        let mut persistent_store = PersistentStore::new(&mut rng);
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
-            let credential_source =
-                create_credential_source(&mut rng, "example.com", vec![i as u8]);
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
@@ -906,30 +885,6 @@ mod test {
                 || (filtered_credentials[1].credential_id == id0
                     && filtered_credentials[0].credential_id == id1)
         );
-    }
-
-    #[cfg(feature = "with_ctap2_1")]
-    #[test]
-    fn test_all_credentials() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
-        let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
-        let credential_source2 = create_credential_source(&mut rng, "example.com", vec![0x02]);
-        let all_credentials = persistent_store.all_credentials().unwrap();
-        assert_eq!(all_credentials.len(), 0);
-
-        assert!(persistent_store
-            .store_credential(credential_source1)
-            .is_ok());
-        let all_credentials = persistent_store.all_credentials().unwrap();
-        assert_eq!(all_credentials.len(), 1);
-
-        assert!(persistent_store
-            .store_credential(credential_source2)
-            .is_ok());
-        let all_credentials = persistent_store.all_credentials().unwrap();
-        assert_eq!(all_credentials.len(), 2);
     }
 
     #[test]

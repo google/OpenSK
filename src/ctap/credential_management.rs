@@ -33,6 +33,7 @@ use crypto::sha256::Sha256;
 use crypto::Hash256;
 use libtock_drivers::timer::ClockValue;
 
+/// Generates the response for subcommands enumerating RPs.
 fn enumerate_rps_response(
     rp_id: Option<String>,
     total_rps: Option<u64>,
@@ -59,6 +60,7 @@ fn enumerate_rps_response(
     })
 }
 
+/// Generates the response for subcommands enumerating credentials.
 fn enumerate_credentials_response(
     credential: PublicKeyCredentialSource,
     total_credentials: Option<u64>,
@@ -103,6 +105,7 @@ fn enumerate_credentials_response(
     })
 }
 
+/// Processes the subcommand getCredsMetadata for CredentialManagement.
 fn process_get_creds_metadata(
     persistent_store: &PersistentStore,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -123,6 +126,7 @@ fn process_get_creds_metadata(
     })
 }
 
+/// Processes the subcommand enumerateRPsBegin for CredentialManagement.
 fn process_enumerate_rps_begin(
     persistent_store: &PersistentStore,
     stateful_command_permission: &mut TimedPermission,
@@ -147,6 +151,7 @@ fn process_enumerate_rps_begin(
     enumerate_rps_response(rp_id, Some(total_rps as u64))
 }
 
+/// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
 fn process_enumerate_rps_get_next_rp(
     stateful_command_permission: &mut TimedPermission,
     stateful_command_type: &mut Option<StatefulCommand>,
@@ -161,6 +166,7 @@ fn process_enumerate_rps_get_next_rp(
     enumerate_rps_response(Some(rp_id), None)
 }
 
+/// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
 fn process_enumerate_credentials_begin(
     persistent_store: &PersistentStore,
     stateful_command_permission: &mut TimedPermission,
@@ -193,6 +199,7 @@ fn process_enumerate_credentials_begin(
     enumerate_credentials_response(credential, Some(total_credentials as u64))
 }
 
+/// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
 fn process_enumerate_credentials_get_next_credential(
     stateful_command_permission: &mut TimedPermission,
     mut stateful_command_type: &mut Option<StatefulCommand>,
@@ -211,6 +218,7 @@ fn process_enumerate_credentials_get_next_credential(
     enumerate_credentials_response(credential, None)
 }
 
+/// Processes the subcommand deleteCredential for CredentialManagement.
 fn process_delete_credential(
     persistent_store: &mut PersistentStore,
     sub_command_params: CredentialManagementSubCommandParameters,
@@ -222,6 +230,7 @@ fn process_delete_credential(
     persistent_store.delete_credential(&credential_id)
 }
 
+/// Processes the subcommand updateUserInformation for CredentialManagement.
 fn process_update_user_information(
     persistent_store: &mut PersistentStore,
     sub_command_params: CredentialManagementSubCommandParameters,
@@ -236,6 +245,9 @@ fn process_update_user_information(
     persistent_store.update_credential(&credential_id, user)
 }
 
+/// Checks the PIN protocol.
+///
+/// TODO(#246) refactor after #246 is merged
 fn pin_uv_auth_protocol_check(pin_uv_auth_protocol: Option<u64>) -> Result<(), Ctap2StatusCode> {
     match pin_uv_auth_protocol {
         Some(1) => Ok(()),
@@ -244,6 +256,7 @@ fn pin_uv_auth_protocol_check(pin_uv_auth_protocol: Option<u64>) -> Result<(), C
     }
 }
 
+/// Processes the CredentialManagement command and all its subcommands.
 pub fn process_credential_management_subcommand(
     persistent_store: &mut PersistentStore,
     stateful_command_permission: &mut TimedPermission,

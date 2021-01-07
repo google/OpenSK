@@ -62,8 +62,10 @@ impl SecKey {
         // - https://www.secg.org/sec1-v2.pdf
     }
 
-    // DH key agreement method defined in the FIDO2 specification, Section 5.5.4. "Getting
-    // sharedSecret from Authenticator"
+    /// Creates a shared key using the Diffie Hellman key agreement.
+    ///
+    /// The key agreement is defined in the FIDO2 specification,
+    /// Section 6.5.5.4. "Obtaining the Shared Secret"
     pub fn exchange_x_sha256(&self, other: &PubKey) -> [u8; 32] {
         let p = self.exchange_raw(other);
         let mut x: [u8; 32] = [Default::default(); 32];
@@ -83,12 +85,13 @@ impl PubKey {
         self.p.to_bytes_uncompressed(bytes);
     }
 
+    /// Creates a new PubKey from their coordinates.
     pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
         PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
             .map(|p| PubKey { p })
     }
 
-    // Writes the coordinates into the passed in arrays.
+    /// Writes the coordinates into the passed in arrays.
     pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
         self.p.getx().to_int().to_bin(x);
         self.p.gety().to_int().to_bin(y);

@@ -204,6 +204,10 @@ impl PersistentStore {
     }
 
     /// Finds the key and value for a given credential ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
     #[cfg(feature = "with_ctap2_1")]
     fn find_credential_item(
         &mut self,
@@ -223,14 +227,22 @@ impl PersistentStore {
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
     }
 
-    /// Deletes a credential. Returns an error if the credential was not found.
+    /// Deletes a credential.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
     #[cfg(feature = "with_ctap2_1")]
     pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
         let (key, _) = self.find_credential_item(credential_id)?;
         Ok(self.store.remove(key)?)
     }
 
-    /// Update a credential's user information. Returns an error if the credential was not found.
+    /// Updates a credential's user information.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
     #[cfg(feature = "with_ctap2_1")]
     pub fn update_credential(
         &mut self,

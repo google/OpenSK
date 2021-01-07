@@ -62,10 +62,11 @@ impl SecKey {
         }
     }
 
-    // ECDSA signature based on a RNG to generate a suitable randomization parameter.
-    // Under the hood, rejection sampling is used to make sure that the randomization parameter is
-    // uniformly distributed.
-    // The provided RNG must be cryptographically secure; otherwise this method is insecure.
+    /// Creates an ECDSA signature based on a RNG.
+    ///
+    /// Under the hood, rejection sampling is used to make sure that the
+    /// randomization parameter is uniformly distributed. The provided RNG must
+    /// be cryptographically secure; otherwise this method is insecure.
     pub fn sign_rng<H, R>(&self, msg: &[u8], rng: &mut R) -> Signature
     where
         H: Hash256,
@@ -81,8 +82,7 @@ impl SecKey {
         }
     }
 
-    // Deterministic ECDSA signature based on RFC 6979 to generate a suitable randomization
-    // parameter.
+    /// Creates a deterministic ECDSA signature based on RFC 6979.
     pub fn sign_rfc6979<H>(&self, msg: &[u8]) -> Signature
     where
         H: Hash256 + HashBlockSize64Bytes,
@@ -105,8 +105,10 @@ impl SecKey {
         }
     }
 
-    // Try signing a curve element given a randomization parameter k. If no signature can be
-    // obtained from this k, None is returned and the caller should try again with another value.
+    /// Try signing a curve element given a randomization parameter k.
+    ///
+    /// If no signature can be obtained from this k, None is returned and the
+    /// caller should try again with another value.
     fn try_sign(&self, k: &NonZeroExponentP256, msg: &ExponentP256) -> Option<Signature> {
         let r = ExponentP256::modn(PointP256::base_point_mul(k.as_exponent()).getx().to_int());
         // The branching here is fine because all this reveals is that k generated an unsuitable r.
@@ -246,7 +248,7 @@ impl PubKey {
         representation
     }
 
-    // Writes the coordinates into the passed in arrays.
+    /// Writes the coordinates into the passed in arrays.
     pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
         self.p.getx().to_int().to_bin(x);
         self.p.gety().to_int().to_bin(y);

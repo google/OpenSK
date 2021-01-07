@@ -21,6 +21,7 @@ use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 use alloc::vec;
 
+/// Processes the subcommand setMinPINLength for AuthenticatorConfig.
 fn process_set_min_pin_length(
     persistent_store: &mut PersistentStore,
     pin_protocol_v1: &mut PinProtocolV1,
@@ -52,6 +53,7 @@ fn process_set_min_pin_length(
     Ok(ResponseData::AuthenticatorConfig)
 }
 
+/// Processes the AuthenticatorConfig command.
 pub fn process_config(
     persistent_store: &mut PersistentStore,
     pin_protocol_v1: &mut PinProtocolV1,

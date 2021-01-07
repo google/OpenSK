@@ -262,6 +262,7 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
     pub cred_protect: Option<CredentialProtectionPolicy>,
+    pub min_pin_length: bool,
 }
 
 impl TryFrom<cbor::Value> for MakeCredentialExtensions {
@@ -272,6 +273,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
             let {
                 "credProtect" => cred_protect,
                 "hmac-secret" => hmac_secret,
+                "minPinLength" => min_pin_length,
             } = extract_map(cbor_value)?;
         }
 
@@ -279,9 +281,11 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
         let cred_protect = cred_protect
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
+        let min_pin_length = min_pin_length.map_or(Ok(false), extract_bool)?;
         Ok(Self {
             hmac_secret,
             cred_protect,
+            min_pin_length,
         })
     }
 }
@@ -706,7 +710,6 @@ pub enum ClientPinSubCommand {
     GetPinToken = 0x05,
     GetPinUvAuthTokenUsingUvWithPermissions = 0x06,
     GetUvRetries = 0x07,
-    SetMinPinLength = 0x08,
     GetPinUvAuthTokenUsingPinWithPermissions = 0x09,
 }
 
@@ -729,9 +732,110 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
             0x05 => Ok(ClientPinSubCommand::GetPinToken),
             0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions),
             0x07 => Ok(ClientPinSubCommand::GetUvRetries),
-            0x08 => Ok(ClientPinSubCommand::SetMinPinLength),
             0x09 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+pub enum ConfigSubCommand {
+    EnableEnterpriseAttestation = 0x01,
+    ToggleAlwaysUv = 0x02,
+    SetMinPinLength = 0x03,
+    VendorPrototype = 0xFF,
+}
+
+impl From<ConfigSubCommand> for cbor::Value {
+    fn from(subcommand: ConfigSubCommand) -> Self {
+        (subcommand as u64).into()
+    }
+}
+
+impl TryFrom<cbor::Value> for ConfigSubCommand {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let subcommand_int = extract_unsigned(cbor_value)?;
+        match subcommand_int {
+            0x01 => Ok(ConfigSubCommand::EnableEnterpriseAttestation),
+            0x02 => Ok(ConfigSubCommand::ToggleAlwaysUv),
+            0x03 => Ok(ConfigSubCommand::SetMinPinLength),
+            0xFF => Ok(ConfigSubCommand::VendorPrototype),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub enum ConfigSubCommandParams {
+    SetMinPinLength(SetMinPinLengthParams),
+}
+
+impl From<ConfigSubCommandParams> for cbor::Value {
+    fn from(params: ConfigSubCommandParams) -> Self {
+        match params {
+            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params) => {
+                set_min_pin_length_params.into()
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct SetMinPinLengthParams {
+    pub new_min_pin_length: Option<u8>,
+    pub min_pin_length_rp_ids: Option<Vec<String>>,
+    pub force_change_pin: Option<bool>,
+}
+
+impl TryFrom<cbor::Value> for SetMinPinLengthParams {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                0x01 => new_min_pin_length,
+                0x02 => min_pin_length_rp_ids,
+                0x03 => force_change_pin,
+            } = extract_map(cbor_value)?;
+        }
+
+        let new_min_pin_length = new_min_pin_length
+            .map(extract_unsigned)
+            .transpose()?
+            .map(u8::try_from)
+            .transpose()
+            .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
+        let min_pin_length_rp_ids = match min_pin_length_rp_ids {
+            Some(entry) => Some(
+                extract_array(entry)?
+                    .into_iter()
+                    .map(extract_text_string)
+                    .collect::<Result<Vec<String>, Ctap2StatusCode>>()?,
+            ),
+            None => None,
+        };
+        let force_change_pin = force_change_pin.map(extract_bool).transpose()?;
+
+        Ok(Self {
+            new_min_pin_length,
+            min_pin_length_rp_ids,
+            force_change_pin,
+        })
+    }
+}
+
+impl From<SetMinPinLengthParams> for cbor::Value {
+    fn from(params: SetMinPinLengthParams) -> Self {
+        cbor_map_options! {
+            0x01 => params.new_min_pin_length.map(|u| u as u64),
+            0x02 => params.min_pin_length_rp_ids.map(|vec| cbor_array_vec!(vec)),
+            0x03 => params.force_change_pin,
         }
     }
 }
@@ -1240,11 +1344,13 @@ mod test {
         let cbor_extensions = cbor_map! {
             "hmac-secret" => true,
             "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+            "minPinLength" => true,
         };
         let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
         let expected_extensions = MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            min_pin_length: true,
         };
         assert_eq!(extensions, Ok(expected_extensions));
     }
@@ -1345,6 +1451,56 @@ mod test {
             let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }
+    }
+
+    #[test]
+    fn test_from_into_config_sub_command() {
+        let cbor_sub_command: cbor::Value = cbor_int!(0x01);
+        let sub_command = ConfigSubCommand::try_from(cbor_sub_command.clone());
+        let expected_sub_command = ConfigSubCommand::EnableEnterpriseAttestation;
+        assert_eq!(sub_command, Ok(expected_sub_command));
+        let created_cbor: cbor::Value = sub_command.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command);
+
+        for command in ConfigSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = ConfigSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
+        }
+    }
+
+    #[test]
+    fn test_from_set_min_pin_length_params() {
+        let params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
+            force_change_pin: Some(true),
+        };
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x03 => true,
+        };
+        assert_eq!(cbor::Value::from(params.clone()), cbor_params);
+        let reconstructed_params = SetMinPinLengthParams::try_from(cbor_params);
+        assert_eq!(reconstructed_params, Ok(params));
+    }
+
+    #[test]
+    fn test_from_config_sub_command_params() {
+        let set_min_pin_length_params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
+            force_change_pin: Some(true),
+        };
+        let config_sub_command_params =
+            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params);
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x03 => true,
+        };
+        assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);
     }
 
     #[test]

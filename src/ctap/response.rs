@@ -31,6 +31,8 @@ pub enum ResponseData {
     AuthenticatorClientPin(Option<AuthenticatorClientPinResponse>),
     AuthenticatorReset,
     AuthenticatorSelection,
+    // TODO(kaczmarczyck) dummy, extend
+    AuthenticatorConfig,
     AuthenticatorVendor(AuthenticatorVendorResponse),
 }
 
@@ -45,6 +47,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorClientPin(None) => None,
             ResponseData::AuthenticatorReset => None,
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorConfig => None,
             ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
     }
@@ -365,6 +368,12 @@ mod test {
     #[test]
     fn test_selection_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_config_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorConfig.into();
         assert_eq!(response_cbor, None);
     }
 

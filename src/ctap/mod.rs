@@ -1016,14 +1016,11 @@ mod test {
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
         let mut expected_response = vec![0x00, 0xAA, 0x01];
-        // The difference here is a longer array of supported versions.
-        let mut version_count = 0;
-        // CTAP 2.0 and 2.1 are always supported
-        version_count += 2;
+        // The version array differs with CTAP1, always including 2.0 and 2.1.
+        #[cfg(not(feature = "with_ctap1"))]
+        let version_count = 2;
         #[cfg(feature = "with_ctap1")]
-        {
-            version_count += 1;
-        }
+        let version_count = 3;
         expected_response.push(0x80 + version_count);
         #[cfg(feature = "with_ctap1")]
         expected_response.extend(&[0x66, 0x55, 0x32, 0x46, 0x5F, 0x56, 0x32]);

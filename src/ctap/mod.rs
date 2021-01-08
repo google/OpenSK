@@ -25,23 +25,19 @@ pub mod status_code;
 mod storage;
 mod timed_permission;
 
-#[cfg(feature = "with_ctap2_1")]
-use self::command::MAX_CREDENTIAL_COUNT_IN_LIST;
 use self::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
+    MAX_CREDENTIAL_COUNT_IN_LIST,
 };
-#[cfg(feature = "with_ctap2_1")]
-use self::data_formats::AuthenticatorTransport;
 use self::data_formats::{
-    CredentialProtectionPolicy, GetAssertionHmacSecretInput, PackedAttestationStatement,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    AuthenticatorTransport, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
+    PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+    SignatureAlgorithm,
 };
 use self::hid::ChannelID;
-#[cfg(feature = "with_ctap2_1")]
-use self::pin_protocol_v1::PinPermission;
-use self::pin_protocol_v1::PinProtocolV1;
+use self::pin_protocol_v1::{PinPermission, PinProtocolV1};
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
@@ -108,7 +104,6 @@ pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
 // TODO(#106) change to final string when ready
-#[cfg(feature = "with_ctap2_1")]
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
 // We currently only support one algorithm for signatures: ES256.
@@ -339,7 +334,6 @@ where
                     // GetInfo does not reset stateful commands.
                     (Command::AuthenticatorGetInfo, _) => (),
                     // AuthenticatorSelection does not reset stateful commands.
-                    #[cfg(feature = "with_ctap2_1")]
                     (Command::AuthenticatorSelection, _) => (),
                     (_, _) => {
                         self.stateful_command_type = None;
@@ -356,7 +350,6 @@ where
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
                     Command::AuthenticatorReset => self.process_reset(cid, now),
-                    #[cfg(feature = "with_ctap2_1")]
                     Command::AuthenticatorSelection => self.process_selection(cid),
                     // TODO(kaczmarczyck) implement FIDO 2.1 commands
                     // Vendor specific commands
@@ -484,12 +477,9 @@ where
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
-                #[cfg(feature = "with_ctap2_1")]
-                {
-                    self.pin_protocol_v1
-                        .has_permission(PinPermission::MakeCredential)?;
-                    self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
-                }
+                self.pin_protocol_v1
+                    .has_permission(PinPermission::MakeCredential)?;
+                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -738,12 +728,9 @@ where
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
-                #[cfg(feature = "with_ctap2_1")]
-                {
-                    self.pin_protocol_v1
-                        .has_permission(PinPermission::GetAssertion)?;
-                    self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
-                }
+                self.pin_protocol_v1
+                    .has_permission(PinPermission::GetAssertion)?;
+                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
                 UV_FLAG
             }
             None => {
@@ -851,7 +838,6 @@ where
                     #[cfg(feature = "with_ctap1")]
                     String::from(U2F_VERSION_STRING),
                     String::from(FIDO2_VERSION_STRING),
-                    #[cfg(feature = "with_ctap2_1")]
                     String::from(FIDO2_1_VERSION_STRING),
                 ],
                 extensions: Some(vec![String::from("hmac-secret")]),
@@ -861,19 +847,13 @@ where
                 pin_protocols: Some(vec![
                     CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
                 ]),
-                #[cfg(feature = "with_ctap2_1")]
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 // #TODO(106) update with version 2.1 of HMAC-secret
-                #[cfg(feature = "with_ctap2_1")]
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
-                #[cfg(feature = "with_ctap2_1")]
                 transports: Some(vec![AuthenticatorTransport::Usb]),
-                #[cfg(feature = "with_ctap2_1")]
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 default_cred_protect: DEFAULT_CRED_PROTECT,
-                #[cfg(feature = "with_ctap2_1")]
                 min_pin_length: self.persistent_store.min_pin_length()?,
-                #[cfg(feature = "with_ctap2_1")]
                 firmware_version: None,
             },
         ))
@@ -916,7 +896,6 @@ where
         Ok(ResponseData::AuthenticatorReset)
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     fn process_selection(&self, cid: ChannelID) -> Result<ResponseData, Ctap2StatusCode> {
         (self.check_user_presence)(cid)?;
         Ok(ResponseData::AuthenticatorSelection)
@@ -1036,42 +1015,28 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
-        #[cfg(feature = "with_ctap2_1")]
         let mut expected_response = vec![0x00, 0xAA, 0x01];
-        #[cfg(not(feature = "with_ctap2_1"))]
-        let mut expected_response = vec![0x00, 0xA6, 0x01];
-        // The difference here is a longer array of supported versions.
-        let mut version_count = 0;
-        // CTAP 2 is always supported
-        version_count += 1;
+        // The version array differs with CTAP1, always including 2.0 and 2.1.
+        #[cfg(not(feature = "with_ctap1"))]
+        let version_count = 2;
         #[cfg(feature = "with_ctap1")]
-        {
-            version_count += 1;
-        }
-        #[cfg(feature = "with_ctap2_1")]
-        {
-            version_count += 1;
-        }
+        let version_count = 3;
         expected_response.push(0x80 + version_count);
         #[cfg(feature = "with_ctap1")]
         expected_response.extend(&[0x66, 0x55, 0x32, 0x46, 0x5F, 0x56, 0x32]);
-        expected_response.extend(&[0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30]);
-        #[cfg(feature = "with_ctap2_1")]
-        expected_response.extend(&[
-            0x6C, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45,
-        ]);
-        expected_response.extend(&[
-            0x02, 0x81, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
-            0x03, 0x50,
-        ]);
-        expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
-        expected_response.extend(&[
-            0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
-            0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
-        ]);
-        #[cfg(feature = "with_ctap2_1")]
         expected_response.extend(
             [
+                0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30, 0x6C, 0x46, 0x49, 0x44, 0x4F,
+                0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45, 0x02, 0x81, 0x6B, 0x68, 0x6D, 0x61,
+                0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x03, 0x50,
+            ]
+            .iter(),
+        );
+        expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
+        expected_response.extend(
+            [
+                0x04, 0xA3, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
+                0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
                 0x08, 0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61,
                 0x6C, 0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69,
                 0x63, 0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04,

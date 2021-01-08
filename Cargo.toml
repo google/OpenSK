@@ -27,7 +27,6 @@ panic_console = ["lang_items/panic_console"]
 std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
-with_ctap2_1 = []
 with_nfc = ["libtock_drivers/with_nfc"]
 
 [dev-dependencies]

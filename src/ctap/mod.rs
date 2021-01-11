@@ -848,13 +848,19 @@ where
                     CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
                 ]),
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
-                // #TODO(106) update with version 2.1 of HMAC-secret
+                // TODO(#106) update with version 2.1 of HMAC-secret
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 default_cred_protect: DEFAULT_CRED_PROTECT,
                 min_pin_length: self.persistent_store.min_pin_length()?,
                 firmware_version: None,
+                max_cred_blob_length: None,
+                // TODO(kaczmarczyck) update when extension is implemented
+                max_rp_ids_for_set_min_pin_length: None,
+                remaining_discoverable_credentials: Some(
+                    self.persistent_store.remaining_credentials()? as u64,
+                ),
             },
         ))
     }
@@ -1015,7 +1021,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
-        let mut expected_response = vec![0x00, 0xAA, 0x01];
+        let mut expected_response = vec![0x00, 0xAB, 0x01];
         // The version array differs with CTAP1, always including 2.0 and 2.1.
         #[cfg(not(feature = "with_ctap1"))]
         let version_count = 2;
@@ -1039,7 +1045,7 @@ mod test {
                 0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01,
                 0x08, 0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61,
                 0x6C, 0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69,
-                0x63, 0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04,
+                0x63, 0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04, 0x14, 0x18, 0x96,
             ]
             .iter(),
         );

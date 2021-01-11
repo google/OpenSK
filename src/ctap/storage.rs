@@ -117,6 +117,24 @@ impl PersistentStore {
         Ok(())
     }
 
+    /// Returns the credential at the given key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_VENDOR_INTERNAL_ERROR` if the key does not hold a valid credential.
+    pub fn get_credential(&self, key: usize) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
+        let min_key = key::CREDENTIALS.start;
+        if key < min_key || key >= min_key + MAX_SUPPORTED_RESIDENTIAL_KEYS {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        let credential_entry = self
+            .store
+            .find(key)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        deserialize_credential(&credential_entry)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+    }
+
     /// Finds the key and value for a given credential ID.
     ///
     /// # Errors
@@ -246,22 +264,23 @@ impl PersistentStore {
     /// Returns the list of matching credentials.
     ///
     /// Does not return credentials that are not discoverable if `check_cred_protect` is set.
-    pub fn filter_credential(
+    pub fn filter_credentials(
         &self,
         rp_id: &str,
         check_cred_protect: bool,
-    ) -> Result<Vec<PublicKeyCredentialSource>, Ctap2StatusCode> {
+    ) -> Result<Vec<(usize, u64)>, Ctap2StatusCode> {
         let mut iter_result = Ok(());
         let iter = self.iter_credentials(&mut iter_result)?;
         let result = iter
-            .filter_map(|(_, credential)| {
-                if credential.rp_id == rp_id {
-                    Some(credential)
+            .filter_map(|(key, credential)| {
+                if credential.rp_id == rp_id
+                    && (!check_cred_protect || credential.is_discoverable())
+                {
+                    Some((key, credential.creation_order))
                 } else {
                     None
                 }
             })
-            .filter(|cred| !check_cred_protect || cred.is_discoverable())
             .collect();
         iter_result?;
         Ok(result)
@@ -801,12 +820,13 @@ mod test {
             .store_credential(credential_source1)
             .is_ok());
         assert_eq!(persistent_store.count_credentials().unwrap(), 1);
-        assert_eq!(
-            &persistent_store
-                .filter_credential("example.com", false)
-                .unwrap(),
-            &[expected_credential]
-        );
+        let filtered_credentials = persistent_store
+            .filter_credentials("example.com", false)
+            .unwrap();
+        let retrieved_credential_source = persistent_store
+            .get_credential(filtered_credentials[0].0)
+            .unwrap();
+        assert_eq!(retrieved_credential_source, expected_credential);
 
         let mut persistent_store = PersistentStore::new(&mut rng);
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
@@ -831,7 +851,7 @@ mod test {
     }
 
     #[test]
-    fn test_filter() {
+    fn test_filter_get_credentials() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
@@ -852,14 +872,20 @@ mod test {
             .is_ok());
 
         let filtered_credentials = persistent_store
-            .filter_credential("example.com", false)
+            .filter_credentials("example.com", false)
             .unwrap();
         assert_eq!(filtered_credentials.len(), 2);
+        let retrieved_credential0 = persistent_store
+            .get_credential(filtered_credentials[0].0)
+            .unwrap();
+        let retrieved_credential1 = persistent_store
+            .get_credential(filtered_credentials[1].0)
+            .unwrap();
         assert!(
-            (filtered_credentials[0].credential_id == id0
-                && filtered_credentials[1].credential_id == id1)
-                || (filtered_credentials[1].credential_id == id0
-                    && filtered_credentials[0].credential_id == id1)
+            (retrieved_credential0.credential_id == id0
+                && retrieved_credential1.credential_id == id1)
+                || (retrieved_credential1.credential_id == id0
+                    && retrieved_credential0.credential_id == id1)
         );
     }
 
@@ -886,7 +912,7 @@ mod test {
         assert!(persistent_store.store_credential(credential).is_ok());
 
         let no_credential = persistent_store
-            .filter_credential("example.com", true)
+            .filter_credentials("example.com", true)
             .unwrap();
         assert_eq!(no_credential, vec![]);
     }

@@ -142,7 +142,7 @@ struct AssertionInput {
 struct AssertionState {
     assertion_input: AssertionInput,
     // Sorted by ascending order of creation, so the last element is the most recent one.
-    next_credentials: Vec<PublicKeyCredentialSource>,
+    next_credential_keys: Vec<usize>,
 }
 
 enum StatefulCommand {
@@ -606,7 +606,7 @@ where
     // and returns the correct Get(Next)Assertion response.
     fn assertion_response(
         &mut self,
-        credential: PublicKeyCredentialSource,
+        mut credential: PublicKeyCredentialSource,
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -642,6 +642,12 @@ where
             key_id: credential.credential_id,
             transports: None, // You can set USB as a hint here.
         };
+        // Remove user identifiable information without uv.
+        if !has_uv {
+            credential.user_name = None;
+            credential.user_display_name = None;
+            credential.user_icon = None;
+        }
         let user = if !credential.user_handle.is_empty() {
             Some(PublicKeyCredentialUserEntity {
                 user_id: credential.user_handle,
@@ -749,26 +755,23 @@ where
         }
 
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-        let mut applicable_credentials = if let Some(allow_list) = allow_list {
-            if let Some(credential) =
-                self.get_any_credential_from_allow_list(allow_list, &rp_id, &rp_id_hash, has_uv)?
-            {
-                vec![credential]
-            } else {
-                vec![]
-            }
+        let (credential, next_credential_keys) = if let Some(allow_list) = allow_list {
+            (
+                self.get_any_credential_from_allow_list(allow_list, &rp_id, &rp_id_hash, has_uv)?,
+                vec![],
+            )
         } else {
-            self.persistent_store.filter_credential(&rp_id, !has_uv)?
+            let mut stored_credentials =
+                self.persistent_store.filter_credentials(&rp_id, !has_uv)?;
+            stored_credentials.sort_unstable_by_key(|c| c.1);
+            let mut stored_credentials: Vec<usize> =
+                stored_credentials.into_iter().map(|c| c.0).collect();
+            let credential = stored_credentials
+                .pop()
+                .map(|key| self.persistent_store.get_credential(key))
+                .transpose()?;
+            (credential, stored_credentials)
         };
-        // Remove user identifiable information without uv.
-        if !has_uv {
-            for credential in &mut applicable_credentials {
-                credential.user_name = None;
-                credential.user_display_name = None;
-                credential.user_icon = None;
-            }
-        }
-        applicable_credentials.sort_unstable_by_key(|c| c.creation_order);
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         // For CTAP 2.1, it was moved to a later protocol step.
@@ -776,9 +779,7 @@ where
             (self.check_user_presence)(cid)?;
         }
 
-        let credential = applicable_credentials
-            .pop()
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
+        let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         self.increment_global_signature_counter()?;
 
@@ -788,15 +789,15 @@ where
             hmac_secret_input,
             has_uv,
         };
-        let number_of_credentials = if applicable_credentials.is_empty() {
+        let number_of_credentials = if next_credential_keys.is_empty() {
             None
         } else {
-            let number_of_credentials = Some(applicable_credentials.len() + 1);
+            let number_of_credentials = Some(next_credential_keys.len() + 1);
             self.stateful_command_permission =
                 TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
             self.stateful_command_type = Some(StatefulCommand::GetAssertion(AssertionState {
                 assertion_input: assertion_input.clone(),
-                next_credentials: applicable_credentials,
+                next_credential_keys,
             }));
             number_of_credentials
         };
@@ -812,10 +813,11 @@ where
             if let Some(StatefulCommand::GetAssertion(assertion_state)) =
                 &mut self.stateful_command_type
             {
-                let credential = assertion_state
-                    .next_credentials
+                let credential_key = assertion_state
+                    .next_credential_keys
                     .pop()
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+                let credential = self.persistent_store.get_credential(credential_key)?;
                 (assertion_state.assertion_input.clone(), credential)
             } else {
                 return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
@@ -1250,11 +1252,16 @@ mod test {
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
-        let stored_credential = ctap_state
+        let credential_key = ctap_state
             .persistent_store
-            .filter_credential("example.com", false)
+            .filter_credentials("example.com", false)
             .unwrap()
             .pop()
+            .unwrap()
+            .0;
+        let stored_credential = ctap_state
+            .persistent_store
+            .get_credential(credential_key)
             .unwrap();
         let credential_id = stored_credential.credential_id;
         assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
@@ -1275,11 +1282,16 @@ mod test {
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
-        let stored_credential = ctap_state
+        let credential_key = ctap_state
             .persistent_store
-            .filter_credential("example.com", false)
+            .filter_credentials("example.com", false)
             .unwrap()
             .pop()
+            .unwrap()
+            .0;
+        let stored_credential = ctap_state
+            .persistent_store
+            .get_credential(credential_key)
             .unwrap();
         let credential_id = stored_credential.credential_id;
         assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));

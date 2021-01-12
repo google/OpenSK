@@ -85,7 +85,7 @@ impl PubKey {
         self.p.to_bytes_uncompressed(bytes);
     }
 
-    /// Creates a new PubKey from their coordinates.
+    /// Creates a new PubKey from its coordinates on the elliptic curve.
     pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
         PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
             .map(|p| PubKey { p })

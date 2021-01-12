@@ -220,7 +220,6 @@ impl Signature {
 }
 
 impl PubKey {
-    pub const ES256_ALGORITHM: i64 = -7;
     #[cfg(feature = "with_ctap1")]
     const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
 

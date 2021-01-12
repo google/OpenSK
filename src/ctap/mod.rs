@@ -534,7 +534,7 @@ where
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        if !cbor::write(cbor::Value::Map(CoseKey::from(pk).0), &mut auth_data) {
+        if !cbor::write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data) {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         if has_extension_output {

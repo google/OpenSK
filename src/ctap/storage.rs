@@ -544,6 +544,11 @@ impl PersistentStore {
         self.init(rng)?;
         Ok(())
     }
+
+    pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
+        // TODO(kaczmarczyck) implement storage logic
+        Ok(())
+    }
 }
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {

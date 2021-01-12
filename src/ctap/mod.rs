@@ -128,8 +128,7 @@ pub fn check_pin_uv_auth_protocol(
 ) -> Result<(), Ctap2StatusCode> {
     match pin_uv_auth_protocol {
         Some(PIN_PROTOCOL_VERSION) => Ok(()),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-        None => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
     }
 }
 
@@ -1087,11 +1086,6 @@ mod test {
                     auth_data[0..expected_auth_data.len()],
                     expected_auth_data[..]
                 );
-                /*assert_eq!(
-                    &auth_data[expected_auth_data.len()
-                        ..expected_auth_data.len() + expected_attested_cred_data.len()],
-                    expected_attested_cred_data
-                );*/
                 assert_eq!(
                     &auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
                     expected_extension_cbor
@@ -1424,9 +1418,6 @@ mod test {
         make_credential_params.extensions = extensions;
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
-        let mut expected_attested_cred_data =
-            ctap_state.persistent_store.aaguid().unwrap().to_vec();
-        expected_attested_cred_data.extend(&[0x00, 0x20]);
         check_make_response(
             make_credential_response,
             0x41,

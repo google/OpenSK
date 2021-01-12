@@ -24,7 +24,6 @@ use alloc::vec;
 /// Processes the subcommand setMinPINLength for AuthenticatorConfig.
 fn process_set_min_pin_length(
     persistent_store: &mut PersistentStore,
-    pin_protocol_v1: &mut PinProtocolV1,
     params: SetMinPinLengthParams,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let SetMinPinLengthParams {
@@ -44,8 +43,10 @@ fn process_set_min_pin_length(
     if let Some(old_length) = persistent_store.pin_code_point_length()? {
         force_change_pin |= new_min_pin_length > old_length;
     }
-    pin_protocol_v1.force_pin_change |= force_change_pin;
-    // TODO(kaczmarczyck) actually force a PIN change
+    if force_change_pin {
+        // TODO(kaczmarczyck) actually force a PIN change in PinProtocolV1
+        persistent_store.force_pin_change()?;
+    }
     persistent_store.set_min_pin_length(new_min_pin_length)?;
     if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
         persistent_store.set_min_pin_length_rp_ids(min_pin_length_rp_ids)?;
@@ -86,7 +87,7 @@ pub fn process_config(
     match sub_command {
         ConfigSubCommand::SetMinPinLength => {
             if let Some(ConfigSubCommandParams::SetMinPinLength(params)) = sub_command_params {
-                process_set_min_pin_length(persistent_store, pin_protocol_v1, params)
+                process_set_min_pin_length(persistent_store, params)
             } else {
                 Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
             }

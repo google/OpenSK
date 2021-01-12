@@ -172,7 +172,6 @@ pub struct PinProtocolV1 {
     consecutive_pin_mismatches: u8,
     permissions: u8,
     permissions_rp_id: Option<String>,
-    pub force_pin_change: bool,
 }
 
 impl PinProtocolV1 {
@@ -185,7 +184,6 @@ impl PinProtocolV1 {
             consecutive_pin_mismatches: 0,
             permissions: 0,
             permissions_rp_id: None,
-            force_pin_change: false,
         }
     }
 
@@ -530,7 +528,6 @@ impl PinProtocolV1 {
             consecutive_pin_mismatches: 0,
             permissions: 0xFF,
             permissions_rp_id: None,
-            force_pin_change: false,
         }
     }
 }

@@ -72,6 +72,7 @@ pub fn process_config(
         check_pin_uv_auth_protocol(pin_uv_auth_protocol)
             .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
         let auth_param = pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        // Constants are taken from the specification, section 6.11, step 4.2.
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
         if let Some(sub_command_params) = sub_command_params.clone() {

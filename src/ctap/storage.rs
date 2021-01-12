@@ -16,6 +16,7 @@ mod key;
 
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
+    PublicKeyCredentialUserEntity,
 };
 use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
@@ -124,6 +125,47 @@ impl PersistentStore {
         Ok(())
     }
 
+    /// Returns the credential at the given key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_VENDOR_INTERNAL_ERROR` if the key does not hold a valid credential.
+    pub fn get_credential(&self, key: usize) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
+        let min_key = key::CREDENTIALS.start;
+        if key < min_key || key >= min_key + MAX_SUPPORTED_RESIDENTIAL_KEYS {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        let credential_entry = self
+            .store
+            .find(key)?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        deserialize_credential(&credential_entry)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+    }
+
+    /// Finds the key and value for a given credential ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
+    fn find_credential_item(
+        &self,
+        credential_id: &[u8],
+    ) -> Result<(usize, PublicKeyCredentialSource), Ctap2StatusCode> {
+        let mut iter_result = Ok(());
+        let iter = self.iter_credentials(&mut iter_result)?;
+        let mut credentials: Vec<(usize, PublicKeyCredentialSource)> = iter
+            .filter(|(_, credential)| credential.credential_id == credential_id)
+            .collect();
+        iter_result?;
+        if credentials.len() > 1 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        credentials
+            .pop()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
+    }
+
     /// Returns the first matching credential.
     ///
     /// Returns `None` if no credentials are matched or if `check_cred_protect` is set and the first
@@ -134,22 +176,17 @@ impl PersistentStore {
         credential_id: &[u8],
         check_cred_protect: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        let mut iter_result = Ok(());
-        let iter = self.iter_credentials(&mut iter_result)?;
-        // We don't check whether there is more than one matching credential to be able to exit
-        // early.
-        let result = iter.map(|(_, credential)| credential).find(|credential| {
-            credential.rp_id == rp_id && credential.credential_id == credential_id
-        });
-        iter_result?;
-        if let Some(cred) = &result {
-            let user_verification_required = cred.cred_protect_policy
-                == Some(CredentialProtectionPolicy::UserVerificationRequired);
-            if check_cred_protect && user_verification_required {
-                return Ok(None);
-            }
+        let credential = match self.find_credential_item(credential_id) {
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS) => return Ok(None),
+            Err(e) => return Err(e),
+            Ok((_key, credential)) => credential,
+        };
+        let is_protected = credential.cred_protect_policy
+            == Some(CredentialProtectionPolicy::UserVerificationRequired);
+        if credential.rp_id != rp_id || (check_cred_protect && is_protected) {
+            return Ok(None);
         }
-        Ok(result)
+        Ok(Some(credential))
     }
 
     /// Stores or updates a credential.
@@ -204,32 +241,35 @@ impl PersistentStore {
         Ok(())
     }
 
-    /// Returns the list of matching credentials.
+    /// Deletes a credential.
     ///
-    /// Does not return credentials that are not discoverable if `check_cred_protect` is set.
-    pub fn filter_credential(
-        &self,
-        rp_id: &str,
-        check_cred_protect: bool,
-    ) -> Result<Vec<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        let mut iter_result = Ok(());
-        let iter = self.iter_credentials(&mut iter_result)?;
-        let result = iter
-            .filter_map(|(_, credential)| {
-                if credential.rp_id == rp_id {
-                    Some(credential)
-                } else {
-                    None
-                }
-            })
-            .filter(|cred| !check_cred_protect || cred.is_discoverable())
-            .collect();
-        iter_result?;
-        Ok(result)
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
+    pub fn _delete_credential(&mut self, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
+        let (key, _) = self.find_credential_item(credential_id)?;
+        Ok(self.store.remove(key)?)
+    }
+
+    /// Updates a credential's user information.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
+    pub fn _update_credential(
+        &mut self,
+        credential_id: &[u8],
+        user: PublicKeyCredentialUserEntity,
+    ) -> Result<(), Ctap2StatusCode> {
+        let (key, mut credential) = self.find_credential_item(credential_id)?;
+        credential.user_name = user.user_name;
+        credential.user_display_name = user.user_display_name;
+        credential.user_icon = user.user_icon;
+        let value = serialize_credential(credential)?;
+        Ok(self.store.insert(key, &value)?)
     }
 
     /// Returns the number of credentials.
-    #[cfg(test)]
     pub fn count_credentials(&self) -> Result<usize, Ctap2StatusCode> {
         let mut iter_result = Ok(());
         let iter = self.iter_credentials(&mut iter_result)?;
@@ -238,10 +278,17 @@ impl PersistentStore {
         Ok(result)
     }
 
+    /// Returns the estimated number of credentials that can still be stored.
+    pub fn remaining_credentials(&self) -> Result<usize, Ctap2StatusCode> {
+        MAX_SUPPORTED_RESIDENTIAL_KEYS
+            .checked_sub(self.count_credentials()?)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+    }
+
     /// Iterates through the credentials.
     ///
     /// If an error is encountered during iteration, it is written to `result`.
-    fn iter_credentials<'a>(
+    pub fn iter_credentials<'a>(
         &'a self,
         result: &'a mut Result<(), Ctap2StatusCode>,
     ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
@@ -520,7 +567,7 @@ impl From<persistent_store::StoreError> for Ctap2StatusCode {
 }
 
 /// Iterator for credentials.
-struct IterCredentials<'a> {
+pub struct IterCredentials<'a> {
     /// The store being iterated.
     store: &'a persistent_store::Store<Storage>,
 
@@ -656,6 +703,66 @@ mod test {
     }
 
     #[test]
+    fn test_delete_credential() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
+
+        let mut credential_ids = vec![];
+        for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
+            credential_ids.push(credential_source.credential_id.clone());
+            assert!(persistent_store.store_credential(credential_source).is_ok());
+            assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
+        }
+        let mut count = persistent_store.count_credentials().unwrap();
+        for credential_id in credential_ids {
+            assert!(persistent_store._delete_credential(&credential_id).is_ok());
+            count -= 1;
+            assert_eq!(persistent_store.count_credentials().unwrap(), count);
+        }
+    }
+
+    #[test]
+    fn test_update_credential() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let user = PublicKeyCredentialUserEntity {
+            // User ID is ignored.
+            user_id: vec![0x00],
+            user_name: Some("name".to_string()),
+            user_display_name: Some("display_name".to_string()),
+            user_icon: Some("icon".to_string()),
+        };
+        assert_eq!(
+            persistent_store._update_credential(&[0x1D], user.clone()),
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
+        );
+
+        let credential_source = create_credential_source(&mut rng, "example.com", vec![0x1D]);
+        let credential_id = credential_source.credential_id.clone();
+        assert!(persistent_store.store_credential(credential_source).is_ok());
+        let stored_credential = persistent_store
+            .find_credential("example.com", &credential_id, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored_credential.user_name, None);
+        assert_eq!(stored_credential.user_display_name, None);
+        assert_eq!(stored_credential.user_icon, None);
+        assert!(persistent_store
+            ._update_credential(&credential_id, user.clone())
+            .is_ok());
+        let stored_credential = persistent_store
+            .find_credential("example.com", &credential_id, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored_credential.user_name, user.user_name);
+        assert_eq!(stored_credential.user_display_name, user.user_display_name);
+        assert_eq!(stored_credential.user_icon, user.user_icon);
+    }
+
+    #[test]
     fn test_credential_order() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
@@ -671,17 +778,14 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn test_fill_store() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
-        // To make this test work for bigger storages, implement better int -> Vec conversion.
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
-            let credential_source =
-                create_credential_source(&mut rng, "example.com", vec![i as u8]);
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
@@ -701,7 +805,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn test_overwrite() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
@@ -709,7 +812,8 @@ mod test {
         // These should have different IDs.
         let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x00]);
-        let expected_credential = credential_source1.clone();
+        let credential_id0 = credential_source0.credential_id.clone();
+        let credential_id1 = credential_source1.credential_id.clone();
 
         assert!(persistent_store
             .store_credential(credential_source0)
@@ -718,18 +822,19 @@ mod test {
             .store_credential(credential_source1)
             .is_ok());
         assert_eq!(persistent_store.count_credentials().unwrap(), 1);
-        assert_eq!(
-            &persistent_store
-                .filter_credential("example.com", false)
-                .unwrap(),
-            &[expected_credential]
-        );
+        assert!(persistent_store
+            .find_credential("example.com", &credential_id0, false)
+            .unwrap()
+            .is_none());
+        assert!(persistent_store
+            .find_credential("example.com", &credential_id1, false)
+            .unwrap()
+            .is_some());
 
-        // To make this test work for bigger storages, implement better int -> Vec conversion.
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS < 256);
+        let mut persistent_store = PersistentStore::new(&mut rng);
         for i in 0..MAX_SUPPORTED_RESIDENTIAL_KEYS {
-            let credential_source =
-                create_credential_source(&mut rng, "example.com", vec![i as u8]);
+            let user_handle = i.to_ne_bytes().to_vec();
+            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
@@ -749,64 +854,21 @@ mod test {
     }
 
     #[test]
-    fn test_filter() {
+    fn test_get_credential() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
         let credential_source2 =
             create_credential_source(&mut rng, "another.example.com", vec![0x02]);
-        let id0 = credential_source0.credential_id.clone();
-        let id1 = credential_source1.credential_id.clone();
-        assert!(persistent_store
-            .store_credential(credential_source0)
-            .is_ok());
-        assert!(persistent_store
-            .store_credential(credential_source1)
-            .is_ok());
-        assert!(persistent_store
-            .store_credential(credential_source2)
-            .is_ok());
-
-        let filtered_credentials = persistent_store
-            .filter_credential("example.com", false)
-            .unwrap();
-        assert_eq!(filtered_credentials.len(), 2);
-        assert!(
-            (filtered_credentials[0].credential_id == id0
-                && filtered_credentials[1].credential_id == id1)
-                || (filtered_credentials[1].credential_id == id0
-                    && filtered_credentials[0].credential_id == id1)
-        );
-    }
-
-    #[test]
-    fn test_filter_with_cred_protect() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        assert_eq!(persistent_store.count_credentials().unwrap(), 0);
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let credential = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x00],
-            user_display_name: None,
-            cred_protect_policy: Some(
-                CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList,
-            ),
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-        };
-        assert!(persistent_store.store_credential(credential).is_ok());
-
-        let no_credential = persistent_store
-            .filter_credential("example.com", true)
-            .unwrap();
-        assert_eq!(no_credential, vec![]);
+        let credential_sources = vec![credential_source0, credential_source1, credential_source2];
+        for credential_source in credential_sources.into_iter() {
+            let cred_id = credential_source.credential_id.clone();
+            assert!(persistent_store.store_credential(credential_source).is_ok());
+            let (key, _) = persistent_store.find_credential_item(&cred_id).unwrap();
+            let cred = persistent_store.get_credential(key).unwrap();
+            assert_eq!(&cred_id, &cred.credential_id);
+        }
     }
 
     #[test]

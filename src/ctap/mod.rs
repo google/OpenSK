@@ -761,11 +761,23 @@ where
                 vec![],
             )
         } else {
-            let mut stored_credentials =
-                self.persistent_store.filter_credentials(&rp_id, !has_uv)?;
-            stored_credentials.sort_unstable_by_key(|c| c.1);
-            let mut stored_credentials: Vec<usize> =
-                stored_credentials.into_iter().map(|c| c.0).collect();
+            let mut iter_result = Ok(());
+            let iter = self.persistent_store.iter_credentials(&mut iter_result)?;
+            let mut stored_credentials: Vec<(usize, u64)> = iter
+                .filter_map(|(key, credential)| {
+                    if credential.rp_id == rp_id && (has_uv || credential.is_discoverable()) {
+                        Some((key, credential.creation_order))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            iter_result?;
+            stored_credentials.sort_unstable_by_key(|&(_key, order)| order);
+            let mut stored_credentials: Vec<usize> = stored_credentials
+                .into_iter()
+                .map(|(key, _order)| key)
+                .collect();
             let credential = stored_credentials
                 .pop()
                 .map(|key| self.persistent_store.get_credential(key))
@@ -1252,17 +1264,14 @@ mod test {
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
-        let credential_key = ctap_state
+        let mut iter_result = Ok(());
+        let iter = ctap_state
             .persistent_store
-            .filter_credentials("example.com", false)
-            .unwrap()
-            .pop()
-            .unwrap()
-            .0;
-        let stored_credential = ctap_state
-            .persistent_store
-            .get_credential(credential_key)
+            .iter_credentials(&mut iter_result)
             .unwrap();
+        // There is only 1 credential, so last is good enough.
+        let (_, stored_credential) = iter.last().unwrap();
+        iter_result.unwrap();
         let credential_id = stored_credential.credential_id;
         assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
 
@@ -1282,17 +1291,14 @@ mod test {
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
-        let credential_key = ctap_state
+        let mut iter_result = Ok(());
+        let iter = ctap_state
             .persistent_store
-            .filter_credentials("example.com", false)
-            .unwrap()
-            .pop()
-            .unwrap()
-            .0;
-        let stored_credential = ctap_state
-            .persistent_store
-            .get_credential(credential_key)
+            .iter_credentials(&mut iter_result)
             .unwrap();
+        // There is only 1 credential, so last is good enough.
+        let (_, stored_credential) = iter.last().unwrap();
+        iter_result.unwrap();
         let credential_id = stored_credential.credential_id;
         assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
 

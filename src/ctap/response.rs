@@ -107,7 +107,6 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct AuthenticatorGetInfoResponse {
-    // TODO(kaczmarczyck) add maxAuthenticatorConfigLength and defaultCredProtect
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
     pub aaguid: [u8; 16],
@@ -121,6 +120,9 @@ pub struct AuthenticatorGetInfoResponse {
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub min_pin_length: u8,
     pub firmware_version: Option<u64>,
+    pub max_cred_blob_length: Option<u64>,
+    pub max_rp_ids_for_set_min_pin_length: Option<u64>,
+    pub remaining_discoverable_credentials: Option<u64>,
 }
 
 impl From<AuthenticatorGetInfoResponse> for cbor::Value {
@@ -139,6 +141,9 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             default_cred_protect,
             min_pin_length,
             firmware_version,
+            max_cred_blob_length,
+            max_rp_ids_for_set_min_pin_length,
+            remaining_discoverable_credentials,
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
@@ -163,6 +168,9 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x0C => default_cred_protect.map(|p| p as u64),
             0x0D => min_pin_length as u64,
             0x0E => firmware_version,
+            0x0F => max_cred_blob_length,
+            0x10 => max_rp_ids_for_set_min_pin_length,
+            0x14 => remaining_discoverable_credentials,
         }
     }
 }
@@ -285,6 +293,9 @@ mod test {
             default_cred_protect: None,
             min_pin_length: 4,
             firmware_version: None,
+            max_cred_blob_length: None,
+            max_rp_ids_for_set_min_pin_length: None,
+            remaining_discoverable_credentials: None,
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
@@ -314,6 +325,9 @@ mod test {
             default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
             min_pin_length: 4,
             firmware_version: Some(0),
+            max_cred_blob_length: Some(1024),
+            max_rp_ids_for_set_min_pin_length: Some(8),
+            remaining_discoverable_credentials: Some(150),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
@@ -331,6 +345,9 @@ mod test {
             0x0C => CredentialProtectionPolicy::UserVerificationRequired as u64,
             0x0D => 4,
             0x0E => 0,
+            0x0F => 1024,
+            0x10 => 8,
+            0x14 => 150,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }

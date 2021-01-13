@@ -99,7 +99,6 @@ pub fn process_config(
 
 #[cfg(test)]
 mod test {
-    use super::super::command::AuthenticatorConfigParameters;
     use super::*;
     use crypto::rng256::ThreadRng256;
 

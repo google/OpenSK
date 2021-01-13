@@ -738,7 +738,8 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
 
         // Since algorithm can be used for different COSE key types, we check
         // whether the current type is correct for ECDH. For an OpenSSH bugfix,
-        // the algorithm ES256_ALGORITHM is allowed here too. See #90.
+        // the algorithm ES256_ALGORITHM is allowed here too.
+        // https://github.com/google/OpenSK/issues/90
         if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }

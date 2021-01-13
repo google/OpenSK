@@ -23,16 +23,8 @@ use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 
-// This is the algorithm specifier that is supposed to be used in a COSE key
-// map in ECDH. CTAP requests -25 which represents ECDH-ES + HKDF-256 here:
-// https://www.iana.org/assignments/cose/cose.xhtml#algorithms
-const ECDH_ALGORITHM: i64 = -25;
-// This is the identifier used for ECDSA and ECDH in OpenSSH.
+// Used as the identifier for ECDSA in assertion signatures and COSE.
 const ES256_ALGORITHM: i64 = -7;
-// The COSE key parameter behind map key 1.
-const EC2_KEY_TYPE: i64 = 2;
-// The COSE key parameter behind map key -1.
-const P_256_CURVE: i64 = 1;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -634,6 +626,17 @@ pub struct CoseKey {
     algorithm: i64,
 }
 
+impl CoseKey {
+    // This is the algorithm specifier for ECDH.
+    // CTAP requests -25 which represents ECDH-ES + HKDF-256 here:
+    // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
+    const ECDH_ALGORITHM: i64 = -25;
+    // The parameter behind map key 1.
+    const EC2_KEY_TYPE: i64 = 2;
+    // The parameter behind map key -1.
+    const P_256_CURVE: i64 = 1;
+}
+
 // This conversion accepts both ECDH and ECDSA.
 impl TryFrom<cbor::Value> for CoseKey {
     type Error = Ctap2StatusCode;
@@ -659,15 +662,15 @@ impl TryFrom<cbor::Value> for CoseKey {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let curve = extract_integer(ok_or_missing(curve)?)?;
-        if curve != P_256_CURVE {
+        if curve != CoseKey::P_256_CURVE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         let key_type = extract_integer(ok_or_missing(key_type)?)?;
-        if key_type != EC2_KEY_TYPE {
+        if key_type != CoseKey::EC2_KEY_TYPE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
-        if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
 
@@ -688,9 +691,9 @@ impl From<CoseKey> for cbor::Value {
         } = cose_key;
 
         cbor_map! {
-            1 => EC2_KEY_TYPE,
+            1 => CoseKey::EC2_KEY_TYPE,
             3 => algorithm,
-            -1 => P_256_CURVE,
+            -1 => CoseKey::P_256_CURVE,
             -2 => x_bytes,
             -3 => y_bytes,
         }
@@ -705,7 +708,7 @@ impl From<ecdh::PubKey> for CoseKey {
         CoseKey {
             x_bytes,
             y_bytes,
-            algorithm: ECDH_ALGORITHM,
+            algorithm: CoseKey::ECDH_ALGORITHM,
         }
     }
 }
@@ -735,8 +738,8 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
 
         // Since algorithm can be used for different COSE key types, we check
         // whether the current type is correct for ECDH. For an OpenSSH bugfix,
-        // the algorithm ES256_ALGORITHM is allowed here too.
-        if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+        // the algorithm ES256_ALGORITHM is allowed here too. See #90.
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         ecdh::PubKey::from_coordinates(&x_bytes, &y_bytes)
@@ -1371,11 +1374,11 @@ mod test {
 
     #[test]
     fn test_from_into_cose_key_cbor() {
-        for algorithm in &[ECDH_ALGORITHM, ES256_ALGORITHM] {
+        for algorithm in &[CoseKey::ECDH_ALGORITHM, ES256_ALGORITHM] {
             let cbor_value = cbor_map! {
-                1 => EC2_KEY_TYPE,
+                1 => CoseKey::EC2_KEY_TYPE,
                 3 => algorithm,
-                -1 => P_256_CURVE,
+                -1 => CoseKey::P_256_CURVE,
                 -2 => [0u8; 32],
                 -3 => [0u8; 32],
             };
@@ -1383,12 +1386,15 @@ mod test {
             let created_cbor_value = cbor::Value::from(cose_key);
             assert_eq!(created_cbor_value, cbor_value);
         }
+    }
 
+    #[test]
+    fn test_cose_key_unknown_algorithm() {
         let cbor_value = cbor_map! {
-            1 => EC2_KEY_TYPE,
+            1 => CoseKey::EC2_KEY_TYPE,
             // unknown algorithm
             3 => 0,
-            -1 => P_256_CURVE,
+            -1 => CoseKey::P_256_CURVE,
             -2 => [0u8; 32],
             -3 => [0u8; 32],
         };
@@ -1396,11 +1402,15 @@ mod test {
             CoseKey::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
         );
+    }
+
+    #[test]
+    fn test_cose_key_unknown_type() {
         let cbor_value = cbor_map! {
             // unknown type
             1 => 0,
-            3 => ECDH_ALGORITHM,
-            -1 => P_256_CURVE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
             -2 => [0u8; 32],
             -3 => [0u8; 32],
         };
@@ -1408,9 +1418,13 @@ mod test {
             CoseKey::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
         );
+    }
+
+    #[test]
+    fn test_cose_key_unknown_curve() {
         let cbor_value = cbor_map! {
-            1 => EC2_KEY_TYPE,
-            3 => ECDH_ALGORITHM,
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
             // unknown curve
             -1 => 0,
             -2 => [0u8; 32],
@@ -1420,10 +1434,14 @@ mod test {
             CoseKey::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
         );
+    }
+
+    #[test]
+    fn test_cose_key_wrong_length_x() {
         let cbor_value = cbor_map! {
-            1 => EC2_KEY_TYPE,
-            3 => ECDH_ALGORITHM,
-            -1 => P_256_CURVE,
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
             // wrong length
             -2 => [0u8; 31],
             -3 => [0u8; 32],
@@ -1432,10 +1450,14 @@ mod test {
             CoseKey::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
+    }
+
+    #[test]
+    fn test_cose_key_wrong_length_y() {
         let cbor_value = cbor_map! {
-            1 => EC2_KEY_TYPE,
-            3 => ECDH_ALGORITHM,
-            -1 => P_256_CURVE,
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
             -2 => [0u8; 32],
             // wrong length
             -3 => [0u8; 33],

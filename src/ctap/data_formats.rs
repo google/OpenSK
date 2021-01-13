@@ -27,6 +27,7 @@ use enum_iterator::IntoEnumIterator;
 const ES256_ALGORITHM: i64 = -7;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
+#[derive(Clone)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
@@ -58,8 +59,19 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
     }
 }
 
+impl From<PublicKeyCredentialRpEntity> for cbor::Value {
+    fn from(entity: PublicKeyCredentialRpEntity) -> Self {
+        cbor_map_options! {
+            "id" => entity.rp_id,
+            "name" => entity.rp_name,
+            "icon" => entity.rp_icon,
+        }
+    }
+}
+
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
     pub user_name: Option<String>,
@@ -173,7 +185,8 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum AuthenticatorTransport {
     Usb,
@@ -210,7 +223,8 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
     pub key_id: Vec<u8>,
@@ -784,6 +798,88 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
             0x08 => Ok(ClientPinSubCommand::SetMinPinLength),
             0x09 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+pub enum CredentialManagementSubCommand {
+    GetCredsMetadata = 0x01,
+    EnumerateRpsBegin = 0x02,
+    EnumerateRpsGetNextRp = 0x03,
+    EnumerateCredentialsBegin = 0x04,
+    EnumerateCredentialsGetNextCredential = 0x05,
+    DeleteCredential = 0x06,
+    UpdateUserInformation = 0x07,
+}
+
+impl From<CredentialManagementSubCommand> for cbor::Value {
+    fn from(subcommand: CredentialManagementSubCommand) -> Self {
+        (subcommand as u64).into()
+    }
+}
+
+impl TryFrom<cbor::Value> for CredentialManagementSubCommand {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let subcommand_int = extract_unsigned(cbor_value)?;
+        match subcommand_int {
+            0x01 => Ok(CredentialManagementSubCommand::GetCredsMetadata),
+            0x02 => Ok(CredentialManagementSubCommand::EnumerateRpsBegin),
+            0x03 => Ok(CredentialManagementSubCommand::EnumerateRpsGetNextRp),
+            0x04 => Ok(CredentialManagementSubCommand::EnumerateCredentialsBegin),
+            0x05 => Ok(CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential),
+            0x06 => Ok(CredentialManagementSubCommand::DeleteCredential),
+            0x07 => Ok(CredentialManagementSubCommand::UpdateUserInformation),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct CredentialManagementSubCommandParameters {
+    pub rp_id_hash: Option<Vec<u8>>,
+    pub credential_id: Option<PublicKeyCredentialDescriptor>,
+    pub user: Option<PublicKeyCredentialUserEntity>,
+}
+
+impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                0x01 => rp_id_hash,
+                0x02 => credential_id,
+                0x03 => user,
+            } = extract_map(cbor_value)?;
+        }
+
+        let rp_id_hash = rp_id_hash.map(extract_byte_string).transpose()?;
+        let credential_id = credential_id
+            .map(PublicKeyCredentialDescriptor::try_from)
+            .transpose()?;
+        let user = user
+            .map(PublicKeyCredentialUserEntity::try_from)
+            .transpose()?;
+        Ok(Self {
+            rp_id_hash,
+            credential_id,
+            user,
+        })
+    }
+}
+
+impl From<CredentialManagementSubCommandParameters> for cbor::Value {
+    fn from(sub_command_params: CredentialManagementSubCommandParameters) -> Self {
+        cbor_map_options! {
+            0x01 => sub_command_params.rp_id_hash,
+            0x02 => sub_command_params.credential_id,
+            0x03 => sub_command_params.user,
         }
     }
 }
@@ -1502,6 +1598,52 @@ mod test {
             let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }
+    }
+
+    #[test]
+    fn test_from_into_cred_management_sub_command() {
+        let cbor_sub_command: cbor::Value = cbor_int!(0x01);
+        let sub_command = CredentialManagementSubCommand::try_from(cbor_sub_command.clone());
+        let expected_sub_command = CredentialManagementSubCommand::GetCredsMetadata;
+        assert_eq!(sub_command, Ok(expected_sub_command));
+        let created_cbor: cbor::Value = sub_command.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command);
+
+        for command in CredentialManagementSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = CredentialManagementSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
+        }
+    }
+
+    #[test]
+    fn test_from_into_cred_management_sub_command_params() {
+        let credential_id = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: vec![0x2D, 0x2D, 0x2D, 0x2D],
+            transports: Some(vec![AuthenticatorTransport::Usb]),
+        };
+        let user_entity = PublicKeyCredentialUserEntity {
+            user_id: vec![0x1D, 0x1D, 0x1D, 0x1D],
+            user_name: Some("foo".to_string()),
+            user_display_name: Some("bar".to_string()),
+            user_icon: Some("example.com/foo/icon.png".to_string()),
+        };
+        let cbor_sub_command_params = cbor_map! {
+            0x01 => vec![0x1D; 32],
+            0x02 => credential_id.clone(),
+            0x03 => user_entity.clone(),
+        };
+        let sub_command_params =
+            CredentialManagementSubCommandParameters::try_from(cbor_sub_command_params.clone());
+        let expected_sub_command_params = CredentialManagementSubCommandParameters {
+            rp_id_hash: Some(vec![0x1D; 32]),
+            credential_id: Some(credential_id),
+            user: Some(user_entity),
+        };
+        assert_eq!(sub_command_params, Ok(expected_sub_command_params));
+        let created_cbor: cbor::Value = sub_command_params.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command_params);
     }
 
     #[test]

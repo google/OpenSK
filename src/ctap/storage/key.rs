@@ -92,7 +92,7 @@ make_partition! {
     CRED_RANDOM_SECRET = 2041;
 
     /// List of RP IDs allowed to read the minimum PIN length.
-    _MIN_PIN_LENGTH_RP_IDS = 2042;
+    MIN_PIN_LENGTH_RP_IDS = 2042;
 
     /// The minimum PIN length.
     ///
@@ -104,10 +104,11 @@ make_partition! {
     /// If the entry is absent, the number of PIN retries is `MAX_PIN_RETRIES`.
     PIN_RETRIES = 2044;
 
-    /// The PIN hash.
+    /// The PIN hash and length.
     ///
-    /// If the entry is absent, there is no PIN set.
-    PIN_HASH = 2045;
+    /// If the entry is absent, there is no PIN set. The first byte represents
+    /// the length, the following are an array with the hash.
+    PIN_PROPERTIES = 2045;
 
     /// The encryption and hmac keys.
     ///

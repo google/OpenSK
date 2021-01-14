@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,11 +54,10 @@ const MAX_SUPPORTED_RESIDENTIAL_KEYS: usize = 150;
 
 const MAX_PIN_RETRIES: u8 = 8;
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
-// TODO(kaczmarczyck) use this for the minPinLength extension
-// https://github.com/google/OpenSK/issues/129
-const _DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
-// TODO(kaczmarczyck) Check whether this constant is necessary, or replace it accordingly.
-const _MAX_RP_IDS_LENGTH: usize = 8;
+const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
+// This constant is an attempt to limit storage requirements. If you don't set it to 0,
+// the stored strings can still be unbounded, but that is true for all RP IDs.
+const MAX_RP_IDS_LENGTH: usize = 8;
 
 /// Wrapper for master keys.
 pub struct MasterKeys {
@@ -67,6 +66,15 @@ pub struct MasterKeys {
 
     /// Master hmac key.
     pub hmac: [u8; 32],
+}
+
+/// Wrapper for PIN properties.
+struct PinProperties {
+    /// 16 byte prefix of SHA256 of the currently set PIN.
+    hash: [u8; PIN_AUTH_LENGTH],
+
+    /// Length of the current PIN in code points.
+    code_point_length: u8,
 }
 
 /// CTAP persistent storage.
@@ -343,26 +351,44 @@ impl PersistentStore {
         Ok(*array_ref![cred_random_secret, offset, 32])
     }
 
-    /// Returns the PIN hash if defined.
-    pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
-        let pin_hash = match self.store.find(key::PIN_HASH)? {
+    /// Reads the PIN properties and wraps them into PinProperties.
+    fn pin_properties(&self) -> Result<Option<PinProperties>, Ctap2StatusCode> {
+        let pin_properties = match self.store.find(key::PIN_PROPERTIES)? {
             None => return Ok(None),
-            Some(pin_hash) => pin_hash,
+            Some(pin_properties) => pin_properties,
         };
-        if pin_hash.len() != PIN_AUTH_LENGTH {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        const PROPERTIES_LENGTH: usize = PIN_AUTH_LENGTH + 1;
+        match pin_properties.len() {
+            PROPERTIES_LENGTH => Ok(Some(PinProperties {
+                hash: *array_ref![pin_properties, 1, PIN_AUTH_LENGTH],
+                code_point_length: pin_properties[0],
+            })),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
-        Ok(Some(*array_ref![pin_hash, 0, PIN_AUTH_LENGTH]))
     }
 
-    /// Sets the PIN hash.
+    /// Returns the PIN hash if defined.
+    pub fn pin_hash(&self) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
+        Ok(self.pin_properties()?.map(|p| p.hash))
+    }
+
+    /// Returns the length of the currently set PIN if defined.
+    pub fn pin_code_point_length(&self) -> Result<Option<u8>, Ctap2StatusCode> {
+        Ok(self.pin_properties()?.map(|p| p.code_point_length))
+    }
+
+    /// Sets the PIN hash and length.
     ///
     /// If it was already defined, it is updated.
-    pub fn set_pin_hash(
+    pub fn set_pin(
         &mut self,
         pin_hash: &[u8; PIN_AUTH_LENGTH],
+        pin_code_point_length: u8,
     ) -> Result<(), Ctap2StatusCode> {
-        Ok(self.store.insert(key::PIN_HASH, pin_hash)?)
+        let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
+        pin_properties[0] = pin_code_point_length;
+        pin_properties[1..].clone_from_slice(pin_hash);
+        Ok(self.store.insert(key::PIN_PROPERTIES, &pin_properties)?)
     }
 
     /// Returns the number of remaining PIN retries.
@@ -405,34 +431,34 @@ impl PersistentStore {
 
     /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
     /// allowed.
-    pub fn _min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
+    pub fn min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
         let rp_ids = self
             .store
-            .find(key::_MIN_PIN_LENGTH_RP_IDS)?
-            .map_or(Some(_DEFAULT_MIN_PIN_LENGTH_RP_IDS), |value| {
-                _deserialize_min_pin_length_rp_ids(&value)
+            .find(key::MIN_PIN_LENGTH_RP_IDS)?
+            .map_or(Some(DEFAULT_MIN_PIN_LENGTH_RP_IDS), |value| {
+                deserialize_min_pin_length_rp_ids(&value)
             });
         debug_assert!(rp_ids.is_some());
         Ok(rp_ids.unwrap_or_default())
     }
 
     /// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
-    pub fn _set_min_pin_length_rp_ids(
+    pub fn set_min_pin_length_rp_ids(
         &mut self,
         min_pin_length_rp_ids: Vec<String>,
     ) -> Result<(), Ctap2StatusCode> {
         let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-        for rp_id in _DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
             if !min_pin_length_rp_ids.contains(&rp_id) {
                 min_pin_length_rp_ids.push(rp_id);
             }
         }
-        if min_pin_length_rp_ids.len() > _MAX_RP_IDS_LENGTH {
+        if min_pin_length_rp_ids.len() > MAX_RP_IDS_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
         }
         Ok(self.store.insert(
-            key::_MIN_PIN_LENGTH_RP_IDS,
-            &_serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
+            key::MIN_PIN_LENGTH_RP_IDS,
+            &serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
         )?)
     }
 
@@ -516,6 +542,11 @@ impl PersistentStore {
     pub fn reset(&mut self, rng: &mut impl Rng256) -> Result<(), Ctap2StatusCode> {
         self.store.clear(key::NUM_PERSISTENT_KEYS)?;
         self.init(rng)?;
+        Ok(())
+    }
+
+    pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
+        // TODO(kaczmarczyck) implement storage logic
         Ok(())
     }
 }
@@ -620,7 +651,7 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>
 }
 
 /// Deserializes a list of RP IDs from storage representation.
-fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
+fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
     let cbor = cbor::read(data).ok()?;
     extract_array(cbor)
         .ok()?
@@ -631,7 +662,7 @@ fn _deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
 }
 
 /// Serializes a list of RP IDs to storage representation.
-fn _serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
+fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     if cbor::write(cbor_array_vec!(rp_ids), &mut data) {
         Ok(data)
@@ -953,28 +984,38 @@ mod test {
     }
 
     #[test]
-    fn test_pin_hash() {
+    fn test_pin_hash_and_length() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
         // Pin hash is initially not set.
         assert!(persistent_store.pin_hash().unwrap().is_none());
+        assert!(persistent_store.pin_code_point_length().unwrap().is_none());
 
-        // Setting the pin hash sets the pin hash.
+        // Setting the pin sets the pin hash.
         let random_data = rng.gen_uniform_u8x32();
         assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
         let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
         let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
-        persistent_store.set_pin_hash(&pin_hash_1).unwrap();
+        let pin_length_1 = 4;
+        let pin_length_2 = 63;
+        persistent_store.set_pin(&pin_hash_1, pin_length_1).unwrap();
         assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_1));
-        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_1));
-        persistent_store.set_pin_hash(&pin_hash_2).unwrap();
+        assert_eq!(
+            persistent_store.pin_code_point_length().unwrap(),
+            Some(pin_length_1)
+        );
+        persistent_store.set_pin(&pin_hash_2, pin_length_2).unwrap();
         assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_2));
-        assert_eq!(persistent_store.pin_hash().unwrap(), Some(pin_hash_2));
+        assert_eq!(
+            persistent_store.pin_code_point_length().unwrap(),
+            Some(pin_length_2)
+        );
 
         // Resetting the storage resets the pin hash.
         persistent_store.reset(&mut rng).unwrap();
         assert!(persistent_store.pin_hash().unwrap().is_none());
+        assert!(persistent_store.pin_code_point_length().unwrap().is_none());
     }
 
     #[test]
@@ -1068,22 +1109,22 @@ mod test {
 
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
-            persistent_store._min_pin_length_rp_ids().unwrap(),
-            _DEFAULT_MIN_PIN_LENGTH_RP_IDS
+            persistent_store.min_pin_length_rp_ids().unwrap(),
+            DEFAULT_MIN_PIN_LENGTH_RP_IDS
         );
 
         // Changes by the setter are reflected by the getter.
         let mut rp_ids = vec![String::from("example.com")];
         assert_eq!(
-            persistent_store._set_min_pin_length_rp_ids(rp_ids.clone()),
+            persistent_store.set_min_pin_length_rp_ids(rp_ids.clone()),
             Ok(())
         );
-        for rp_id in _DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }
         }
-        assert_eq!(persistent_store._min_pin_length_rp_ids().unwrap(), rp_ids);
+        assert_eq!(persistent_store.min_pin_length_rp_ids().unwrap(), rp_ids);
     }
 
     #[test]
@@ -1132,8 +1173,8 @@ mod test {
     #[test]
     fn test_serialize_deserialize_min_pin_length_rp_ids() {
         let rp_ids = vec![String::from("example.com")];
-        let serialized = _serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
-        let reconstructed = _deserialize_min_pin_length_rp_ids(&serialized).unwrap();
+        let serialized = serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
+        let reconstructed = deserialize_min_pin_length_rp_ids(&serialized).unwrap();
         assert_eq!(rp_ids, reconstructed);
     }
 }

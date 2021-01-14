@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 pub mod apdu;
 pub mod command;
+mod config_command;
 mod credential_management;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
@@ -31,6 +32,7 @@ use self::command::{
     AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
     MAX_CREDENTIAL_COUNT_IN_LIST,
 };
+use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
@@ -108,6 +110,9 @@ pub const U2F_VERSION_STRING: &str = "U2F_V2";
 // TODO(#106) change to final string when ready
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
+// This is the currently supported PIN protocol version.
+const PIN_PROTOCOL_VERSION: u64 = 1;
+
 // We currently only support one algorithm for signatures: ES256.
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
@@ -118,6 +123,16 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 // - Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList)
 // - Some(CredentialProtectionPolicy::UserVerificationRequired)
 const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
+
+// Checks the PIN protocol parameter against all supported versions.
+pub fn check_pin_uv_auth_protocol(
+    pin_uv_auth_protocol: Option<u64>,
+) -> Result<(), Ctap2StatusCode> {
+    match pin_uv_auth_protocol {
+        Some(PIN_PROTOCOL_VERSION) => Ok(()),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+    }
+}
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
 // (as of 2020-01-20) and truncates to "max" bytes, not breaking the encoding.
@@ -188,8 +203,6 @@ where
     R: Rng256,
     CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
 {
-    pub const PIN_PROTOCOL_VERSION: u64 = 1;
-
     pub fn new(
         rng: &'a mut R,
         check_user_presence: CheckUserPresence,
@@ -376,6 +389,11 @@ where
                         )
                     }
                     Command::AuthenticatorSelection => self.process_selection(cid),
+                    Command::AuthenticatorConfig(params) => process_config(
+                        &mut self.persistent_store,
+                        &mut self.pin_protocol_v1,
+                        params,
+                    ),
                     // TODO(kaczmarczyck) implement FIDO 2.1 commands
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
@@ -419,11 +437,7 @@ where
                 }
             }
 
-            match pin_uv_auth_protocol {
-                Some(CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION) => Ok(()),
-                Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-                None => Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-            }
+            check_pin_uv_auth_protocol(pin_uv_auth_protocol)
         } else {
             Ok(())
         }
@@ -452,22 +466,29 @@ where
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
 
-        let (use_hmac_extension, cred_protect_policy) = if let Some(extensions) = extensions {
-            let mut cred_protect = extensions.cred_protect;
-            if cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
-                < DEFAULT_CRED_PROTECT
-                    .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
-            {
-                cred_protect = DEFAULT_CRED_PROTECT;
-            }
-            (extensions.hmac_secret, cred_protect)
-        } else {
-            (false, DEFAULT_CRED_PROTECT)
-        };
-
-        let has_extension_output = use_hmac_extension || cred_protect_policy.is_some();
-
         let rp_id = rp.rp_id;
+        let (use_hmac_extension, cred_protect_policy, min_pin_length) =
+            if let Some(extensions) = extensions {
+                let mut cred_protect = extensions.cred_protect;
+                if cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
+                    < DEFAULT_CRED_PROTECT
+                        .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
+                {
+                    cred_protect = DEFAULT_CRED_PROTECT;
+                }
+                let min_pin_length = extensions.min_pin_length
+                    && self
+                        .persistent_store
+                        .min_pin_length_rp_ids()?
+                        .contains(&rp_id);
+                (extensions.hmac_secret, cred_protect, min_pin_length)
+            } else {
+                (false, DEFAULT_CRED_PROTECT, false)
+            };
+
+        let has_extension_output =
+            use_hmac_extension || cred_protect_policy.is_some() || min_pin_length;
+
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
@@ -564,9 +585,15 @@ where
         }
         if has_extension_output {
             let hmac_secret_output = if use_hmac_extension { Some(true) } else { None };
+            let min_pin_length_output = if min_pin_length {
+                Some(self.persistent_store.min_pin_length()? as u64)
+            } else {
+                None
+            };
             let extensions_output = cbor_map_options! {
                 "hmac-secret" => hmac_secret_output,
                 "credProtect" => cred_protect_policy,
+                "minPinLength" => min_pin_length_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -870,6 +897,7 @@ where
             self.persistent_store.pin_hash()?.is_some(),
         );
         options_map.insert(String::from("credMgmt"), true);
+        options_map.insert(String::from("setMinPINLength"), true);
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions: vec![
@@ -878,13 +906,15 @@ where
                     String::from(FIDO2_VERSION_STRING),
                     String::from(FIDO2_1_VERSION_STRING),
                 ],
-                extensions: Some(vec![String::from("hmac-secret")]),
+                extensions: Some(vec![
+                    String::from("hmac-secret"),
+                    String::from("credProtect"),
+                    String::from("minPinLength"),
+                ]),
                 aaguid: self.persistent_store.aaguid()?,
                 options: Some(options_map),
                 max_msg_size: Some(1024),
-                pin_protocols: Some(vec![
-                    CtapState::<R, CheckUserPresence>::PIN_PROTOCOL_VERSION,
-                ]),
+                pin_protocols: Some(vec![PIN_PROTOCOL_VERSION]),
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 // TODO(#106) update with version 2.1 of HMAC-secret
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
@@ -1052,6 +1082,44 @@ mod test {
     // ID is irrelevant, so we pass this (dummy but valid) value.
     const DUMMY_CHANNEL_ID: ChannelID = [0x12, 0x34, 0x56, 0x78];
 
+    fn check_make_response(
+        make_credential_response: Result<ResponseData, Ctap2StatusCode>,
+        flags: u8,
+        expected_aaguid: &[u8],
+        expected_credential_id_size: u8,
+        expected_extension_cbor: &[u8],
+    ) {
+        match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let AuthenticatorMakeCredentialResponse {
+                    fmt,
+                    auth_data,
+                    att_stmt,
+                } = make_credential_response;
+                // The expected response is split to only assert the non-random parts.
+                assert_eq!(fmt, "packed");
+                let mut expected_auth_data = vec![
+                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
+                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00,
+                ];
+                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
+                expected_auth_data.extend(expected_aaguid);
+                expected_auth_data.extend(&[0x00, expected_credential_id_size]);
+                assert_eq!(
+                    auth_data[0..expected_auth_data.len()],
+                    expected_auth_data[..]
+                );
+                assert_eq!(
+                    &auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
+                    expected_extension_cbor
+                );
+                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
+            }
+            _ => panic!("Invalid response type"),
+        }
+    }
+
     #[test]
     fn test_get_info() {
         let mut rng = ThreadRng256 {};
@@ -1071,20 +1139,23 @@ mod test {
         expected_response.extend(
             [
                 0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30, 0x6C, 0x46, 0x49, 0x44, 0x4F,
-                0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45, 0x02, 0x81, 0x6B, 0x68, 0x6D, 0x61,
-                0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x03, 0x50,
+                0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45, 0x02, 0x83, 0x6B, 0x68, 0x6D, 0x61,
+                0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x6B, 0x63, 0x72, 0x65, 0x64, 0x50,
+                0x72, 0x6F, 0x74, 0x65, 0x63, 0x74, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C,
+                0x65, 0x6E, 0x67, 0x74, 0x68, 0x03, 0x50,
             ]
             .iter(),
         );
         expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
         expected_response.extend(
             [
-                0x04, 0xA4, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x68, 0x63, 0x72, 0x65,
+                0x04, 0xA5, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x68, 0x63, 0x72, 0x65,
                 0x64, 0x4D, 0x67, 0x6D, 0x74, 0xF5, 0x69, 0x63, 0x6C, 0x69, 0x65, 0x6E, 0x74, 0x50,
-                0x69, 0x6E, 0xF4, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01, 0x08, 0x18, 0x70, 0x09,
-                0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C, 0x67, 0x26, 0x64,
-                0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65,
-                0x79, 0x0D, 0x04, 0x14, 0x18, 0x96,
+                0x69, 0x6E, 0xF4, 0x6F, 0x73, 0x65, 0x74, 0x4D, 0x69, 0x6E, 0x50, 0x49, 0x4E, 0x4C,
+                0x65, 0x6E, 0x67, 0x74, 0x68, 0xF5, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01, 0x08,
+                0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C,
+                0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63,
+                0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04, 0x14, 0x18, 0x96,
             ]
             .iter(),
         );
@@ -1143,6 +1214,7 @@ mod test {
         let extensions = Some(MakeCredentialExtensions {
             hmac_secret: false,
             cred_protect: Some(policy),
+            min_pin_length: false,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
@@ -1159,31 +1231,13 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
 
-        match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let AuthenticatorMakeCredentialResponse {
-                    fmt,
-                    auth_data,
-                    att_stmt,
-                } = make_credential_response;
-                // The expected response is split to only assert the non-random parts.
-                assert_eq!(fmt, "packed");
-                let mut expected_auth_data = vec![
-                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
-                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00,
-                ];
-                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
-                expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                expected_auth_data.extend(&[0x00, 0x20]);
-                assert_eq!(
-                    auth_data[0..expected_auth_data.len()],
-                    expected_auth_data[..]
-                );
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
-            }
-            _ => panic!("Invalid response type"),
-        }
+        check_make_response(
+            make_credential_response,
+            0x41,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x20,
+            &[],
+        );
     }
 
     #[test]
@@ -1197,31 +1251,13 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
 
-        match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let AuthenticatorMakeCredentialResponse {
-                    fmt,
-                    auth_data,
-                    att_stmt,
-                } = make_credential_response;
-                // The expected response is split to only assert the non-random parts.
-                assert_eq!(fmt, "packed");
-                let mut expected_auth_data = vec![
-                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
-                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0x41, 0x00, 0x00, 0x00,
-                ];
-                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
-                expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                expected_auth_data.extend(&[0x00, CREDENTIAL_ID_SIZE as u8]);
-                assert_eq!(
-                    auth_data[0..expected_auth_data.len()],
-                    expected_auth_data[..]
-                );
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
-            }
-            _ => panic!("Invalid response type"),
-        }
+        check_make_response(
+            make_credential_response,
+            0x41,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            CREDENTIAL_ID_SIZE as u8,
+            &[],
+        );
     }
 
     #[test]
@@ -1343,6 +1379,7 @@ mod test {
         let extensions = Some(MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: None,
+            min_pin_length: false,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
@@ -1350,39 +1387,16 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
 
-        match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let AuthenticatorMakeCredentialResponse {
-                    fmt,
-                    auth_data,
-                    att_stmt,
-                } = make_credential_response;
-                // The expected response is split to only assert the non-random parts.
-                assert_eq!(fmt, "packed");
-                let mut expected_auth_data = vec![
-                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
-                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00,
-                ];
-                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
-                expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                expected_auth_data.extend(&[0x00, CREDENTIAL_ID_SIZE as u8]);
-                assert_eq!(
-                    auth_data[0..expected_auth_data.len()],
-                    expected_auth_data[..]
-                );
-                let expected_extension_cbor = vec![
-                    0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
-                    0xF5,
-                ];
-                assert_eq!(
-                    auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
-                    expected_extension_cbor[..]
-                );
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
-            }
-            _ => panic!("Invalid response type"),
-        }
+        let expected_extension_cbor = [
+            0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
+        ];
+        check_make_response(
+            make_credential_response,
+            0xC1,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            CREDENTIAL_ID_SIZE as u8,
+            &expected_extension_cbor,
+        );
     }
 
     #[test]
@@ -1394,45 +1408,77 @@ mod test {
         let extensions = Some(MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: None,
+            min_pin_length: false,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
 
-        match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let AuthenticatorMakeCredentialResponse {
-                    fmt,
-                    auth_data,
-                    att_stmt,
-                } = make_credential_response;
-                // The expected response is split to only assert the non-random parts.
-                assert_eq!(fmt, "packed");
-                let mut expected_auth_data = vec![
-                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
-                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, 0xC1, 0x00, 0x00, 0x00,
-                ];
-                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
-                expected_auth_data.extend(&ctap_state.persistent_store.aaguid().unwrap());
-                expected_auth_data.extend(&[0x00, 0x20]);
-                assert_eq!(
-                    auth_data[0..expected_auth_data.len()],
-                    expected_auth_data[..]
-                );
-                let expected_extension_cbor = vec![
-                    0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
-                    0xF5,
-                ];
-                assert_eq!(
-                    auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
-                    expected_extension_cbor[..]
-                );
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
-            }
-            _ => panic!("Invalid response type"),
-        }
+        let expected_extension_cbor = [
+            0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
+        ];
+        check_make_response(
+            make_credential_response,
+            0xC1,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x20,
+            &expected_extension_cbor,
+        );
+    }
+
+    #[test]
+    fn test_process_make_credential_min_pin_length() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+
+        // First part: The extension is ignored, since the RP ID is not on the list.
+        let extensions = Some(MakeCredentialExtensions {
+            hmac_secret: false,
+            cred_protect: None,
+            min_pin_length: true,
+        });
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.extensions = extensions;
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        check_make_response(
+            make_credential_response,
+            0x41,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x20,
+            &[],
+        );
+
+        // Second part: The extension is used.
+        assert_eq!(
+            ctap_state
+                .persistent_store
+                .set_min_pin_length_rp_ids(vec!["example.com".to_string()]),
+            Ok(())
+        );
+
+        let extensions = Some(MakeCredentialExtensions {
+            hmac_secret: false,
+            cred_protect: None,
+            min_pin_length: true,
+        });
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.extensions = extensions;
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        let expected_extension_cbor = [
+            0xA1, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68,
+            0x04,
+        ];
+        check_make_response(
+            make_credential_response,
+            0xC1,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x20,
+            &expected_extension_cbor,
+        );
     }
 
     #[test]
@@ -1551,6 +1597,7 @@ mod test {
         let make_extensions = Some(MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: None,
+            min_pin_length: false,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
@@ -1618,6 +1665,7 @@ mod test {
         let make_extensions = Some(MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: None,
+            min_pin_length: false,
         });
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = make_extensions;
@@ -1810,10 +1858,8 @@ mod test {
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        // The PIN length is outside of the test scope and most likely incorrect.
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0x6F, 0x52, 0x83, 0xBF, 0x1A, 0x91, 0xEE, 0x67, 0xE9, 0xD4, 0x4C, 0x80, 0x08, 0x79,
             0x90, 0x8D,

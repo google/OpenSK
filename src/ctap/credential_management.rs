@@ -409,10 +409,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         ctap_state.pin_protocol_v1 = pin_protocol_v1;
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
             0xFB, 0x00,
@@ -496,10 +493,7 @@ mod test {
             .store_credential(credential_source2)
             .unwrap();
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
@@ -602,10 +596,7 @@ mod test {
             .store_credential(credential_source2)
             .unwrap();
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
             0x2B, 0x68,
@@ -705,10 +696,7 @@ mod test {
             .store_credential(credential_source)
             .unwrap();
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0xBD, 0xE3, 0xEF, 0x8A, 0x77, 0x01, 0xB1, 0x69, 0x19, 0xE6, 0x62, 0xB9, 0x9B, 0x89,
             0x9C, 0x64,
@@ -781,10 +769,7 @@ mod test {
             .store_credential(credential_source)
             .unwrap();
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0xA5, 0x55, 0x8F, 0x03, 0xC3, 0xD3, 0x73, 0x1C, 0x07, 0xDA, 0x1F, 0x8C, 0xC7, 0xBD,
             0x9D, 0xB7,
@@ -850,10 +835,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         ctap_state.pin_protocol_v1 = pin_protocol_v1;
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let pin_auth = Some(vec![
             0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
             0xFB, 0x00,
@@ -885,10 +867,7 @@ mod test {
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
 
-        ctap_state
-            .persistent_store
-            .set_pin_hash(&[0u8; 16])
-            .unwrap();
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,

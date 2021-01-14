@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@ pub enum ResponseData {
     AuthenticatorReset,
     AuthenticatorCredentialManagement(Option<AuthenticatorCredentialManagementResponse>),
     AuthenticatorSelection,
+    // TODO(kaczmarczyck) dummy, extend
+    AuthenticatorConfig,
     AuthenticatorVendor(AuthenticatorVendorResponse),
 }
 
@@ -47,6 +49,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorReset => None,
             ResponseData::AuthenticatorCredentialManagement(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorConfig => None,
             ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
     }
@@ -515,6 +518,12 @@ mod test {
     #[test]
     fn test_selection_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_config_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorConfig.into();
         assert_eq!(response_cbor, None);
     }
 

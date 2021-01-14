@@ -84,8 +84,8 @@ make_partition! {
 
     /// The credentials.
     ///
-    /// Depending on `MAX_SUPPORTED_RESIDENTIAL_KEYS`, only a prefix of those keys is used. Each
-    /// board may configure `MAX_SUPPORTED_RESIDENTIAL_KEYS` depending on the storage size.
+    /// Depending on `MAX_SUPPORTED_RESIDENT_KEYS`, only a prefix of those keys is used. Each
+    /// board may configure `MAX_SUPPORTED_RESIDENT_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
 
     /// The secret of the CredRandom feature.
@@ -127,8 +127,8 @@ mod test {
 
     #[test]
     fn enough_credentials() {
-        use super::super::MAX_SUPPORTED_RESIDENTIAL_KEYS;
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
+        use super::super::MAX_SUPPORTED_RESIDENT_KEYS;
+        assert!(MAX_SUPPORTED_RESIDENT_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
     }
 
     #[test]

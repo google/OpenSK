@@ -1222,7 +1222,7 @@ mod test {
     }
 
     #[test]
-    fn test_residential_process_make_credential() {
+    fn test_resident_process_make_credential() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
@@ -1241,7 +1241,7 @@ mod test {
     }
 
     #[test]
-    fn test_non_residential_process_make_credential() {
+    fn test_non_resident_process_make_credential() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
@@ -1553,7 +1553,7 @@ mod test {
     }
 
     #[test]
-    fn test_residential_process_get_assertion() {
+    fn test_resident_process_get_assertion() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
@@ -1656,7 +1656,7 @@ mod test {
     }
 
     #[test]
-    fn test_residential_process_get_assertion_hmac_secret() {
+    fn test_resident_process_get_assertion_hmac_secret() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let user_immediately_present = |_| Ok(());
@@ -1708,7 +1708,7 @@ mod test {
     }
 
     #[test]
-    fn test_residential_process_get_assertion_with_cred_protect() {
+    fn test_resident_process_get_assertion_with_cred_protect() {
         let mut rng = ThreadRng256 {};
         let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let credential_id = rng.gen_uniform_u8x32().to_vec();

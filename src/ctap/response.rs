@@ -195,7 +195,7 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
         } = client_pin_response;
 
         cbor_map_options! {
-            1 => key_agreement.map(|cose_key| cbor_map_btree!(cose_key.0)),
+            1 => key_agreement.map(cbor::Value::from),
             2 => pin_token,
             3 => retries,
         }

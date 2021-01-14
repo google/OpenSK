@@ -33,7 +33,7 @@ use self::command::{
 };
 use self::config_command::process_config;
 use self::data_formats::{
-    AuthenticatorTransport, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
+    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
     PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
     PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
     SignatureAlgorithm,
@@ -555,11 +555,9 @@ where
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        let cose_key = match pk.to_cose_key() {
-            Some(cose_key) => cose_key,
-            None => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-        };
-        auth_data.extend(cose_key);
+        if !cbor::write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data) {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
         if has_extension_output {
             let hmac_secret_output = if use_hmac_extension { Some(true) } else { None };
             let min_pin_length_output = if min_pin_length {

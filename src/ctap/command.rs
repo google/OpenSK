@@ -320,7 +320,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
 
         let pin_protocol = extract_unsigned(ok_or_missing(pin_protocol)?)?;
         let sub_command = ClientPinSubCommand::try_from(ok_or_missing(sub_command)?)?;
-        let key_agreement = key_agreement.map(extract_map).transpose()?.map(CoseKey);
+        let key_agreement = key_agreement.map(CoseKey::try_from).transpose()?;
         let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;
@@ -449,8 +449,8 @@ mod test {
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
-    use alloc::collections::BTreeMap;
     use cbor::{cbor_array, cbor_map};
+    use crypto::rng256::ThreadRng256;
 
     #[test]
     fn test_from_cbor_make_credential_parameters() {
@@ -560,10 +560,15 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
+
         let cbor_value = cbor_map! {
             1 => 1,
             2 => ClientPinSubCommand::GetPinRetries,
-            3 => cbor_map!{},
+            3 => cbor::Value::from(cose_key.clone()),
             4 => vec! [0xBB],
             5 => vec! [0xCC],
             6 => vec! [0xDD],
@@ -576,7 +581,7 @@ mod test {
         let expected_pin_protocol_parameters = AuthenticatorClientPinParameters {
             pin_protocol: 1,
             sub_command: ClientPinSubCommand::GetPinRetries,
-            key_agreement: Some(CoseKey(BTreeMap::new())),
+            key_agreement: Some(cose_key),
             pin_auth: Some(vec![0xBB]),
             new_pin_enc: Some(vec![0xCC]),
             pin_hash_enc: Some(vec![0xDD]),

@@ -23,7 +23,10 @@ use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 use super::timed_permission::TimedPermission;
-use super::{check_command_permission, StatefulCommand, STATEFUL_COMMAND_TIMEOUT_DURATION};
+use super::{
+    check_command_permission, check_pin_uv_auth_protocol, StatefulCommand,
+    STATEFUL_COMMAND_TIMEOUT_DURATION,
+};
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
@@ -251,16 +254,6 @@ fn process_update_user_information(
     persistent_store.update_credential(&credential_id, user)
 }
 
-/// Checks the PIN protocol.
-///
-/// TODO(#246) refactor after #246 is merged
-fn pin_uv_auth_protocol_check(pin_uv_auth_protocol: Option<u64>) -> Result<(), Ctap2StatusCode> {
-    match pin_uv_auth_protocol {
-        Some(1) => Ok(()),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-    }
-}
-
 /// Processes the CredentialManagement command and all its subcommands.
 pub fn process_credential_management(
     persistent_store: &mut PersistentStore,
@@ -297,7 +290,7 @@ pub fn process_credential_management(
         | CredentialManagementSubCommand::DeleteCredential
         | CredentialManagementSubCommand::EnumerateCredentialsBegin
         | CredentialManagementSubCommand::UpdateUserInformation => {
-            pin_uv_auth_protocol_check(pin_protocol)?;
+            check_pin_uv_auth_protocol(pin_protocol)?;
             persistent_store
                 .pin_hash()?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;

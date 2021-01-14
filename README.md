@@ -106,8 +106,7 @@ a few things you can personalize:
     check [WebAuthn](https://www.w3.org/TR/webauthn/#signature-counter) for
     documentation.
 1.  Depending on your available flash storage, choose an appropriate maximum
-    number of supported residential keys and number of pages in
-    `ctap/storage.rs`.
+    number of supported resident keys and number of pages in `ctap/storage.rs`.
 1.  Change the default level for the credProtect extension in `ctap/mod.rs`.
     When changing the default, resident credentials become undiscoverable without
     user verification. This helps privacy, but can make usage less comfortable

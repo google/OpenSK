@@ -49,17 +49,10 @@ fn enumerate_rps_response(
     let rp_id_hash = rp_id.map(|rp_id| Sha256::hash(rp_id.as_bytes()).to_vec());
 
     Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: None,
-        max_possible_remaining_resident_credentials_count: None,
         rp,
         rp_id_hash,
         total_rps,
-        user: None,
-        credential_id: None,
-        public_key: None,
-        total_credentials: None,
-        cred_protect: None,
-        large_blob_key: None,
+        ..Default::default()
     })
 }
 
@@ -93,11 +86,6 @@ fn enumerate_credentials_response(
     };
     let public_key = CoseKey::from(private_key.genpk());
     Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: None,
-        max_possible_remaining_resident_credentials_count: None,
-        rp: None,
-        rp_id_hash: None,
-        total_rps: None,
         user: Some(user),
         credential_id: Some(credential_id),
         public_key: Some(public_key),
@@ -105,6 +93,7 @@ fn enumerate_credentials_response(
         cred_protect: cred_protect_policy,
         // TODO(kaczmarczyck) add when largeBlobKey is implemented
         large_blob_key: None,
+        ..Default::default()
     })
 }
 
@@ -117,15 +106,7 @@ fn process_get_creds_metadata(
         max_possible_remaining_resident_credentials_count: Some(
             persistent_store.remaining_credentials()? as u64,
         ),
-        rp: None,
-        rp_id_hash: None,
-        total_rps: None,
-        user: None,
-        credential_id: None,
-        public_key: None,
-        total_credentials: None,
-        cred_protect: None,
-        large_blob_key: None,
+        ..Default::default()
     })
 }
 

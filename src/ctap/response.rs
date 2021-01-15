@@ -204,6 +204,7 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     }
 }
 
+#[derive(Default)]
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct AuthenticatorCredentialManagementResponse {
@@ -435,19 +436,7 @@ mod test {
 
     #[test]
     fn test_used_credential_management_into_cbor() {
-        let cred_management_response = AuthenticatorCredentialManagementResponse {
-            existing_resident_credentials_count: None,
-            max_possible_remaining_resident_credentials_count: None,
-            rp: None,
-            rp_id_hash: None,
-            total_rps: None,
-            user: None,
-            credential_id: None,
-            public_key: None,
-            total_credentials: None,
-            cred_protect: None,
-            large_blob_key: None,
-        };
+        let cred_management_response = AuthenticatorCredentialManagementResponse::default();
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorCredentialManagement(Some(cred_management_response)).into();
         let expected_cbor = cbor_map_options! {};

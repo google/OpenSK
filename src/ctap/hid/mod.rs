@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,8 +68,8 @@ pub struct CtapHid {
     // vendor specific.
     // We allocate them incrementally, that is all `cid` such that 1 <= cid <= allocated_cids are
     // allocated.
-    // In packets, the ids are then encoded with the native endianness (with the
-    // u32::to/from_ne_bytes methods).
+    // In packets, the ID encoding is Big Endian to match what is used throughout CTAP (with the
+    // u32::to/from_be_bytes methods).
     allocated_cids: usize,
     pub wink_permission: TimedPermission,
 }
@@ -117,9 +117,8 @@ impl CtapHid {
     // CTAP specification (version 20190130) section 8.1.9.1.3
     const PROTOCOL_VERSION: u8 = 2;
 
-    // The device version number is vendor-defined. For now we define them to be zero.
-    // TODO: Update with device version?
-    const DEVICE_VERSION_MAJOR: u8 = 0;
+    // The device version number is vendor-defined.
+    const DEVICE_VERSION_MAJOR: u8 = 1;
     const DEVICE_VERSION_MINOR: u8 = 0;
     const DEVICE_VERSION_BUILD: u8 = 0;
 
@@ -220,7 +219,7 @@ impl CtapHid {
                                 cid,
                                 cmd: CtapHid::COMMAND_CBOR,
                                 payload: vec![
-                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG as u8,
+                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8,
                                 ],
                             })
                             .unwrap()
@@ -235,7 +234,7 @@ impl CtapHid {
                         let new_cid = if cid == CtapHid::CHANNEL_BROADCAST {
                             // TODO: Prevent allocating 2^32 channels.
                             self.allocated_cids += 1;
-                            (self.allocated_cids as u32).to_ne_bytes()
+                            (self.allocated_cids as u32).to_be_bytes()
                         } else {
                             // Sync the channel and discard the current transaction.
                             cid
@@ -342,7 +341,7 @@ impl CtapHid {
     }
 
     fn is_allocated_channel(&self, cid: ChannelID) -> bool {
-        cid != CtapHid::CHANNEL_RESERVED && u32::from_ne_bytes(cid) as usize <= self.allocated_cids
+        cid != CtapHid::CHANNEL_RESERVED && u32::from_be_bytes(cid) as usize <= self.allocated_cids
     }
 
     fn error_message(cid: ChannelID, error_code: u8) -> HidPacketIterator {
@@ -417,7 +416,7 @@ impl CtapHid {
     #[cfg(feature = "with_ctap1")]
     fn ctap1_success_message(cid: ChannelID, payload: &[u8]) -> HidPacketIterator {
         let mut response = payload.to_vec();
-        let code: u16 = ctap1::Ctap1StatusCode::SW_NO_ERROR.into();
+        let code: u16 = ctap1::Ctap1StatusCode::SW_SUCCESS.into();
         response.extend_from_slice(&code.to_be_bytes());
         CtapHid::split_message(Message {
             cid,
@@ -569,12 +568,12 @@ mod test {
                     0xBC,
                     0xDE,
                     0xF0,
-                    0x01, // Allocated CID
+                    0x00, // Allocated CID
                     0x00,
                     0x00,
-                    0x00,
+                    0x01,
                     0x02, // Protocol version
-                    0x00, // Device version
+                    0x01, // Device version
                     0x00,
                     0x00,
                     CtapHid::CAPABILITIES
@@ -634,7 +633,7 @@ mod test {
                     cid[2],
                     cid[3],
                     0x02, // Protocol version
-                    0x00, // Device version
+                    0x01, // Device version
                     0x00,
                     0x00,
                     CtapHid::CAPABILITIES

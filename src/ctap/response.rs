@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "with_ctap2_1")]
-use super::data_formats::{AuthenticatorTransport, PublicKeyCredentialParameter};
 use super::data_formats::{
-    CoseKey, CredentialProtectionPolicy, PackedAttestationStatement, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialUserEntity,
+    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, PackedAttestationStatement,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialUserEntity,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -32,8 +30,10 @@ pub enum ResponseData {
     AuthenticatorGetInfo(AuthenticatorGetInfoResponse),
     AuthenticatorClientPin(Option<AuthenticatorClientPinResponse>),
     AuthenticatorReset,
-    #[cfg(feature = "with_ctap2_1")]
     AuthenticatorSelection,
+    // TODO(kaczmarczyck) dummy, extend
+    AuthenticatorConfig,
+    AuthenticatorVendor(AuthenticatorVendorResponse),
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -46,8 +46,9 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorClientPin(Some(data)) => Some(data.into()),
             ResponseData::AuthenticatorClientPin(None) => None,
             ResponseData::AuthenticatorReset => None,
-            #[cfg(feature = "with_ctap2_1")]
             ResponseData::AuthenticatorSelection => None,
+            ResponseData::AuthenticatorConfig => None,
+            ResponseData::AuthenticatorVendor(data) => Some(data.into()),
         }
     }
 }
@@ -109,30 +110,25 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct AuthenticatorGetInfoResponse {
-    // TODO(kaczmarczyck) add maxAuthenticatorConfigLength and defaultCredProtect
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
     pub aaguid: [u8; 16],
     pub options: Option<BTreeMap<String, bool>>,
     pub max_msg_size: Option<u64>,
     pub pin_protocols: Option<Vec<u64>>,
-    #[cfg(feature = "with_ctap2_1")]
     pub max_credential_count_in_list: Option<u64>,
-    #[cfg(feature = "with_ctap2_1")]
     pub max_credential_id_length: Option<u64>,
-    #[cfg(feature = "with_ctap2_1")]
     pub transports: Option<Vec<AuthenticatorTransport>>,
-    #[cfg(feature = "with_ctap2_1")]
     pub algorithms: Option<Vec<PublicKeyCredentialParameter>>,
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
-    #[cfg(feature = "with_ctap2_1")]
     pub min_pin_length: u8,
-    #[cfg(feature = "with_ctap2_1")]
     pub firmware_version: Option<u64>,
+    pub max_cred_blob_length: Option<u64>,
+    pub max_rp_ids_for_set_min_pin_length: Option<u64>,
+    pub remaining_discoverable_credentials: Option<u64>,
 }
 
 impl From<AuthenticatorGetInfoResponse> for cbor::Value {
-    #[cfg(feature = "with_ctap2_1")]
     fn from(get_info_response: AuthenticatorGetInfoResponse) -> Self {
         let AuthenticatorGetInfoResponse {
             versions,
@@ -148,6 +144,9 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             default_cred_protect,
             min_pin_length,
             firmware_version,
+            max_cred_blob_length,
+            max_rp_ids_for_set_min_pin_length,
+            remaining_discoverable_credentials,
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
@@ -172,37 +171,9 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x0C => default_cred_protect.map(|p| p as u64),
             0x0D => min_pin_length as u64,
             0x0E => firmware_version,
-        }
-    }
-
-    #[cfg(not(feature = "with_ctap2_1"))]
-    fn from(get_info_response: AuthenticatorGetInfoResponse) -> Self {
-        let AuthenticatorGetInfoResponse {
-            versions,
-            extensions,
-            aaguid,
-            options,
-            max_msg_size,
-            pin_protocols,
-            default_cred_protect,
-        } = get_info_response;
-
-        let options_cbor: Option<cbor::Value> = options.map(|options| {
-            let option_map: BTreeMap<_, _> = options
-                .into_iter()
-                .map(|(key, value)| (cbor_text!(key), cbor_bool!(value)))
-                .collect();
-            cbor_map_btree!(option_map)
-        });
-
-        cbor_map_options! {
-            0x01 => cbor_array_vec!(versions),
-            0x02 => extensions.map(|vec| cbor_array_vec!(vec)),
-            0x03 => &aaguid,
-            0x04 => options_cbor,
-            0x05 => max_msg_size,
-            0x06 => pin_protocols.map(|vec| cbor_array_vec!(vec)),
-            0x0C => default_cred_protect.map(|p| p as u64),
+            0x0F => max_cred_blob_length,
+            0x10 => max_rp_ids_for_set_min_pin_length,
+            0x14 => remaining_discoverable_credentials,
         }
     }
 }
@@ -224,9 +195,30 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
         } = client_pin_response;
 
         cbor_map_options! {
-            1 => key_agreement.map(|cose_key| cbor_map_btree!(cose_key.0)),
+            1 => key_agreement.map(cbor::Value::from),
             2 => pin_token,
             3 => retries,
+        }
+    }
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct AuthenticatorVendorResponse {
+    pub cert_programmed: bool,
+    pub pkey_programmed: bool,
+}
+
+impl From<AuthenticatorVendorResponse> for cbor::Value {
+    fn from(vendor_response: AuthenticatorVendorResponse) -> Self {
+        let AuthenticatorVendorResponse {
+            cert_programmed,
+            pkey_programmed,
+        } = vendor_response;
+
+        cbor_map_options! {
+            1 => cert_programmed,
+            2 => pkey_programmed,
         }
     }
 }
@@ -234,7 +226,6 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
 #[cfg(test)]
 mod test {
     use super::super::data_formats::PackedAttestationStatement;
-    #[cfg(feature = "with_ctap2_1")]
     use super::super::ES256_CRED_PARAM;
     use super::*;
     use cbor::{cbor_bytes, cbor_map};
@@ -298,28 +289,19 @@ mod test {
             options: None,
             max_msg_size: None,
             pin_protocols: None,
-            #[cfg(feature = "with_ctap2_1")]
             max_credential_count_in_list: None,
-            #[cfg(feature = "with_ctap2_1")]
             max_credential_id_length: None,
-            #[cfg(feature = "with_ctap2_1")]
             transports: None,
-            #[cfg(feature = "with_ctap2_1")]
             algorithms: None,
             default_cred_protect: None,
-            #[cfg(feature = "with_ctap2_1")]
             min_pin_length: 4,
-            #[cfg(feature = "with_ctap2_1")]
             firmware_version: None,
+            max_cred_blob_length: None,
+            max_rp_ids_for_set_min_pin_length: None,
+            remaining_discoverable_credentials: None,
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
-        #[cfg(not(feature = "with_ctap2_1"))]
-        let expected_cbor = cbor_map_options! {
-            0x01 => cbor_array_vec![versions],
-            0x03 => vec![0x00; 16],
-        };
-        #[cfg(feature = "with_ctap2_1")]
         let expected_cbor = cbor_map_options! {
             0x01 => cbor_array_vec![versions],
             0x03 => vec![0x00; 16],
@@ -329,7 +311,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ctap2_1")]
     fn test_get_info_optionals_into_cbor() {
         let mut options_map = BTreeMap::new();
         options_map.insert(String::from("rk"), true);
@@ -347,6 +328,9 @@ mod test {
             default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
             min_pin_length: 4,
             firmware_version: Some(0),
+            max_cred_blob_length: Some(1024),
+            max_rp_ids_for_set_min_pin_length: Some(8),
+            remaining_discoverable_credentials: Some(150),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
@@ -364,6 +348,9 @@ mod test {
             0x0C => CredentialProtectionPolicy::UserVerificationRequired as u64,
             0x0D => 4,
             0x0E => 0,
+            0x0F => 1024,
+            0x10 => 8,
+            0x14 => 150,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -395,10 +382,45 @@ mod test {
         assert_eq!(response_cbor, None);
     }
 
-    #[cfg(feature = "with_ctap2_1")]
     #[test]
     fn test_selection_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorSelection.into();
         assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_config_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorConfig.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_vendor_response_into_cbor() {
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: true,
+                pkey_programmed: false,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => true,
+                2 => false,
+            })
+        );
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+                cert_programmed: false,
+                pkey_programmed: true,
+            })
+            .into();
+        assert_eq!(
+            response_cbor,
+            Some(cbor_map_options! {
+                1 => false,
+                2 => true,
+            })
+        );
     }
 }

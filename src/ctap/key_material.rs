@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,3 @@ pub const AAGUID_LENGTH: usize = 16;
 
 pub const AAGUID: &[u8; AAGUID_LENGTH] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
-
-pub const ATTESTATION_CERTIFICATE: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_cert.bin"));
-
-pub const ATTESTATION_PRIVATE_KEY: &[u8; ATTESTATION_PRIVATE_KEY_LENGTH] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_pkey.bin"));

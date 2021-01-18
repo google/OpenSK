@@ -1,6 +1,6 @@
 [package]
 name = "ctap2"
-version = "0.1.0"
+version = "1.0.0"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
@@ -27,7 +27,6 @@ panic_console = ["lang_items/panic_console"]
 std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
-with_ctap2_1 = []
 with_nfc = ["libtock_drivers/with_nfc"]
 
 [dev-dependencies]
@@ -35,7 +34,6 @@ elf2tab = "0.6.0"
 enum-iterator = "0.6.0"
 
 [build-dependencies]
-openssl = "0.10"
 uuid = { version = "0.8", features = ["v4"] }
 
 [profile.dev]

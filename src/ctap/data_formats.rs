@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,14 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use cbor::{cbor_array_vec, cbor_bytes_lit, cbor_map_options, destructure_cbor_map};
+use cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
+
+// Used as the identifier for ECDSA in assertion signatures and COSE.
+const ES256_ALGORITHM: i64 = -7;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
@@ -262,6 +265,7 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
     pub cred_protect: Option<CredentialProtectionPolicy>,
+    pub min_pin_length: bool,
 }
 
 impl TryFrom<cbor::Value> for MakeCredentialExtensions {
@@ -272,6 +276,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
             let {
                 "credProtect" => cred_protect,
                 "hmac-secret" => hmac_secret,
+                "minPinLength" => min_pin_length,
             } = extract_map(cbor_value)?;
         }
 
@@ -279,9 +284,11 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
         let cred_protect = cred_protect
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
+        let min_pin_length = min_pin_length.map_or(Ok(false), extract_bool)?;
         Ok(Self {
             hmac_secret,
             cred_protect,
+            min_pin_length,
         })
     }
 }
@@ -322,17 +329,17 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => cose_key,
+                1 => key_agreement,
                 2 => salt_enc,
                 3 => salt_auth,
             } = extract_map(cbor_value)?;
         }
 
-        let cose_key = extract_map(ok_or_missing(cose_key)?)?;
+        let key_agreement = CoseKey::try_from(ok_or_missing(key_agreement)?)?;
         let salt_enc = extract_byte_string(ok_or_missing(salt_enc)?)?;
         let salt_auth = extract_byte_string(ok_or_missing(salt_auth)?)?;
         Ok(Self {
-            key_agreement: CoseKey(cose_key),
+            key_agreement,
             salt_enc,
             salt_auth,
         })
@@ -432,7 +439,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
 #[derive(PartialEq)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub enum SignatureAlgorithm {
-    ES256 = ecdsa::PubKey::ES256_ALGORITHM as isize,
+    ES256 = ES256_ALGORITHM as isize,
     // This is the default for all numbers not covered above.
     // Unknown types should be ignored, instead of returning errors.
     Unknown = 0,
@@ -449,7 +456,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         match extract_integer(cbor_value)? {
-            ecdsa::PubKey::ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
+            ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
             _ => Ok(SignatureAlgorithm::Unknown),
         }
     }
@@ -614,72 +621,42 @@ impl PublicKeyCredentialSource {
     }
 }
 
-// TODO(kaczmarczyck) we could decide to split this data type up
-// It depends on the algorithm though, I think.
-// So before creating a mess, this is my workaround.
+// The COSE key is used for both ECDH and ECDSA public keys for transmission.
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
-pub struct CoseKey(pub BTreeMap<cbor::KeyType, cbor::Value>);
-
-// This is the algorithm specifier that is supposed to be used in a COSE key
-// map. The CTAP specification says -25 which represents ECDH-ES + HKDF-256
-// here: https://www.iana.org/assignments/cose/cose.xhtml#algorithms
-// In fact, this is just used for compatibility with older specification versions.
-const ECDH_ALGORITHM: i64 = -25;
-// This is the identifier used by OpenSSH. To be compatible, we accept both.
-const ES256_ALGORITHM: i64 = -7;
-const EC2_KEY_TYPE: i64 = 2;
-const P_256_CURVE: i64 = 1;
-
-impl From<ecdh::PubKey> for CoseKey {
-    fn from(pk: ecdh::PubKey) -> Self {
-        let mut x_bytes = [0; ecdh::NBYTES];
-        let mut y_bytes = [0; ecdh::NBYTES];
-        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
-        let x_byte_cbor: cbor::Value = cbor_bytes_lit!(&x_bytes);
-        let y_byte_cbor: cbor::Value = cbor_bytes_lit!(&y_bytes);
-        // TODO(kaczmarczyck) do not write optional parameters, spec is unclear
-        let cose_cbor_value = cbor_map_options! {
-            1 => EC2_KEY_TYPE,
-            3 => ECDH_ALGORITHM,
-            -1 => P_256_CURVE,
-            -2 => x_byte_cbor,
-            -3 => y_byte_cbor,
-        };
-        if let cbor::Value::Map(cose_map) = cose_cbor_value {
-            CoseKey(cose_map)
-        } else {
-            unreachable!();
-        }
-    }
+pub struct CoseKey {
+    x_bytes: [u8; ecdh::NBYTES],
+    y_bytes: [u8; ecdh::NBYTES],
+    algorithm: i64,
 }
 
-impl TryFrom<CoseKey> for ecdh::PubKey {
+impl CoseKey {
+    // This is the algorithm specifier for ECDH.
+    // CTAP requests -25 which represents ECDH-ES + HKDF-256 here:
+    // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
+    const ECDH_ALGORITHM: i64 = -25;
+    // The parameter behind map key 1.
+    const EC2_KEY_TYPE: i64 = 2;
+    // The parameter behind map key -1.
+    const P_256_CURVE: i64 = 1;
+}
+
+// This conversion accepts both ECDH and ECDSA.
+impl TryFrom<cbor::Value> for CoseKey {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
+                // This is sorted correctly, negative encoding is bigger.
                 1 => key_type,
                 3 => algorithm,
                 -1 => curve,
                 -2 => x_bytes,
                 -3 => y_bytes,
-            } = cose_key.0;
+            } = extract_map(cbor_value)?;
         }
 
-        let key_type = extract_integer(ok_or_missing(key_type)?)?;
-        if key_type != EC2_KEY_TYPE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
-        if algorithm != ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        let curve = extract_integer(ok_or_missing(curve)?)?;
-        if curve != P_256_CURVE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
         let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
         if x_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -688,10 +665,89 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
         if y_bytes.len() != ecdh::NBYTES {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
+        let curve = extract_integer(ok_or_missing(curve)?)?;
+        if curve != CoseKey::P_256_CURVE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        let key_type = extract_integer(ok_or_missing(key_type)?)?;
+        if key_type != CoseKey::EC2_KEY_TYPE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
 
-        let x_array_ref = array_ref![x_bytes.as_slice(), 0, ecdh::NBYTES];
-        let y_array_ref = array_ref![y_bytes.as_slice(), 0, ecdh::NBYTES];
-        ecdh::PubKey::from_coordinates(x_array_ref, y_array_ref)
+        Ok(CoseKey {
+            x_bytes: *array_ref![x_bytes.as_slice(), 0, ecdh::NBYTES],
+            y_bytes: *array_ref![y_bytes.as_slice(), 0, ecdh::NBYTES],
+            algorithm,
+        })
+    }
+}
+
+impl From<CoseKey> for cbor::Value {
+    fn from(cose_key: CoseKey) -> Self {
+        let CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm,
+        } = cose_key;
+
+        cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => algorithm,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => x_bytes,
+            -3 => y_bytes,
+        }
+    }
+}
+
+impl From<ecdh::PubKey> for CoseKey {
+    fn from(pk: ecdh::PubKey) -> Self {
+        let mut x_bytes = [0; ecdh::NBYTES];
+        let mut y_bytes = [0; ecdh::NBYTES];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: CoseKey::ECDH_ALGORITHM,
+        }
+    }
+}
+
+impl From<ecdsa::PubKey> for CoseKey {
+    fn from(pk: ecdsa::PubKey) -> Self {
+        let mut x_bytes = [0; ecdh::NBYTES];
+        let mut y_bytes = [0; ecdh::NBYTES];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: ES256_ALGORITHM,
+        }
+    }
+}
+
+impl TryFrom<CoseKey> for ecdh::PubKey {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
+        let CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm,
+        } = cose_key;
+
+        // Since algorithm can be used for different COSE key types, we check
+        // whether the current type is correct for ECDH. For an OpenSSH bugfix,
+        // the algorithm ES256_ALGORITHM is allowed here too.
+        // https://github.com/google/OpenSK/issues/90
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        ecdh::PubKey::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
     }
 }
@@ -704,13 +760,8 @@ pub enum ClientPinSubCommand {
     SetPin = 0x03,
     ChangePin = 0x04,
     GetPinToken = 0x05,
-    #[cfg(feature = "with_ctap2_1")]
     GetPinUvAuthTokenUsingUvWithPermissions = 0x06,
-    #[cfg(feature = "with_ctap2_1")]
     GetUvRetries = 0x07,
-    #[cfg(feature = "with_ctap2_1")]
-    SetMinPinLength = 0x08,
-    #[cfg(feature = "with_ctap2_1")]
     GetPinUvAuthTokenUsingPinWithPermissions = 0x09,
 }
 
@@ -731,18 +782,112 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
             0x03 => Ok(ClientPinSubCommand::SetPin),
             0x04 => Ok(ClientPinSubCommand::ChangePin),
             0x05 => Ok(ClientPinSubCommand::GetPinToken),
-            #[cfg(feature = "with_ctap2_1")]
             0x06 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions),
-            #[cfg(feature = "with_ctap2_1")]
             0x07 => Ok(ClientPinSubCommand::GetUvRetries),
-            #[cfg(feature = "with_ctap2_1")]
-            0x08 => Ok(ClientPinSubCommand::SetMinPinLength),
-            #[cfg(feature = "with_ctap2_1")]
             0x09 => Ok(ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions),
-            #[cfg(feature = "with_ctap2_1")]
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
-            #[cfg(not(feature = "with_ctap2_1"))]
-            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+pub enum ConfigSubCommand {
+    EnableEnterpriseAttestation = 0x01,
+    ToggleAlwaysUv = 0x02,
+    SetMinPinLength = 0x03,
+    VendorPrototype = 0xFF,
+}
+
+impl From<ConfigSubCommand> for cbor::Value {
+    fn from(subcommand: ConfigSubCommand) -> Self {
+        (subcommand as u64).into()
+    }
+}
+
+impl TryFrom<cbor::Value> for ConfigSubCommand {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let subcommand_int = extract_unsigned(cbor_value)?;
+        match subcommand_int {
+            0x01 => Ok(ConfigSubCommand::EnableEnterpriseAttestation),
+            0x02 => Ok(ConfigSubCommand::ToggleAlwaysUv),
+            0x03 => Ok(ConfigSubCommand::SetMinPinLength),
+            0xFF => Ok(ConfigSubCommand::VendorPrototype),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub enum ConfigSubCommandParams {
+    SetMinPinLength(SetMinPinLengthParams),
+}
+
+impl From<ConfigSubCommandParams> for cbor::Value {
+    fn from(params: ConfigSubCommandParams) -> Self {
+        match params {
+            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params) => {
+                set_min_pin_length_params.into()
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct SetMinPinLengthParams {
+    pub new_min_pin_length: Option<u8>,
+    pub min_pin_length_rp_ids: Option<Vec<String>>,
+    pub force_change_pin: Option<bool>,
+}
+
+impl TryFrom<cbor::Value> for SetMinPinLengthParams {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                0x01 => new_min_pin_length,
+                0x02 => min_pin_length_rp_ids,
+                0x03 => force_change_pin,
+            } = extract_map(cbor_value)?;
+        }
+
+        let new_min_pin_length = new_min_pin_length
+            .map(extract_unsigned)
+            .transpose()?
+            .map(u8::try_from)
+            .transpose()
+            .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)?;
+        let min_pin_length_rp_ids = match min_pin_length_rp_ids {
+            Some(entry) => Some(
+                extract_array(entry)?
+                    .into_iter()
+                    .map(extract_text_string)
+                    .collect::<Result<Vec<String>, Ctap2StatusCode>>()?,
+            ),
+            None => None,
+        };
+        let force_change_pin = force_change_pin.map(extract_bool).transpose()?;
+
+        Ok(Self {
+            new_min_pin_length,
+            min_pin_length_rp_ids,
+            force_change_pin,
+        })
+    }
+}
+
+impl From<SetMinPinLengthParams> for cbor::Value {
+    fn from(params: SetMinPinLengthParams) -> Self {
+        cbor_map_options! {
+            0x01 => params.new_min_pin_length.map(|u| u as u64),
+            0x02 => params.min_pin_length_rp_ids.map(|vec| cbor_array_vec!(vec)),
+            0x03 => params.force_change_pin,
         }
     }
 }
@@ -816,8 +961,8 @@ mod test {
     use super::*;
     use alloc::collections::BTreeMap;
     use cbor::{
-        cbor_array, cbor_bool, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null, cbor_text,
-        cbor_unsigned,
+        cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
+        cbor_text, cbor_unsigned,
     };
     use crypto::rng256::{Rng256, ThreadRng256};
 
@@ -1140,7 +1285,7 @@ mod test {
 
     #[test]
     fn test_from_into_signature_algorithm() {
-        let cbor_signature_algorithm: cbor::Value = cbor_int!(ecdsa::PubKey::ES256_ALGORITHM);
+        let cbor_signature_algorithm: cbor::Value = cbor_int!(ES256_ALGORITHM);
         let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
         let expected_signature_algorithm = SignatureAlgorithm::ES256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
@@ -1214,7 +1359,7 @@ mod test {
     fn test_from_into_public_key_credential_parameter() {
         let cbor_credential_parameter = cbor_map! {
             "type" => "public-key",
-            "alg" => ecdsa::PubKey::ES256_ALGORITHM,
+            "alg" => ES256_ALGORITHM,
         };
         let credential_parameter =
             PublicKeyCredentialParameter::try_from(cbor_credential_parameter.clone());
@@ -1251,11 +1396,13 @@ mod test {
         let cbor_extensions = cbor_map! {
             "hmac-secret" => true,
             "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+            "minPinLength" => true,
         };
         let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
         let expected_extensions = MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            min_pin_length: true,
         };
         assert_eq!(extensions, Ok(expected_extensions));
     }
@@ -1268,7 +1415,7 @@ mod test {
         let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
             "hmac-secret" => cbor_map! {
-                1 => cbor::Value::Map(cose_key.0.clone()),
+                1 => cbor::Value::from(cose_key.clone()),
                 2 => vec![0x02; 32],
                 3 => vec![0x03; 16],
             },
@@ -1333,13 +1480,118 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_cose_key() {
+    fn test_from_into_cose_key_cbor() {
+        for algorithm in &[CoseKey::ECDH_ALGORITHM, ES256_ALGORITHM] {
+            let cbor_value = cbor_map! {
+                1 => CoseKey::EC2_KEY_TYPE,
+                3 => algorithm,
+                -1 => CoseKey::P_256_CURVE,
+                -2 => [0u8; 32],
+                -3 => [0u8; 32],
+            };
+            let cose_key = CoseKey::try_from(cbor_value.clone()).unwrap();
+            let created_cbor_value = cbor::Value::from(cose_key);
+            assert_eq!(created_cbor_value, cbor_value);
+        }
+    }
+
+    #[test]
+    fn test_cose_key_unknown_algorithm() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            // unknown algorithm
+            3 => 0,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        assert_eq!(
+            CoseKey::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+    }
+
+    #[test]
+    fn test_cose_key_unknown_type() {
+        let cbor_value = cbor_map! {
+            // unknown type
+            1 => 0,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        assert_eq!(
+            CoseKey::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+    }
+
+    #[test]
+    fn test_cose_key_unknown_curve() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            // unknown curve
+            -1 => 0,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        assert_eq!(
+            CoseKey::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+    }
+
+    #[test]
+    fn test_cose_key_wrong_length_x() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            // wrong length
+            -2 => [0u8; 31],
+            -3 => [0u8; 32],
+        };
+        assert_eq!(
+            CoseKey::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
+    fn test_cose_key_wrong_length_y() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+            // wrong length
+            -3 => [0u8; 33],
+        };
+        assert_eq!(
+            CoseKey::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
+    fn test_from_into_cose_key_ecdh() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk.clone());
         let created_pk = ecdh::PubKey::try_from(cose_key);
         assert_eq!(created_pk, Ok(pk));
+    }
+
+    #[test]
+    fn test_into_cose_key_ecdsa() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
+        assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
     }
 
     #[test]
@@ -1356,6 +1608,56 @@ mod test {
             let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }
+    }
+
+    #[test]
+    fn test_from_into_config_sub_command() {
+        let cbor_sub_command: cbor::Value = cbor_int!(0x01);
+        let sub_command = ConfigSubCommand::try_from(cbor_sub_command.clone());
+        let expected_sub_command = ConfigSubCommand::EnableEnterpriseAttestation;
+        assert_eq!(sub_command, Ok(expected_sub_command));
+        let created_cbor: cbor::Value = sub_command.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command);
+
+        for command in ConfigSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = ConfigSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
+        }
+    }
+
+    #[test]
+    fn test_from_set_min_pin_length_params() {
+        let params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
+            force_change_pin: Some(true),
+        };
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x03 => true,
+        };
+        assert_eq!(cbor::Value::from(params.clone()), cbor_params);
+        let reconstructed_params = SetMinPinLengthParams::try_from(cbor_params);
+        assert_eq!(reconstructed_params, Ok(params));
+    }
+
+    #[test]
+    fn test_from_config_sub_command_params() {
+        let set_min_pin_length_params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
+            force_change_pin: Some(true),
+        };
+        let config_sub_command_params =
+            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params);
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x03 => true,
+        };
+        assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);
     }
 
     #[test]

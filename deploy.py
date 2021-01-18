@@ -710,6 +710,22 @@ class OpenSKInstaller:
             check=False,
             timeout=None,
         ).returncode
+
+    # Configure OpenSK through vendor specific command if needed
+    if any([
+        self.args.lock_device,
+        self.args.config_cert,
+        self.args.config_pkey,
+    ]):
+      # pylint: disable=g-import-not-at-top,import-outside-toplevel
+      import tools.configure
+      tools.configure.main(
+          argparse.Namespace(
+              batch=False,
+              certificate=self.args.config_cert,
+              priv_key=self.args.config_pkey,
+              lock=self.args.lock_device,
+          ))
     return 0
 
 
@@ -769,6 +785,33 @@ if __name__ == "__main__":
       dest="clear_storage",
       help=("Erases the persistent storage when installing an application. "
             "All stored data will be permanently lost."),
+  )
+  main_parser.add_argument(
+      "--lock-device",
+      action="store_true",
+      default=False,
+      dest="lock_device",
+      help=("Try to disable JTAG at the end of the operations. This "
+            "operation may fail if the device is already locked or if "
+            "the certificate/private key are not programmed."),
+  )
+  main_parser.add_argument(
+      "--inject-certificate",
+      default=None,
+      metavar="PEM_FILE",
+      type=argparse.FileType("rb"),
+      dest="config_cert",
+      help=("If this option is set, the corresponding certificate "
+            "will be programmed into the key as the last operation."),
+  )
+  main_parser.add_argument(
+      "--inject-private-key",
+      default=None,
+      metavar="PEM_FILE",
+      type=argparse.FileType("rb"),
+      dest="config_pkey",
+      help=("If this option is set, the corresponding private key "
+            "will be programmed into the key as the last operation."),
   )
   main_parser.add_argument(
       "--programmer",
@@ -839,14 +882,6 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
-      "--ctap2.1",
-      action="append_const",
-      const="with_ctap2_1",
-      dest="features",
-      help=("Compiles the OpenSK application with backward compatible "
-            "support for CTAP2.1 protocol."),
-  )
-  main_parser.add_argument(
       "--nfc",
       action="append_const",
       const="with_nfc",
@@ -904,7 +939,16 @@ if __name__ == "__main__":
       dest="application",
       action="store_const",
       const="store_latency",
-      help=("Compiles and installs the store_latency example."))
+      help=("Compiles and installs the store_latency example which prints "
+            "latency statistics of the persistent store library."))
+  apps_group.add_argument(
+      "--erase_storage",
+      dest="application",
+      action="store_const",
+      const="erase_storage",
+      help=("Compiles and installs the erase_storage example which erases "
+            "the storage. During operation the dongle red light is on. Once "
+            "the operation is completed the dongle green light is on."))
   apps_group.add_argument(
       "--panic_test",
       dest="application",

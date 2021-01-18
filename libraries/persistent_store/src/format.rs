@@ -1077,4 +1077,15 @@ mod tests {
             0xff800000
         );
     }
+
+    #[test]
+    fn position_offsets_fit_in_a_halfword() {
+        // The store stores in RAM the entry positions as their offset from the head. Those offsets
+        // are represented as u16. The bound below is a large over-approximation of the maximal
+        // offset. We first make sure it fits in a u16.
+        const MAX_POS: Nat = (MAX_PAGE_INDEX + 1) * MAX_VIRT_PAGE_SIZE;
+        assert!(MAX_POS <= u16::MAX as Nat);
+        // We also check the actual value for up-to-date documentation, since it's a constant.
+        assert_eq!(MAX_POS, 0xff80);
+    }
 }

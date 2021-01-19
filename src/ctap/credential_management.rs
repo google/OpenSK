@@ -31,10 +31,22 @@ use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::iter::FromIterator;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 use libtock_drivers::timer::ClockValue;
+
+/// Generates a set with all existing RP IDs.
+fn get_stored_rp_ids(
+    persistent_store: &PersistentStore,
+) -> Result<BTreeSet<String>, Ctap2StatusCode> {
+    let mut rp_set = BTreeSet::new();
+    let mut iter_result = Ok(());
+    for (_, credential) in persistent_store.iter_credentials(&mut iter_result)? {
+        rp_set.insert(credential.rp_id);
+    }
+    iter_result?;
+    Ok(rp_set)
+}
 
 /// Generates the response for subcommands enumerating RPs.
 fn enumerate_rps_response(
@@ -117,34 +129,35 @@ fn process_enumerate_rps_begin(
     stateful_command_type: &mut Option<StatefulCommand>,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let mut rp_set = BTreeSet::new();
-    let mut iter_result = Ok(());
-    for (_, credential) in persistent_store.iter_credentials(&mut iter_result)? {
-        rp_set.insert(credential.rp_id);
-    }
-    iter_result?;
-    let mut rp_ids = Vec::from_iter(rp_set);
-    let total_rps = rp_ids.len();
+    let rp_set = get_stored_rp_ids(persistent_store)?;
+    let total_rps = rp_set.len();
 
-    // TODO(kaczmarczyck) behaviour with empty list?
-    let rp_id = rp_ids.pop();
+    // TODO(kaczmarczyck) should we return CTAP2_ERR_NO_CREDENTIALS if empty?
     if total_rps > 1 {
         *stateful_command_permission =
             TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-        *stateful_command_type = Some(StatefulCommand::EnumerateRps(rp_ids));
+        *stateful_command_type = Some(StatefulCommand::EnumerateRps(1));
     }
-    enumerate_rps_response(rp_id, Some(total_rps as u64))
+    // TODO https://github.com/rust-lang/rust/issues/62924 replace with pop_first()
+    enumerate_rps_response(rp_set.into_iter().next(), Some(total_rps as u64))
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
 fn process_enumerate_rps_get_next_rp(
+    persistent_store: &PersistentStore,
     stateful_command_permission: &mut TimedPermission,
     stateful_command_type: &mut Option<StatefulCommand>,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     check_command_permission(stateful_command_permission, now)?;
-    if let Some(StatefulCommand::EnumerateRps(rp_ids)) = stateful_command_type {
-        let rp_id = rp_ids.pop().ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+    if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = stateful_command_type {
+        let rp_set = get_stored_rp_ids(persistent_store)?;
+        // A BTreeSet is already sorted.
+        let rp_id = rp_set
+            .into_iter()
+            .nth(*rp_id_index)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+        *stateful_command_type = Some(StatefulCommand::EnumerateRps(*rp_id_index + 1));
         enumerate_rps_response(Some(rp_id), None)
     } else {
         Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -305,6 +318,7 @@ pub fn process_credential_management(
         )?),
         CredentialManagementSubCommand::EnumerateRpsGetNextRp => {
             Some(process_enumerate_rps_get_next_rp(
+                persistent_store,
                 stateful_command_permission,
                 stateful_command_type,
                 now,
@@ -530,6 +544,90 @@ mod test {
             pin_protocol: None,
             pin_auth: None,
         };
+        let cred_management_response = process_credential_management(
+            &mut ctap_state.persistent_store,
+            &mut ctap_state.stateful_command_permission,
+            &mut ctap_state.stateful_command_type,
+            &mut ctap_state.pin_protocol_v1,
+            cred_management_params,
+            DUMMY_CLOCK_VALUE,
+        );
+        assert_eq!(
+            cred_management_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn test_process_enumerate_rps_completeness() {
+        let mut rng = ThreadRng256 {};
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let credential_source = create_credential_source(&mut rng);
+
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.pin_protocol_v1 = pin_protocol_v1;
+
+        const NUM_CREDENTIALS: usize = 20;
+        for i in 0..NUM_CREDENTIALS {
+            let mut credential = credential_source.clone();
+            credential.rp_id = i.to_string();
+            ctap_state
+                .persistent_store
+                .store_credential(credential)
+                .unwrap();
+        }
+
+        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        let pin_auth = Some(vec![
+            0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
+            0xD0, 0xD1,
+        ]);
+
+        let mut rp_set = BTreeSet::new();
+        // This mut is just to make the test code shorter.
+        // The command is different on the first loop iteration.
+        let mut cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateRpsBegin,
+            sub_command_params: None,
+            pin_protocol: Some(1),
+            pin_auth,
+        };
+
+        for _ in 0..NUM_CREDENTIALS {
+            let cred_management_response = process_credential_management(
+                &mut ctap_state.persistent_store,
+                &mut ctap_state.stateful_command_permission,
+                &mut ctap_state.stateful_command_type,
+                &mut ctap_state.pin_protocol_v1,
+                cred_management_params,
+                DUMMY_CLOCK_VALUE,
+            );
+            match cred_management_response.unwrap() {
+                ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
+                    if rp_set.is_empty() {
+                        assert_eq!(response.total_rps, Some(NUM_CREDENTIALS as u64));
+                    } else {
+                        assert_eq!(response.total_rps, None);
+                    }
+                    let rp_id = response.rp.unwrap().rp_id;
+                    let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+                    assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
+                    assert!(!rp_set.contains(&rp_id));
+                    rp_set.insert(rp_id);
+                }
+                _ => panic!("Invalid response type"),
+            };
+            cred_management_params = AuthenticatorCredentialManagementParameters {
+                sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
+                sub_command_params: None,
+                pin_protocol: None,
+                pin_auth: None,
+            };
+        }
+
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,

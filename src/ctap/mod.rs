@@ -165,7 +165,7 @@ pub struct AssertionState {
 pub enum StatefulCommand {
     Reset,
     GetAssertion(AssertionState),
-    EnumerateRps(Vec<String>),
+    EnumerateRps(usize),
     EnumerateCredentials(Vec<usize>),
 }
 

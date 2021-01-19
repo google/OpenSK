@@ -335,12 +335,12 @@ impl Format {
     }
 
     /// Builds the storage representation of an init info.
-    pub fn build_init(&self, init: InitInfo) -> WordSlice {
+    pub fn build_init(&self, init: InitInfo) -> StoreResult<WordSlice> {
         let mut word = ERASED_WORD;
-        INIT_CYCLE.set(&mut word, init.cycle);
-        INIT_PREFIX.set(&mut word, init.prefix);
-        WORD_CHECKSUM.set(&mut word, 0);
-        word.as_slice()
+        INIT_CYCLE.set(&mut word, init.cycle)?;
+        INIT_PREFIX.set(&mut word, init.prefix)?;
+        WORD_CHECKSUM.set(&mut word, 0)?;
+        Ok(word.as_slice())
     }
 
     /// Returns the storage index of the compact info of a page.
@@ -368,36 +368,36 @@ impl Format {
     }
 
     /// Builds the storage representation of a compact info.
-    pub fn build_compact(&self, compact: CompactInfo) -> WordSlice {
+    pub fn build_compact(&self, compact: CompactInfo) -> StoreResult<WordSlice> {
         let mut word = ERASED_WORD;
-        COMPACT_TAIL.set(&mut word, compact.tail);
-        WORD_CHECKSUM.set(&mut word, 0);
-        word.as_slice()
+        COMPACT_TAIL.set(&mut word, compact.tail)?;
+        WORD_CHECKSUM.set(&mut word, 0)?;
+        Ok(word.as_slice())
     }
 
     /// Builds the storage representation of an internal entry.
-    pub fn build_internal(&self, internal: InternalEntry) -> WordSlice {
+    pub fn build_internal(&self, internal: InternalEntry) -> StoreResult<WordSlice> {
         let mut word = ERASED_WORD;
         match internal {
             InternalEntry::Erase { page } => {
-                ID_ERASE.set(&mut word);
-                ERASE_PAGE.set(&mut word, page);
+                ID_ERASE.set(&mut word)?;
+                ERASE_PAGE.set(&mut word, page)?;
             }
             InternalEntry::Clear { min_key } => {
-                ID_CLEAR.set(&mut word);
-                CLEAR_MIN_KEY.set(&mut word, min_key);
+                ID_CLEAR.set(&mut word)?;
+                CLEAR_MIN_KEY.set(&mut word, min_key)?;
             }
             InternalEntry::Marker { count } => {
-                ID_MARKER.set(&mut word);
-                MARKER_COUNT.set(&mut word, count);
+                ID_MARKER.set(&mut word)?;
+                MARKER_COUNT.set(&mut word, count)?;
             }
             InternalEntry::Remove { key } => {
-                ID_REMOVE.set(&mut word);
-                REMOVE_KEY.set(&mut word, key);
+                ID_REMOVE.set(&mut word)?;
+                REMOVE_KEY.set(&mut word, key)?;
             }
         }
-        WORD_CHECKSUM.set(&mut word, 0);
-        word.as_slice()
+        WORD_CHECKSUM.set(&mut word, 0)?;
+        Ok(word.as_slice())
     }
 
     /// Parses the first word of an entry from its storage representation.
@@ -459,31 +459,31 @@ impl Format {
     }
 
     /// Builds the storage representation of a user entry.
-    pub fn build_user(&self, key: Nat, value: &[u8]) -> Vec<u8> {
+    pub fn build_user(&self, key: Nat, value: &[u8]) -> StoreResult<Vec<u8>> {
         let length = usize_to_nat(value.len());
         let word_size = self.word_size();
         let footer = self.bytes_to_words(length);
         let mut result = vec![0xff; ((1 + footer) * word_size) as usize];
         result[word_size as usize..][..length as usize].copy_from_slice(value);
         let mut word = ERASED_WORD;
-        ID_HEADER.set(&mut word);
+        ID_HEADER.set(&mut word)?;
         if footer > 0 && is_erased(&result[(footer * word_size) as usize..]) {
             HEADER_FLIPPED.set(&mut word);
             *result.last_mut().unwrap() = 0x7f;
         }
-        HEADER_LENGTH.set(&mut word, length);
-        HEADER_KEY.set(&mut word, key);
+        HEADER_LENGTH.set(&mut word, length)?;
+        HEADER_KEY.set(&mut word, key)?;
         HEADER_CHECKSUM.set(
             &mut word,
             count_zeros(&result[(footer * word_size) as usize..]),
-        );
+        )?;
         result[..word_size as usize].copy_from_slice(&word.as_slice());
-        result
+        Ok(result)
     }
 
     /// Sets the padding bit in the first word of a user entry.
-    pub fn set_padding(&self, word: &mut Word) {
-        ID_PADDING.set(word);
+    pub fn set_padding(&self, word: &mut Word) -> StoreResult<()> {
+        ID_PADDING.set(word)
     }
 
     /// Sets the deleted bit in the first word of a user entry.

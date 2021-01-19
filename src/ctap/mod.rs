@@ -101,8 +101,9 @@ const ED_FLAG: u8 = 0x80;
 pub const TOUCH_TIMEOUT_MS: isize = 30000;
 #[cfg(feature = "with_ctap1")]
 const U2F_UP_PROMPT_TIMEOUT: Duration<isize> = Duration::from_ms(10000);
+// TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
 const RESET_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(10000);
-pub const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
+const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
 
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
@@ -169,15 +170,50 @@ pub enum StatefulCommand {
     EnumerateCredentials(Vec<usize>),
 }
 
-pub fn check_command_permission(
-    stateful_command_permission: &mut TimedPermission,
-    now: ClockValue,
-) -> Result<(), Ctap2StatusCode> {
-    *stateful_command_permission = stateful_command_permission.check_expiration(now);
-    if stateful_command_permission.is_granted(now) {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+pub struct StatefulPermission {
+    permission: TimedPermission,
+    command_type: Option<StatefulCommand>,
+}
+
+impl StatefulPermission {
+    // Resets are only possible in the first 10 seconds after booting.
+    // Therefore, initialization includes allowing Reset.
+    pub fn new_reset(now: ClockValue) -> StatefulPermission {
+        StatefulPermission {
+            permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
+            command_type: Some(StatefulCommand::Reset),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.permission = TimedPermission::waiting();
+        self.command_type = None;
+    }
+
+    pub fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
+        if self.permission.is_granted(now) {
+            Ok(())
+        } else {
+            self.clear();
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    pub fn get_command(&mut self) -> Result<&mut StatefulCommand, Ctap2StatusCode> {
+        self.command_type
+            .as_mut()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+    }
+
+    pub fn set_command(&mut self, now: ClockValue, new_command_type: StatefulCommand) {
+        match &new_command_type {
+            // Reset is only allowed after a power cycle.
+            StatefulCommand::Reset => unreachable!(),
+            _ => {
+                self.permission = TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
+                self.command_type = Some(new_command_type);
+            }
+        }
     }
 }
 
@@ -194,8 +230,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     #[cfg(feature = "with_ctap1")]
     pub u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
-    stateful_command_permission: TimedPermission,
-    stateful_command_type: Option<StatefulCommand>,
+    stateful_command_permission: StatefulPermission,
 }
 
 impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
@@ -220,13 +255,15 @@ where
                 U2F_UP_PROMPT_TIMEOUT,
                 Duration::from_ms(TOUCH_TIMEOUT_MS),
             ),
-            stateful_command_permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
-            stateful_command_type: Some(StatefulCommand::Reset),
+            stateful_command_permission: StatefulPermission::new_reset(now),
         }
     }
 
     pub fn update_command_permission(&mut self, now: ClockValue) {
-        self.stateful_command_permission = self.stateful_command_permission.check_expiration(now);
+        // Ignore the result, just update.
+        let _ = self
+            .stateful_command_permission
+            .check_command_permission(now);
     }
 
     pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
@@ -345,27 +382,23 @@ where
                         Duration::from_ms(TOUCH_TIMEOUT_MS),
                     );
                 }
-                match (&command, &self.stateful_command_type) {
-                    (
-                        Command::AuthenticatorGetNextAssertion,
-                        Some(StatefulCommand::GetAssertion(_)),
-                    ) => (),
-                    (
+                match (&command, self.stateful_command_permission.get_command()) {
+                    (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
+                    | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
+                    // AuthenticatorGetInfo still allows Reset.
+                    | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
+                    // AuthenticatorSelection still allows Reset.
+                    | (Command::AuthenticatorSelection, Ok(StatefulCommand::Reset))
+                    // AuthenticatorCredentialManagement handles its subcommands later.
+                    | (
                         Command::AuthenticatorCredentialManagement(_),
-                        Some(StatefulCommand::EnumerateRps(_)),
-                    ) => (),
-                    (
+                        Ok(StatefulCommand::EnumerateRps(_)),
+                    )
+                    | (
                         Command::AuthenticatorCredentialManagement(_),
-                        Some(StatefulCommand::EnumerateCredentials(_)),
+                        Ok(StatefulCommand::EnumerateCredentials(_)),
                     ) => (),
-                    (Command::AuthenticatorReset, Some(StatefulCommand::Reset)) => (),
-                    // GetInfo does not reset stateful commands.
-                    (Command::AuthenticatorGetInfo, _) => (),
-                    // AuthenticatorSelection does not reset stateful commands.
-                    (Command::AuthenticatorSelection, _) => (),
-                    (_, _) => {
-                        self.stateful_command_type = None;
-                    }
+                    (_, _) => self.stateful_command_permission.clear(),
                 }
                 let response = match command {
                     Command::AuthenticatorMakeCredential(params) => {
@@ -382,7 +415,6 @@ where
                         process_credential_management(
                             &mut self.persistent_store,
                             &mut self.stateful_command_permission,
-                            &mut self.stateful_command_type,
                             &mut self.pin_protocol_v1,
                             params,
                             now,
@@ -855,12 +887,12 @@ where
             None
         } else {
             let number_of_credentials = Some(next_credential_keys.len() + 1);
-            self.stateful_command_permission =
-                TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-            self.stateful_command_type = Some(StatefulCommand::GetAssertion(AssertionState {
+            let assertion_state = StatefulCommand::GetAssertion(AssertionState {
                 assertion_input: assertion_input.clone(),
                 next_credential_keys,
-            }));
+            });
+            self.stateful_command_permission
+                .set_command(now, assertion_state);
             number_of_credentials
         };
         self.assertion_response(credential, assertion_input, number_of_credentials)
@@ -870,20 +902,20 @@ where
         &mut self,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        check_command_permission(&mut self.stateful_command_permission, now)?;
-        let (assertion_input, credential) =
-            if let Some(StatefulCommand::GetAssertion(assertion_state)) =
-                &mut self.stateful_command_type
-            {
-                let credential_key = assertion_state
-                    .next_credential_keys
-                    .pop()
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-                let credential = self.persistent_store.get_credential(credential_key)?;
-                (assertion_state.assertion_input.clone(), credential)
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-            };
+        self.stateful_command_permission
+            .check_command_permission(now)?;
+        let (assertion_input, credential) = if let StatefulCommand::GetAssertion(assertion_state) =
+            self.stateful_command_permission.get_command()?
+        {
+            let credential_key = assertion_state
+                .next_credential_keys
+                .pop()
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+            let credential = self.persistent_store.get_credential(credential_key)?;
+            (assertion_state.assertion_input.clone(), credential)
+        } else {
+            return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
+        };
         self.assertion_response(credential, assertion_input, None)
     }
 
@@ -949,11 +981,10 @@ where
         cid: ChannelID,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        // Resets are only possible in the first 10 seconds after booting.
-        // TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
-        check_command_permission(&mut self.stateful_command_permission, now)?;
-        match &self.stateful_command_type {
-            Some(StatefulCommand::Reset) => (),
+        self.stateful_command_permission
+            .check_command_permission(now)?;
+        match self.stateful_command_permission.get_command()? {
+            StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
         (self.check_user_presence)(cid)?;

@@ -22,11 +22,7 @@ use super::pin_protocol_v1::{PinPermission, PinProtocolV1};
 use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
-use super::timed_permission::TimedPermission;
-use super::{
-    check_command_permission, check_pin_uv_auth_protocol, StatefulCommand,
-    STATEFUL_COMMAND_TIMEOUT_DURATION,
-};
+use super::{check_pin_uv_auth_protocol, StatefulCommand, StatefulPermission};
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
@@ -125,8 +121,7 @@ fn process_get_creds_metadata(
 /// Processes the subcommand enumerateRPsBegin for CredentialManagement.
 fn process_enumerate_rps_begin(
     persistent_store: &PersistentStore,
-    stateful_command_permission: &mut TimedPermission,
-    stateful_command_type: &mut Option<StatefulCommand>,
+    stateful_command_permission: &mut StatefulPermission,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_set = get_stored_rp_ids(persistent_store)?;
@@ -134,9 +129,7 @@ fn process_enumerate_rps_begin(
 
     // TODO(kaczmarczyck) should we return CTAP2_ERR_NO_CREDENTIALS if empty?
     if total_rps > 1 {
-        *stateful_command_permission =
-            TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-        *stateful_command_type = Some(StatefulCommand::EnumerateRps(1));
+        stateful_command_permission.set_command(now, StatefulCommand::EnumerateRps(1));
     }
     // TODO https://github.com/rust-lang/rust/issues/62924 replace with pop_first()
     enumerate_rps_response(rp_set.into_iter().next(), Some(total_rps as u64))
@@ -145,19 +138,16 @@ fn process_enumerate_rps_begin(
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
 fn process_enumerate_rps_get_next_rp(
     persistent_store: &PersistentStore,
-    stateful_command_permission: &mut TimedPermission,
-    stateful_command_type: &mut Option<StatefulCommand>,
-    now: ClockValue,
+    stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    check_command_permission(stateful_command_permission, now)?;
-    if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = stateful_command_type {
+    if let StatefulCommand::EnumerateRps(rp_id_index) = stateful_command_permission.get_command()? {
         let rp_set = get_stored_rp_ids(persistent_store)?;
         // A BTreeSet is already sorted.
         let rp_id = rp_set
             .into_iter()
             .nth(*rp_id_index)
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-        *stateful_command_type = Some(StatefulCommand::EnumerateRps(*rp_id_index + 1));
+        *rp_id_index += 1;
         enumerate_rps_response(Some(rp_id), None)
     } else {
         Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -167,8 +157,7 @@ fn process_enumerate_rps_get_next_rp(
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
 fn process_enumerate_credentials_begin(
     persistent_store: &PersistentStore,
-    stateful_command_permission: &mut TimedPermission,
-    stateful_command_type: &mut Option<StatefulCommand>,
+    stateful_command_permission: &mut StatefulPermission,
     sub_command_params: CredentialManagementSubCommandParameters,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -194,9 +183,8 @@ fn process_enumerate_credentials_begin(
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
     let credential = persistent_store.get_credential(current_key)?;
     if total_credentials > 1 {
-        *stateful_command_permission =
-            TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-        *stateful_command_type = Some(StatefulCommand::EnumerateCredentials(rp_credentials));
+        stateful_command_permission
+            .set_command(now, StatefulCommand::EnumerateCredentials(rp_credentials));
     }
     enumerate_credentials_response(credential, Some(total_credentials as u64))
 }
@@ -204,12 +192,10 @@ fn process_enumerate_credentials_begin(
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
 fn process_enumerate_credentials_get_next_credential(
     persistent_store: &PersistentStore,
-    stateful_command_permission: &mut TimedPermission,
-    mut stateful_command_type: &mut Option<StatefulCommand>,
-    now: ClockValue,
+    stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    check_command_permission(stateful_command_permission, now)?;
-    if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut stateful_command_type
+    if let StatefulCommand::EnumerateCredentials(rp_credentials) =
+        stateful_command_permission.get_command()?
     {
         let current_key = rp_credentials
             .pop()
@@ -251,8 +237,7 @@ fn process_update_user_information(
 /// Processes the CredentialManagement command and all its subcommands.
 pub fn process_credential_management(
     persistent_store: &mut PersistentStore,
-    stateful_command_permission: &mut TimedPermission,
-    mut stateful_command_type: &mut Option<StatefulCommand>,
+    stateful_command_permission: &mut StatefulPermission,
     pin_protocol_v1: &mut PinProtocolV1,
     cred_management_params: AuthenticatorCredentialManagementParameters,
     now: ClockValue,
@@ -264,17 +249,17 @@ pub fn process_credential_management(
         pin_auth,
     } = cred_management_params;
 
-    match (sub_command, &mut stateful_command_type) {
+    match (sub_command, stateful_command_permission.get_command()) {
         (
             CredentialManagementSubCommand::EnumerateRpsGetNextRp,
-            Some(StatefulCommand::EnumerateRps(_)),
-        ) => (),
-        (
+            Ok(StatefulCommand::EnumerateRps(_)),
+        )
+        | (
             CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
-            Some(StatefulCommand::EnumerateCredentials(_)),
-        ) => (),
+            Ok(StatefulCommand::EnumerateCredentials(_)),
+        ) => stateful_command_permission.check_command_permission(now)?,
         (_, _) => {
-            *stateful_command_type = None;
+            stateful_command_permission.clear();
         }
     }
 
@@ -313,22 +298,15 @@ pub fn process_credential_management(
         CredentialManagementSubCommand::EnumerateRpsBegin => Some(process_enumerate_rps_begin(
             persistent_store,
             stateful_command_permission,
-            stateful_command_type,
             now,
         )?),
-        CredentialManagementSubCommand::EnumerateRpsGetNextRp => {
-            Some(process_enumerate_rps_get_next_rp(
-                persistent_store,
-                stateful_command_permission,
-                stateful_command_type,
-                now,
-            )?)
-        }
+        CredentialManagementSubCommand::EnumerateRpsGetNextRp => Some(
+            process_enumerate_rps_get_next_rp(persistent_store, stateful_command_permission)?,
+        ),
         CredentialManagementSubCommand::EnumerateCredentialsBegin => {
             Some(process_enumerate_credentials_begin(
                 persistent_store,
                 stateful_command_permission,
-                stateful_command_type,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                 now,
             )?)
@@ -337,8 +315,6 @@ pub fn process_credential_management(
             Some(process_enumerate_credentials_get_next_credential(
                 persistent_store,
                 stateful_command_permission,
-                stateful_command_type,
-                now,
             )?)
         }
         CredentialManagementSubCommand::DeleteCredential => {
@@ -412,7 +388,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -441,7 +416,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -496,7 +470,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -521,7 +494,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -547,7 +519,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -600,7 +571,6 @@ mod test {
             let cred_management_response = process_credential_management(
                 &mut ctap_state.persistent_store,
                 &mut ctap_state.stateful_command_permission,
-                &mut ctap_state.stateful_command_type,
                 &mut ctap_state.pin_protocol_v1,
                 cred_management_params,
                 DUMMY_CLOCK_VALUE,
@@ -631,7 +601,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -690,7 +659,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -714,7 +682,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -739,7 +706,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -793,7 +759,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -812,7 +777,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -872,7 +836,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -922,7 +885,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,
@@ -950,7 +912,6 @@ mod test {
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
             &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.stateful_command_type,
             &mut ctap_state.pin_protocol_v1,
             cred_management_params,
             DUMMY_CLOCK_VALUE,

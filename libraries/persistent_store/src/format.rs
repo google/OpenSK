@@ -20,6 +20,7 @@ use self::bitfield::Length;
 use self::bitfield::{count_zeros, num_bits, Bit, Checksum, ConstField, Field};
 use crate::{usize_to_nat, Nat, Storage, StorageIndex, StoreError, StoreResult, StoreUpdate};
 use alloc::vec::Vec;
+use core::borrow::Borrow;
 use core::cmp::min;
 use core::convert::TryFrom;
 
@@ -492,13 +493,16 @@ impl Format {
     }
 
     /// Returns the capacity required by a transaction.
-    pub fn transaction_capacity(&self, updates: &[StoreUpdate]) -> Nat {
+    pub fn transaction_capacity<ByteSlice: Borrow<[u8]>>(
+        &self,
+        updates: &[StoreUpdate<ByteSlice>],
+    ) -> Nat {
         match updates.len() {
             // An empty transaction doesn't consume anything.
             0 => 0,
             // Transactions with a single update are optimized by avoiding a marker entry.
             1 => match &updates[0] {
-                StoreUpdate::Insert { value, .. } => self.entry_size(value),
+                StoreUpdate::Insert { value, .. } => self.entry_size(value.borrow()),
                 // Transactions with a single update which is a removal don't consume anything.
                 StoreUpdate::Remove { .. } => 0,
             },
@@ -508,9 +512,9 @@ impl Format {
     }
 
     /// Returns the capacity of an update.
-    fn update_capacity(&self, update: &StoreUpdate) -> Nat {
+    fn update_capacity<ByteSlice: Borrow<[u8]>>(&self, update: &StoreUpdate<ByteSlice>) -> Nat {
         match update {
-            StoreUpdate::Insert { value, .. } => self.entry_size(value),
+            StoreUpdate::Insert { value, .. } => self.entry_size(value.borrow()),
             StoreUpdate::Remove { .. } => 1,
         }
     }
@@ -523,7 +527,10 @@ impl Format {
     /// Checks if a transaction is valid and returns its sorted keys.
     ///
     /// Returns `None` if the transaction is invalid.
-    pub fn transaction_valid(&self, updates: &[StoreUpdate]) -> Option<Vec<Nat>> {
+    pub fn transaction_valid<ByteSlice: Borrow<[u8]>>(
+        &self,
+        updates: &[StoreUpdate<ByteSlice>],
+    ) -> Option<Vec<Nat>> {
         if usize_to_nat(updates.len()) > self.max_updates() {
             return None;
         }

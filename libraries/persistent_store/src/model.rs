@@ -34,7 +34,7 @@ pub enum StoreOperation {
     /// Applies a transaction.
     Transaction {
         /// The list of updates to be applied.
-        updates: Vec<StoreUpdate>,
+        updates: Vec<StoreUpdate<Vec<u8>>>,
     },
 
     /// Deletes all keys above a threshold.
@@ -89,7 +89,7 @@ impl StoreModel {
     }
 
     /// Applies a transaction.
-    fn transaction(&mut self, updates: Vec<StoreUpdate>) -> StoreResult<()> {
+    fn transaction(&mut self, updates: Vec<StoreUpdate<Vec<u8>>>) -> StoreResult<()> {
         // Fail if the transaction is invalid.
         if self.format.transaction_valid(&updates).is_none() {
             return Err(StoreError::InvalidArgument);

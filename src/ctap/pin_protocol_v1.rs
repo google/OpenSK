@@ -506,6 +506,13 @@ impl PinProtocolV1 {
         }
     }
 
+    pub fn has_no_permission_rp_id(&self) -> Result<(), Ctap2StatusCode> {
+        if self.permissions_rp_id.is_some() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
+        }
+        Ok(())
+    }
+
     pub fn has_permission_for_rp_id(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
         if let Some(permissions_rp_id) = &self.permissions_rp_id {
             if rp_id != permissions_rp_id {
@@ -1090,6 +1097,19 @@ mod test {
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
             );
         }
+    }
+
+    #[test]
+    fn test_has_no_permission_rp_id() {
+        let mut rng = ThreadRng256 {};
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        assert_eq!(pin_protocol_v1.has_no_permission_rp_id(), Ok(()));
+        assert_eq!(pin_protocol_v1.permissions_rp_id, None,);
+        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
+        assert_eq!(
+            pin_protocol_v1.has_no_permission_rp_id(),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
     }
 
     #[test]

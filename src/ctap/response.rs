@@ -14,7 +14,8 @@
 
 use super::data_formats::{
     AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, PackedAttestationStatement,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialUserEntity,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialUserEntity,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -30,6 +31,7 @@ pub enum ResponseData {
     AuthenticatorGetInfo(AuthenticatorGetInfoResponse),
     AuthenticatorClientPin(Option<AuthenticatorClientPinResponse>),
     AuthenticatorReset,
+    AuthenticatorCredentialManagement(Option<AuthenticatorCredentialManagementResponse>),
     AuthenticatorSelection,
     // TODO(kaczmarczyck) dummy, extend
     AuthenticatorConfig,
@@ -43,9 +45,9 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorGetAssertion(data) => Some(data.into()),
             ResponseData::AuthenticatorGetNextAssertion(data) => Some(data.into()),
             ResponseData::AuthenticatorGetInfo(data) => Some(data.into()),
-            ResponseData::AuthenticatorClientPin(Some(data)) => Some(data.into()),
-            ResponseData::AuthenticatorClientPin(None) => None,
+            ResponseData::AuthenticatorClientPin(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorReset => None,
+            ResponseData::AuthenticatorCredentialManagement(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorSelection => None,
             ResponseData::AuthenticatorConfig => None,
             ResponseData::AuthenticatorVendor(data) => Some(data.into()),
@@ -202,6 +204,55 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     }
 }
 
+#[derive(Default)]
+#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+pub struct AuthenticatorCredentialManagementResponse {
+    pub existing_resident_credentials_count: Option<u64>,
+    pub max_possible_remaining_resident_credentials_count: Option<u64>,
+    pub rp: Option<PublicKeyCredentialRpEntity>,
+    pub rp_id_hash: Option<Vec<u8>>,
+    pub total_rps: Option<u64>,
+    pub user: Option<PublicKeyCredentialUserEntity>,
+    pub credential_id: Option<PublicKeyCredentialDescriptor>,
+    pub public_key: Option<CoseKey>,
+    pub total_credentials: Option<u64>,
+    pub cred_protect: Option<CredentialProtectionPolicy>,
+    pub large_blob_key: Option<Vec<u8>>,
+}
+
+impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
+    fn from(cred_management_response: AuthenticatorCredentialManagementResponse) -> Self {
+        let AuthenticatorCredentialManagementResponse {
+            existing_resident_credentials_count,
+            max_possible_remaining_resident_credentials_count,
+            rp,
+            rp_id_hash,
+            total_rps,
+            user,
+            credential_id,
+            public_key,
+            total_credentials,
+            cred_protect,
+            large_blob_key,
+        } = cred_management_response;
+
+        cbor_map_options! {
+            0x01 => existing_resident_credentials_count,
+            0x02 => max_possible_remaining_resident_credentials_count,
+            0x03 => rp,
+            0x04 => rp_id_hash,
+            0x05 => total_rps,
+            0x06 => user,
+            0x07 => credential_id,
+            0x08 => public_key.map(cbor::Value::from),
+            0x09 => total_credentials,
+            0x0A => cred_protect,
+            0x0B => large_blob_key,
+        }
+    }
+}
+
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
 pub struct AuthenticatorVendorResponse {
@@ -225,10 +276,11 @@ impl From<AuthenticatorVendorResponse> for cbor::Value {
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::PackedAttestationStatement;
+    use super::super::data_formats::{PackedAttestationStatement, PublicKeyCredentialType};
     use super::super::ES256_CRED_PARAM;
     use super::*;
     use cbor::{cbor_bytes, cbor_map};
+    use crypto::rng256::ThreadRng256;
 
     #[test]
     fn test_make_credential_into_cbor() {
@@ -379,6 +431,76 @@ mod test {
     #[test]
     fn test_reset_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorReset.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_used_credential_management_into_cbor() {
+        let cred_management_response = AuthenticatorCredentialManagementResponse::default();
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorCredentialManagement(Some(cred_management_response)).into();
+        let expected_cbor = cbor_map_options! {};
+        assert_eq!(response_cbor, Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_used_credential_management_optionals_into_cbor() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let rp = PublicKeyCredentialRpEntity {
+            rp_id: String::from("example.com"),
+            rp_name: None,
+            rp_icon: None,
+        };
+        let user = PublicKeyCredentialUserEntity {
+            user_id: vec![0xFA, 0xB1, 0xA2],
+            user_name: None,
+            user_display_name: None,
+            user_icon: None,
+        };
+        let cred_descriptor = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: vec![0x1D; 32],
+            transports: None,
+        };
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
+
+        let cred_management_response = AuthenticatorCredentialManagementResponse {
+            existing_resident_credentials_count: Some(100),
+            max_possible_remaining_resident_credentials_count: Some(96),
+            rp: Some(rp.clone()),
+            rp_id_hash: Some(vec![0x1D; 32]),
+            total_rps: Some(3),
+            user: Some(user.clone()),
+            credential_id: Some(cred_descriptor.clone()),
+            public_key: Some(cose_key.clone()),
+            total_credentials: Some(2),
+            cred_protect: Some(CredentialProtectionPolicy::UserVerificationOptional),
+            large_blob_key: Some(vec![0xBB; 64]),
+        };
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorCredentialManagement(Some(cred_management_response)).into();
+        let expected_cbor = cbor_map_options! {
+            0x01 => 100,
+            0x02 => 96,
+            0x03 => rp,
+            0x04 => vec![0x1D; 32],
+            0x05 => 3,
+            0x06 => user,
+            0x07 => cred_descriptor,
+            0x08 => cbor::Value::from(cose_key),
+            0x09 => 2,
+            0x0A => 0x01,
+            0x0B => vec![0xBB; 64],
+        };
+        assert_eq!(response_cbor, Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_empty_credential_management_into_cbor() {
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorCredentialManagement(None).into();
         assert_eq!(response_cbor, None);
     }
 

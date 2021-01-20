@@ -15,9 +15,10 @@
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
-    CoseKey, GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions,
-    MakeCredentialOptions, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
-    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
+    CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
+    GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
 use super::key_material;
 use super::status_code::Ctap2StatusCode;
@@ -41,6 +42,7 @@ pub enum Command {
     AuthenticatorClientPin(AuthenticatorClientPinParameters),
     AuthenticatorReset,
     AuthenticatorGetNextAssertion,
+    AuthenticatorCredentialManagement(AuthenticatorCredentialManagementParameters),
     AuthenticatorSelection,
     AuthenticatorConfig(AuthenticatorConfigParameters),
     // TODO(kaczmarczyck) implement FIDO 2.1 commands (see below consts)
@@ -110,6 +112,12 @@ impl Command {
             Command::AUTHENTICATOR_GET_NEXT_ASSERTION => {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorGetNextAssertion)
+            }
+            Command::AUTHENTICATOR_CREDENTIAL_MANAGEMENT => {
+                let decoded_cbor = cbor::read(&bytes[1..])?;
+                Ok(Command::AuthenticatorCredentialManagement(
+                    AuthenticatorCredentialManagementParameters::try_from(decoded_cbor)?,
+                ))
             }
             Command::AUTHENTICATOR_SELECTION => {
                 // Parameters are ignored.
@@ -415,6 +423,43 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
 }
 
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+pub struct AuthenticatorCredentialManagementParameters {
+    pub sub_command: CredentialManagementSubCommand,
+    pub sub_command_params: Option<CredentialManagementSubCommandParameters>,
+    pub pin_protocol: Option<u64>,
+    pub pin_auth: Option<Vec<u8>>,
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                0x01 => sub_command,
+                0x02 => sub_command_params,
+                0x03 => pin_protocol,
+                0x04 => pin_auth,
+            } = extract_map(cbor_value)?;
+        }
+
+        let sub_command = CredentialManagementSubCommand::try_from(ok_or_missing(sub_command)?)?;
+        let sub_command_params = sub_command_params
+            .map(CredentialManagementSubCommandParameters::try_from)
+            .transpose()?;
+        let pin_protocol = pin_protocol.map(extract_unsigned).transpose()?;
+        let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
+
+        Ok(AuthenticatorCredentialManagementParameters {
+            sub_command,
+            sub_command_params,
+            pin_protocol,
+            pin_auth,
+        })
+    }
+}
+
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct AuthenticatorVendorConfigureParameters {
     pub lockdown: bool,
     pub attestation_material: Option<AuthenticatorAttestationMaterial>,
@@ -575,10 +620,10 @@ mod test {
             9 => 0x03,
             10 => "example.com",
         };
-        let returned_pin_protocol_parameters =
+        let returned_client_pin_parameters =
             AuthenticatorClientPinParameters::try_from(cbor_value).unwrap();
 
-        let expected_pin_protocol_parameters = AuthenticatorClientPinParameters {
+        let expected_client_pin_parameters = AuthenticatorClientPinParameters {
             pin_protocol: 1,
             sub_command: ClientPinSubCommand::GetPinRetries,
             key_agreement: Some(cose_key),
@@ -590,8 +635,8 @@ mod test {
         };
 
         assert_eq!(
-            returned_pin_protocol_parameters,
-            expected_pin_protocol_parameters
+            returned_client_pin_parameters,
+            expected_client_pin_parameters
         );
     }
 
@@ -615,6 +660,37 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_GET_NEXT_ASSERTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorGetNextAssertion));
+    }
+
+    #[test]
+    fn test_from_cbor_cred_management_parameters() {
+        let cbor_value = cbor_map! {
+            1 => CredentialManagementSubCommand::EnumerateCredentialsBegin as u64,
+            2 => cbor_map!{
+                0x01 => vec![0x1D; 32],
+            },
+            3 => 1,
+            4 => vec! [0x9A; 16],
+        };
+        let returned_cred_management_parameters =
+            AuthenticatorCredentialManagementParameters::try_from(cbor_value).unwrap();
+
+        let params = CredentialManagementSubCommandParameters {
+            rp_id_hash: Some(vec![0x1D; 32]),
+            credential_id: None,
+            user: None,
+        };
+        let expected_cred_management_parameters = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
+            sub_command_params: Some(params),
+            pin_protocol: Some(1),
+            pin_auth: Some(vec![0x9A; 16]),
+        };
+
+        assert_eq!(
+            returned_cred_management_parameters,
+            expected_cred_management_parameters
+        );
     }
 
     #[test]

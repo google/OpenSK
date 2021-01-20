@@ -15,6 +15,7 @@
 pub mod apdu;
 pub mod command;
 mod config_command;
+mod credential_management;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 pub mod data_formats;
@@ -32,6 +33,7 @@ use self::command::{
     MAX_CREDENTIAL_COUNT_IN_LIST,
 };
 use self::config_command::process_config;
+use self::credential_management::process_credential_management;
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, GetAssertionHmacSecretInput,
     PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
@@ -99,6 +101,7 @@ const ED_FLAG: u8 = 0x80;
 pub const TOUCH_TIMEOUT_MS: isize = 30000;
 #[cfg(feature = "with_ctap1")]
 const U2F_UP_PROMPT_TIMEOUT: Duration<isize> = Duration::from_ms(10000);
+// TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
 const RESET_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(10000);
 const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
 
@@ -146,23 +149,131 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
     }
 }
 
+/// Holds data necessary to sign an assertion for a credential.
 #[derive(Clone)]
-struct AssertionInput {
+pub struct AssertionInput {
     client_data_hash: Vec<u8>,
     auth_data: Vec<u8>,
     hmac_secret_input: Option<GetAssertionHmacSecretInput>,
     has_uv: bool,
 }
 
-struct AssertionState {
+/// Contains the state we need to store for GetNextAssertion.
+pub struct AssertionState {
     assertion_input: AssertionInput,
     // Sorted by ascending order of creation, so the last element is the most recent one.
     next_credential_keys: Vec<usize>,
 }
 
-enum StatefulCommand {
+/// Stores which command currently holds state for subsequent calls.
+pub enum StatefulCommand {
     Reset,
     GetAssertion(AssertionState),
+    EnumerateRps(usize),
+    EnumerateCredentials(Vec<usize>),
+}
+
+/// Stores the current CTAP command state and when it times out.
+///
+/// Some commands are executed in a series of calls to the authenticator.
+/// Interleaving calls to other commands interrupt the current command and
+/// remove all state and permissions. Power cycling allows the Reset command,
+/// and to prevent misuse or accidents, we disallow Reset after receiving
+/// different commands. Therefore, Reset behaves just like all other stateful
+/// commands and is included here. Please note that the allowed time for Reset
+/// differs from all other stateful commands.
+pub struct StatefulPermission {
+    permission: TimedPermission,
+    command_type: Option<StatefulCommand>,
+}
+
+impl StatefulPermission {
+    /// Creates the command state at device startup.
+    ///
+    /// Resets are only possible after a power cycle. Therefore, initialization
+    /// means allowing Reset, and Reset cannot be granted later.
+    pub fn new_reset(now: ClockValue) -> StatefulPermission {
+        StatefulPermission {
+            permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
+            command_type: Some(StatefulCommand::Reset),
+        }
+    }
+
+    /// Clears all permissions and state.
+    pub fn clear(&mut self) {
+        self.permission = TimedPermission::waiting();
+        self.command_type = None;
+    }
+
+    /// Checks the permission timeout.
+    pub fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
+        if self.permission.is_granted(now) {
+            Ok(())
+        } else {
+            self.clear();
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    /// Gets a reference to the current command state, if any exists.
+    pub fn get_command(&self) -> Result<&StatefulCommand, Ctap2StatusCode> {
+        self.command_type
+            .as_ref()
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+    }
+
+    /// Sets a new command state, and starts a new clock for timeouts.
+    pub fn set_command(&mut self, now: ClockValue, new_command_type: StatefulCommand) {
+        match &new_command_type {
+            // Reset is only allowed after a power cycle.
+            StatefulCommand::Reset => unreachable!(),
+            _ => {
+                self.permission = TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
+                self.command_type = Some(new_command_type);
+            }
+        }
+    }
+
+    /// Returns the state for the next assertion and advances it.
+    ///
+    /// The state includes all information from GetAssertion and the storage key
+    /// to the next credential that needs to be processed.
+    pub fn next_assertion_credential(
+        &mut self,
+    ) -> Result<(AssertionInput, usize), Ctap2StatusCode> {
+        if let Some(StatefulCommand::GetAssertion(assertion_state)) = &mut self.command_type {
+            let credential_key = assertion_state
+                .next_credential_keys
+                .pop()
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+            Ok((assertion_state.assertion_input.clone(), credential_key))
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    /// Returns the index to the next RP ID for enumeration and advances it.
+    pub fn next_enumerate_rp(&mut self) -> Result<usize, Ctap2StatusCode> {
+        if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = &mut self.command_type {
+            let current_index = *rp_id_index;
+            *rp_id_index += 1;
+            Ok(current_index)
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    /// Returns the next storage credential key for enumeration and advances it.
+    pub fn next_enumerate_credential(&mut self) -> Result<usize, Ctap2StatusCode> {
+        if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut self.command_type
+        {
+            rp_credentials
+                .pop()
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
 }
 
 // This struct currently holds all state, not only the persistent memory. The persistent members are
@@ -178,8 +289,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     #[cfg(feature = "with_ctap1")]
     pub u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
-    stateful_command_permission: TimedPermission,
-    stateful_command_type: Option<StatefulCommand>,
+    stateful_command_permission: StatefulPermission,
 }
 
 impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
@@ -204,22 +314,15 @@ where
                 U2F_UP_PROMPT_TIMEOUT,
                 Duration::from_ms(TOUCH_TIMEOUT_MS),
             ),
-            stateful_command_permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
-            stateful_command_type: Some(StatefulCommand::Reset),
+            stateful_command_permission: StatefulPermission::new_reset(now),
         }
     }
 
     pub fn update_command_permission(&mut self, now: ClockValue) {
-        self.stateful_command_permission = self.stateful_command_permission.check_expiration(now);
-    }
-
-    fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
-        self.update_command_permission(now);
-        if self.stateful_command_permission.is_granted(now) {
-            Ok(())
-        } else {
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        }
+        // Ignore the result, just update.
+        let _ = self
+            .stateful_command_permission
+            .check_command_permission(now);
     }
 
     pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
@@ -338,19 +441,23 @@ where
                         Duration::from_ms(TOUCH_TIMEOUT_MS),
                     );
                 }
-                match (&command, &self.stateful_command_type) {
-                    (
-                        Command::AuthenticatorGetNextAssertion,
-                        Some(StatefulCommand::GetAssertion(_)),
+                match (&command, self.stateful_command_permission.get_command()) {
+                    (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
+                    | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
+                    // AuthenticatorGetInfo still allows Reset.
+                    | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
+                    // AuthenticatorSelection still allows Reset.
+                    | (Command::AuthenticatorSelection, Ok(StatefulCommand::Reset))
+                    // AuthenticatorCredentialManagement handles its subcommands later.
+                    | (
+                        Command::AuthenticatorCredentialManagement(_),
+                        Ok(StatefulCommand::EnumerateRps(_)),
+                    )
+                    | (
+                        Command::AuthenticatorCredentialManagement(_),
+                        Ok(StatefulCommand::EnumerateCredentials(_)),
                     ) => (),
-                    (Command::AuthenticatorReset, Some(StatefulCommand::Reset)) => (),
-                    // GetInfo does not reset stateful commands.
-                    (Command::AuthenticatorGetInfo, _) => (),
-                    // AuthenticatorSelection does not reset stateful commands.
-                    (Command::AuthenticatorSelection, _) => (),
-                    (_, _) => {
-                        self.stateful_command_type = None;
-                    }
+                    (_, _) => self.stateful_command_permission.clear(),
                 }
                 let response = match command {
                     Command::AuthenticatorMakeCredential(params) => {
@@ -363,6 +470,15 @@ where
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
                     Command::AuthenticatorReset => self.process_reset(cid, now),
+                    Command::AuthenticatorCredentialManagement(params) => {
+                        process_credential_management(
+                            &mut self.persistent_store,
+                            &mut self.stateful_command_permission,
+                            &mut self.pin_protocol_v1,
+                            params,
+                            now,
+                        )
+                    }
                     Command::AuthenticatorSelection => self.process_selection(cid),
                     Command::AuthenticatorConfig(params) => process_config(
                         &mut self.persistent_store,
@@ -830,12 +946,12 @@ where
             None
         } else {
             let number_of_credentials = Some(next_credential_keys.len() + 1);
-            self.stateful_command_permission =
-                TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
-            self.stateful_command_type = Some(StatefulCommand::GetAssertion(AssertionState {
+            let assertion_state = StatefulCommand::GetAssertion(AssertionState {
                 assertion_input: assertion_input.clone(),
                 next_credential_keys,
-            }));
+            });
+            self.stateful_command_permission
+                .set_command(now, assertion_state);
             number_of_credentials
         };
         self.assertion_response(credential, assertion_input, number_of_credentials)
@@ -845,20 +961,12 @@ where
         &mut self,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.check_command_permission(now)?;
-        let (assertion_input, credential) =
-            if let Some(StatefulCommand::GetAssertion(assertion_state)) =
-                &mut self.stateful_command_type
-            {
-                let credential_key = assertion_state
-                    .next_credential_keys
-                    .pop()
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-                let credential = self.persistent_store.get_credential(credential_key)?;
-                (assertion_state.assertion_input.clone(), credential)
-            } else {
-                return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-            };
+        self.stateful_command_permission
+            .check_command_permission(now)?;
+        let (assertion_input, credential_key) = self
+            .stateful_command_permission
+            .next_assertion_credential()?;
+        let credential = self.persistent_store.get_credential(credential_key)?;
         self.assertion_response(credential, assertion_input, None)
     }
 
@@ -871,6 +979,7 @@ where
             String::from("clientPin"),
             self.persistent_store.pin_hash()?.is_some(),
         );
+        options_map.insert(String::from("credMgmt"), true);
         options_map.insert(String::from("setMinPINLength"), true);
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
@@ -923,11 +1032,10 @@ where
         cid: ChannelID,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        // Resets are only possible in the first 10 seconds after booting.
-        // TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
-        self.check_command_permission(now)?;
-        match &self.stateful_command_type {
-            Some(StatefulCommand::Reset) => (),
+        self.stateful_command_permission
+            .check_command_permission(now)?;
+        match self.stateful_command_permission.get_command()? {
+            StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
         (self.check_user_presence)(cid)?;
@@ -1123,12 +1231,13 @@ mod test {
         expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
         expected_response.extend(
             [
-                0x04, 0xA4, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x69, 0x63, 0x6C, 0x69,
-                0x65, 0x6E, 0x74, 0x50, 0x69, 0x6E, 0xF4, 0x6F, 0x73, 0x65, 0x74, 0x4D, 0x69, 0x6E,
-                0x50, 0x49, 0x4E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0xF5, 0x05, 0x19, 0x04, 0x00,
-                0x06, 0x81, 0x01, 0x08, 0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81,
-                0xA2, 0x63, 0x61, 0x6C, 0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75,
-                0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04, 0x14, 0x18, 0x96,
+                0x04, 0xA5, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x68, 0x63, 0x72, 0x65,
+                0x64, 0x4D, 0x67, 0x6D, 0x74, 0xF5, 0x69, 0x63, 0x6C, 0x69, 0x65, 0x6E, 0x74, 0x50,
+                0x69, 0x6E, 0xF4, 0x6F, 0x73, 0x65, 0x74, 0x4D, 0x69, 0x6E, 0x50, 0x49, 0x4E, 0x4C,
+                0x65, 0x6E, 0x67, 0x74, 0x68, 0xF5, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01, 0x08,
+                0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C,
+                0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63,
+                0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04, 0x14, 0x18, 0x96,
             ]
             .iter(),
         );
@@ -2081,16 +2190,31 @@ mod test {
     }
 
     #[test]
+    fn test_process_credential_management_unknown_subcommand() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+
+        // The subcommand 0xEE does not exist.
+        let reponse = ctap_state.process_command(
+            &[0x0A, 0xA1, 0x01, 0x18, 0xEE],
+            DUMMY_CHANNEL_ID,
+            DUMMY_CLOCK_VALUE,
+        );
+        let expected_response = vec![Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND as u8];
+        assert_eq!(reponse, expected_response);
+    }
+
+    #[test]
     fn test_process_unknown_command() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
 
         // This command does not exist.
-        let reset_reponse =
-            ctap_state.process_command(&[0xDF], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reponse = ctap_state.process_command(&[0xDF], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
-        assert_eq!(reset_reponse, expected_response);
+        assert_eq!(reponse, expected_response);
     }
 
     #[test]

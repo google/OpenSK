@@ -242,7 +242,7 @@ impl PersistentStore {
     /// # Errors
     ///
     /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-    pub fn _delete_credential(&mut self, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
+    pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
         let (key, _) = self.find_credential_item(credential_id)?;
         Ok(self.store.remove(key)?)
     }
@@ -252,7 +252,7 @@ impl PersistentStore {
     /// # Errors
     ///
     /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-    pub fn _update_credential(
+    pub fn update_credential(
         &mut self,
         credential_id: &[u8],
         user: PublicKeyCredentialUserEntity,
@@ -719,7 +719,7 @@ mod test {
         }
         let mut count = persistent_store.count_credentials().unwrap();
         for credential_id in credential_ids {
-            assert!(persistent_store._delete_credential(&credential_id).is_ok());
+            assert!(persistent_store.delete_credential(&credential_id).is_ok());
             count -= 1;
             assert_eq!(persistent_store.count_credentials().unwrap(), count);
         }
@@ -737,7 +737,7 @@ mod test {
             user_icon: Some("icon".to_string()),
         };
         assert_eq!(
-            persistent_store._update_credential(&[0x1D], user.clone()),
+            persistent_store.update_credential(&[0x1D], user.clone()),
             Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
         );
 
@@ -752,7 +752,7 @@ mod test {
         assert_eq!(stored_credential.user_display_name, None);
         assert_eq!(stored_credential.user_icon, None);
         assert!(persistent_store
-            ._update_credential(&credential_id, user.clone())
+            .update_credential(&credential_id, user.clone())
             .is_ok());
         let stored_credential = persistent_store
             .find_credential("example.com", &credential_id, false)

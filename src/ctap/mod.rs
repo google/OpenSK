@@ -180,7 +180,7 @@ pub enum StatefulCommand {
 /// remove all state and permissions. Power cycling allows the Reset command,
 /// and to prevent misuse or accidents, we disallow Reset after receiving
 /// different commands. Therefore, Reset behaves just like all other stateful
-/// commands and is included here. Please not that the allowed time for Reset
+/// commands and is included here. Please note that the allowed time for Reset
 /// differs from all other stateful commands.
 pub struct StatefulPermission {
     permission: TimedPermission,

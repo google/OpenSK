@@ -25,6 +25,7 @@ pub use crate::{
 };
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::borrow::Borrow;
 use core::cmp::{max, min, Ordering};
 use core::convert::TryFrom;
 use core::option::NoneError;
@@ -159,15 +160,15 @@ impl StoreHandle {
 
 /// Represents an update to the store as part of a transaction.
 #[derive(Clone, Debug)]
-pub enum StoreUpdate {
+pub enum StoreUpdate<ByteSlice: Borrow<[u8]>> {
     /// Inserts or replaces an entry in the store.
-    Insert { key: usize, value: Vec<u8> },
+    Insert { key: usize, value: ByteSlice },
 
     /// Removes an entry from the store.
     Remove { key: usize },
 }
 
-impl StoreUpdate {
+impl<ByteSlice: Borrow<[u8]>> StoreUpdate<ByteSlice> {
     /// Returns the key affected by the update.
     pub fn key(&self) -> usize {
         match *self {
@@ -179,7 +180,7 @@ impl StoreUpdate {
     /// Returns the value written by the update.
     pub fn value(&self) -> Option<&[u8]> {
         match self {
-            StoreUpdate::Insert { value, .. } => Some(value),
+            StoreUpdate::Insert { value, .. } => Some(value.borrow()),
             StoreUpdate::Remove { .. } => None,
         }
     }
@@ -280,14 +281,17 @@ impl<S: Storage> Store<S> {
     /// - There are too many updates.
     /// - The updates overlap, i.e. their keys are not disjoint.
     /// - The updates are invalid, e.g. key out of bound or value too long.
-    pub fn transaction(&mut self, updates: &[StoreUpdate]) -> StoreResult<()> {
+    pub fn transaction<ByteSlice: Borrow<[u8]>>(
+        &mut self,
+        updates: &[StoreUpdate<ByteSlice>],
+    ) -> StoreResult<()> {
         let count = usize_to_nat(updates.len());
         if count == 0 {
             return Ok(());
         }
         if count == 1 {
             match updates[0] {
-                StoreUpdate::Insert { key, ref value } => return self.insert(key, value),
+                StoreUpdate::Insert { key, ref value } => return self.insert(key, value.borrow()),
                 StoreUpdate::Remove { key } => return self.remove(key),
             }
         }
@@ -310,7 +314,7 @@ impl<S: Storage> Store<S> {
         for update in updates {
             let length = match *update {
                 StoreUpdate::Insert { key, ref value } => {
-                    let entry = self.format.build_user(usize_to_nat(key), value)?;
+                    let entry = self.format.build_user(usize_to_nat(key), value.borrow())?;
                     let word_size = self.format.word_size();
                     let footer = usize_to_nat(entry.len()) / word_size - 1;
                     self.write_slice(tail, &entry[..(footer * word_size) as usize])?;

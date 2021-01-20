@@ -303,7 +303,7 @@ impl<'a> Fuzzer<'a> {
     }
 
     /// Generates a possibly invalid update.
-    fn update(&mut self) -> StoreUpdate {
+    fn update(&mut self) -> StoreUpdate<Vec<u8>> {
         match self.entropy.read_range(0, 1) {
             0 => {
                 let key = self.key();

@@ -140,18 +140,14 @@ fn process_enumerate_rps_get_next_rp(
     persistent_store: &PersistentStore,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    if let StatefulCommand::EnumerateRps(rp_id_index) = stateful_command_permission.get_command()? {
-        let rp_set = get_stored_rp_ids(persistent_store)?;
-        // A BTreeSet is already sorted.
-        let rp_id = rp_set
-            .into_iter()
-            .nth(*rp_id_index)
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-        *rp_id_index += 1;
-        enumerate_rps_response(Some(rp_id), None)
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-    }
+    let rp_id_index = stateful_command_permission.next_enumerate_rp()?;
+    let rp_set = get_stored_rp_ids(persistent_store)?;
+    // A BTreeSet is already sorted.
+    let rp_id = rp_set
+        .into_iter()
+        .nth(rp_id_index)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+    enumerate_rps_response(Some(rp_id), None)
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
@@ -194,17 +190,9 @@ fn process_enumerate_credentials_get_next_credential(
     persistent_store: &PersistentStore,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    if let StatefulCommand::EnumerateCredentials(rp_credentials) =
-        stateful_command_permission.get_command()?
-    {
-        let current_key = rp_credentials
-            .pop()
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-        let credential = persistent_store.get_credential(current_key)?;
-        enumerate_credentials_response(credential, None)
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-    }
+    let credential_key = stateful_command_permission.next_enumerate_credential()?;
+    let credential = persistent_store.get_credential(credential_key)?;
+    enumerate_credentials_response(credential, None)
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.

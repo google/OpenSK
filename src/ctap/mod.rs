@@ -149,20 +149,23 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
     }
 }
 
+/// Holds data necessary to sign an assertion for a credential.
 #[derive(Clone)]
-struct AssertionInput {
+pub struct AssertionInput {
     client_data_hash: Vec<u8>,
     auth_data: Vec<u8>,
     hmac_secret_input: Option<GetAssertionHmacSecretInput>,
     has_uv: bool,
 }
 
+/// Contains the state we need to store for GetNextAssertion.
 pub struct AssertionState {
     assertion_input: AssertionInput,
     // Sorted by ascending order of creation, so the last element is the most recent one.
     next_credential_keys: Vec<usize>,
 }
 
+/// Stores which command currently holds state for subsequent calls.
 pub enum StatefulCommand {
     Reset,
     GetAssertion(AssertionState),
@@ -170,14 +173,25 @@ pub enum StatefulCommand {
     EnumerateCredentials(Vec<usize>),
 }
 
+/// Stores the current CTAP command state and when it times out.
+///
+/// Some commands are executed in a series of calls to the authenticator.
+/// Interleaving calls to other commands interrupt the current command and
+/// remove all state and permissions. Power cycling allows the Reset command,
+/// and to prevent misuse or accidents, we disallow Reset after receiving
+/// different commands. Therefore, Reset behaves just like all other stateful
+/// commands and is included here. Please not that the allowed time for Reset
+/// differs from all other stateful commands.
 pub struct StatefulPermission {
     permission: TimedPermission,
     command_type: Option<StatefulCommand>,
 }
 
 impl StatefulPermission {
-    // Resets are only possible in the first 10 seconds after booting.
-    // Therefore, initialization includes allowing Reset.
+    /// Creates the command state at device startup.
+    ///
+    /// Resets are only possible after a power cycle. Therefore, initialization
+    /// means allowing Reset, and Reset cannot be granted later.
     pub fn new_reset(now: ClockValue) -> StatefulPermission {
         StatefulPermission {
             permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
@@ -185,11 +199,13 @@ impl StatefulPermission {
         }
     }
 
+    /// Clears all permissions and state.
     pub fn clear(&mut self) {
         self.permission = TimedPermission::waiting();
         self.command_type = None;
     }
 
+    /// Checks the permission timeout.
     pub fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
         if self.permission.is_granted(now) {
             Ok(())
@@ -199,12 +215,14 @@ impl StatefulPermission {
         }
     }
 
-    pub fn get_command(&mut self) -> Result<&mut StatefulCommand, Ctap2StatusCode> {
+    /// Gets a reference to the current command state, if any exists.
+    pub fn get_command(&self) -> Result<&StatefulCommand, Ctap2StatusCode> {
         self.command_type
-            .as_mut()
+            .as_ref()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
     }
 
+    /// Sets a new command state, and starts a new clock for timeouts.
     pub fn set_command(&mut self, now: ClockValue, new_command_type: StatefulCommand) {
         match &new_command_type {
             // Reset is only allowed after a power cycle.
@@ -213,6 +231,47 @@ impl StatefulPermission {
                 self.permission = TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
                 self.command_type = Some(new_command_type);
             }
+        }
+    }
+
+    /// Returns the state for the next assertion and advances it.
+    ///
+    /// The state includes all information from GetAssertion and the storage key
+    /// to the next credential that needs to be processed.
+    pub fn next_assertion_credential(
+        &mut self,
+    ) -> Result<(AssertionInput, usize), Ctap2StatusCode> {
+        if let Some(StatefulCommand::GetAssertion(assertion_state)) = &mut self.command_type {
+            let credential_key = assertion_state
+                .next_credential_keys
+                .pop()
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
+            Ok((assertion_state.assertion_input.clone(), credential_key))
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    /// Returns the index to the next RP ID for enumeration and advances it.
+    pub fn next_enumerate_rp(&mut self) -> Result<usize, Ctap2StatusCode> {
+        if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = &mut self.command_type {
+            let current_index = *rp_id_index;
+            *rp_id_index += 1;
+            Ok(current_index)
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        }
+    }
+
+    /// Returns the next storage credential key for enumeration and advances it.
+    pub fn next_enumerate_credential(&mut self) -> Result<usize, Ctap2StatusCode> {
+        if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut self.command_type
+        {
+            rp_credentials
+                .pop()
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         }
     }
 }
@@ -904,18 +963,10 @@ where
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
             .check_command_permission(now)?;
-        let (assertion_input, credential) = if let StatefulCommand::GetAssertion(assertion_state) =
-            self.stateful_command_permission.get_command()?
-        {
-            let credential_key = assertion_state
-                .next_credential_keys
-                .pop()
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-            let credential = self.persistent_store.get_credential(credential_key)?;
-            (assertion_state.assertion_input.clone(), credential)
-        } else {
-            return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
-        };
+        let (assertion_input, credential_key) = self
+            .stateful_command_permission
+            .next_assertion_credential()?;
+        let credential = self.persistent_store.get_credential(credential_key)?;
         self.assertion_response(credential, assertion_input, None)
     }
 

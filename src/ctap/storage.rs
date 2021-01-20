@@ -57,7 +57,7 @@ const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
 const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 // This constant is an attempt to limit storage requirements. If you don't set it to 0,
 // the stored strings can still be unbounded, but that is true for all RP IDs.
-const MAX_RP_IDS_LENGTH: usize = 8;
+pub const MAX_RP_IDS_LENGTH: usize = 8;
 
 /// Wrapper for master keys.
 pub struct MasterKeys {
@@ -690,6 +690,7 @@ mod test {
             creation_order: 0,
             user_name: None,
             user_icon: None,
+            cred_blob: None,
         }
     }
 
@@ -906,6 +907,7 @@ mod test {
             creation_order: 0,
             user_name: None,
             user_icon: None,
+            cred_blob: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -927,6 +929,7 @@ mod test {
             creation_order: 0,
             user_name: None,
             user_icon: None,
+            cred_blob: None,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -1160,6 +1163,7 @@ mod test {
             creation_order: 0,
             user_name: None,
             user_icon: None,
+            cred_blob: None,
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

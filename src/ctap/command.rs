@@ -147,8 +147,9 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub user: PublicKeyCredentialUserEntity,
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameter>,
     pub exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<MakeCredentialExtensions>,
-    // Even though options are optional, we can use the default if not present.
+    // Extensions are optional, but we can use defaults for all missing fields.
+    pub extensions: MakeCredentialExtensions,
+    // Same for options, use defaults when not present.
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
     pub pin_uv_auth_protocol: Option<u64>,
@@ -198,15 +199,13 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 
         let extensions = extensions
             .map(MakeCredentialExtensions::try_from)
-            .transpose()?;
+            .transpose()?
+            .unwrap_or_default();
 
-        let options = match options {
-            Some(entry) => MakeCredentialOptions::try_from(entry)?,
-            None => MakeCredentialOptions {
-                rk: false,
-                uv: false,
-            },
-        };
+        let options = options
+            .map(MakeCredentialOptions::try_from)
+            .transpose()?
+            .unwrap_or_default();
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
@@ -230,8 +229,9 @@ pub struct AuthenticatorGetAssertionParameters {
     pub rp_id: String,
     pub client_data_hash: Vec<u8>,
     pub allow_list: Option<Vec<PublicKeyCredentialDescriptor>>,
-    pub extensions: Option<GetAssertionExtensions>,
-    // Even though options are optional, we can use the default if not present.
+    // Extensions are optional, but we can use defaults for all missing fields.
+    pub extensions: GetAssertionExtensions,
+    // Same for options, use defaults when not present.
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
     pub pin_uv_auth_protocol: Option<u64>,
@@ -272,15 +272,13 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
 
         let extensions = extensions
             .map(GetAssertionExtensions::try_from)
-            .transpose()?;
+            .transpose()?
+            .unwrap_or_default();
 
-        let options = match options {
-            Some(entry) => GetAssertionOptions::try_from(entry)?,
-            None => GetAssertionOptions {
-                up: true,
-                uv: false,
-            },
-        };
+        let options = options
+            .map(GetAssertionOptions::try_from)
+            .transpose()?
+            .unwrap_or_default();
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
@@ -545,7 +543,7 @@ mod test {
             user,
             pub_key_cred_params: vec![ES256_CRED_PARAM],
             exclude_list: Some(vec![]),
-            extensions: None,
+            extensions: MakeCredentialExtensions::default(),
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
             pin_uv_auth_protocol: Some(1),
@@ -591,7 +589,7 @@ mod test {
             rp_id,
             client_data_hash,
             allow_list: Some(vec![pub_key_cred_descriptor]),
-            extensions: None,
+            extensions: GetAssertionExtensions::default(),
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
             pin_uv_auth_protocol: Some(1),

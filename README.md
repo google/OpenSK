@@ -123,6 +123,8 @@ a few things you can personalize:
     allows some relying parties to read the minimum PIN length by default. The
     latter allows storing more relying parties that may check the minimum PIN
     length.
+1.  Increase the `MAX_CRED_BLOB_LENGTH` in `ctap/mod.rs`, if you expect blobs
+    bigger than the default value.
 
 ### 3D printed enclosure
 

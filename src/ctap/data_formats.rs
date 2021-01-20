@@ -275,11 +275,13 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     }
 }
 
+#[derive(Default)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
     pub cred_protect: Option<CredentialProtectionPolicy>,
     pub min_pin_length: bool,
+    pub cred_blob: Option<Vec<u8>>,
 }
 
 impl TryFrom<cbor::Value> for MakeCredentialExtensions {
@@ -288,6 +290,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
+                "credBlob" => cred_blob,
                 "credProtect" => cred_protect,
                 "hmac-secret" => hmac_secret,
                 "minPinLength" => min_pin_length,
@@ -299,17 +302,21 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
         let min_pin_length = min_pin_length.map_or(Ok(false), extract_bool)?;
+        let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
         Ok(Self {
             hmac_secret,
             cred_protect,
             min_pin_length,
+            cred_blob,
         })
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone, Default)]
+#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct GetAssertionExtensions {
     pub hmac_secret: Option<GetAssertionHmacSecretInput>,
+    pub cred_blob: bool,
 }
 
 impl TryFrom<cbor::Value> for GetAssertionExtensions {
@@ -318,6 +325,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
+                "credBlob" => cred_blob,
                 "hmac-secret" => hmac_secret,
             } = extract_map(cbor_value)?;
         }
@@ -325,7 +333,11 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
         let hmac_secret = hmac_secret
             .map(GetAssertionHmacSecretInput::try_from)
             .transpose()?;
-        Ok(Self { hmac_secret })
+        let cred_blob = cred_blob.map_or(Ok(false), extract_bool)?;
+        Ok(Self {
+            hmac_secret,
+            cred_blob,
+        })
     }
 }
 
@@ -361,6 +373,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 }
 
 // Even though options are optional, we can use the default if not present.
+#[derive(Default)]
 #[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
 pub struct MakeCredentialOptions {
     pub rk: bool,
@@ -398,6 +411,15 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
 pub struct GetAssertionOptions {
     pub up: bool,
     pub uv: bool,
+}
+
+impl Default for GetAssertionOptions {
+    fn default() -> Self {
+        GetAssertionOptions {
+            up: true,
+            uv: false,
+        }
+    }
 }
 
 impl TryFrom<cbor::Value> for GetAssertionOptions {
@@ -523,6 +545,7 @@ pub struct PublicKeyCredentialSource {
     pub creation_order: u64,
     pub user_name: Option<String>,
     pub user_icon: Option<String>,
+    pub cred_blob: Option<Vec<u8>>,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
@@ -537,6 +560,7 @@ enum PublicKeyCredentialSourceField {
     CreationOrder = 7,
     UserName = 8,
     UserIcon = 9,
+    CredBlob = 10,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags:
@@ -563,6 +587,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::CreationOrder => credential.creation_order,
             PublicKeyCredentialSourceField::UserName => credential.user_name,
             PublicKeyCredentialSourceField::UserIcon => credential.user_icon,
+            PublicKeyCredentialSourceField::CredBlob => credential.cred_blob,
         }
     }
 }
@@ -582,6 +607,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::CreationOrder => creation_order,
                 PublicKeyCredentialSourceField::UserName => user_name,
                 PublicKeyCredentialSourceField::UserIcon => user_icon,
+                PublicKeyCredentialSourceField::CredBlob => cred_blob,
             } = extract_map(cbor_value)?;
         }
 
@@ -601,6 +627,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let creation_order = creation_order.map(extract_unsigned).unwrap_or(Ok(0))?;
         let user_name = user_name.map(extract_text_string).transpose()?;
         let user_icon = user_icon.map(extract_text_string).transpose()?;
+        let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
         // serialization at a given version of OpenSK. This is not a problem because:
@@ -622,6 +649,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             creation_order,
             user_name,
             user_icon,
+            cred_blob,
         })
     }
 }
@@ -1493,12 +1521,14 @@ mod test {
             "hmac-secret" => true,
             "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
             "minPinLength" => true,
+            "credBlob" => vec![0xCB],
         };
         let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
         let expected_extensions = MakeCredentialExtensions {
             hmac_secret: true,
             cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
             min_pin_length: true,
+            cred_blob: Some(vec![0xCB]),
         };
         assert_eq!(extensions, Ok(expected_extensions));
     }
@@ -1515,6 +1545,7 @@ mod test {
                 2 => vec![0x02; 32],
                 3 => vec![0x03; 16],
             },
+            "credBlob" => true,
         };
         let extensions = GetAssertionExtensions::try_from(cbor_extensions);
         let expected_input = GetAssertionHmacSecretInput {
@@ -1524,6 +1555,7 @@ mod test {
         };
         let expected_extensions = GetAssertionExtensions {
             hmac_secret: Some(expected_input),
+            cred_blob: true,
         };
         assert_eq!(extensions, Ok(expected_extensions));
     }
@@ -1816,6 +1848,7 @@ mod test {
             creation_order: 0,
             user_name: None,
             user_icon: None,
+            cred_blob: None,
         };
 
         assert_eq!(
@@ -1855,6 +1888,16 @@ mod test {
 
         let credential = PublicKeyCredentialSource {
             user_icon: Some("icon".to_string()),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            cred_blob: Some(vec![0xCB]),
             ..credential
         };
 

@@ -44,7 +44,6 @@ fn process_set_min_pin_length(
         force_change_pin |= new_min_pin_length > old_length;
     }
     if force_change_pin {
-        // TODO(kaczmarczyck) actually force a PIN change in PinProtocolV1
         persistent_store.force_pin_change()?;
     }
     persistent_store.set_min_pin_length(new_min_pin_length)?;

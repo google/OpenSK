@@ -384,7 +384,9 @@ impl PersistentStore {
         let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
         pin_properties[0] = pin_code_point_length;
         pin_properties[1..].clone_from_slice(pin_hash);
-        Ok(self.store.insert(key::PIN_PROPERTIES, &pin_properties)?)
+        self.store.insert(key::PIN_PROPERTIES, &pin_properties)?;
+        // If this second transaction fails, you are forced to retry.
+        Ok(self.store.remove(key::FORCE_PIN_CHANGE)?)
     }
 
     /// Returns the number of remaining PIN retries.
@@ -541,9 +543,18 @@ impl PersistentStore {
         Ok(())
     }
 
+    /// Returns whether the PIN needs to be changed before its next usage.
+    pub fn has_force_pin_change(&self) -> Result<bool, Ctap2StatusCode> {
+        match self.store.find(key::FORCE_PIN_CHANGE)? {
+            None => Ok(false),
+            Some(value) if value.len() == 1 && value[0] == 1 => Ok(true),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Marks the PIN as outdated with respect to the new PIN policy.
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
-        // TODO(kaczmarczyck) implement storage logic
-        Ok(())
+        Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[1])?)
     }
 }
 
@@ -1146,6 +1157,18 @@ mod test {
                 counter_value
             );
         }
+    }
+
+    #[test]
+    fn test_force_pin_change() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        assert!(!persistent_store.has_force_pin_change().unwrap());
+        assert_eq!(persistent_store.force_pin_change(), Ok(()));
+        assert!(persistent_store.has_force_pin_change().unwrap());
+        assert_eq!(persistent_store.set_pin(&[0x88; 16], 8), Ok(()));
+        assert!(!persistent_store.has_force_pin_change().unwrap());
     }
 
     #[test]

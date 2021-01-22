@@ -69,7 +69,7 @@ impl LargeBlobs {
             if get > MAX_FRAGMENT_LENGTH {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
-            let config = persistent_store.get_large_blob_array(get, offset)?;
+            let config = persistent_store.get_large_blob_array(offset, get)?;
             return Ok(ResponseData::AuthenticatorLargeBlobs(Some(
                 AuthenticatorLargeBlobsResponse { config },
             )));

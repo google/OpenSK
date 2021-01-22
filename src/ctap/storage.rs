@@ -514,26 +514,25 @@ impl PersistentStore {
         &mut self,
         large_blob_array: &[u8],
     ) -> Result<(), Ctap2StatusCode> {
-        let mut large_blob_index = 0;
-        let mut shard_key = key::LARGE_BLOB_SHARDS.start;
-        while large_blob_index < large_blob_array.len() {
-            if !key::LARGE_BLOB_SHARDS.contains(&shard_key) {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        if large_blob_array.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        const MIN_SHARD_KEY: usize = key::LARGE_BLOB_SHARDS.start;
+        const SHARD_COUNT: usize = key::LARGE_BLOB_SHARDS.end - MIN_SHARD_KEY;
+        let mut transactions = Vec::with_capacity(SHARD_COUNT);
+        for shard_key in MIN_SHARD_KEY..key::LARGE_BLOB_SHARDS.end {
+            let large_blob_index = (shard_key - MIN_SHARD_KEY) * SHARD_SIZE;
+            if large_blob_array.len() > large_blob_index {
+                let shard_length = cmp::min(SHARD_SIZE, large_blob_array.len() - large_blob_index);
+                transactions.push(StoreUpdate::Insert {
+                    key: shard_key,
+                    value: &large_blob_array[large_blob_index..large_blob_index + shard_length],
+                });
+            } else {
+                transactions.push(StoreUpdate::Remove { key: shard_key });
             }
-            let shard_length = cmp::min(SHARD_SIZE, large_blob_array.len() - large_blob_index);
-            self.store.insert(
-                shard_key,
-                &large_blob_array[large_blob_index..large_blob_index + shard_length],
-            )?;
-            large_blob_index += shard_length;
-            shard_key += 1;
         }
-        // The length is not stored, so overwrite old entries explicitly.
-        for key in shard_key..key::LARGE_BLOB_SHARDS.end {
-            // Assuming the store optimizes out unnecessary removes.
-            self.store.remove(key)?;
-        }
-        Ok(())
+        Ok(self.store.transaction(&transactions)?)
     }
 
     /// Returns the attestation private key if defined.

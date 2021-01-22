@@ -100,7 +100,7 @@ pub type StoreResult<T> = Result<T, StoreError>;
 ///
 /// [capacity]: struct.Store.html#method.capacity
 /// [lifetime]: struct.Store.html#method.lifetime
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct StoreRatio {
     /// How much of the metric is used.
     pub(crate) used: Nat,
@@ -146,6 +146,15 @@ impl StoreHandle {
     /// Returns the key of the entry.
     pub fn get_key(&self) -> usize {
         self.key as usize
+    }
+
+    /// Returns the length of value of the entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if the entry has been deleted or compacted.
+    pub fn get_length<S: Storage>(&self, store: &Store<S>) -> StoreResult<usize> {
+        store.get_length(self)
     }
 
     /// Returns the value of the entry.
@@ -444,6 +453,17 @@ impl<S: Storage> Store<S> {
     /// Returns the maximum length in bytes of a value.
     pub fn max_value_length(&self) -> usize {
         self.format.max_value_len() as usize
+    }
+
+    /// Returns the length of the value of an entry given its handle.
+    fn get_length(&self, handle: &StoreHandle) -> StoreResult<usize> {
+        self.check_handle(handle)?;
+        let mut pos = handle.pos;
+        match self.parse_entry(&mut pos)? {
+            ParsedEntry::User(header) => Ok(header.length as usize),
+            ParsedEntry::Padding => Err(StoreError::InvalidArgument),
+            _ => Err(StoreError::InvalidStorage),
+        }
     }
 
     /// Returns the value of an entry given its handle.

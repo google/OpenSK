@@ -44,7 +44,6 @@ fn process_set_min_pin_length(
         force_change_pin |= new_min_pin_length > old_length;
     }
     if force_change_pin {
-        // TODO(kaczmarczyck) actually force a PIN change in PinProtocolV1
         persistent_store.force_pin_change()?;
     }
     persistent_store.set_min_pin_length(new_min_pin_length)?;
@@ -246,6 +245,62 @@ mod test {
             persistent_store.min_pin_length_rp_ids(),
             Ok(min_pin_length_rp_ids)
         );
+    }
+
+    #[test]
+    fn test_process_set_min_pin_length_force_pin_change_implicit() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+
+        persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        // Increase min PIN, force PIN change.
+        let min_pin_length = 6;
+        let mut config_params = create_min_pin_config_params(min_pin_length, None);
+        let pin_uv_auth_param = Some(vec![
+            0x81, 0x37, 0x37, 0xF3, 0xD8, 0x69, 0xBD, 0x74, 0xFE, 0x88, 0x30, 0x8C, 0xC4, 0x2E,
+            0xA8, 0xC8,
+        ]);
+        config_params.pin_uv_auth_param = pin_uv_auth_param;
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
+        assert_eq!(persistent_store.has_force_pin_change(), Ok(true));
+    }
+
+    #[test]
+    fn test_process_set_min_pin_length_force_pin_change_explicit() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+
+        persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        let pin_uv_auth_param = Some(vec![
+            0xE3, 0x74, 0xF4, 0x27, 0xBE, 0x7D, 0x40, 0xB5, 0x71, 0xB6, 0xB4, 0x1A, 0xD2, 0xC1,
+            0x53, 0xD7,
+        ]);
+        let set_min_pin_length_params = SetMinPinLengthParams {
+            new_min_pin_length: Some(persistent_store.min_pin_length().unwrap()),
+            min_pin_length_rp_ids: None,
+            force_change_pin: Some(true),
+        };
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::SetMinPinLength,
+            sub_command_params: Some(ConfigSubCommandParams::SetMinPinLength(
+                set_min_pin_length_params,
+            )),
+            pin_uv_auth_param,
+            pin_uv_auth_protocol: Some(1),
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert_eq!(persistent_store.has_force_pin_change(), Ok(true));
     }
 
     #[test]

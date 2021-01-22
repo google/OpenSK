@@ -88,6 +88,9 @@ make_partition! {
     /// board may configure `MAX_SUPPORTED_RESIDENT_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
 
+    /// If this entry exists and equals 1, the PIN needs to be changed.
+    FORCE_PIN_CHANGE = 2040;
+
     /// The secret of the CredRandom feature.
     CRED_RANDOM_SECRET = 2041;
 

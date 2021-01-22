@@ -328,6 +328,10 @@ impl PinProtocolV1 {
         let token_encryption_key = crypto::aes256::EncryptionKey::new(&shared_secret);
         let pin_decryption_key = crypto::aes256::DecryptionKey::new(&token_encryption_key);
         self.verify_pin_hash_enc(rng, persistent_store, &pin_decryption_key, pin_hash_enc)?;
+        // TODO(kaczmarczyck) can this be moved up in the specification?
+        if persistent_store.has_force_pin_change()? {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
+        }
 
         // Assuming PIN_TOKEN_LENGTH % block_size == 0 here.
         let iv = [0u8; 16];
@@ -822,6 +826,28 @@ mod test {
     }
 
     #[test]
+    fn test_process_get_pin_token_force_pin_change() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        set_standard_pin(&mut persistent_store);
+        assert_eq!(persistent_store.force_pin_change(), Ok(()));
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let pk = pin_protocol_v1.key_agreement_key.genpk();
+        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let key_agreement = CoseKey::from(pk);
+        let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
+        assert_eq!(
+            pin_protocol_v1.process_get_pin_token(
+                &mut rng,
+                &mut persistent_store,
+                key_agreement,
+                pin_hash_enc
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID),
+        );
+    }
+
+    #[test]
     fn test_process_get_pin_uv_auth_token_using_pin_with_permissions() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
@@ -882,6 +908,30 @@ mod test {
                 Some(String::from("example.com")),
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_process_get_pin_token_force_pin_change_force_pin_change() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        set_standard_pin(&mut persistent_store);
+        assert_eq!(persistent_store.force_pin_change(), Ok(()));
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let pk = pin_protocol_v1.key_agreement_key.genpk();
+        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let key_agreement = CoseKey::from(pk);
+        let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
+        assert_eq!(
+            pin_protocol_v1.process_get_pin_uv_auth_token_using_pin_with_permissions(
+                &mut rng,
+                &mut persistent_store,
+                key_agreement,
+                pin_hash_enc,
+                0x03,
+                Some(String::from("example.com")),
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID),
         );
     }
 

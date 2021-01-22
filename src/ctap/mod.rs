@@ -1006,6 +1006,10 @@ where
         );
         options_map.insert(String::from("credMgmt"), true);
         options_map.insert(String::from("setMinPINLength"), true);
+        options_map.insert(
+            String::from("forcePINChange"),
+            self.persistent_store.has_force_pin_change()?,
+        );
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions: vec![
@@ -1177,7 +1181,7 @@ mod test {
         MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
     use super::*;
-    use cbor::{cbor_array, cbor_map};
+    use cbor::{cbor_array, cbor_array_vec, cbor_map};
     use crypto::rng256::ThreadRng256;
 
     const CLOCK_FREQUENCY_HZ: usize = 32768;
@@ -1233,41 +1237,44 @@ mod test {
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
         let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
-        let mut expected_response = vec![0x00, 0xAD, 0x01];
-        // The version array differs with CTAP1, always including 2.0 and 2.1.
-        #[cfg(not(feature = "with_ctap1"))]
-        let version_count = 2;
-        #[cfg(feature = "with_ctap1")]
-        let version_count = 3;
-        expected_response.push(0x80 + version_count);
-        #[cfg(feature = "with_ctap1")]
-        expected_response.extend(&[0x66, 0x55, 0x32, 0x46, 0x5F, 0x56, 0x32]);
-        expected_response.extend(
-            [
-                0x68, 0x46, 0x49, 0x44, 0x4F, 0x5F, 0x32, 0x5F, 0x30, 0x6C, 0x46, 0x49, 0x44, 0x4F,
-                0x5F, 0x32, 0x5F, 0x31, 0x5F, 0x50, 0x52, 0x45, 0x02, 0x84, 0x6B, 0x68, 0x6D, 0x61,
-                0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x6B, 0x63, 0x72, 0x65, 0x64, 0x50,
-                0x72, 0x6F, 0x74, 0x65, 0x63, 0x74, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C,
-                0x65, 0x6E, 0x67, 0x74, 0x68, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62,
-                0x03, 0x50,
-            ]
-            .iter(),
-        );
-        expected_response.extend(&ctap_state.persistent_store.aaguid().unwrap());
-        expected_response.extend(
-            [
-                0x04, 0xA5, 0x62, 0x72, 0x6B, 0xF5, 0x62, 0x75, 0x70, 0xF5, 0x68, 0x63, 0x72, 0x65,
-                0x64, 0x4D, 0x67, 0x6D, 0x74, 0xF5, 0x69, 0x63, 0x6C, 0x69, 0x65, 0x6E, 0x74, 0x50,
-                0x69, 0x6E, 0xF4, 0x6F, 0x73, 0x65, 0x74, 0x4D, 0x69, 0x6E, 0x50, 0x49, 0x4E, 0x4C,
-                0x65, 0x6E, 0x67, 0x74, 0x68, 0xF5, 0x05, 0x19, 0x04, 0x00, 0x06, 0x81, 0x01, 0x08,
-                0x18, 0x70, 0x09, 0x81, 0x63, 0x75, 0x73, 0x62, 0x0A, 0x81, 0xA2, 0x63, 0x61, 0x6C,
-                0x67, 0x26, 0x64, 0x74, 0x79, 0x70, 0x65, 0x6A, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63,
-                0x2D, 0x6B, 0x65, 0x79, 0x0D, 0x04, 0x0F, 0x18, 0x20, 0x10, 0x08, 0x14, 0x18, 0x96,
-            ]
-            .iter(),
-        );
+        let expected_cbor = cbor_map_options! {
+             0x01 => cbor_array_vec![vec![
+                    #[cfg(feature = "with_ctap1")]
+                    String::from(U2F_VERSION_STRING),
+                    String::from(FIDO2_VERSION_STRING),
+                    String::from(FIDO2_1_VERSION_STRING),
+                ]],
+            0x02 => cbor_array_vec![vec![
+                    String::from("hmac-secret"),
+                    String::from("credProtect"),
+                    String::from("minPinLength"),
+                    String::from("credBlob"),
+                ]],
+            0x03 => ctap_state.persistent_store.aaguid().unwrap(),
+            0x04 => cbor_map! {
+                "rk" => true,
+                "up" => true,
+                "clientPin" => false,
+                "credMgmt" => true,
+                "setMinPINLength" => true,
+                "forcePINChange" => false,
+            },
+            0x05 => 1024,
+            0x06 => cbor_array_vec![vec![1]],
+            0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
+            0x08 => CREDENTIAL_ID_SIZE as u64,
+            0x09 => cbor_array_vec![vec!["usb"]],
+            0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x0C => DEFAULT_CRED_PROTECT.map(|c| c as u64),
+            0x0D => ctap_state.persistent_store.min_pin_length().unwrap() as u64,
+            0x0F => MAX_CRED_BLOB_LENGTH as u64,
+            0x10 => MAX_RP_IDS_LENGTH as u64,
+            0x14 => ctap_state.persistent_store.remaining_credentials().unwrap() as u64,
+        };
 
-        assert_eq!(info_reponse, expected_response);
+        let mut response_cbor = vec![0x00];
+        assert!(cbor::write(expected_cbor, &mut response_cbor));
+        assert_eq!(info_reponse, response_cbor);
     }
 
     fn create_minimal_make_credential_parameters() -> AuthenticatorMakeCredentialParameters {

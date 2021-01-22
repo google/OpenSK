@@ -91,7 +91,7 @@ make_partition! {
     /// Storage for the serialized large blob array.
     ///
     /// The stored large blob can be too big for one key, so it has to be sharded.
-    LARGE_BLOB_SHARDS = 2000..2016;
+    LARGE_BLOB_SHARDS = 2000..2004;
 
     /// If this entry exists and equals 1, the PIN needs to be changed.
     FORCE_PIN_CHANGE = 2040;

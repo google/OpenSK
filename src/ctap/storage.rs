@@ -60,7 +60,7 @@ const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 // This constant is an attempt to limit storage requirements. If you don't set it to 0,
 // the stored strings can still be unbounded, but that is true for all RP IDs.
 pub const MAX_RP_IDS_LENGTH: usize = 8;
-const SHARD_SIZE: usize = 128;
+const SHARD_SIZE: usize = 1023;
 pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize =
     SHARD_SIZE * (key::LARGE_BLOB_SHARDS.end - key::LARGE_BLOB_SHARDS.start);
 
@@ -473,7 +473,8 @@ impl PersistentStore {
 
     /// Reads the byte vector stored as the serialized large blobs array.
     ///
-    /// If more data is requested than stored, return as many bytes as possible.
+    /// If too few bytes exist at that offset, return the maximum number
+    /// available. This includes cases of offset being beyond the stored array.
     pub fn get_large_blob_array(
         &self,
         mut byte_count: usize,
@@ -481,24 +482,24 @@ impl PersistentStore {
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         if self.store.find(key::LARGE_BLOB_SHARDS.start)?.is_none() {
             return Ok(vec![
-                0x80, 0x76, 0xbe, 0x8b, 0x52, 0x8d, 0x00, 0x75, 0xf7, 0xaa, 0xe9, 0x8d, 0x6f, 0xa5,
-                0x7a, 0x6d, 0x3c,
+                0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+                0x7A, 0x6D, 0x3C,
             ]);
         }
         let mut output = Vec::with_capacity(byte_count);
         while byte_count > 0 {
-            let shard = offset / SHARD_SIZE;
             let shard_offset = offset % SHARD_SIZE;
             let shard_length = cmp::min(SHARD_SIZE - shard_offset, byte_count);
 
-            let shard_key = key::LARGE_BLOB_SHARDS.start + shard;
+            let shard_key = key::LARGE_BLOB_SHARDS.start + offset / SHARD_SIZE;
             if !key::LARGE_BLOB_SHARDS.contains(&shard_key) {
                 // This request should have been caught at application level.
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
             let shard_entry = self.store.find(shard_key)?.unwrap_or_default();
             if shard_entry.len() < shard_offset + shard_length {
-                output.extend(&shard_entry[..]);
+                // If fewer bytes exist than requested, return them all.
+                output.extend(&shard_entry[shard_offset..]);
                 return Ok(output);
             }
             output.extend(&shard_entry[shard_offset..shard_offset + shard_length]);
@@ -529,7 +530,7 @@ impl PersistentStore {
         }
         // The length is not stored, so overwrite old entries explicitly.
         for key in shard_key..key::LARGE_BLOB_SHARDS.end {
-            // Assuming the store optimizes out unnecessary writes.
+            // Assuming the store optimizes out unnecessary removes.
             self.store.remove(key)?;
         }
         Ok(())
@@ -1223,12 +1224,18 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        let large_blob_array = vec![0xC0; 1];
+        let large_blob_array = vec![0x01, 0x02, 0x03];
         assert!(persistent_store
             .commit_large_blob_array(&large_blob_array)
             .is_ok());
         let restored_large_blob_array = persistent_store.get_large_blob_array(1, 0).unwrap();
-        assert_eq!(large_blob_array, restored_large_blob_array);
+        assert_eq!(vec![0x01], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(1, 1).unwrap();
+        assert_eq!(vec![0x02], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(1, 2).unwrap();
+        assert_eq!(vec![0x03], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(2, 2).unwrap();
+        assert_eq!(vec![0x03], restored_large_blob_array);
 
         let large_blob_array = vec![0xC0; SHARD_SIZE];
         assert!(persistent_store

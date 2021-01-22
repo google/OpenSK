@@ -1267,7 +1267,7 @@ mod test {
                 "setMinPINLength" => true,
                 "forcePINChange" => false,
             },
-            0x05 => 1024,
+            0x05 => MAX_MSG_SIZE as u64,
             0x06 => cbor_array_vec![vec![1]],
             0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
             0x08 => CREDENTIAL_ID_SIZE as u64,

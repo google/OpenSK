@@ -30,6 +30,7 @@ use arrayref::array_ref;
 use cbor::cbor_array_vec;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
+use persistent_store::StoreUpdate;
 
 // Those constants may be modified before compilation to tune the behavior of the key.
 //
@@ -384,9 +385,15 @@ impl PersistentStore {
         let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
         pin_properties[0] = pin_code_point_length;
         pin_properties[1..].clone_from_slice(pin_hash);
-        self.store.insert(key::PIN_PROPERTIES, &pin_properties)?;
-        // If this second transaction fails, you are forced to retry.
-        Ok(self.store.remove(key::FORCE_PIN_CHANGE)?)
+        Ok(self.store.transaction(&[
+            StoreUpdate::Insert {
+                key: key::PIN_PROPERTIES,
+                value: &pin_properties[..],
+            },
+            StoreUpdate::Remove {
+                key: key::FORCE_PIN_CHANGE,
+            },
+        ])?)
     }
 
     /// Returns the number of remaining PIN retries.
@@ -547,14 +554,14 @@ impl PersistentStore {
     pub fn has_force_pin_change(&self) -> Result<bool, Ctap2StatusCode> {
         match self.store.find(key::FORCE_PIN_CHANGE)? {
             None => Ok(false),
-            Some(value) if value.len() == 1 && value[0] == 1 => Ok(true),
+            Some(value) if value.is_empty() => Ok(true),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
     }
 
     /// Marks the PIN as outdated with respect to the new PIN policy.
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
-        Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[1])?)
+        Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[])?)
     }
 }
 

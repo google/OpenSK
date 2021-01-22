@@ -328,6 +328,7 @@ impl PinProtocolV1 {
         let token_encryption_key = crypto::aes256::EncryptionKey::new(&shared_secret);
         let pin_decryption_key = crypto::aes256::DecryptionKey::new(&token_encryption_key);
         self.verify_pin_hash_enc(rng, persistent_store, &pin_decryption_key, pin_hash_enc)?;
+        // TODO(kaczmarczyck) can this be moved up in the specification?
         if persistent_store.has_force_pin_change()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }

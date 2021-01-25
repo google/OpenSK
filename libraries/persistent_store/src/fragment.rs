@@ -24,6 +24,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 /// Represents a sequence of keys.
+#[allow(clippy::len_without_is_empty)]
 pub trait Keys {
     /// Returns the number of keys.
     fn len(&self) -> usize;

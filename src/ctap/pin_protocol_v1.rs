@@ -162,7 +162,7 @@ pub enum PinPermission {
     GetAssertion = 0x02,
     CredentialManagement = 0x04,
     BioEnrollment = 0x08,
-    PlatformConfiguration = 0x10,
+    LargeBlobWrite = 0x10,
     AuthenticatorConfiguration = 0x20,
 }
 

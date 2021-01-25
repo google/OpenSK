@@ -28,9 +28,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use cbor::cbor_array_vec;
+use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
-use persistent_store::StoreUpdate;
+use persistent_store::{fragment, StoreUpdate};
 
 // Those constants may be modified before compilation to tune the behavior of the key.
 //
@@ -59,6 +60,7 @@ const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
 // This constant is an attempt to limit storage requirements. If you don't set it to 0,
 // the stored strings can still be unbounded, but that is true for all RP IDs.
 pub const MAX_RP_IDS_LENGTH: usize = 8;
+pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize = 2048;
 
 /// Wrapper for master keys.
 pub struct MasterKeys {
@@ -464,6 +466,51 @@ impl PersistentStore {
         Ok(self.store.insert(
             key::MIN_PIN_LENGTH_RP_IDS,
             &serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
+        )?)
+    }
+
+    /// Reads the byte vector stored as the serialized large blobs array.
+    ///
+    /// If too few bytes exist at that offset, return the maximum number
+    /// available. This includes cases of offset being beyond the stored array.
+    ///
+    /// If no large blob is committed to the store, get responds as if an empty
+    /// CBOR array (0x80) was written, together with the 16 byte prefix of its
+    /// SHA256, to a total length of 17 byte (which is the shortest legitimate
+    /// large blob entry possible).
+    pub fn get_large_blob_array(
+        &self,
+        offset: usize,
+        byte_count: usize,
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        let byte_range = offset..offset + byte_count;
+        let output = fragment::read_range(&self.store, &key::LARGE_BLOB_SHARDS, byte_range)?;
+        Ok(output.unwrap_or_else(|| {
+            const EMPTY_LARGE_BLOB: [u8; 17] = [
+                0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+                0x7A, 0x6D, 0x3C,
+            ];
+            let last_index = cmp::min(EMPTY_LARGE_BLOB.len(), offset + byte_count);
+            EMPTY_LARGE_BLOB
+                .get(offset..last_index)
+                .unwrap_or_default()
+                .to_vec()
+        }))
+    }
+
+    /// Sets a byte vector as the serialized large blobs array.
+    pub fn commit_large_blob_array(
+        &mut self,
+        large_blob_array: &[u8],
+    ) -> Result<(), Ctap2StatusCode> {
+        // This input should have been caught at caller level.
+        if large_blob_array.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(fragment::write(
+            &mut self.store,
+            &key::LARGE_BLOB_SHARDS,
+            large_blob_array,
         )?)
     }
 
@@ -1142,6 +1189,86 @@ mod test {
             }
         }
         assert_eq!(persistent_store.min_pin_length_rp_ids().unwrap(), rp_ids);
+    }
+
+    #[test]
+    fn test_max_large_blob_array_size() {
+        let mut rng = ThreadRng256 {};
+        let persistent_store = PersistentStore::new(&mut rng);
+
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(MAX_LARGE_BLOB_ARRAY_SIZE >= 1024);
+        }
+        assert!(
+            MAX_LARGE_BLOB_ARRAY_SIZE
+                <= persistent_store.store.max_value_length()
+                    * (key::LARGE_BLOB_SHARDS.end - key::LARGE_BLOB_SHARDS.start)
+        );
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        let large_blob_array = vec![0x01, 0x02, 0x03];
+        assert!(persistent_store
+            .commit_large_blob_array(&large_blob_array)
+            .is_ok());
+        let restored_large_blob_array = persistent_store.get_large_blob_array(0, 1).unwrap();
+        assert_eq!(vec![0x01], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(1, 1).unwrap();
+        assert_eq!(vec![0x02], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(2, 1).unwrap();
+        assert_eq!(vec![0x03], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(2, 2).unwrap();
+        assert_eq!(vec![0x03], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(3, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(4, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array_overwrite() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        let large_blob_array = vec![0x11; 5];
+        assert!(persistent_store
+            .commit_large_blob_array(&large_blob_array)
+            .is_ok());
+        let large_blob_array = vec![0x22; 4];
+        assert!(persistent_store
+            .commit_large_blob_array(&large_blob_array)
+            .is_ok());
+        let restored_large_blob_array = persistent_store.get_large_blob_array(0, 5).unwrap();
+        assert_eq!(large_blob_array, restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(4, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+
+        assert!(persistent_store.commit_large_blob_array(&[]).is_ok());
+        let restored_large_blob_array = persistent_store.get_large_blob_array(0, 20).unwrap();
+        // Committing an empty array resets to the default blob of 17 byte.
+        assert_eq!(restored_large_blob_array.len(), 17);
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array_no_commit() {
+        let mut rng = ThreadRng256 {};
+        let persistent_store = PersistentStore::new(&mut rng);
+
+        let empty_blob_array = vec![
+            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+            0x7A, 0x6D, 0x3C,
+        ];
+        let restored_large_blob_array = persistent_store.get_large_blob_array(0, 17).unwrap();
+        assert_eq!(empty_blob_array, restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(0, 1).unwrap();
+        assert_eq!(vec![0x80], restored_large_blob_array);
+        let restored_large_blob_array = persistent_store.get_large_blob_array(16, 1).unwrap();
+        assert_eq!(vec![0x3C], restored_large_blob_array);
     }
 
     #[test]

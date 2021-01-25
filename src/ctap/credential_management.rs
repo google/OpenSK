@@ -100,7 +100,7 @@ fn enumerate_credentials_response(
         public_key: Some(public_key),
         total_credentials,
         cred_protect: cred_protect_policy,
-        // TODO(kaczmarczyck) add when largeBlobKey is implemented
+        // TODO(kaczmarczyck) add when largeBlobKey extension is implemented
         large_blob_key: None,
         ..Default::default()
     })

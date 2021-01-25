@@ -88,6 +88,11 @@ make_partition! {
     /// board may configure `MAX_SUPPORTED_RESIDENT_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
 
+    /// Storage for the serialized large blob array.
+    ///
+    /// The stored large blob can be too big for one key, so it has to be sharded.
+    LARGE_BLOB_SHARDS = 2000..2004;
+
     /// If this entry exists and equals 1, the PIN needs to be changed.
     FORCE_PIN_CHANGE = 2040;
 

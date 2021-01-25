@@ -81,6 +81,7 @@ fn enumerate_credentials_response(
         user_name,
         user_icon,
         cred_blob: _,
+        large_blob_key,
     } = credential;
     let user = PublicKeyCredentialUserEntity {
         user_id: user_handle,
@@ -100,8 +101,7 @@ fn enumerate_credentials_response(
         public_key: Some(public_key),
         total_credentials,
         cred_protect: cred_protect_policy,
-        // TODO(kaczmarczyck) add when largeBlobKey extension is implemented
-        large_blob_key: None,
+        large_blob_key,
         ..Default::default()
     })
 }
@@ -348,6 +348,7 @@ mod test {
             user_name: Some("name".to_string()),
             user_icon: Some("icon".to_string()),
             cred_blob: None,
+            large_blob_key: None,
         }
     }
 

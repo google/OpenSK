@@ -63,6 +63,7 @@ pub struct AuthenticatorMakeCredentialResponse {
     pub fmt: String,
     pub auth_data: Vec<u8>,
     pub att_stmt: PackedAttestationStatement,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
@@ -71,12 +72,14 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
             fmt,
             auth_data,
             att_stmt,
+            large_blob_key,
         } = make_credential_response;
 
         cbor_map_options! {
             0x01 => fmt,
             0x02 => auth_data,
             0x03 => att_stmt,
+            0x05 => large_blob_key,
         }
     }
 }
@@ -89,6 +92,7 @@ pub struct AuthenticatorGetAssertionResponse {
     pub signature: Vec<u8>,
     pub user: Option<PublicKeyCredentialUserEntity>,
     pub number_of_credentials: Option<u64>,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
@@ -99,6 +103,7 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
             signature,
             user,
             number_of_credentials,
+            large_blob_key,
         } = get_assertion_response;
 
         cbor_map_options! {
@@ -107,6 +112,7 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
             0x03 => signature,
             0x04 => user,
             0x05 => number_of_credentials,
+            0x07 => large_blob_key,
         }
     }
 }
@@ -124,7 +130,8 @@ pub struct AuthenticatorGetInfoResponse {
     pub max_credential_id_length: Option<u64>,
     pub transports: Option<Vec<AuthenticatorTransport>>,
     pub algorithms: Option<Vec<PublicKeyCredentialParameter>>,
-    pub default_cred_protect: Option<CredentialProtectionPolicy>,
+    pub max_serialized_large_blob_array: Option<u64>,
+    pub force_pin_change: Option<bool>,
     pub min_pin_length: u8,
     pub firmware_version: Option<u64>,
     pub max_cred_blob_length: Option<u64>,
@@ -145,7 +152,8 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             max_credential_id_length,
             transports,
             algorithms,
-            default_cred_protect,
+            max_serialized_large_blob_array,
+            force_pin_change,
             min_pin_length,
             firmware_version,
             max_cred_blob_length,
@@ -172,7 +180,8 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x08 => max_credential_id_length,
             0x09 => transports.map(|vec| cbor_array_vec!(vec)),
             0x0A => algorithms.map(|vec| cbor_array_vec!(vec)),
-            0x0C => default_cred_protect.map(|p| p as u64),
+            0x0B => max_serialized_large_blob_array,
+            0x0C => force_pin_change,
             0x0D => min_pin_length as u64,
             0x0E => firmware_version,
             0x0F => max_cred_blob_length,
@@ -297,7 +306,7 @@ mod test {
     use super::super::data_formats::{PackedAttestationStatement, PublicKeyCredentialType};
     use super::super::ES256_CRED_PARAM;
     use super::*;
-    use cbor::{cbor_bytes, cbor_map};
+    use cbor::{cbor_array, cbor_bytes, cbor_map};
     use crypto::rng256::ThreadRng256;
 
     #[test]
@@ -320,6 +329,7 @@ mod test {
             fmt: "packed".to_string(),
             auth_data: vec![0xAD],
             att_stmt,
+            large_blob_key: Some(vec![0x1B]),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorMakeCredential(make_credential_response).into();
@@ -327,24 +337,50 @@ mod test {
             0x01 => "packed",
             0x02 => vec![0xAD],
             0x03 => cbor_packed_attestation_statement,
+            0x05 => vec![0x1B],
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
 
     #[test]
     fn test_get_assertion_into_cbor() {
+        let pub_key_cred_descriptor = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: vec![0x2D, 0x2D, 0x2D, 0x2D],
+            transports: Some(vec![AuthenticatorTransport::Usb]),
+        };
+        let user = PublicKeyCredentialUserEntity {
+            user_id: vec![0x1D, 0x1D, 0x1D, 0x1D],
+            user_name: Some("foo".to_string()),
+            user_display_name: Some("bar".to_string()),
+            user_icon: Some("example.com/foo/icon.png".to_string()),
+        };
         let get_assertion_response = AuthenticatorGetAssertionResponse {
-            credential: None,
+            credential: Some(pub_key_cred_descriptor),
             auth_data: vec![0xAD],
             signature: vec![0x51],
-            user: None,
-            number_of_credentials: None,
+            user: Some(user),
+            number_of_credentials: Some(2),
+            large_blob_key: Some(vec![0x1B]),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetAssertion(get_assertion_response).into();
         let expected_cbor = cbor_map_options! {
+            0x01 => cbor_map! {
+                "type" => "public-key",
+                "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+                "transports" => cbor_array!["usb"],
+            },
             0x02 => vec![0xAD],
             0x03 => vec![0x51],
+            0x04 => cbor_map! {
+                "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
+                "name" => "foo".to_string(),
+                "displayName" => "bar".to_string(),
+                "icon" => "example.com/foo/icon.png".to_string(),
+            },
+            0x05 => 2,
+            0x07 => vec![0x1B],
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -363,7 +399,8 @@ mod test {
             max_credential_id_length: None,
             transports: None,
             algorithms: None,
-            default_cred_protect: None,
+            max_serialized_large_blob_array: None,
+            force_pin_change: None,
             min_pin_length: 4,
             firmware_version: None,
             max_cred_blob_length: None,
@@ -395,7 +432,8 @@ mod test {
             max_credential_id_length: Some(256),
             transports: Some(vec![AuthenticatorTransport::Usb]),
             algorithms: Some(vec![ES256_CRED_PARAM]),
-            default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            max_serialized_large_blob_array: Some(1024),
+            force_pin_change: Some(false),
             min_pin_length: 4,
             firmware_version: Some(0),
             max_cred_blob_length: Some(1024),
@@ -415,7 +453,8 @@ mod test {
             0x08 => 256,
             0x09 => cbor_array_vec![vec!["usb"]],
             0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
-            0x0C => CredentialProtectionPolicy::UserVerificationRequired as u64,
+            0x0B => 1024,
+            0x0C => false,
             0x0D => 4,
             0x0E => 0,
             0x0F => 1024,

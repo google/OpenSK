@@ -756,6 +756,7 @@ mod test {
             user_name: None,
             user_icon: None,
             cred_blob: None,
+            large_blob_key: None,
         }
     }
 
@@ -973,6 +974,7 @@ mod test {
             user_name: None,
             user_icon: None,
             cred_blob: None,
+            large_blob_key: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -995,6 +997,7 @@ mod test {
             user_name: None,
             user_icon: None,
             cred_blob: None,
+            large_blob_key: None,
         };
         assert!(persistent_store.store_credential(credential).is_ok());
 
@@ -1321,6 +1324,7 @@ mod test {
             user_name: None,
             user_icon: None,
             cred_blob: None,
+            large_blob_key: None,
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

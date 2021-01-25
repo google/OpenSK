@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use persistent_store::{BufferOptions, BufferStorage, Store, StoreDriverOff};
+use crate::{BufferOptions, BufferStorage, Store, StoreDriverOff};
 
 #[derive(Clone)]
 pub struct Config {
@@ -47,3 +47,38 @@ pub const MINIMAL: Config = Config {
     max_word_writes: 2,
     max_page_erases: 9,
 };
+
+const NORDIC: Config = Config {
+    word_size: 4,
+    page_size: 0x1000,
+    num_pages: 20,
+    max_word_writes: 2,
+    max_page_erases: 10000,
+};
+
+const TITAN: Config = Config {
+    word_size: 4,
+    page_size: 0x800,
+    num_pages: 10,
+    max_word_writes: 2,
+    max_page_erases: 10000,
+};
+
+#[test]
+fn nordic_capacity() {
+    let driver = NORDIC.new_driver().power_on().unwrap();
+    assert_eq!(driver.model().capacity().total, 19123);
+}
+
+#[test]
+fn titan_capacity() {
+    let driver = TITAN.new_driver().power_on().unwrap();
+    assert_eq!(driver.model().capacity().total, 4315);
+}
+
+#[test]
+fn minimal_virt_page_size() {
+    // Make sure a virtual page has 14 words. We use this property in the other tests below to
+    // know whether entries are spanning, starting, and ending pages.
+    assert_eq!(MINIMAL.new_driver().model().format().virt_page_size(), 14);
+}

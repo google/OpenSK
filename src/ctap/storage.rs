@@ -268,11 +268,11 @@ impl PersistentStore {
 
     /// Returns the number of credentials.
     pub fn count_credentials(&self) -> Result<usize, Ctap2StatusCode> {
-        let mut iter_result = Ok(());
-        let iter = self.iter_credentials(&mut iter_result)?;
-        let result = iter.count();
-        iter_result?;
-        Ok(result)
+        let mut count = 0;
+        for handle in self.store.iter()? {
+            count += key::CREDENTIALS.contains(&handle?.get_key()) as usize;
+        }
+        Ok(count)
     }
 
     /// Returns the estimated number of credentials that can still be stored.

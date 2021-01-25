@@ -32,6 +32,7 @@ use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
 use persistent_store::StoreUpdate;
+use persistent_store::fragment::{read_range, write};
 
 // Those constants may be modified before compilation to tune the behavior of the key.
 //
@@ -469,13 +470,6 @@ impl PersistentStore {
         )?)
     }
 
-    /// The size used for shards of large blobs.
-    ///
-    /// This value is constant during the lifetime of the device.
-    fn shard_size(&self) -> usize {
-        self.store.max_value_length()
-    }
-
     /// Reads the byte vector stored as the serialized large blobs array.
     ///
     /// If too few bytes exist at that offset, return the maximum number
@@ -483,45 +477,23 @@ impl PersistentStore {
     ///
     /// If no large blob is committed to the store, get responds as if an empty
     /// CBOR array (0x80) was written, together with the 16 byte prefix of its
-    /// SHA256, to a total length of 17 byte (which is the shortest legitemate
+    /// SHA256, to a total length of 17 byte (which is the shortest legitimate
     /// large blob entry possible).
     pub fn get_large_blob_array(
         &self,
-        mut offset: usize,
-        mut byte_count: usize,
+        offset: usize,
+        byte_count: usize,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let mut output = Vec::with_capacity(byte_count);
-        while byte_count > 0 {
-            let shard_key = key::LARGE_BLOB_SHARDS.start + offset / self.shard_size();
-            if !key::LARGE_BLOB_SHARDS.contains(&shard_key) {
-                // This request should have been caught at application level.
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
-            let shard_entry = self.store.find(shard_key)?;
-            let shard_entry = if shard_key == key::LARGE_BLOB_SHARDS.start {
-                shard_entry.unwrap_or_else(|| {
-                    vec![
-                        0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D,
-                        0x6F, 0xA5, 0x7A, 0x6D, 0x3C,
-                    ]
-                })
-            } else {
-                shard_entry.unwrap_or_default()
-            };
-
-            let shard_offset = offset % self.shard_size();
-            if shard_entry.len() < shard_offset {
-                break;
-            }
-            let shard_length = cmp::min(shard_entry.len() - shard_offset, byte_count);
-            output.extend(&shard_entry[shard_offset..][..shard_length]);
-            if shard_entry.len() < self.shard_size() {
-                break;
-            }
-            offset += shard_length;
-            byte_count -= shard_length;
-        }
-        Ok(output)
+        let byte_range = offset..offset + byte_count;
+        let output = read_range(&self.store, &key::LARGE_BLOB_SHARDS, byte_range)?;
+        Ok(output.unwrap_or_else(|| {
+            let empty_large_blob = vec![
+                0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+                0x7A, 0x6D, 0x3C,
+            ];
+            let last_index = cmp::min(empty_large_blob.len(), offset + byte_count);
+            empty_large_blob.get(offset..last_index).unwrap_or_default().to_vec()
+        }))
     }
 
     /// Sets a byte vector as the serialized large blobs array.
@@ -529,21 +501,11 @@ impl PersistentStore {
         &mut self,
         large_blob_array: &[u8],
     ) -> Result<(), Ctap2StatusCode> {
+        // This input should have been caught at caller level.
         if large_blob_array.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-
-        let mut shards = large_blob_array.chunks(self.shard_size());
-        let mut updates = Vec::with_capacity(shards.len());
-        for key in key::LARGE_BLOB_SHARDS {
-            let update = match shards.next() {
-                Some(value) => StoreUpdate::Insert { key, value },
-                None if self.store.find(key)?.is_some() => StoreUpdate::Remove { key },
-                _ => break,
-            };
-            updates.push(update);
-        }
-        Ok(self.store.transaction(&updates)?)
+        Ok(write(&mut self.store, &key::LARGE_BLOB_SHARDS, large_blob_array)?)
     }
 
     /// Returns the attestation private key if defined.
@@ -642,6 +604,15 @@ impl PersistentStore {
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
         Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[])?)
     }
+
+    /// The size used for shards of large blobs.
+    ///
+    /// This value is constant during the lifetime of the device.
+    #[cfg(test)]
+    fn shard_size(&self) -> usize {
+        self.store.max_value_length()
+    }
+
 }
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {

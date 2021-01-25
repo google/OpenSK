@@ -96,7 +96,7 @@ pub fn read_range(
         let length = handle.get_length(store)?;
         let end = core::cmp::min(range.end.saturating_sub(offset), length);
         offset += length;
-        if start < end && end <= length {
+        if start < end {
             result.extend(&handle.get_value(store)?[start..end]);
         }
     }

@@ -354,6 +354,7 @@ mod buffer;
 #[cfg(feature = "std")]
 mod driver;
 mod format;
+pub mod fragment;
 #[cfg(feature = "std")]
 mod model;
 mod storage;

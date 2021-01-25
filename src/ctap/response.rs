@@ -74,9 +74,9 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
         } = make_credential_response;
 
         cbor_map_options! {
-            1 => fmt,
-            2 => auth_data,
-            3 => att_stmt,
+            0x01 => fmt,
+            0x02 => auth_data,
+            0x03 => att_stmt,
         }
     }
 }
@@ -102,11 +102,11 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
         } = get_assertion_response;
 
         cbor_map_options! {
-            1 => credential,
-            2 => auth_data,
-            3 => signature,
-            4 => user,
-            5 => number_of_credentials,
+            0x01 => credential,
+            0x02 => auth_data,
+            0x03 => signature,
+            0x04 => user,
+            0x05 => number_of_credentials,
         }
     }
 }
@@ -199,9 +199,9 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
         } = client_pin_response;
 
         cbor_map_options! {
-            1 => key_agreement.map(cbor::Value::from),
-            2 => pin_token,
-            3 => retries,
+            0x01 => key_agreement.map(cbor::Value::from),
+            0x02 => pin_token,
+            0x03 => retries,
         }
     }
 }
@@ -286,8 +286,8 @@ impl From<AuthenticatorVendorResponse> for cbor::Value {
         } = vendor_response;
 
         cbor_map_options! {
-            1 => cert_programmed,
-            2 => pkey_programmed,
+            0x01 => cert_programmed,
+            0x02 => pkey_programmed,
         }
     }
 }
@@ -324,9 +324,9 @@ mod test {
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorMakeCredential(make_credential_response).into();
         let expected_cbor = cbor_map_options! {
-            1 => "packed",
-            2 => vec![0xAD],
-            3 => cbor_packed_attestation_statement,
+            0x01 => "packed",
+            0x02 => vec![0xAD],
+            0x03 => cbor_packed_attestation_statement,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -343,8 +343,8 @@ mod test {
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetAssertion(get_assertion_response).into();
         let expected_cbor = cbor_map_options! {
-            2 => vec![0xAD],
-            3 => vec![0x51],
+            0x02 => vec![0xAD],
+            0x03 => vec![0x51],
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -435,7 +435,7 @@ mod test {
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorClientPin(Some(client_pin_response)).into();
         let expected_cbor = cbor_map_options! {
-            2 => vec![70],
+            0x02 => vec![70],
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }
@@ -562,8 +562,8 @@ mod test {
         assert_eq!(
             response_cbor,
             Some(cbor_map_options! {
-                1 => true,
-                2 => false,
+                0x01 => true,
+                0x02 => false,
             })
         );
         let response_cbor: Option<cbor::Value> =
@@ -575,8 +575,8 @@ mod test {
         assert_eq!(
             response_cbor,
             Some(cbor_map_options! {
-                1 => false,
-                2 => true,
+                0x01 => false,
+                0x02 => true,
             })
         );
     }

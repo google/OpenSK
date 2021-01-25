@@ -31,8 +31,8 @@ use cbor::cbor_array_vec;
 use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
-use persistent_store::StoreUpdate;
 use persistent_store::fragment::{read_range, write};
+use persistent_store::StoreUpdate;
 
 // Those constants may be modified before compilation to tune the behavior of the key.
 //
@@ -492,7 +492,10 @@ impl PersistentStore {
                 0x7A, 0x6D, 0x3C,
             ];
             let last_index = cmp::min(empty_large_blob.len(), offset + byte_count);
-            empty_large_blob.get(offset..last_index).unwrap_or_default().to_vec()
+            empty_large_blob
+                .get(offset..last_index)
+                .unwrap_or_default()
+                .to_vec()
         }))
     }
 
@@ -505,7 +508,11 @@ impl PersistentStore {
         if large_blob_array.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        Ok(write(&mut self.store, &key::LARGE_BLOB_SHARDS, large_blob_array)?)
+        Ok(write(
+            &mut self.store,
+            &key::LARGE_BLOB_SHARDS,
+            large_blob_array,
+        )?)
     }
 
     /// Returns the attestation private key if defined.
@@ -612,7 +619,6 @@ impl PersistentStore {
     fn shard_size(&self) -> usize {
         self.store.max_value_length()
     }
-
 }
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {

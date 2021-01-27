@@ -561,6 +561,7 @@ where
             options,
             pin_uv_auth_param,
             pin_uv_auth_protocol,
+            enterprise_attestation: _,
         } = make_credential_params;
 
         self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
@@ -1313,6 +1314,7 @@ mod test {
             options,
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
+            enterprise_attestation: None,
         }
     }
 

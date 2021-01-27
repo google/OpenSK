@@ -161,6 +161,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
     pub pin_uv_auth_protocol: Option<u64>,
+    pub enterprise_attestation: Option<bool>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
@@ -169,15 +170,16 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => client_data_hash,
-                2 => rp,
-                3 => user,
-                4 => cred_param_vec,
-                5 => exclude_list,
-                6 => extensions,
-                7 => options,
-                8 => pin_uv_auth_param,
-                9 => pin_uv_auth_protocol,
+                0x01 => client_data_hash,
+                0x02 => rp,
+                0x03 => user,
+                0x04 => cred_param_vec,
+                0x05 => exclude_list,
+                0x06 => extensions,
+                0x07 => options,
+                0x08 => pin_uv_auth_param,
+                0x09 => pin_uv_auth_protocol,
+                0x0A => enterprise_attestation,
             } = extract_map(cbor_value)?;
         }
 
@@ -217,6 +219,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+        let enterprise_attestation = enterprise_attestation.map(extract_bool).transpose()?;
 
         Ok(AuthenticatorMakeCredentialParameters {
             client_data_hash,
@@ -228,6 +231,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
             options,
             pin_uv_auth_param,
             pin_uv_auth_protocol,
+            enterprise_attestation,
         })
     }
 }
@@ -251,13 +255,13 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => rp_id,
-                2 => client_data_hash,
-                3 => allow_list,
-                4 => extensions,
-                5 => options,
-                6 => pin_uv_auth_param,
-                7 => pin_uv_auth_protocol,
+                0x01 => rp_id,
+                0x02 => client_data_hash,
+                0x03 => allow_list,
+                0x04 => extensions,
+                0x05 => options,
+                0x06 => pin_uv_auth_param,
+                0x07 => pin_uv_auth_protocol,
             } = extract_map(cbor_value)?;
         }
 
@@ -321,14 +325,14 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => pin_protocol,
-                2 => sub_command,
-                3 => key_agreement,
-                4 => pin_auth,
-                5 => new_pin_enc,
-                6 => pin_hash_enc,
-                9 => permissions,
-                10 => permissions_rp_id,
+                0x01 => pin_protocol,
+                0x02 => sub_command,
+                0x03 => key_agreement,
+                0x04 => pin_auth,
+                0x05 => new_pin_enc,
+                0x06 => pin_hash_enc,
+                0x09 => permissions,
+                0x0A => permissions_rp_id,
             } = extract_map(cbor_value)?;
         }
 
@@ -375,12 +379,12 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => get,
-                2 => set,
-                3 => offset,
-                4 => length,
-                5 => pin_uv_auth_param,
-                6 => pin_uv_auth_protocol,
+                0x01 => get,
+                0x02 => set,
+                0x03 => offset,
+                0x04 => length,
+                0x05 => pin_uv_auth_param,
+                0x06 => pin_uv_auth_protocol,
             } = extract_map(cbor_value)?;
         }
 
@@ -486,8 +490,8 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => certificate,
-                2 => private_key,
+                0x01 => certificate,
+                0x02 => private_key,
             } = extract_map(cbor_value)?;
         }
         let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
@@ -552,8 +556,8 @@ impl TryFrom<cbor::Value> for AuthenticatorVendorConfigureParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                1 => lockdown,
-                2 => attestation_material,
+                0x01 => lockdown,
+                0x02 => attestation_material,
             } = extract_map(cbor_value)?;
         }
         let lockdown = lockdown.map_or(Ok(false), extract_bool)?;
@@ -581,22 +585,23 @@ mod test {
     #[test]
     fn test_from_cbor_make_credential_parameters() {
         let cbor_value = cbor_map! {
-            1 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
-            2 => cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
                 "id" => "example.com",
                 "name" => "Example",
                 "icon" => "example.com/icon.png",
             },
-            3 => cbor_map! {
+            0x03 => cbor_map! {
                 "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
                 "name" => "foo",
                 "displayName" => "bar",
                 "icon" => "example.com/foo/icon.png",
             },
-            4 => cbor_array![ES256_CRED_PARAM],
-            5 => cbor_array![],
-            8 => vec![0x12, 0x34],
-            9 => 1,
+            0x04 => cbor_array![ES256_CRED_PARAM],
+            0x05 => cbor_array![],
+            0x08 => vec![0x12, 0x34],
+            0x09 => 1,
+            0x0A => true,
         };
         let returned_make_credential_parameters =
             AuthenticatorMakeCredentialParameters::try_from(cbor_value).unwrap();
@@ -630,6 +635,7 @@ mod test {
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
             pin_uv_auth_protocol: Some(1),
+            enterprise_attestation: Some(true),
         };
 
         assert_eq!(
@@ -641,15 +647,15 @@ mod test {
     #[test]
     fn test_from_cbor_get_assertion_parameters() {
         let cbor_value = cbor_map! {
-            1 => "example.com",
-            2 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
-            3 => cbor_array![ cbor_map! {
+            0x01 => "example.com",
+            0x02 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x03 => cbor_array![ cbor_map! {
                 "type" => "public-key",
                 "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
                 "transports" => cbor_array!["usb"],
             } ],
-            6 => vec![0x12, 0x34],
-            7 => 1,
+            0x06 => vec![0x12, 0x34],
+            0x07 => 1,
         };
         let returned_get_assertion_parameters =
             AuthenticatorGetAssertionParameters::try_from(cbor_value).unwrap();
@@ -692,14 +698,14 @@ mod test {
         let cose_key = CoseKey::from(pk);
 
         let cbor_value = cbor_map! {
-            1 => 1,
-            2 => ClientPinSubCommand::GetPinRetries,
-            3 => cbor::Value::from(cose_key.clone()),
-            4 => vec! [0xBB],
-            5 => vec! [0xCC],
-            6 => vec! [0xDD],
-            9 => 0x03,
-            10 => "example.com",
+            0x01 => 1,
+            0x02 => ClientPinSubCommand::GetPinRetries,
+            0x03 => cbor::Value::from(cose_key.clone()),
+            0x04 => vec! [0xBB],
+            0x05 => vec! [0xCC],
+            0x06 => vec! [0xDD],
+            0x09 => 0x03,
+            0x0A => "example.com",
         };
         let returned_client_pin_parameters =
             AuthenticatorClientPinParameters::try_from(cbor_value).unwrap();
@@ -746,12 +752,12 @@ mod test {
     #[test]
     fn test_from_cbor_cred_management_parameters() {
         let cbor_value = cbor_map! {
-            1 => CredentialManagementSubCommand::EnumerateCredentialsBegin as u64,
-            2 => cbor_map!{
+            0x01 => CredentialManagementSubCommand::EnumerateCredentialsBegin as u64,
+            0x02 => cbor_map!{
                 0x01 => vec![0x1D; 32],
             },
-            3 => 1,
-            4 => vec! [0x9A; 16],
+            0x03 => 1,
+            0x04 => vec! [0x9A; 16],
         };
         let returned_cred_management_parameters =
             AuthenticatorCredentialManagementParameters::try_from(cbor_value).unwrap();
@@ -785,8 +791,8 @@ mod test {
     fn test_from_cbor_large_blobs_parameters() {
         // successful get
         let cbor_value = cbor_map! {
-            1 => 2,
-            3 => 4,
+            0x01 => 2,
+            0x03 => 4,
         };
         let returned_large_blobs_parameters =
             AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
@@ -805,11 +811,11 @@ mod test {
 
         // successful first set
         let cbor_value = cbor_map! {
-            2 => vec! [0x5E],
-            3 => 0,
-            4 => MIN_LARGE_BLOB_LEN as u64,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x02 => vec! [0x5E],
+            0x03 => 0,
+            0x04 => MIN_LARGE_BLOB_LEN as u64,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         let returned_large_blobs_parameters =
             AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
@@ -828,10 +834,10 @@ mod test {
 
         // successful next set
         let cbor_value = cbor_map! {
-            2 => vec! [0x5E],
-            3 => 1,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x02 => vec! [0x5E],
+            0x03 => 1,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         let returned_large_blobs_parameters =
             AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
@@ -850,9 +856,9 @@ mod test {
 
         // failing with neither get nor set
         let cbor_value = cbor_map! {
-            3 => 4,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x03 => 4,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -861,11 +867,11 @@ mod test {
 
         // failing with get and set
         let cbor_value = cbor_map! {
-            1 => 2,
-            2 => vec! [0x5E],
-            3 => 4,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x01 => 2,
+            0x02 => vec! [0x5E],
+            0x03 => 4,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -874,11 +880,11 @@ mod test {
 
         // failing with get and length
         let cbor_value = cbor_map! {
-            1 => 2,
-            3 => 4,
-            4 => MIN_LARGE_BLOB_LEN as u64,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x01 => 2,
+            0x03 => 4,
+            0x04 => MIN_LARGE_BLOB_LEN as u64,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -887,10 +893,10 @@ mod test {
 
         // failing with zero offset and no length present
         let cbor_value = cbor_map! {
-            2 => vec! [0x5E],
-            3 => 0,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x02 => vec! [0x5E],
+            0x03 => 0,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -899,11 +905,11 @@ mod test {
 
         // failing with length smaller than minimum
         let cbor_value = cbor_map! {
-            2 => vec! [0x5E],
-            3 => 0,
-            4 => MIN_LARGE_BLOB_LEN as u64 - 1,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x02 => vec! [0x5E],
+            0x03 => 0,
+            0x04 => MIN_LARGE_BLOB_LEN as u64 - 1,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -912,11 +918,11 @@ mod test {
 
         // failing with non-zero offset and length present
         let cbor_value = cbor_map! {
-            2 => vec! [0x5E],
-            3 => 4,
-            4 => MIN_LARGE_BLOB_LEN as u64,
-            5 => vec! [0xA9],
-            6 => 1,
+            0x02 => vec! [0x5E],
+            0x03 => 4,
+            0x04 => MIN_LARGE_BLOB_LEN as u64,
+            0x05 => vec! [0xA9],
+            0x06 => 1,
         };
         assert_eq!(
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
@@ -948,10 +954,10 @@ mod test {
 
         // Attestation key is too short.
         let cbor_value = cbor_map! {
-            1 => false,
-            2 => cbor_map! {
-                1 => dummy_cert,
-                2 => dummy_pkey[..key_material::ATTESTATION_PRIVATE_KEY_LENGTH - 1]
+            0x01 => false,
+            0x02 => cbor_map! {
+                0x01 => dummy_cert,
+                0x02 => dummy_pkey[..key_material::ATTESTATION_PRIVATE_KEY_LENGTH - 1]
             }
         };
         assert_eq!(
@@ -961,9 +967,9 @@ mod test {
 
         // Missing private key
         let cbor_value = cbor_map! {
-            1 => false,
-            2 => cbor_map! {
-                1 => dummy_cert
+            0x01 => false,
+            0x02 => cbor_map! {
+                0x01 => dummy_cert
             }
         };
         assert_eq!(
@@ -973,9 +979,9 @@ mod test {
 
         // Missing certificate
         let cbor_value = cbor_map! {
-            1 => false,
-            2 => cbor_map! {
-                2 => dummy_pkey
+            0x01 => false,
+            0x02 => cbor_map! {
+                0x02 => dummy_pkey
             }
         };
         assert_eq!(
@@ -985,10 +991,10 @@ mod test {
 
         // Valid
         let cbor_value = cbor_map! {
-            1 => false,
-            2 => cbor_map! {
-                1 => dummy_cert,
-                2 => dummy_pkey
+            0x01 => false,
+            0x02 => cbor_map! {
+                0x01 => dummy_cert,
+                0x02 => dummy_pkey
             }
         };
         assert_eq!(

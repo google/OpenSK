@@ -46,16 +46,15 @@ fn get_stored_rp_ids(
 
 /// Generates the response for subcommands enumerating RPs.
 fn enumerate_rps_response(
-    rp_id: Option<String>,
+    rp_id: String,
     total_rps: Option<u64>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp = rp_id.clone().map(|rp_id| PublicKeyCredentialRpEntity {
+    let rp_id_hash = Some(Sha256::hash(rp_id.as_bytes()).to_vec());
+    let rp = Some(PublicKeyCredentialRpEntity {
         rp_id,
         rp_name: None,
         rp_icon: None,
     });
-    let rp_id_hash = rp_id.map(|rp_id| Sha256::hash(rp_id.as_bytes()).to_vec());
-
     Ok(AuthenticatorCredentialManagementResponse {
         rp,
         rp_id_hash,
@@ -128,12 +127,15 @@ fn process_enumerate_rps_begin(
     let rp_set = get_stored_rp_ids(persistent_store)?;
     let total_rps = rp_set.len();
 
-    // TODO(kaczmarczyck) should we return CTAP2_ERR_NO_CREDENTIALS if empty?
     if total_rps > 1 {
         stateful_command_permission.set_command(now, StatefulCommand::EnumerateRps(1));
     }
     // TODO https://github.com/rust-lang/rust/issues/62924 replace with pop_first()
-    enumerate_rps_response(rp_set.into_iter().next(), Some(total_rps as u64))
+    let rp_id = rp_set
+        .into_iter()
+        .next()
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
+    enumerate_rps_response(rp_id, Some(total_rps as u64))
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
@@ -148,7 +150,7 @@ fn process_enumerate_rps_get_next_rp(
         .into_iter()
         .nth(rp_id_index)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-    enumerate_rps_response(Some(rp_id), None)
+    enumerate_rps_response(rp_id, None)
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.

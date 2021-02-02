@@ -18,11 +18,10 @@ use core::ops::Mul;
 use subtle::{self, Choice, ConditionallySelectable, CtOption};
 
 // An exponent on the elliptic curve, that is an element modulo the curve order N.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
-#[cfg_attr(feature = "derive_debug", derive(Debug))]
 pub struct ExponentP256 {
     int: Int256,
 }
@@ -92,11 +91,10 @@ impl Mul for &ExponentP256 {
 }
 
 // A non-zero exponent on the elliptic curve.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
-#[cfg_attr(feature = "derive_debug", derive(Debug))]
 pub struct NonZeroExponentP256 {
     e: ExponentP256,
 }

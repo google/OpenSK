@@ -26,7 +26,7 @@ pub struct SecKey {
     a: NonZeroExponentP256,
 }
 
-#[cfg_attr(feature = "derive_debug", derive(Clone, PartialEq, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PubKey {
     p: PointP256,
 }

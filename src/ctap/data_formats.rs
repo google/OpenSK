@@ -27,8 +27,7 @@ use enum_iterator::IntoEnumIterator;
 const ES256_ALGORITHM: i64 = -7;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
     pub rp_name: Option<String>,
@@ -70,8 +69,7 @@ impl From<PublicKeyCredentialRpEntity> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
     pub user_name: Option<String>,
@@ -118,8 +116,7 @@ impl From<PublicKeyCredentialUserEntity> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-publickeycredentialtype
-#[derive(Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PublicKeyCredentialType {
     PublicKey,
     // This is the default for all strings not covered above.
@@ -151,8 +148,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialType {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialparameters
-#[derive(PartialEq)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct PublicKeyCredentialParameter {
     pub cred_type: PublicKeyCredentialType,
     pub alg: SignatureAlgorithm,
@@ -185,8 +181,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum AuthenticatorTransport {
     Usb,
@@ -223,8 +218,7 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
     pub key_id: Vec<u8>,
@@ -275,8 +269,7 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     }
 }
 
-#[derive(Default)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
     pub cred_protect: Option<CredentialProtectionPolicy>,
@@ -321,8 +314,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     }
 }
 
-#[derive(Clone, Default)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GetAssertionExtensions {
     pub hmac_secret: Option<GetAssertionHmacSecretInput>,
     pub cred_blob: bool,
@@ -359,8 +351,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -391,8 +382,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 }
 
 // Even though options are optional, we can use the default if not present.
-#[derive(Default)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, Default, PartialEq)]
 pub struct MakeCredentialOptions {
     pub rk: bool,
     pub uv: bool,
@@ -425,7 +415,7 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct GetAssertionOptions {
     pub up: bool,
     pub uv: bool,
@@ -470,8 +460,7 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
 }
 
 // https://www.w3.org/TR/webauthn/#packed-attestation
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct PackedAttestationStatement {
     pub alg: i64,
     pub sig: Vec<u8>,
@@ -490,8 +479,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
     }
 }
 
-#[derive(PartialEq)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
     // This is the default for all numbers not covered above.
@@ -516,8 +504,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialProtectionPolicy {
     UserVerificationOptional = 0x01,
@@ -548,9 +535,7 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
 //
 // Note that we only use the WebAuthn definition as an example. This data-structure is not specified
 // by FIDO. In particular we may choose how we serialize and deserialize it.
-#[derive(Clone)]
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PublicKeyCredentialSource {
     // TODO function to convert to / from Vec<u8>
     pub key_type: PublicKeyCredentialType,
@@ -688,8 +673,7 @@ impl PublicKeyCredentialSource {
 }
 
 // The COSE key is used for both ECDH and ECDSA public keys for transmission.
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CoseKey {
     x_bytes: [u8; ecdh::NBYTES],
     y_bytes: [u8; ecdh::NBYTES],
@@ -818,7 +802,7 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ClientPinSubCommand {
     GetPinRetries = 0x01,
@@ -856,8 +840,7 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
     }
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ConfigSubCommand {
     EnableEnterpriseAttestation = 0x01,
@@ -887,8 +870,7 @@ impl TryFrom<cbor::Value> for ConfigSubCommand {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConfigSubCommandParams {
     SetMinPinLength(SetMinPinLengthParams),
 }
@@ -903,8 +885,7 @@ impl From<ConfigSubCommandParams> for cbor::Value {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SetMinPinLengthParams {
     pub new_min_pin_length: Option<u8>,
     pub min_pin_length_rp_ids: Option<Vec<String>>,
@@ -958,8 +939,7 @@ impl From<SetMinPinLengthParams> for cbor::Value {
     }
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialManagementSubCommand {
     GetCredsMetadata = 0x01,
@@ -995,8 +975,7 @@ impl TryFrom<cbor::Value> for CredentialManagementSubCommand {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CredentialManagementSubCommandParameters {
     pub rp_id_hash: Option<Vec<u8>>,
     pub credential_id: Option<PublicKeyCredentialDescriptor>,

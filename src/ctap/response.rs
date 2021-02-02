@@ -22,8 +22,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use cbor::{cbor_array_vec, cbor_bool, cbor_map_btree, cbor_map_options, cbor_text};
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub enum ResponseData {
     AuthenticatorMakeCredential(AuthenticatorMakeCredentialResponse),
     AuthenticatorGetAssertion(AuthenticatorGetAssertionResponse),
@@ -57,8 +56,7 @@ impl From<ResponseData> for Option<cbor::Value> {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorMakeCredentialResponse {
     pub fmt: String,
     pub auth_data: Vec<u8>,
@@ -84,8 +82,7 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorGetAssertionResponse {
     pub credential: Option<PublicKeyCredentialDescriptor>,
     pub auth_data: Vec<u8>,
@@ -117,8 +114,7 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorGetInfoResponse {
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
@@ -191,8 +187,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorClientPinResponse {
     pub key_agreement: Option<CoseKey>,
     pub pin_token: Option<Vec<u8>>,
@@ -215,8 +210,7 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorLargeBlobsResponse {
     pub config: Vec<u8>,
 }
@@ -231,9 +225,7 @@ impl From<AuthenticatorLargeBlobsResponse> for cbor::Value {
     }
 }
 
-#[derive(Default)]
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, Default, PartialEq)]
 pub struct AuthenticatorCredentialManagementResponse {
     pub existing_resident_credentials_count: Option<u64>,
     pub max_possible_remaining_resident_credentials_count: Option<u64>,
@@ -280,8 +272,7 @@ impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorVendorResponse {
     pub cert_programmed: bool,
     pub pkey_programmed: bool,

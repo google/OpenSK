@@ -91,7 +91,7 @@ then
   cargo test --release --features std
   cd ../..
   cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std,derive_debug
+  RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
@@ -103,7 +103,7 @@ then
   cargo test --features std
   cd ../..
   cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --features std,derive_debug
+  RUSTFLAGS='-C target-feature=+aes' cargo test --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --features std

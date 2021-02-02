@@ -30,8 +30,7 @@ use core::marker::PhantomData;
 
 pub const NBYTES: usize = int256::NBYTES;
 
-#[derive(Clone, PartialEq)]
-#[cfg_attr(feature = "derive_debug", derive(Debug))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
@@ -41,7 +40,7 @@ pub struct Signature {
     s: NonZeroExponentP256,
 }
 
-#[cfg_attr(feature = "derive_debug", derive(Clone))]
+#[derive(Clone)]
 pub struct PubKey {
     p: PointP256,
 }

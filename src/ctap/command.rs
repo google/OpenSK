@@ -38,7 +38,7 @@ pub const MAX_CREDENTIAL_COUNT_IN_LIST: Option<usize> = None;
 const MIN_LARGE_BLOB_LEN: usize = 17;
 
 // CTAP specification (version 20190130) section 6.1
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     AuthenticatorMakeCredential(AuthenticatorMakeCredentialParameters),
     AuthenticatorGetAssertion(AuthenticatorGetAssertionParameters),
@@ -148,7 +148,7 @@ impl Command {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorMakeCredentialParameters {
     pub client_data_hash: Vec<u8>,
     pub rp: PublicKeyCredentialRpEntity,
@@ -236,7 +236,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorGetAssertionParameters {
     pub rp_id: String,
     pub client_data_hash: Vec<u8>,
@@ -307,7 +307,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorClientPinParameters {
     pub pin_protocol: u64,
     pub sub_command: ClientPinSubCommand,
@@ -363,7 +363,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorLargeBlobsParameters {
     pub get: Option<usize>,
     pub set: Option<Vec<u8>>,
@@ -438,7 +438,7 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorConfigParameters {
     pub sub_command: ConfigSubCommand,
     pub sub_command_params: Option<ConfigSubCommandParams>,
@@ -478,7 +478,7 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorAttestationMaterial {
     pub certificate: Vec<u8>,
     pub private_key: [u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
@@ -507,7 +507,7 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorCredentialManagementParameters {
     pub sub_command: CredentialManagementSubCommand,
     pub sub_command_params: Option<CredentialManagementSubCommandParameters>,
@@ -544,7 +544,7 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct AuthenticatorVendorConfigureParameters {
     pub lockdown: bool,
     pub attestation_material: Option<AuthenticatorAttestationMaterial>,

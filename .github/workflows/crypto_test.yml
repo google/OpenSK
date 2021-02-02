@@ -33,10 +33,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/crypto/Cargo.toml --release --features std,derive_debug
+          args: --manifest-path libraries/crypto/Cargo.toml --release --features std
 
       - name: Unit testing of crypto library (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/crypto/Cargo.toml --features std,derive_debug
+          args: --manifest-path libraries/crypto/Cargo.toml --features std

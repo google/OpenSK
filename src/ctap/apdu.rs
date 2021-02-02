@@ -18,9 +18,8 @@ use core::convert::TryFrom;
 
 const APDU_HEADER_LEN: usize = 4;
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(non_camel_case_types, dead_code)]
-#[derive(PartialEq)]
 pub enum ApduStatusCode {
     SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
@@ -51,9 +50,8 @@ pub enum ApduInstructions {
     GetResponse = 0xC0,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[allow(dead_code)]
-#[derive(Default, PartialEq)]
 pub struct ApduHeader {
     pub cla: u8,
     pub ins: u8,
@@ -72,8 +70,7 @@ impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
     }
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// The APDU cases
 pub enum Case {
     Le1,
@@ -85,18 +82,16 @@ pub enum Case {
     Le3,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-#[derive(PartialEq)]
 pub enum ApduType {
     Instruction,
     Short(Case),
     Extended(Case),
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-#[derive(PartialEq)]
 pub struct APDU {
     pub header: ApduHeader,
     pub lc: u16,

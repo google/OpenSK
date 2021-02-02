@@ -111,7 +111,6 @@ impl Mul for &GFP256 {
     }
 }
 
-#[cfg(feature = "derive_debug")]
 impl core::fmt::Debug for GFP256 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "GFP256::{:?}", self.int)

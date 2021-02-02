@@ -636,7 +636,6 @@ impl SubAssign<&Int256> for Int256 {
     }
 }
 
-#[cfg(feature = "derive_debug")]
 impl core::fmt::Debug for Int256 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "Int256 {{ digits: {:08x?} }}", self.digits)

@@ -610,6 +610,23 @@ impl PersistentStore {
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
         Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[])?)
     }
+
+    /// Returns whether enterprise attestation is enabled.
+    pub fn enterprise_attestation(&self) -> Result<bool, Ctap2StatusCode> {
+        match self.store.find(key::ENTERPRISE_ATTESTATION)? {
+            None => Ok(false),
+            Some(value) if value.is_empty() => Ok(true),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Marks enterprise attestation as enabled.
+    pub fn enable_enterprise_attestation(&mut self) -> Result<(), Ctap2StatusCode> {
+        if !self.enterprise_attestation()? {
+            self.store.insert(key::ENTERPRISE_ATTESTATION, &[])?;
+        }
+        Ok(())
+    }
 }
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {
@@ -1306,6 +1323,18 @@ mod test {
         assert!(persistent_store.has_force_pin_change().unwrap());
         assert_eq!(persistent_store.set_pin(&[0x88; 16], 8), Ok(()));
         assert!(!persistent_store.has_force_pin_change().unwrap());
+    }
+
+    #[test]
+    fn test_enterprise_attestation() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        assert!(!persistent_store.enterprise_attestation().unwrap());
+        assert_eq!(persistent_store.enable_enterprise_attestation(), Ok(()));
+        assert!(persistent_store.enterprise_attestation().unwrap());
+        persistent_store.reset(&mut rng).unwrap();
+        assert!(!persistent_store.enterprise_attestation().unwrap());
     }
 
     #[test]

@@ -93,7 +93,10 @@ make_partition! {
     /// The stored large blob can be too big for one key, so it has to be sharded.
     LARGE_BLOB_SHARDS = 2000..2004;
 
-    /// If this entry exists and equals 1, the PIN needs to be changed.
+    /// If this entry exists and is empty, enterprise attestation is enabled.
+    ENTERPRISE_ATTESTATION = 2039;
+
+    /// If this entry exists and is empty, the PIN needs to be changed.
     FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.

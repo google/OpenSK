@@ -106,6 +106,22 @@ fn enumerate_credentials_response(
     })
 }
 
+/// Check if the token permissions have the correct associated RP ID.
+///
+/// Either no RP ID is associated, or the RP ID matches the stored credential.
+fn check_rp_id_permissions(
+    persistent_store: &mut PersistentStore,
+    pin_protocol_v1: &mut PinProtocolV1,
+    credential_id: &[u8],
+) -> Result<(), Ctap2StatusCode> {
+    // Pre-check a sufficient condition before calling the store.
+    if pin_protocol_v1.has_no_rp_id_permission().is_ok() {
+        return Ok(());
+    }
+    let (_, credential) = persistent_store.find_credential_item(credential_id)?;
+    pin_protocol_v1.has_no_or_rp_id_permission(&credential.rp_id)
+}
+
 /// Processes the subcommand getCredsMetadata for CredentialManagement.
 fn process_get_creds_metadata(
     persistent_store: &PersistentStore,
@@ -155,12 +171,14 @@ fn process_enumerate_rps_get_next_rp(
 fn process_enumerate_credentials_begin(
     persistent_store: &PersistentStore,
     stateful_command_permission: &mut StatefulPermission,
+    pin_protocol_v1: &mut PinProtocolV1,
     sub_command_params: CredentialManagementSubCommandParameters,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_hash = sub_command_params
         .rp_id_hash
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
+    pin_protocol_v1.has_no_or_rp_id_hash_permission(&rp_id_hash[..])?;
     let mut iter_result = Ok(());
     let iter = persistent_store.iter_credentials(&mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
@@ -199,18 +217,21 @@ fn process_enumerate_credentials_get_next_credential(
 /// Processes the subcommand deleteCredential for CredentialManagement.
 fn process_delete_credential(
     persistent_store: &mut PersistentStore,
+    pin_protocol_v1: &mut PinProtocolV1,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
     let credential_id = sub_command_params
         .credential_id
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
         .key_id;
+    check_rp_id_permissions(persistent_store, pin_protocol_v1, &credential_id)?;
     persistent_store.delete_credential(&credential_id)
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
 fn process_update_user_information(
     persistent_store: &mut PersistentStore,
+    pin_protocol_v1: &mut PinProtocolV1,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
     let credential_id = sub_command_params
@@ -220,6 +241,7 @@ fn process_update_user_information(
     let user = sub_command_params
         .user
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
+    check_rp_id_permissions(persistent_store, pin_protocol_v1, &credential_id)?;
     persistent_store.update_credential(&credential_id, user)
 }
 
@@ -255,13 +277,10 @@ pub fn process_credential_management(
     match sub_command {
         CredentialManagementSubCommand::GetCredsMetadata
         | CredentialManagementSubCommand::EnumerateRpsBegin
-        | CredentialManagementSubCommand::DeleteCredential
         | CredentialManagementSubCommand::EnumerateCredentialsBegin
+        | CredentialManagementSubCommand::DeleteCredential
         | CredentialManagementSubCommand::UpdateUserInformation => {
             check_pin_uv_auth_protocol(pin_protocol)?;
-            persistent_store
-                .pin_hash()?
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
             let pin_auth = pin_auth.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
             let mut management_data = vec![sub_command as u8];
             if let Some(sub_command_params) = sub_command_params.clone() {
@@ -272,9 +291,8 @@ pub fn process_credential_management(
             if !pin_protocol_v1.verify_pin_auth_token(&management_data, &pin_auth) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
             }
+            // The RP ID permission is handled differently per subcommand below.
             pin_protocol_v1.has_permission(PinPermission::CredentialManagement)?;
-            pin_protocol_v1.has_no_permission_rp_id()?;
-            // TODO(kaczmarczyck) sometimes allow a RP ID
         }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp
         | CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {}
@@ -282,13 +300,17 @@ pub fn process_credential_management(
 
     let response = match sub_command {
         CredentialManagementSubCommand::GetCredsMetadata => {
+            pin_protocol_v1.has_no_rp_id_permission()?;
             Some(process_get_creds_metadata(persistent_store)?)
         }
-        CredentialManagementSubCommand::EnumerateRpsBegin => Some(process_enumerate_rps_begin(
-            persistent_store,
-            stateful_command_permission,
-            now,
-        )?),
+        CredentialManagementSubCommand::EnumerateRpsBegin => {
+            pin_protocol_v1.has_no_rp_id_permission()?;
+            Some(process_enumerate_rps_begin(
+                persistent_store,
+                stateful_command_permission,
+                now,
+            )?)
+        }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp => Some(
             process_enumerate_rps_get_next_rp(persistent_store, stateful_command_permission)?,
         ),
@@ -296,6 +318,7 @@ pub fn process_credential_management(
             Some(process_enumerate_credentials_begin(
                 persistent_store,
                 stateful_command_permission,
+                pin_protocol_v1,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                 now,
             )?)
@@ -309,6 +332,7 @@ pub fn process_credential_management(
         CredentialManagementSubCommand::DeleteCredential => {
             process_delete_credential(
                 persistent_store,
+                pin_protocol_v1,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
             )?;
             None
@@ -316,6 +340,7 @@ pub fn process_credential_management(
         CredentialManagementSubCommand::UpdateUserInformation => {
             process_update_user_information(
                 persistent_store,
+                pin_protocol_v1,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
             )?;
             None

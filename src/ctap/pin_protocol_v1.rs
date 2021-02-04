@@ -501,6 +501,7 @@ impl PinProtocolV1 {
         encrypt_hmac_secret_output(&shared_secret, &salt_enc[..], cred_random)
     }
 
+    /// Check if the required command's token permission is granted.
     pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
         // Relies on the fact that all permissions are represented by powers of two.
         if permission as u8 & self.permissions != 0 {
@@ -510,22 +511,47 @@ impl PinProtocolV1 {
         }
     }
 
-    pub fn has_no_permission_rp_id(&self) -> Result<(), Ctap2StatusCode> {
+    /// Check if no RP ID is associated with the token permission.
+    pub fn has_no_rp_id_permission(&self) -> Result<(), Ctap2StatusCode> {
         if self.permissions_rp_id.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         Ok(())
     }
 
-    pub fn has_permission_for_rp_id(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
-        if let Some(permissions_rp_id) = &self.permissions_rp_id {
-            if rp_id != permissions_rp_id {
-                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-            }
-        } else {
-            self.permissions_rp_id = Some(String::from(rp_id));
+    /// Check if no or the passed RP ID is associated with the token permission.
+    pub fn has_no_or_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+        match &self.permissions_rp_id {
+            Some(p) if rp_id != p => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+            _ => Ok(()),
         }
-        Ok(())
+    }
+
+    /// Check if no RP ID is associated with the token permission, or it matches the hash.
+    pub fn has_no_or_rp_id_hash_permission(
+        &self,
+        rp_id_hash: &[u8],
+    ) -> Result<(), Ctap2StatusCode> {
+        match &self.permissions_rp_id {
+            Some(p) if rp_id_hash != Sha256::hash(p.as_bytes()) => {
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Check if the passed RP ID is associated with the token permission.
+    ///
+    /// If no RP ID is associated, associate the passed RP ID as a side effect.
+    pub fn require_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+        match &self.permissions_rp_id {
+            Some(p) if rp_id != p => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
+            None => {
+                self.permissions_rp_id = Some(String::from(rp_id));
+                Ok(())
+            }
+            _ => Ok(()),
+        }
     }
 
     #[cfg(test)]
@@ -1150,24 +1176,65 @@ mod test {
     }
 
     #[test]
-    fn test_has_no_permission_rp_id() {
+    fn test_has_no_rp_id_permission() {
         let mut rng = ThreadRng256 {};
         let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        assert_eq!(pin_protocol_v1.has_no_permission_rp_id(), Ok(()));
-        assert_eq!(pin_protocol_v1.permissions_rp_id, None,);
+        assert_eq!(pin_protocol_v1.has_no_rp_id_permission(), Ok(()));
+        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
         pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
         assert_eq!(
-            pin_protocol_v1.has_no_permission_rp_id(),
+            pin_protocol_v1.has_no_rp_id_permission(),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
 
     #[test]
-    fn test_has_permission_for_rp_id() {
+    fn test_has_no_or_rp_id_permission() {
         let mut rng = ThreadRng256 {};
         let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
         assert_eq!(
-            pin_protocol_v1.has_permission_for_rp_id("example.com"),
+            pin_protocol_v1.has_no_or_rp_id_permission("example.com"),
+            Ok(())
+        );
+        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
+        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
+        assert_eq!(
+            pin_protocol_v1.has_no_or_rp_id_permission("example.com"),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_no_or_rp_id_permission("another.example.com"),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_has_no_or_rp_id_hash_permission() {
+        let mut rng = ThreadRng256 {};
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let rp_id_hash = Sha256::hash(b"example.com");
+        assert_eq!(
+            pin_protocol_v1.has_no_or_rp_id_hash_permission(&rp_id_hash),
+            Ok(())
+        );
+        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
+        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
+        assert_eq!(
+            pin_protocol_v1.has_no_or_rp_id_hash_permission(&rp_id_hash),
+            Ok(())
+        );
+        assert_eq!(
+            pin_protocol_v1.has_no_or_rp_id_hash_permission(&[0x4A; 32]),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_require_rp_id_permission() {
+        let mut rng = ThreadRng256 {};
+        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        assert_eq!(
+            pin_protocol_v1.require_rp_id_permission("example.com"),
             Ok(())
         );
         assert_eq!(
@@ -1175,11 +1242,11 @@ mod test {
             Some(String::from("example.com"))
         );
         assert_eq!(
-            pin_protocol_v1.has_permission_for_rp_id("example.com"),
+            pin_protocol_v1.require_rp_id_permission("example.com"),
             Ok(())
         );
         assert_eq!(
-            pin_protocol_v1.has_permission_for_rp_id("counter-example.com"),
+            pin_protocol_v1.require_rp_id_permission("counter-example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

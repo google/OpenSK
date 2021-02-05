@@ -177,7 +177,7 @@ impl CtapHid {
                 match message.cmd {
                     // CTAP specification (version 20190130) section 8.1.9.1.1
                     CtapHid::COMMAND_MSG => {
-                        // If we don't have CTAP1 backward compatibilty, this command in invalid.
+                        // If we don't have CTAP1 backward compatibilty, this command is invalid.
                         #[cfg(not(feature = "with_ctap1"))]
                         return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD);
 

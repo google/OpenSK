@@ -88,7 +88,7 @@ impl LargeBlobs {
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
             }
-            if persistent_store.pin_hash()?.is_some() {
+            if persistent_store.pin_hash()?.is_some() || persistent_store.has_always_uv()? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 // TODO(kaczmarczyck) Error codes for PIN protocol differ across commands.

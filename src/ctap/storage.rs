@@ -610,6 +610,24 @@ impl PersistentStore {
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
         Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[])?)
     }
+
+    /// Returns whether alwaysUv is enabled.
+    pub fn has_always_uv(&self) -> Result<bool, Ctap2StatusCode> {
+        match self.store.find(key::ALWAYS_UV)? {
+            None => Ok(false),
+            Some(value) if value.is_empty() => Ok(true),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Enables alwaysUv, when disabled, and vice versa.
+    pub fn toggle_always_uv(&mut self) -> Result<(), Ctap2StatusCode> {
+        if self.has_always_uv()? {
+            Ok(self.store.remove(key::ALWAYS_UV)?)
+        } else {
+            Ok(self.store.insert(key::ALWAYS_UV, &[])?)
+        }
+    }
 }
 
 impl From<persistent_store::StoreError> for Ctap2StatusCode {
@@ -1306,6 +1324,18 @@ mod test {
         assert!(persistent_store.has_force_pin_change().unwrap());
         assert_eq!(persistent_store.set_pin(&[0x88; 16], 8), Ok(()));
         assert!(!persistent_store.has_force_pin_change().unwrap());
+    }
+
+    #[test]
+    fn test_always_uv() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        assert!(!persistent_store.has_always_uv().unwrap());
+        assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
+        assert!(persistent_store.has_always_uv().unwrap());
+        assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
+        assert!(!persistent_store.has_always_uv().unwrap());
     }
 
     #[test]

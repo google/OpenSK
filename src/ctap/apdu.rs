@@ -29,6 +29,7 @@ pub enum ApduStatusCode {
     SW_WRONG_DATA = 0x6a_80,
     SW_WRONG_LENGTH = 0x67_00,
     SW_COND_USE_NOT_SATISFIED = 0x69_85,
+    SW_COMMAND_NOT_ALLOWED = 0x69_86,
     SW_FILE_NOT_FOUND = 0x6a_82,
     SW_INCORRECT_P1P2 = 0x6a_86,
     /// Instruction code not supported or invalid

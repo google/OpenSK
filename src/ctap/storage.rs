@@ -460,8 +460,8 @@ impl PersistentStore {
         min_pin_length_rp_ids: Vec<String>,
     ) -> Result<(), Ctap2StatusCode> {
         let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
-            let rp_id = String::from(*rp_id);
+        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = String::from(rp_id);
             if !min_pin_length_rp_ids.contains(&rp_id) {
                 min_pin_length_rp_ids.push(rp_id);
             }
@@ -1209,8 +1209,8 @@ mod test {
             persistent_store.set_min_pin_length_rp_ids(rp_ids.clone()),
             Ok(())
         );
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
-            let rp_id = rp_id.to_string().to_string();
+        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = String::from(rp_id);
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }

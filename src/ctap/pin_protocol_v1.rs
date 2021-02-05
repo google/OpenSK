@@ -543,7 +543,7 @@ impl PinProtocolV1 {
     /// Check if the passed RP ID is associated with the token permission.
     ///
     /// If no RP ID is associated, associate the passed RP ID as a side effect.
-    pub fn require_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+    pub fn ensure_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
         match &self.permissions_rp_id {
             Some(p) if rp_id != p => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
             None => {
@@ -1230,11 +1230,11 @@ mod test {
     }
 
     #[test]
-    fn test_require_rp_id_permission() {
+    fn test_ensure_rp_id_permission() {
         let mut rng = ThreadRng256 {};
         let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
         assert_eq!(
-            pin_protocol_v1.require_rp_id_permission("example.com"),
+            pin_protocol_v1.ensure_rp_id_permission("example.com"),
             Ok(())
         );
         assert_eq!(
@@ -1242,11 +1242,11 @@ mod test {
             Some(String::from("example.com"))
         );
         assert_eq!(
-            pin_protocol_v1.require_rp_id_permission("example.com"),
+            pin_protocol_v1.ensure_rp_id_permission("example.com"),
             Ok(())
         );
         assert_eq!(
-            pin_protocol_v1.require_rp_id_permission("counter-example.com"),
+            pin_protocol_v1.ensure_rp_id_permission("counter-example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

@@ -1816,6 +1816,10 @@ mod test {
     #[test]
     fn test_from_enterprise_attestation_mode() {
         assert_eq!(
+            EnterpriseAttestationMode::try_from(0),
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION),
+        );
+        assert_eq!(
             EnterpriseAttestationMode::try_from(1),
             Ok(EnterpriseAttestationMode::VendorFacilitated),
         );

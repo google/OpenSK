@@ -98,7 +98,7 @@ pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
 // individual certificates then makes authenticators identifiable. Do NOT set
 // USE_BATCH_ATTESTATION to true at the same time in this case!
 pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
-const ENTERPRISE_RP_ID_LIST: Vec<String> = Vec::new();
+const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 // Our credential ID consists of
 // - 16 byte initialization vector for AES-256,
 // - 32 byte ECDSA private key for the credential,
@@ -598,7 +598,7 @@ where
                 (
                     EnterpriseAttestationMode::PlatformManaged,
                     EnterpriseAttestationMode::PlatformManaged,
-                ) => ENTERPRISE_RP_ID_LIST.contains(&rp_id),
+                ) => ENTERPRISE_RP_ID_LIST.contains(&rp_id.as_str()),
                 _ => true,
             }
         } else {

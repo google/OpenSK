@@ -56,7 +56,7 @@ const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
 
 const MAX_PIN_RETRIES: u8 = 8;
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
-const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
+const DEFAULT_MIN_PIN_LENGTH_RP_IDS: &[&str] = &[];
 // This constant is an attempt to limit storage requirements. If you don't set it to 0,
 // the stored strings can still be unbounded, but that is true for all RP IDs.
 pub const MAX_RP_IDS_LENGTH: usize = 8;
@@ -439,12 +439,17 @@ impl PersistentStore {
     /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
     /// allowed.
     pub fn min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
-        let rp_ids = self
-            .store
-            .find(key::MIN_PIN_LENGTH_RP_IDS)?
-            .map_or(Some(DEFAULT_MIN_PIN_LENGTH_RP_IDS), |value| {
-                deserialize_min_pin_length_rp_ids(&value)
-            });
+        let rp_ids = self.store.find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
+            || {
+                Some(
+                    DEFAULT_MIN_PIN_LENGTH_RP_IDS
+                        .iter()
+                        .map(|&s| String::from(s))
+                        .collect(),
+                )
+            },
+            |value| deserialize_min_pin_length_rp_ids(&value),
+        );
         debug_assert!(rp_ids.is_some());
         Ok(rp_ids.unwrap_or_default())
     }
@@ -455,7 +460,8 @@ impl PersistentStore {
         min_pin_length_rp_ids: Vec<String>,
     ) -> Result<(), Ctap2StatusCode> {
         let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = String::from(*rp_id);
             if !min_pin_length_rp_ids.contains(&rp_id) {
                 min_pin_length_rp_ids.push(rp_id);
             }
@@ -1203,7 +1209,8 @@ mod test {
             persistent_store.set_min_pin_length_rp_ids(rp_ids.clone()),
             Ok(())
         );
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = rp_id.to_string().to_string();
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }

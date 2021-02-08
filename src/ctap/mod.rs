@@ -2764,4 +2764,19 @@ mod test {
             ))
         );
     }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    /// Make sure that privacy guarantees are uphold.
+    ///
+    /// The current enterprise attestation implementation reuses batch
+    /// attestation. Enterprise attestation would imply a batch size of 1, but
+    /// batch attestation needs a batch size of at least 100k. To prevent
+    /// accidential misconfiguration, this test allows only one of the constants
+    /// to be set. If you implement your own enterprise attestation mechanism,
+    /// and you want batch attestation at the same time, feel free to proceed
+    /// carefully and remove this test.
+    fn check_attestation_privacy() {
+        assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
+    }
 }

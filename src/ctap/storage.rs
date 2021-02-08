@@ -18,10 +18,10 @@ use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
 };
-use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
+use crate::ctap::{key_material, ENFORCE_ALWAYS_UV};
 use crate::embedded_flash::{new_storage, Storage};
 use alloc::string::String;
 use alloc::vec;
@@ -613,6 +613,9 @@ impl PersistentStore {
 
     /// Returns whether alwaysUv is enabled.
     pub fn has_always_uv(&self) -> Result<bool, Ctap2StatusCode> {
+        if ENFORCE_ALWAYS_UV {
+            return Ok(true);
+        }
         match self.store.find(key::ALWAYS_UV)? {
             None => Ok(false),
             Some(value) if value.is_empty() => Ok(true),
@@ -622,6 +625,9 @@ impl PersistentStore {
 
     /// Enables alwaysUv, when disabled, and vice versa.
     pub fn toggle_always_uv(&mut self) -> Result<(), Ctap2StatusCode> {
+        if ENFORCE_ALWAYS_UV {
+            return Ok(());
+        }
         if self.has_always_uv()? {
             Ok(self.store.remove(key::ALWAYS_UV)?)
         } else {
@@ -1331,11 +1337,15 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        assert!(!persistent_store.has_always_uv().unwrap());
-        assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
-        assert!(persistent_store.has_always_uv().unwrap());
-        assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
-        assert!(!persistent_store.has_always_uv().unwrap());
+        if ENFORCE_ALWAYS_UV {
+            assert!(persistent_store.has_always_uv().unwrap());
+        } else {
+            assert!(!persistent_store.has_always_uv().unwrap());
+            assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
+            assert!(persistent_store.has_always_uv().unwrap());
+            assert_eq!(persistent_store.toggle_always_uv(), Ok(()));
+            assert!(!persistent_store.has_always_uv().unwrap());
+        }
     }
 
     #[test]

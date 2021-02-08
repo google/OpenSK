@@ -129,6 +129,9 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
 // Maximum size stored with the credBlob extension. Must be at least 32.
 const MAX_CRED_BLOB_LENGTH: usize = 32;
+// Enforce the alwaysUv option. With this constant set to true, commands require
+// a PIN to be set up. The command toggleAlwaysUv will fail to disable alwaysUv.
+pub const ENFORCE_ALWAYS_UV: bool = false;
 
 // Checks the PIN protocol parameter against all supported versions.
 pub fn check_pin_uv_auth_protocol(

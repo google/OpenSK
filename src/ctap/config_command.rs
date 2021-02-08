@@ -12,14 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::check_pin_uv_auth_protocol;
 use super::command::AuthenticatorConfigParameters;
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::pin_protocol_v1::PinProtocolV1;
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
+use super::{check_pin_uv_auth_protocol, ENTERPRISE_ATTESTATION_MODE};
 use alloc::vec;
+
+/// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
+fn process_enable_enterprise_attestation(
+    persistent_store: &mut PersistentStore,
+) -> Result<ResponseData, Ctap2StatusCode> {
+    if ENTERPRISE_ATTESTATION_MODE.is_some() {
+        persistent_store.enable_enterprise_attestation()?;
+        Ok(ResponseData::AuthenticatorConfig)
+    } else {
+        Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+    }
+}
 
 /// Processes the subcommand setMinPINLength for AuthenticatorConfig.
 fn process_set_min_pin_length(
@@ -85,6 +97,9 @@ pub fn process_config(
     }
 
     match sub_command {
+        ConfigSubCommand::EnableEnterpriseAttestation => {
+            process_enable_enterprise_attestation(persistent_store)
+        }
         ConfigSubCommand::SetMinPinLength => {
             if let Some(ConfigSubCommandParams::SetMinPinLength(params)) = sub_command_params {
                 process_set_min_pin_length(persistent_store, params)
@@ -100,6 +115,34 @@ pub fn process_config(
 mod test {
     use super::*;
     use crypto::rng256::ThreadRng256;
+
+    #[test]
+    fn test_process_enable_enterprise_attestation() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
+            sub_command_params: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+
+        if ENTERPRISE_ATTESTATION_MODE.is_some() {
+            assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+            assert_eq!(persistent_store.enterprise_attestation(), Ok(true));
+        } else {
+            assert_eq!(
+                config_response,
+                Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+            );
+        }
+    }
 
     fn create_min_pin_config_params(
         min_pin_length: u8,

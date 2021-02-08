@@ -18,7 +18,7 @@ use super::pin_protocol_v1::PinProtocolV1;
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
-use super::{check_pin_uv_auth_protocol, ENFORCE_ALWAYS_UV, ENTERPRISE_ATTESTATION_MODE};
+use super::{check_pin_uv_auth_protocol, ENTERPRISE_ATTESTATION_MODE};
 use alloc::vec;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
@@ -37,9 +37,6 @@ fn process_enable_enterprise_attestation(
 fn process_toggle_always_uv(
     persistent_store: &mut PersistentStore,
 ) -> Result<ResponseData, Ctap2StatusCode> {
-    if ENFORCE_ALWAYS_UV {
-        return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
-    }
     persistent_store.toggle_always_uv()?;
     Ok(ResponseData::AuthenticatorConfig)
 }
@@ -130,6 +127,7 @@ pub fn process_config(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ctap::ENFORCE_ALWAYS_UV;
     use crypto::rng256::ThreadRng256;
 
     #[test]

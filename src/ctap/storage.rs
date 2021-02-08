@@ -649,7 +649,7 @@ impl PersistentStore {
     /// Enables alwaysUv, when disabled, and vice versa.
     pub fn toggle_always_uv(&mut self) -> Result<(), Ctap2StatusCode> {
         if ENFORCE_ALWAYS_UV {
-            return Ok(());
+            return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
         }
         if self.has_always_uv()? {
             Ok(self.store.remove(key::ALWAYS_UV)?)
@@ -1375,6 +1375,10 @@ mod test {
 
         if ENFORCE_ALWAYS_UV {
             assert!(persistent_store.has_always_uv().unwrap());
+            assert_eq!(
+                persistent_store.toggle_always_uv(),
+                Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
+            );
         } else {
             assert!(!persistent_store.has_always_uv().unwrap());
             assert_eq!(persistent_store.toggle_always_uv(), Ok(()));

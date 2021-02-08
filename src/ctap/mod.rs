@@ -1032,7 +1032,7 @@ where
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
         let has_always_uv = self.persistent_store.has_always_uv()?;
-        #[cfg(feature = "with_ctap1")]
+        #[cfg_attr(not(feature = "with_ctap1"), allow(unused_mut))]
         let mut versions = vec![
             String::from(FIDO2_VERSION_STRING),
             String::from(FIDO2_1_VERSION_STRING),
@@ -1043,11 +1043,6 @@ where
                 versions.insert(0, String::from(U2F_VERSION_STRING))
             }
         }
-        #[cfg(not(feature = "with_ctap1"))]
-        let versions = vec![
-            String::from(FIDO2_VERSION_STRING),
-            String::from(FIDO2_1_VERSION_STRING),
-        ];
         let mut options_map = BTreeMap::new();
         options_map.insert(String::from("rk"), true);
         options_map.insert(

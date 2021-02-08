@@ -75,9 +75,11 @@ use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
-// this setting. The basic attestation uses the signing key from key_material.rs
-// as a batch key. Turn it on if you want attestation. In this case, be aware that
-// it is your responsibility to generate your own key material and keep it secret.
+// this setting. The basic attestation uses the signing key configured with a
+// vendor command as a batch key. If you turn batch attestation on, be aware that
+// it is your responsibility to safely generate and store the key material. Also,
+// the batches must have size of at least 100k authenticators before using new
+// key material.
 const USE_BATCH_ATTESTATION: bool = false;
 // The signature counter is currently implemented as a global counter, if you set
 // this flag to true. The spec strongly suggests to have per-credential-counters,
@@ -96,7 +98,10 @@ pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
 // AuthenticatorConfig. An enterprise might want to customize the type of
 // attestation that is used. OpenSK defaults to batch attestation. Configuring
 // individual certificates then makes authenticators identifiable. Do NOT set
-// USE_BATCH_ATTESTATION to true at the same time in this case!
+// USE_BATCH_ATTESTATION to true at the same time in this case! The code asserts
+// that you don't use the same key material for batch and enterprise attestation.
+// If you implement your own enterprise attestation mechanism, and you want batch
+// attestation at the same time, proceed carefully and remove the assertion.
 pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
 const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 // Our credential ID consists of
@@ -321,6 +326,11 @@ where
         check_user_presence: CheckUserPresence,
         now: ClockValue,
     ) -> CtapState<'a, R, CheckUserPresence> {
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
+        }
+
         let persistent_store = PersistentStore::new(rng);
         let pin_protocol_v1 = PinProtocolV1::new(rng);
         CtapState {
@@ -2763,20 +2773,5 @@ mod test {
                 }
             ))
         );
-    }
-
-    #[test]
-    #[allow(clippy::assertions_on_constants)]
-    /// Make sure that privacy guarantees are uphold.
-    ///
-    /// The current enterprise attestation implementation reuses batch
-    /// attestation. Enterprise attestation would imply a batch size of 1, but
-    /// batch attestation needs a batch size of at least 100k. To prevent
-    /// accidential misconfiguration, this test allows only one of the constants
-    /// to be set. If you implement your own enterprise attestation mechanism,
-    /// and you want batch attestation at the same time, feel free to proceed
-    /// carefully and remove this test.
-    fn check_attestation_privacy() {
-        assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
     }
 }

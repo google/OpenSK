@@ -671,7 +671,7 @@ where
                 }
                 self.pin_protocol_v1
                     .has_permission(PinPermission::MakeCredential)?;
-                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -958,7 +958,7 @@ where
                 }
                 self.pin_protocol_v1
                     .has_permission(PinPermission::GetAssertion)?;
-                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
                 UV_FLAG
             }
             None => {

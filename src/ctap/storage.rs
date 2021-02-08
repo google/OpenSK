@@ -151,7 +151,7 @@ impl PersistentStore {
     /// # Errors
     ///
     /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-    fn find_credential_item(
+    pub fn find_credential_item(
         &self,
         credential_id: &[u8],
     ) -> Result<(usize, PublicKeyCredentialSource), Ctap2StatusCode> {

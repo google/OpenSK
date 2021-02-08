@@ -126,11 +126,8 @@ a few things you can personalize:
 1.  Increase the `MAX_CRED_BLOB_LENGTH` in `ctap/mod.rs`, if you expect blobs
     bigger than the default value.
 1.  If a certification (additional to FIDO's) requires that all requests are
-    protected with user verification, set `CAN_DISABLE_ALWAYS_UV` in
-    `ctap/config_command.rs` to `false`. In that case, consider deploying
-    authenticators after calling `toggleAlwaysUv` to activate the feature.
-    Alternatively, you could change `ctap/storage.rs` to set `alwaysUv` in its
-    initialization.
+    protected with user verification, set `ENFORCE_ALWAYS_UV` in
+    `ctap/config_mod.rs` to `true`.
 
 ### 3D printed enclosure
 

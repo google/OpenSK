@@ -939,6 +939,24 @@ impl From<SetMinPinLengthParams> for cbor::Value {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum EnterpriseAttestationMode {
+    VendorFacilitated = 0x01,
+    PlatformManaged = 0x02,
+}
+
+impl TryFrom<u64> for EnterpriseAttestationMode {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(value: u64) -> Result<Self, Ctap2StatusCode> {
+        match value {
+            1 => Ok(EnterpriseAttestationMode::VendorFacilitated),
+            2 => Ok(EnterpriseAttestationMode::PlatformManaged),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialManagementSubCommand {
@@ -1793,6 +1811,26 @@ mod test {
             0x03 => true,
         };
         assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);
+    }
+
+    #[test]
+    fn test_from_enterprise_attestation_mode() {
+        assert_eq!(
+            EnterpriseAttestationMode::try_from(0),
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION),
+        );
+        assert_eq!(
+            EnterpriseAttestationMode::try_from(1),
+            Ok(EnterpriseAttestationMode::VendorFacilitated),
+        );
+        assert_eq!(
+            EnterpriseAttestationMode::try_from(2),
+            Ok(EnterpriseAttestationMode::PlatformManaged),
+        );
+        assert_eq!(
+            EnterpriseAttestationMode::try_from(3),
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION),
+        );
     }
 
     #[test]

@@ -161,7 +161,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
     pub pin_uv_auth_protocol: Option<u64>,
-    pub enterprise_attestation: Option<bool>,
+    pub enterprise_attestation: Option<u64>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
@@ -219,7 +219,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
-        let enterprise_attestation = enterprise_attestation.map(extract_bool).transpose()?;
+        let enterprise_attestation = enterprise_attestation.map(extract_unsigned).transpose()?;
 
         Ok(AuthenticatorMakeCredentialParameters {
             client_data_hash,
@@ -601,7 +601,7 @@ mod test {
             0x05 => cbor_array![],
             0x08 => vec![0x12, 0x34],
             0x09 => 1,
-            0x0A => true,
+            0x0A => 2,
         };
         let returned_make_credential_parameters =
             AuthenticatorMakeCredentialParameters::try_from(cbor_value).unwrap();
@@ -635,7 +635,7 @@ mod test {
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
             pin_uv_auth_protocol: Some(1),
-            enterprise_attestation: Some(true),
+            enterprise_attestation: Some(2),
         };
 
         assert_eq!(

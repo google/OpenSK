@@ -61,6 +61,7 @@ pub struct AuthenticatorMakeCredentialResponse {
     pub fmt: String,
     pub auth_data: Vec<u8>,
     pub att_stmt: PackedAttestationStatement,
+    pub ep_att: Option<bool>,
     pub large_blob_key: Option<Vec<u8>>,
 }
 
@@ -70,6 +71,7 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
             fmt,
             auth_data,
             att_stmt,
+            ep_att,
             large_blob_key,
         } = make_credential_response;
 
@@ -77,6 +79,7 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
             0x01 => fmt,
             0x02 => auth_data,
             0x03 => att_stmt,
+            0x04 => ep_att,
             0x05 => large_blob_key,
         }
     }
@@ -320,6 +323,7 @@ mod test {
             fmt: "packed".to_string(),
             auth_data: vec![0xAD],
             att_stmt,
+            ep_att: Some(true),
             large_blob_key: Some(vec![0x1B]),
         };
         let response_cbor: Option<cbor::Value> =
@@ -328,6 +332,7 @@ mod test {
             0x01 => "packed",
             0x02 => vec![0xAD],
             0x03 => cbor_packed_attestation_statement,
+            0x04 => true,
             0x05 => vec![0x1B],
         };
         assert_eq!(response_cbor, Some(expected_cbor));

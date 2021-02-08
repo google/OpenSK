@@ -56,7 +56,7 @@ const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
 
 const MAX_PIN_RETRIES: u8 = 8;
 const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
-const DEFAULT_MIN_PIN_LENGTH_RP_IDS: Vec<String> = Vec::new();
+const DEFAULT_MIN_PIN_LENGTH_RP_IDS: &[&str] = &[];
 // This constant is an attempt to limit storage requirements. If you don't set it to 0,
 // the stored strings can still be unbounded, but that is true for all RP IDs.
 pub const MAX_RP_IDS_LENGTH: usize = 8;
@@ -151,7 +151,7 @@ impl PersistentStore {
     /// # Errors
     ///
     /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-    fn find_credential_item(
+    pub fn find_credential_item(
         &self,
         credential_id: &[u8],
     ) -> Result<(usize, PublicKeyCredentialSource), Ctap2StatusCode> {
@@ -439,12 +439,17 @@ impl PersistentStore {
     /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
     /// allowed.
     pub fn min_pin_length_rp_ids(&self) -> Result<Vec<String>, Ctap2StatusCode> {
-        let rp_ids = self
-            .store
-            .find(key::MIN_PIN_LENGTH_RP_IDS)?
-            .map_or(Some(DEFAULT_MIN_PIN_LENGTH_RP_IDS), |value| {
-                deserialize_min_pin_length_rp_ids(&value)
-            });
+        let rp_ids = self.store.find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
+            || {
+                Some(
+                    DEFAULT_MIN_PIN_LENGTH_RP_IDS
+                        .iter()
+                        .map(|&s| String::from(s))
+                        .collect(),
+                )
+            },
+            |value| deserialize_min_pin_length_rp_ids(&value),
+        );
         debug_assert!(rp_ids.is_some());
         Ok(rp_ids.unwrap_or_default())
     }
@@ -455,7 +460,8 @@ impl PersistentStore {
         min_pin_length_rp_ids: Vec<String>,
     ) -> Result<(), Ctap2StatusCode> {
         let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = String::from(rp_id);
             if !min_pin_length_rp_ids.contains(&rp_id) {
                 min_pin_length_rp_ids.push(rp_id);
             }
@@ -609,6 +615,23 @@ impl PersistentStore {
     /// Marks the PIN as outdated with respect to the new PIN policy.
     pub fn force_pin_change(&mut self) -> Result<(), Ctap2StatusCode> {
         Ok(self.store.insert(key::FORCE_PIN_CHANGE, &[])?)
+    }
+
+    /// Returns whether enterprise attestation is enabled.
+    pub fn enterprise_attestation(&self) -> Result<bool, Ctap2StatusCode> {
+        match self.store.find(key::ENTERPRISE_ATTESTATION)? {
+            None => Ok(false),
+            Some(value) if value.is_empty() => Ok(true),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Marks enterprise attestation as enabled.
+    pub fn enable_enterprise_attestation(&mut self) -> Result<(), Ctap2StatusCode> {
+        if !self.enterprise_attestation()? {
+            self.store.insert(key::ENTERPRISE_ATTESTATION, &[])?;
+        }
+        Ok(())
     }
 
     /// Returns whether alwaysUv is enabled.
@@ -1210,7 +1233,8 @@ mod test {
             persistent_store.set_min_pin_length_rp_ids(rp_ids.clone()),
             Ok(())
         );
-        for rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS {
+        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+            let rp_id = String::from(rp_id);
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }
@@ -1330,6 +1354,18 @@ mod test {
         assert!(persistent_store.has_force_pin_change().unwrap());
         assert_eq!(persistent_store.set_pin(&[0x88; 16], 8), Ok(()));
         assert!(!persistent_store.has_force_pin_change().unwrap());
+    }
+
+    #[test]
+    fn test_enterprise_attestation() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        assert!(!persistent_store.enterprise_attestation().unwrap());
+        assert_eq!(persistent_store.enable_enterprise_attestation(), Ok(()));
+        assert!(persistent_store.enterprise_attestation().unwrap());
+        persistent_store.reset(&mut rng).unwrap();
+        assert!(!persistent_store.enterprise_attestation().unwrap());
     }
 
     #[test]

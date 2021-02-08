@@ -36,10 +36,10 @@ use self::command::{
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::data_formats::{
-    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, GetAssertionExtensions,
-    PackedAttestationStatement, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
-    PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
-    SignatureAlgorithm,
+    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, EnterpriseAttestationMode,
+    GetAssertionExtensions, PackedAttestationStatement, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameter, PublicKeyCredentialSource, PublicKeyCredentialType,
+    PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 use self::large_blobs::{LargeBlobs, MAX_MSG_SIZE};
@@ -61,6 +61,7 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
 use cbor::cbor_map_options;
+use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
@@ -74,9 +75,11 @@ use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 
 // This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
-// this setting. The basic attestation uses the signing key from key_material.rs
-// as a batch key. Turn it on if you want attestation. In this case, be aware that
-// it is your responsibility to generate your own key material and keep it secret.
+// this setting. The basic attestation uses the signing key configured with a
+// vendor command as a batch key. If you turn batch attestation on, be aware that
+// it is your responsibility to safely generate and store the key material. Also,
+// the batches must have size of at least 100k authenticators before using new
+// key material.
 const USE_BATCH_ATTESTATION: bool = false;
 // The signature counter is currently implemented as a global counter, if you set
 // this flag to true. The spec strongly suggests to have per-credential-counters,
@@ -86,6 +89,21 @@ const USE_BATCH_ATTESTATION: bool = false;
 // solution is a compromise to be compatible with U2F and not wasting storage.
 const USE_SIGNATURE_COUNTER: bool = true;
 pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
+// This flag allows usage of enterprise attestation. For privacy reasons, it is
+// disabled by default. You can choose between
+// - EnterpriseAttestationMode::VendorFacilitated,
+// - EnterpriseAttestationMode::PlatformManaged.
+// For VendorFacilitated, choose an appriopriate ENTERPRISE_RP_ID_LIST.
+// To enable the feature, send the subcommand enableEnterpriseAttestation in
+// AuthenticatorConfig. An enterprise might want to customize the type of
+// attestation that is used. OpenSK defaults to batch attestation. Configuring
+// individual certificates then makes authenticators identifiable. Do NOT set
+// USE_BATCH_ATTESTATION to true at the same time in this case! The code asserts
+// that you don't use the same key material for batch and enterprise attestation.
+// If you implement your own enterprise attestation mechanism, and you want batch
+// attestation at the same time, proceed carefully and remove the assertion.
+pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
+const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 // Our credential ID consists of
 // - 16 byte initialization vector for AES-256,
 // - 32 byte ECDSA private key for the credential,
@@ -311,6 +329,11 @@ where
         check_user_presence: CheckUserPresence,
         now: ClockValue,
     ) -> CtapState<'a, R, CheckUserPresence> {
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
+        }
+
         let persistent_store = PersistentStore::new(rng);
         let pin_protocol_v1 = PinProtocolV1::new(rng);
         CtapState {
@@ -573,7 +596,7 @@ where
             options,
             pin_uv_auth_param,
             pin_uv_auth_protocol,
-            enterprise_attestation: _,
+            enterprise_attestation,
         } = make_credential_params;
 
         self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
@@ -583,6 +606,26 @@ where
         }
 
         let rp_id = rp.rp_id;
+        let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
+            let authenticator_mode =
+                ENTERPRISE_ATTESTATION_MODE.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+            if !self.persistent_store.enterprise_attestation()? {
+                return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+            }
+            match (
+                EnterpriseAttestationMode::try_from(enterprise_attestation)?,
+                authenticator_mode,
+            ) {
+                (
+                    EnterpriseAttestationMode::PlatformManaged,
+                    EnterpriseAttestationMode::PlatformManaged,
+                ) => ENTERPRISE_RP_ID_LIST.contains(&rp_id.as_str()),
+                _ => true,
+            }
+        } else {
+            false
+        };
+
         let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             < DEFAULT_CRED_PROTECT.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
@@ -649,7 +692,7 @@ where
                 }
                 self.pin_protocol_v1
                     .has_permission(PinPermission::MakeCredential)?;
-                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -738,7 +781,7 @@ where
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
 
-        let (signature, x5c) = if USE_BATCH_ATTESTATION {
+        let (signature, x5c) = if USE_BATCH_ATTESTATION || ep_att {
             let attestation_private_key = self
                 .persistent_store
                 .attestation_private_key()?
@@ -765,11 +808,13 @@ where
             x5c,
             ecdaa_key_id: None,
         };
+        let ep_att = if ep_att { Some(true) } else { None };
         Ok(ResponseData::AuthenticatorMakeCredential(
             AuthenticatorMakeCredentialResponse {
                 fmt: String::from("packed"),
                 auth_data,
                 att_stmt: attestation_statement,
+                ep_att,
                 large_blob_key,
             },
         ))
@@ -938,7 +983,7 @@ where
                 }
                 self.pin_protocol_v1
                     .has_permission(PinPermission::GetAssertion)?;
-                self.pin_protocol_v1.has_permission_for_rp_id(&rp_id)?;
+                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
                 UV_FLAG
             }
             None => {
@@ -1055,6 +1100,12 @@ where
         options_map.insert(String::from("up"), true);
         options_map.insert(String::from("pinUvAuthToken"), true);
         options_map.insert(String::from("largeBlobs"), true);
+        if ENTERPRISE_ATTESTATION_MODE.is_some() {
+            options_map.insert(
+                String::from("ep"),
+                self.persistent_store.enterprise_attestation()?,
+            );
+        }
         options_map.insert(String::from("authnrCfg"), true);
         options_map.insert(String::from("credMgmt"), true);
         options_map.insert(String::from("setMinPINLength"), true);
@@ -1252,6 +1303,7 @@ mod test {
                     fmt,
                     auth_data,
                     att_stmt,
+                    ep_att,
                     large_blob_key,
                 } = make_credential_response;
                 // The expected response is split to only assert the non-random parts.
@@ -1272,6 +1324,7 @@ mod test {
                     &auth_data[auth_data.len() - expected_extension_cbor.len()..auth_data.len()],
                     expected_extension_cbor
                 );
+                assert!(ep_att.is_none());
                 assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
                 assert_eq!(large_blob_key, None);
             }
@@ -1301,12 +1354,13 @@ mod test {
                     String::from("largeBlobKey"),
                 ]],
             0x03 => ctap_state.persistent_store.aaguid().unwrap(),
-            0x04 => cbor_map! {
+            0x04 => cbor_map_options! {
                 "rk" => true,
                 "clientPin" => false,
                 "up" => true,
                 "pinUvAuthToken" => true,
                 "largeBlobs" => true,
+                "ep" => ENTERPRISE_ATTESTATION_MODE.map(|_| false),
                 "authnrCfg" => true,
                 "credMgmt" => true,
                 "setMinPINLength" => true,

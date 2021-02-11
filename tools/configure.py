@@ -137,10 +137,9 @@ def main(args):
     if authenticator.device.capabilities & hid.CAPABILITY.WINK:
       authenticator.device.wink()
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
-    info(("Programming device {} AAGUID {} ({}). "
-          "Please touch the device to confirm...").format(
-              authenticator.device.descriptor.get("product_string", "Unknown"),
-              aaguid, authenticator.device))
+    info("Programming OpenSK device AAGUID {} ({}).".format(
+        aaguid, authenticator.device))
+    info("Please touch the device to confirm...")
     try:
       result = authenticator.send_cbor(
           OPENSK_VENDOR_CONFIGURE,

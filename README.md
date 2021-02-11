@@ -128,6 +128,9 @@ a few things you can personalize:
 1.  Implement enterprise attestation. This can be as easy as setting
     ENTERPRISE_ATTESTATION_MODE in `ctap/mod.rs`. If you want to use a different
     attestation type than batch attestation, you have to implement it first.
+1.  If a certification (additional to FIDO's) requires that all requests are
+    protected with user verification, set `ENFORCE_ALWAYS_UV` in
+    `ctap/config_mod.rs` to `true`.
 
 ### 3D printed enclosure
 

@@ -33,6 +33,14 @@ fn process_enable_enterprise_attestation(
     }
 }
 
+/// Processes the subcommand toggleAlwaysUv for AuthenticatorConfig.
+fn process_toggle_always_uv(
+    persistent_store: &mut PersistentStore,
+) -> Result<ResponseData, Ctap2StatusCode> {
+    persistent_store.toggle_always_uv()?;
+    Ok(ResponseData::AuthenticatorConfig)
+}
+
 /// Processes the subcommand setMinPINLength for AuthenticatorConfig.
 fn process_set_min_pin_length(
     persistent_store: &mut PersistentStore,
@@ -78,7 +86,11 @@ pub fn process_config(
         pin_uv_auth_protocol,
     } = params;
 
-    if persistent_store.pin_hash()?.is_some() {
+    let enforce_uv = match sub_command {
+        ConfigSubCommand::ToggleAlwaysUv => false,
+        _ => true,
+    } && persistent_store.has_always_uv()?;
+    if persistent_store.pin_hash()?.is_some() || enforce_uv {
         // TODO(kaczmarczyck) The error code is specified inconsistently with other commands.
         check_pin_uv_auth_protocol(pin_uv_auth_protocol)
             .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
@@ -100,6 +112,7 @@ pub fn process_config(
         ConfigSubCommand::EnableEnterpriseAttestation => {
             process_enable_enterprise_attestation(persistent_store)
         }
+        ConfigSubCommand::ToggleAlwaysUv => process_toggle_always_uv(persistent_store),
         ConfigSubCommand::SetMinPinLength => {
             if let Some(ConfigSubCommandParams::SetMinPinLength(params)) = sub_command_params {
                 process_set_min_pin_length(persistent_store, params)
@@ -114,6 +127,7 @@ pub fn process_config(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ctap::ENFORCE_ALWAYS_UV;
     use crypto::rng256::ThreadRng256;
 
     #[test]
@@ -142,6 +156,87 @@ mod test {
                 Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
             );
         }
+    }
+
+    #[test]
+    fn test_process_toggle_always_uv() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::ToggleAlwaysUv,
+            sub_command_params: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert!(persistent_store.has_always_uv().unwrap());
+
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::ToggleAlwaysUv,
+            sub_command_params: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        if ENFORCE_ALWAYS_UV {
+            assert_eq!(
+                config_response,
+                Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
+            );
+        } else {
+            assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+            assert!(!persistent_store.has_always_uv().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_process_toggle_always_uv_with_pin() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+
+        let pin_uv_auth_param = Some(vec![
+            0x99, 0xBA, 0x0A, 0x57, 0x9D, 0x95, 0x5A, 0x44, 0xE3, 0x77, 0xCF, 0x95, 0x51, 0x3F,
+            0xFD, 0xBE,
+        ]);
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::ToggleAlwaysUv,
+            sub_command_params: None,
+            pin_uv_auth_param: pin_uv_auth_param.clone(),
+            pin_uv_auth_protocol: Some(1),
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        if ENFORCE_ALWAYS_UV {
+            assert_eq!(
+                config_response,
+                Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
+            );
+            return;
+        }
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert!(persistent_store.has_always_uv().unwrap());
+
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::ToggleAlwaysUv,
+            sub_command_params: None,
+            pin_uv_auth_param,
+            pin_uv_auth_protocol: Some(1),
+        };
+        let config_response =
+            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert!(!persistent_store.has_always_uv().unwrap());
     }
 
     fn create_min_pin_config_params(

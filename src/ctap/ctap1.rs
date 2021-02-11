@@ -189,6 +189,12 @@ impl Ctap1Command {
         R: Rng256,
         CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
     {
+        if !ctap_state
+            .allows_ctap1()
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+        {
+            return Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED);
+        }
         let command = U2fCommand::try_from(message)?;
         match command {
             U2fCommand::Register {
@@ -396,6 +402,21 @@ mod test {
         message.push(CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);
         message
+    }
+
+    #[test]
+    fn test_process_allowed() {
+        let mut rng = ThreadRng256 {};
+        let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
+        ctap_state.persistent_store.toggle_always_uv().unwrap();
+
+        let application = [0x0A; 32];
+        let message = create_register_message(&application);
+        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
+        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED));
     }
 
     #[test]

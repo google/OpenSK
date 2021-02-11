@@ -93,6 +93,9 @@ make_partition! {
     /// The stored large blob can be too big for one key, so it has to be sharded.
     LARGE_BLOB_SHARDS = 2000..2004;
 
+    /// If this entry exists and is empty, alwaysUv is enabled.
+    ALWAYS_UV = 2038;
+
     /// If this entry exists and is empty, enterprise attestation is enabled.
     ENTERPRISE_ATTESTATION = 2039;
 

@@ -147,6 +147,9 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
 // Maximum size stored with the credBlob extension. Must be at least 32.
 const MAX_CRED_BLOB_LENGTH: usize = 32;
+// Enforce the alwaysUv option. With this constant set to true, commands require
+// a PIN to be set up. alwaysUv can not be disabled by commands.
+pub const ENFORCE_ALWAYS_UV: bool = false;
 
 // Checks the PIN protocol parameter against all supported versions.
 pub fn check_pin_uv_auth_protocol(
@@ -362,6 +365,14 @@ where
                 .incr_global_signature_counter(increment)?;
         }
         Ok(())
+    }
+
+    // Returns whether CTAP1 commands are currently supported.
+    // If alwaysUv is enabled and the authenticator does not support internal UV,
+    // CTAP1 needs to be disabled.
+    #[cfg(feature = "with_ctap1")]
+    pub fn allows_ctap1(&self) -> Result<bool, Ctap2StatusCode> {
+        Ok(!self.persistent_store.has_always_uv()?)
     }
 
     // Encrypts the private key and relying party ID hash into a credential ID. Other
@@ -685,7 +696,11 @@ where
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
-                if self.persistent_store.pin_hash()?.is_some() {
+                if self.persistent_store.has_always_uv()? {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                }
+                // Corresponds to makeCredUvNotRqd set to true.
+                if options.rk && self.persistent_store.pin_hash()?.is_some() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 if options.uv {
@@ -972,8 +987,10 @@ where
                 UV_FLAG
             }
             None => {
+                if self.persistent_store.has_always_uv()? {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                }
                 if options.uv {
-                    // The specification (inconsistently) wants CTAP2_ERR_UNSUPPORTED_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
                 }
                 0x00
@@ -1062,6 +1079,18 @@ where
     }
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
+        let has_always_uv = self.persistent_store.has_always_uv()?;
+        #[cfg_attr(not(feature = "with_ctap1"), allow(unused_mut))]
+        let mut versions = vec![
+            String::from(FIDO2_VERSION_STRING),
+            String::from(FIDO2_1_VERSION_STRING),
+        ];
+        #[cfg(feature = "with_ctap1")]
+        {
+            if !has_always_uv {
+                versions.insert(0, String::from(U2F_VERSION_STRING))
+            }
+        }
         let mut options_map = BTreeMap::new();
         options_map.insert(String::from("rk"), true);
         options_map.insert(
@@ -1080,15 +1109,11 @@ where
         options_map.insert(String::from("authnrCfg"), true);
         options_map.insert(String::from("credMgmt"), true);
         options_map.insert(String::from("setMinPINLength"), true);
-        options_map.insert(String::from("makeCredUvNotRqd"), true);
+        options_map.insert(String::from("makeCredUvNotRqd"), !has_always_uv);
+        options_map.insert(String::from("alwaysUv"), has_always_uv);
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
-                versions: vec![
-                    #[cfg(feature = "with_ctap1")]
-                    String::from(U2F_VERSION_STRING),
-                    String::from(FIDO2_VERSION_STRING),
-                    String::from(FIDO2_1_VERSION_STRING),
-                ],
+                versions,
                 extensions: Some(vec![
                     String::from("hmac-secret"),
                     String::from("credProtect"),
@@ -1340,6 +1365,7 @@ mod test {
                 "credMgmt" => true,
                 "setMinPINLength" => true,
                 "makeCredUvNotRqd" => true,
+                "alwaysUv" => false,
             },
             0x05 => MAX_MSG_SIZE as u64,
             0x06 => cbor_array_vec![vec![1]],
@@ -1779,6 +1805,70 @@ mod test {
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
         assert_eq!(stored_credential.large_blob_key.unwrap(), large_blob_key);
+    }
+
+    #[test]
+    fn test_non_resident_process_make_credential_with_pin() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+
+        check_make_response(
+            make_credential_response,
+            0x41,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x70,
+            &[],
+        );
+    }
+
+    #[test]
+    fn test_resident_process_make_credential_with_pin() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+
+        let make_credential_params = create_minimal_make_credential_parameters();
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
+        );
+    }
+
+    #[test]
+    fn test_process_make_credential_with_pin_always_uv() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+
+        ctap_state.persistent_store.toggle_always_uv().unwrap();
+        let make_credential_params = create_minimal_make_credential_parameters();
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
+        );
+
+        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
+        make_credential_params.pin_uv_auth_protocol = Some(1);
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
     }
 
     #[test]

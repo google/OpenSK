@@ -141,7 +141,7 @@ mod test {
 
     #[test]
     fn enough_credentials() {
-        use super::super::MAX_SUPPORTED_RESIDENT_KEYS;
+        use crate::ctap::customization::MAX_SUPPORTED_RESIDENT_KEYS;
         assert!(MAX_SUPPORTED_RESIDENT_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
     }
 

@@ -92,45 +92,19 @@ If you build your own security key, depending on the hardware you use, there are
 a few things you can personalize:
 
 1.  If you have multiple buttons, choose the buttons responsible for user
-    presence in `main.rs`.
-1.  Decide whether you want to use batch attestation. There is a boolean flag in
-    `ctap/mod.rs`. It is mandatory for U2F, and you can create your own
-    self-signed certificate. The flag is used for FIDO2 and has some privacy
-    implications. Please check
-    [WebAuthn](https://www.w3.org/TR/webauthn/#attestation) for more
-    information.
-1.  Decide whether you want to use signature counters. Currently, only global
-    signature counters are implemented, as they are the default option for U2F.
-    The flag in `ctap/mod.rs` only turns them off for FIDO2. The most privacy
-    preserving solution is individual or no signature counters. Again, please
-    check [WebAuthn](https://www.w3.org/TR/webauthn/#signature-counter) for
-    documentation.
-1.  Depending on your available flash storage, choose an appropriate maximum
-    number of supported resident keys and number of pages in `ctap/storage.rs`.
-1.  Change the default level for the credProtect extension in `ctap/mod.rs`.
-    When changing the default, resident credentials become undiscoverable without
-    user verification. This helps privacy, but can make usage less comfortable
-    for credentials that need less protection.
-1.  Increase the default minimum length for PINs in `ctap/storage.rs`.
-    The current minimum is 4. Values from 4 to 63 are allowed. Requiring longer
-    PINs can help establish trust between users and relying parties. It makes
-    user verification harder to break, but less convenient.
-    NIST recommends at least 6-digit PINs in section 5.1.9.1:
-    https://pages.nist.gov/800-63-3/sp800-63b.html
-    You can add relying parties to the list of readers of the minimum PIN length.
-1.  In an enterprise setting, you can adapt `DEFAULT_MIN_PIN_LENGTH_RP_IDS` and
-    `MAX_RP_IDS_LENGTH` for tuning the `minPinLength` extension. The former
-    allows some relying parties to read the minimum PIN length by default. The
-    latter allows storing more relying parties that may check the minimum PIN
-    length.
-1.  Increase the `MAX_CRED_BLOB_LENGTH` in `ctap/mod.rs`, if you expect blobs
-    bigger than the default value.
-1.  Implement enterprise attestation. This can be as easy as setting
-    ENTERPRISE_ATTESTATION_MODE in `ctap/mod.rs`. If you want to use a different
-    attestation type than batch attestation, you have to implement it first.
-1.  If a certification (additional to FIDO's) requires that all requests are
-    protected with user verification, set `ENFORCE_ALWAYS_UV` in
-    `ctap/config_mod.rs` to `true`.
+    presence in `src/main.rs`.
+1.  If you have colored LEDs, like different blinking patterns and want to play
+    around with the code in `src/main.rs` more, take a look at e.g. `wink_leds`.
+1.  You find more options and documentation in `src/ctap/customization.rs`,
+    including:
+    - The default level for the credProtect extension.
+    - The default minimum PIN length, and what relying parties can set it.
+    - Whether you want to enforce alwaysUv.
+    - Settings for enterprise attestation.
+    - The maximum PIN retries.
+    - Whether you want to use batch attestation.
+    - Whether you want to use signature counters.
+    - Various constants to adapt to different hardware.
 
 ### 3D printed enclosure
 

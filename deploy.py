@@ -352,8 +352,8 @@ class OpenSKInstaller:
 
   def build_opensk(self):
     info("Building OpenSK application")
-    self._build_app_or_example(is_example=False)
     self._check_invariants()
+    self._build_app_or_example(is_example=False)
 
   def _build_app_or_example(self, is_example):
     assert self.args.application

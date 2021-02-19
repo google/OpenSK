@@ -616,9 +616,15 @@ class OpenSKInstaller:
     if self.args.programmer == "none":
       assert_python_library("intelhex")
 
+  def check_invariants(self):
+    print("Testing invariants in customization.rs...")
+    self.checked_command_output(["cargo", "test", "--features=std", "--lib",
+                                 "customization"])
+
   def run(self):
     self.check_prerequisites()
     self.update_rustc_if_needed()
+    self.check_invariants()
 
     if not (self.args.tockos or self.args.application or
             self.args.clear_storage):

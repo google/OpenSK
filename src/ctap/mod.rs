@@ -36,7 +36,7 @@ use self::command::{
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::customization::{
-    check_invariants, DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
+    DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
     MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
     MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
 };
@@ -296,7 +296,6 @@ where
         check_user_presence: CheckUserPresence,
         now: ClockValue,
     ) -> CtapState<'a, R, CheckUserPresence> {
-        check_invariants();
         let persistent_store = PersistentStore::new(rng);
         let pin_protocol_v1 = PinProtocolV1::new(rng);
         CtapState {

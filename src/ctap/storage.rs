@@ -14,14 +14,19 @@
 
 mod key;
 
+use crate::ctap::customization::{
+    DEFAULT_MIN_PIN_LENGTH, DEFAULT_MIN_PIN_LENGTH_RP_IDS, ENFORCE_ALWAYS_UV,
+    MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_RP_IDS_LENGTH, MAX_SUPPORTED_RESIDENT_KEYS,
+    NUM_PAGES,
+};
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
 };
+use crate::ctap::key_material;
 use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
-use crate::ctap::{key_material, ENFORCE_ALWAYS_UV};
 use crate::embedded_flash::{new_storage, Storage};
 use alloc::string::String;
 use alloc::vec;
@@ -32,35 +37,6 @@ use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
 use persistent_store::{fragment, StoreUpdate};
-
-// Those constants may be modified before compilation to tune the behavior of the key.
-//
-// The number of pages should be at least 3 and at most what the flash can hold. There should be no
-// reason to put a small number here, except that the latency of flash operations is linear in the
-// number of pages. This may improve in the future. Currently, using 20 pages gives between 20ms and
-// 240ms per operation. The rule of thumb is between 1ms and 12ms per additional page.
-//
-// Limiting the number of resident keys permits to ensure a minimum number of counter increments.
-// Let:
-// - P the number of pages (NUM_PAGES)
-// - K the maximum number of resident keys (MAX_SUPPORTED_RESIDENT_KEYS)
-// - S the maximum size of a resident key (about 500)
-// - C the number of erase cycles (10000)
-// - I the minimum number of counter increments
-//
-// We have: I = (P * 4084 - 5107 - K * S) / 8 * C
-//
-// With P=20 and K=150, we have I=2M which is enough for 500 increments per day for 10 years.
-const NUM_PAGES: usize = 20;
-const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
-
-const MAX_PIN_RETRIES: u8 = 8;
-const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
-const DEFAULT_MIN_PIN_LENGTH_RP_IDS: &[&str] = &[];
-// This constant is an attempt to limit storage requirements. If you don't set it to 0,
-// the stored strings can still be unbounded, but that is true for all RP IDs.
-pub const MAX_RP_IDS_LENGTH: usize = 8;
-pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize = 2048;
 
 /// Wrapper for master keys.
 pub struct MasterKeys {
@@ -825,7 +801,7 @@ mod test {
 
         let mut credential_ids = vec![];
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
-            let user_handle = i.to_ne_bytes().to_vec();
+            let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
             assert!(persistent_store.store_credential(credential_source).is_ok());
@@ -899,7 +875,7 @@ mod test {
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
-            let user_handle = i.to_ne_bytes().to_vec();
+            let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
@@ -948,7 +924,7 @@ mod test {
 
         let mut persistent_store = PersistentStore::new(&mut rng);
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
-            let user_handle = i.to_ne_bytes().to_vec();
+            let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
@@ -1247,10 +1223,6 @@ mod test {
         let mut rng = ThreadRng256 {};
         let persistent_store = PersistentStore::new(&mut rng);
 
-        #[allow(clippy::assertions_on_constants)]
-        {
-            assert!(MAX_LARGE_BLOB_ARRAY_SIZE >= 1024);
-        }
         assert!(
             MAX_LARGE_BLOB_ARRAY_SIZE
                 <= persistent_store.store.max_value_length()

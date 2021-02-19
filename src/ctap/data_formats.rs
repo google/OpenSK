@@ -504,11 +504,18 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
     }
 }
 
+/// The credProtect extension's policies for resident credentials.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialProtectionPolicy {
+    /// The credential is always discoverable, as if it had no protection level.
     UserVerificationOptional = 0x01,
+    /// The credential is discoverable with
+    /// - an allowList,
+    /// - an excludeList,
+    /// - user verification.
     UserVerificationOptionalWithCredentialIdList = 0x02,
+    /// The credentials is discoverable with user verification only.
     UserVerificationRequired = 0x03,
 }
 
@@ -939,9 +946,14 @@ impl From<SetMinPinLengthParams> for cbor::Value {
     }
 }
 
+/// The level of enterprise attestation allowed in MakeCredential.
 #[derive(Debug, PartialEq)]
 pub enum EnterpriseAttestationMode {
+    /// Enterprise attestation is restricted to a list of RP IDs. Add your
+    /// enterprises domain, e.g. "example.com", to the list below.
     VendorFacilitated = 0x01,
+    /// All relying parties can request an enterprise attestation. The authenticator
+    /// trusts the platform to filter requests.
     PlatformManaged = 0x02,
 }
 

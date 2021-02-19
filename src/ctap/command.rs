@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::customization::{MAX_CREDENTIAL_COUNT_IN_LIST, MAX_LARGE_BLOB_ARRAY_SIZE};
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
@@ -22,17 +23,11 @@ use super::data_formats::{
 };
 use super::key_material;
 use super::status_code::Ctap2StatusCode;
-use super::storage::MAX_LARGE_BLOB_ARRAY_SIZE;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use cbor::destructure_cbor_map;
 use core::convert::TryFrom;
-
-// Depending on your memory, you can use Some(n) to limit request sizes in
-// MakeCredential and GetAssertion. This affects allowList and excludeList.
-// You might also want to set the max credential size in process_get_info then.
-pub const MAX_CREDENTIAL_COUNT_IN_LIST: Option<usize> = None;
 
 // This constant is a consequence of the structure of messages.
 const MIN_LARGE_BLOB_LEN: usize = 17;

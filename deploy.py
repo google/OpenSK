@@ -352,6 +352,7 @@ class OpenSKInstaller:
 
   def build_opensk(self):
     info("Building OpenSK application")
+    self._check_invariants()
     self._build_app_or_example(is_example=False)
 
   def _build_app_or_example(self, is_example):
@@ -389,6 +390,11 @@ class OpenSKInstaller:
     app_path = os.path.join(app_path, self.args.application)
     # Create a TAB file
     self.create_tab_file({props.arch: app_path})
+
+  def _check_invariants(self):
+    print("Testing invariants in customization.rs...")
+    self.checked_command_output(
+        ["cargo", "test", "--features=std", "--lib", "customization"])
 
   def generate_crypto_materials(self, force_regenerate):
     has_error = subprocess.call([

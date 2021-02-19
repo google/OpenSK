@@ -127,7 +127,7 @@ pub fn process_config(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ctap::ENFORCE_ALWAYS_UV;
+    use crate::ctap::customization::ENFORCE_ALWAYS_UV;
     use crypto::rng256::ThreadRng256;
 
     #[test]

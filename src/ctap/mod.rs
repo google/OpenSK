@@ -18,6 +18,7 @@ mod config_command;
 mod credential_management;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
+mod customization;
 pub mod data_formats;
 pub mod hid;
 mod key_material;
@@ -31,10 +32,14 @@ mod timed_permission;
 use self::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
-    MAX_CREDENTIAL_COUNT_IN_LIST,
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
+use self::customization::{
+    DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
+    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
+    MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
+};
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, EnterpriseAttestationMode,
     GetAssertionExtensions, PackedAttestationStatement, PublicKeyCredentialDescriptor,
@@ -49,7 +54,7 @@ use self::response::{
     AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
-use self::storage::{PersistentStore, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_RP_IDS_LENGTH};
+use self::storage::PersistentStore;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
@@ -74,36 +79,7 @@ use libtock_drivers::console::Console;
 use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 
-// This flag enables or disables basic attestation for FIDO2. U2F is unaffected by
-// this setting. The basic attestation uses the signing key configured with a
-// vendor command as a batch key. If you turn batch attestation on, be aware that
-// it is your responsibility to safely generate and store the key material. Also,
-// the batches must have size of at least 100k authenticators before using new
-// key material.
-const USE_BATCH_ATTESTATION: bool = false;
-// The signature counter is currently implemented as a global counter, if you set
-// this flag to true. The spec strongly suggests to have per-credential-counters,
-// but it means you can't have an infinite amount of credentials anymore. Also,
-// since this is the only piece of information that needs writing often, we might
-// need a flash storage friendly way to implement this feature. The implemented
-// solution is a compromise to be compatible with U2F and not wasting storage.
-const USE_SIGNATURE_COUNTER: bool = true;
 pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
-// This flag allows usage of enterprise attestation. For privacy reasons, it is
-// disabled by default. You can choose between
-// - EnterpriseAttestationMode::VendorFacilitated,
-// - EnterpriseAttestationMode::PlatformManaged.
-// For VendorFacilitated, choose an appriopriate ENTERPRISE_RP_ID_LIST.
-// To enable the feature, send the subcommand enableEnterpriseAttestation in
-// AuthenticatorConfig. An enterprise might want to customize the type of
-// attestation that is used. OpenSK defaults to batch attestation. Configuring
-// individual certificates then makes authenticators identifiable. Do NOT set
-// USE_BATCH_ATTESTATION to true at the same time in this case! The code asserts
-// that you don't use the same key material for batch and enterprise attestation.
-// If you implement your own enterprise attestation mechanism, and you want batch
-// attestation at the same time, proceed carefully and remove the assertion.
-pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
-const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 // Our credential ID consists of
 // - 16 byte initialization vector for AES-256,
 // - 32 byte ECDSA private key for the credential,
@@ -141,15 +117,6 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::ES256,
 };
-// You can change this value to one of the following for more privacy.
-// - Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList)
-// - Some(CredentialProtectionPolicy::UserVerificationRequired)
-const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
-// Maximum size stored with the credBlob extension. Must be at least 32.
-const MAX_CRED_BLOB_LENGTH: usize = 32;
-// Enforce the alwaysUv option. With this constant set to true, commands require
-// a PIN to be set up. alwaysUv can not be disabled by commands.
-pub const ENFORCE_ALWAYS_UV: bool = false;
 
 // Checks the PIN protocol parameter against all supported versions.
 pub fn check_pin_uv_auth_protocol(
@@ -329,11 +296,6 @@ where
         check_user_presence: CheckUserPresence,
         now: ClockValue,
     ) -> CtapState<'a, R, CheckUserPresence> {
-        #[allow(clippy::assertions_on_constants)]
-        {
-            assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
-        }
-
         let persistent_store = PersistentStore::new(rng);
         let pin_protocol_v1 = PinProtocolV1::new(rng);
         CtapState {

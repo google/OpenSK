@@ -618,8 +618,8 @@ class OpenSKInstaller:
 
   def check_invariants(self):
     print("Testing invariants in customization.rs...")
-    self.checked_command_output(["cargo", "test", "--features=std", "--lib",
-                                 "customization"])
+    self.checked_command_output(
+        ["cargo", "test", "--features=std", "--lib", "customization"])
 
   def run(self):
     self.check_prerequisites()

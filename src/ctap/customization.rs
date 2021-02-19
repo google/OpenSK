@@ -245,6 +245,9 @@ mod test {
     #[test]
     #[allow(clippy::assertions_on_constants)]
     fn test_invariants() {
+        // Two invariants are currently tested in different files:
+        // - storage.rs: if MAX_LARGE_BLOB_ARRAY_SIZE fits the shards
+        // - storage/key.rs: if MAX_SUPPORTED_RESIDENT_KEYS fits CREDENTIALS
         assert!(DEFAULT_MIN_PIN_LENGTH >= 4);
         assert!(DEFAULT_MIN_PIN_LENGTH <= 63);
         assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
@@ -259,10 +262,8 @@ mod test {
             assert!(count >= 1);
         }
         assert!(MAX_LARGE_BLOB_ARRAY_SIZE >= 1024);
-        // Storage tests check if MAX_LARGE_BLOB_ARRAY_SIZE fits the shards.
         if MAX_RP_IDS_LENGTH == 0 {
             assert!(!DEFAULT_MIN_PIN_LENGTH_RP_IDS.is_empty());
         }
-        // Storage keys tests check if MAX_SUPPORTED_RESIDENT_KEYS fits CREDENTIALS.
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod apdu;
+mod client_pin;
 pub mod command;
 mod config_command;
 mod credential_management;
@@ -23,15 +24,15 @@ pub mod data_formats;
 pub mod hid;
 mod key_material;
 mod large_blobs;
-mod pin_protocol_v1;
 pub mod response;
 pub mod status_code;
 mod storage;
 mod timed_permission;
 
+use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
-    AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
-    AuthenticatorMakeCredentialParameters, AuthenticatorVendorConfigureParameters, Command,
+    AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters,
+    AuthenticatorVendorConfigureParameters, Command,
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
@@ -48,7 +49,6 @@ use self::data_formats::{
 };
 use self::hid::ChannelID;
 use self::large_blobs::{LargeBlobs, MAX_MSG_SIZE};
-use self::pin_protocol_v1::{PinPermission, PinProtocolV1};
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
@@ -278,7 +278,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     // false otherwise.
     check_user_presence: CheckUserPresence,
     persistent_store: PersistentStore,
-    pin_protocol_v1: PinProtocolV1,
+    client_pin: ClientPin,
     #[cfg(feature = "with_ctap1")]
     pub u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
@@ -297,12 +297,12 @@ where
         now: ClockValue,
     ) -> CtapState<'a, R, CheckUserPresence> {
         let persistent_store = PersistentStore::new(rng);
-        let pin_protocol_v1 = PinProtocolV1::new(rng);
+        let client_pin = ClientPin::new(rng);
         CtapState {
             rng,
             check_user_presence,
             persistent_store,
-            pin_protocol_v1,
+            client_pin,
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(
                 U2F_UP_PROMPT_TIMEOUT,
@@ -473,13 +473,17 @@ where
                     }
                     Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(now),
                     Command::AuthenticatorGetInfo => self.process_get_info(),
-                    Command::AuthenticatorClientPin(params) => self.process_client_pin(params),
+                    Command::AuthenticatorClientPin(params) => self.client_pin.process_command(
+                        self.rng,
+                        &mut self.persistent_store,
+                        params,
+                    ),
                     Command::AuthenticatorReset => self.process_reset(cid, now),
                     Command::AuthenticatorCredentialManagement(params) => {
                         process_credential_management(
                             &mut self.persistent_store,
                             &mut self.stateful_command_permission,
-                            &mut self.pin_protocol_v1,
+                            &mut self.client_pin,
                             params,
                             now,
                         )
@@ -487,14 +491,12 @@ where
                     Command::AuthenticatorSelection => self.process_selection(cid),
                     Command::AuthenticatorLargeBlobs(params) => self.large_blobs.process_command(
                         &mut self.persistent_store,
-                        &mut self.pin_protocol_v1,
+                        &mut self.client_pin,
                         params,
                     ),
-                    Command::AuthenticatorConfig(params) => process_config(
-                        &mut self.persistent_store,
-                        &mut self.pin_protocol_v1,
-                        params,
-                    ),
+                    Command::AuthenticatorConfig(params) => {
+                        process_config(&mut self.persistent_store, &mut self.client_pin, params)
+                    }
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
                         self.process_vendor_configure(params, cid)
@@ -647,14 +649,14 @@ where
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 if !self
-                    .pin_protocol_v1
+                    .client_pin
                     .verify_pin_auth_token(&client_data_hash, &pin_auth)
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
-                self.pin_protocol_v1
+                self.client_pin
                     .has_permission(PinPermission::MakeCredential)?;
-                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
+                self.client_pin.ensure_rp_id_permission(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
             None => {
@@ -815,7 +817,7 @@ where
             let encrypted_output = if let Some(hmac_secret_input) = extensions.hmac_secret {
                 let cred_random = self.generate_cred_random(&credential.private_key, has_uv)?;
                 Some(
-                    self.pin_protocol_v1
+                    self.client_pin
                         .process_hmac_secret(hmac_secret_input, &cred_random)?,
                 )
             } else {
@@ -938,14 +940,14 @@ where
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 if !self
-                    .pin_protocol_v1
+                    .client_pin
                     .verify_pin_auth_token(&client_data_hash, &pin_auth)
                 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
                 }
-                self.pin_protocol_v1
+                self.client_pin
                     .has_permission(PinPermission::GetAssertion)?;
-                self.pin_protocol_v1.ensure_rp_id_permission(&rp_id)?;
+                self.client_pin.ensure_rp_id_permission(&rp_id)?;
                 UV_FLAG
             }
             None => {
@@ -1104,17 +1106,6 @@ where
         ))
     }
 
-    fn process_client_pin(
-        &mut self,
-        client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.pin_protocol_v1.process_subcommand(
-            self.rng,
-            &mut self.persistent_store,
-            client_pin_params,
-        )
-    }
-
     fn process_reset(
         &mut self,
         cid: ChannelID,
@@ -1129,7 +1120,7 @@ where
         (self.check_user_presence)(cid)?;
 
         self.persistent_store.reset(self.rng)?;
-        self.pin_protocol_v1.reset(self.rng);
+        self.client_pin.reset(self.rng);
         #[cfg(feature = "with_ctap1")]
         {
             self.u2f_up_state = U2fUserPresenceState::new(
@@ -2332,11 +2323,11 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x88; 32];
-        let pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.pin_protocol_v1 = pin_protocol_v1;
+        ctap_state.client_pin = client_pin;
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user1 = PublicKeyCredentialUserEntity {

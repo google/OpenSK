@@ -166,7 +166,7 @@ pub enum PinPermission {
     AuthenticatorConfiguration = 0x20,
 }
 
-pub struct PinProtocolV1 {
+pub struct ClientPin {
     key_agreement_key: crypto::ecdh::SecKey,
     pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
     consecutive_pin_mismatches: u8,
@@ -174,11 +174,11 @@ pub struct PinProtocolV1 {
     permissions_rp_id: Option<String>,
 }
 
-impl PinProtocolV1 {
-    pub fn new(rng: &mut impl Rng256) -> PinProtocolV1 {
+impl ClientPin {
+    pub fn new(rng: &mut impl Rng256) -> ClientPin {
         let key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
         let pin_uv_auth_token = rng.gen_uniform_u8x32();
-        PinProtocolV1 {
+        ClientPin {
             key_agreement_key,
             pin_uv_auth_token,
             consecutive_pin_mismatches: 0,
@@ -395,14 +395,14 @@ impl PinProtocolV1 {
         Ok(response)
     }
 
-    pub fn process_subcommand(
+    pub fn process_command(
         &mut self,
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
         client_pin_params: AuthenticatorClientPinParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorClientPinParameters {
-            pin_protocol,
+            pin_uv_auth_protocol,
             sub_command,
             key_agreement,
             pin_auth,
@@ -412,7 +412,7 @@ impl PinProtocolV1 {
             permissions_rp_id,
         } = client_pin_params;
 
-        if pin_protocol != 1 {
+        if pin_uv_auth_protocol != 1 {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 
@@ -558,8 +558,8 @@ impl PinProtocolV1 {
     pub fn new_test(
         key_agreement_key: crypto::ecdh::SecKey,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
-    ) -> PinProtocolV1 {
-        PinProtocolV1 {
+    ) -> ClientPin {
+        ClientPin {
             key_agreement_key,
             pin_uv_auth_token,
             consecutive_pin_mismatches: 0,
@@ -647,13 +647,13 @@ mod test {
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&shared_secret);
         let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
 
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
         let pin_hash_enc = vec![
             0x8D, 0x7A, 0xA3, 0x9F, 0x7F, 0xC6, 0x08, 0x13, 0x9A, 0xC8, 0x56, 0x97, 0x70, 0x74,
             0x99, 0x66,
         ];
         assert_eq!(
-            pin_protocol_v1.verify_pin_hash_enc(
+            client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
@@ -664,7 +664,7 @@ mod test {
 
         let pin_hash_enc = vec![0xEE; 16];
         assert_eq!(
-            pin_protocol_v1.verify_pin_hash_enc(
+            client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
@@ -677,9 +677,9 @@ mod test {
             0x8D, 0x7A, 0xA3, 0x9F, 0x7F, 0xC6, 0x08, 0x13, 0x9A, 0xC8, 0x56, 0x97, 0x70, 0x74,
             0x99, 0x66,
         ];
-        pin_protocol_v1.consecutive_pin_mismatches = 3;
+        client_pin.consecutive_pin_mismatches = 3;
         assert_eq!(
-            pin_protocol_v1.verify_pin_hash_enc(
+            client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
@@ -687,11 +687,11 @@ mod test {
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
         );
-        pin_protocol_v1.consecutive_pin_mismatches = 0;
+        client_pin.consecutive_pin_mismatches = 0;
 
         let pin_hash_enc = vec![0x77; PIN_AUTH_LENGTH - 1];
         assert_eq!(
-            pin_protocol_v1.verify_pin_hash_enc(
+            client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
@@ -702,7 +702,7 @@ mod test {
 
         let pin_hash_enc = vec![0x77; PIN_AUTH_LENGTH + 1];
         assert_eq!(
-            pin_protocol_v1.verify_pin_hash_enc(
+            client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
                 &aes_dec_key,
@@ -716,14 +716,14 @@ mod test {
     fn test_process_get_pin_retries() {
         let mut rng = ThreadRng256 {};
         let persistent_store = PersistentStore::new(&mut rng);
-        let pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let client_pin = ClientPin::new(&mut rng);
         let expected_response = Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_token: None,
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
         });
         assert_eq!(
-            pin_protocol_v1.process_get_pin_retries(&persistent_store),
+            client_pin.process_get_pin_retries(&persistent_store),
             expected_response
         );
     }
@@ -731,36 +731,28 @@ mod test {
     #[test]
     fn test_process_get_key_agreement() {
         let mut rng = ThreadRng256 {};
-        let pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
+        let client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
         let expected_response = Ok(AuthenticatorClientPinResponse {
             key_agreement: Some(CoseKey::from(pk)),
             pin_token: None,
             retries: None,
         });
-        assert_eq!(
-            pin_protocol_v1.process_get_key_agreement(),
-            expected_response
-        );
+        assert_eq!(client_pin.process_get_key_agreement(), expected_response);
     }
 
     #[test]
     fn test_process_set_pin() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let new_pin_enc = encrypt_standard_pin(&shared_secret);
         let pin_auth = hmac_256::<Sha256>(&shared_secret, &new_pin_enc[..])[..16].to_vec();
         assert_eq!(
-            pin_protocol_v1.process_set_pin(
-                &mut persistent_store,
-                key_agreement,
-                pin_auth,
-                new_pin_enc
-            ),
+            client_pin.process_set_pin(&mut persistent_store, key_agreement, pin_auth, new_pin_enc),
             Ok(())
         );
     }
@@ -770,9 +762,9 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let new_pin_enc = encrypt_standard_pin(&shared_secret);
         let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
@@ -780,7 +772,7 @@ mod test {
         auth_param_data.extend(&pin_hash_enc);
         let pin_auth = hmac_256::<Sha256>(&shared_secret, &auth_param_data[..])[..16].to_vec();
         assert_eq!(
-            pin_protocol_v1.process_change_pin(
+            client_pin.process_change_pin(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement.clone(),
@@ -793,7 +785,7 @@ mod test {
 
         let bad_pin_hash_enc = vec![0xEE; 16];
         assert_eq!(
-            pin_protocol_v1.process_change_pin(
+            client_pin.process_change_pin(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement.clone(),
@@ -808,7 +800,7 @@ mod test {
             persistent_store.decr_pin_retries().unwrap();
         }
         assert_eq!(
-            pin_protocol_v1.process_change_pin(
+            client_pin.process_change_pin(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement,
@@ -825,12 +817,12 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
-        assert!(pin_protocol_v1
+        assert!(client_pin
             .process_get_pin_token(
                 &mut rng,
                 &mut persistent_store,
@@ -841,7 +833,7 @@ mod test {
 
         let pin_hash_enc = vec![0xEE; 16];
         assert_eq!(
-            pin_protocol_v1.process_get_pin_token(
+            client_pin.process_get_pin_token(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement,
@@ -857,13 +849,13 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
         assert_eq!(persistent_store.force_pin_change(), Ok(()));
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
         assert_eq!(
-            pin_protocol_v1.process_get_pin_token(
+            client_pin.process_get_pin_token(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement,
@@ -878,12 +870,12 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
-        assert!(pin_protocol_v1
+        assert!(client_pin
             .process_get_pin_uv_auth_token_using_pin_with_permissions(
                 &mut rng,
                 &mut persistent_store,
@@ -893,14 +885,14 @@ mod test {
                 Some(String::from("example.com")),
             )
             .is_ok());
-        assert_eq!(pin_protocol_v1.permissions, 0x03);
+        assert_eq!(client_pin.permissions, 0x03);
         assert_eq!(
-            pin_protocol_v1.permissions_rp_id,
+            client_pin.permissions_rp_id,
             Some(String::from("example.com"))
         );
 
         assert_eq!(
-            pin_protocol_v1.process_get_pin_uv_auth_token_using_pin_with_permissions(
+            client_pin.process_get_pin_uv_auth_token_using_pin_with_permissions(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement.clone(),
@@ -912,7 +904,7 @@ mod test {
         );
 
         assert_eq!(
-            pin_protocol_v1.process_get_pin_uv_auth_token_using_pin_with_permissions(
+            client_pin.process_get_pin_uv_auth_token_using_pin_with_permissions(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement.clone(),
@@ -925,7 +917,7 @@ mod test {
 
         let pin_hash_enc = vec![0xEE; 16];
         assert_eq!(
-            pin_protocol_v1.process_get_pin_uv_auth_token_using_pin_with_permissions(
+            client_pin.process_get_pin_uv_auth_token_using_pin_with_permissions(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement,
@@ -943,13 +935,13 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
         assert_eq!(persistent_store.force_pin_change(), Ok(()));
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        let pk = pin_protocol_v1.key_agreement_key.genpk();
-        let shared_secret = pin_protocol_v1.key_agreement_key.exchange_x_sha256(&pk);
+        let mut client_pin = ClientPin::new(&mut rng);
+        let pk = client_pin.key_agreement_key.genpk();
+        let shared_secret = client_pin.key_agreement_key.exchange_x_sha256(&pk);
         let key_agreement = CoseKey::from(pk);
         let pin_hash_enc = encrypt_standard_pin_hash(&shared_secret);
         assert_eq!(
-            pin_protocol_v1.process_get_pin_uv_auth_token_using_pin_with_permissions(
+            client_pin.process_get_pin_uv_auth_token_using_pin_with_permissions(
                 &mut rng,
                 &mut persistent_store,
                 key_agreement,
@@ -965,9 +957,9 @@ mod test {
     fn test_process() {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
         let client_pin_params = AuthenticatorClientPinParameters {
-            pin_protocol: 1,
+            pin_uv_auth_protocol: 1,
             sub_command: ClientPinSubCommand::GetPinRetries,
             key_agreement: None,
             pin_auth: None,
@@ -976,12 +968,12 @@ mod test {
             permissions: None,
             permissions_rp_id: None,
         };
-        assert!(pin_protocol_v1
-            .process_subcommand(&mut rng, &mut persistent_store, client_pin_params)
+        assert!(client_pin
+            .process_command(&mut rng, &mut persistent_store, client_pin_params)
             .is_ok());
 
         let client_pin_params = AuthenticatorClientPinParameters {
-            pin_protocol: 2,
+            pin_uv_auth_protocol: 2,
             sub_command: ClientPinSubCommand::GetPinRetries,
             key_agreement: None,
             pin_auth: None,
@@ -992,7 +984,7 @@ mod test {
         };
         let error_code = Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER;
         assert_eq!(
-            pin_protocol_v1.process_subcommand(&mut rng, &mut persistent_store, client_pin_params),
+            client_pin.process_command(&mut rng, &mut persistent_store, client_pin_params),
             Err(error_code)
         );
     }
@@ -1161,15 +1153,15 @@ mod test {
     #[test]
     fn test_has_permission() {
         let mut rng = ThreadRng256 {};
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        pin_protocol_v1.permissions = 0x7F;
+        let mut client_pin = ClientPin::new(&mut rng);
+        client_pin.permissions = 0x7F;
         for permission in PinPermission::into_enum_iter() {
-            assert_eq!(pin_protocol_v1.has_permission(permission), Ok(()));
+            assert_eq!(client_pin.has_permission(permission), Ok(()));
         }
-        pin_protocol_v1.permissions = 0x00;
+        client_pin.permissions = 0x00;
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(
-                pin_protocol_v1.has_permission(permission),
+                client_pin.has_permission(permission),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
             );
         }
@@ -1178,12 +1170,12 @@ mod test {
     #[test]
     fn test_has_no_rp_id_permission() {
         let mut rng = ThreadRng256 {};
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
-        assert_eq!(pin_protocol_v1.has_no_rp_id_permission(), Ok(()));
-        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
-        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
+        let mut client_pin = ClientPin::new(&mut rng);
+        assert_eq!(client_pin.has_no_rp_id_permission(), Ok(()));
+        assert_eq!(client_pin.permissions_rp_id, None);
+        client_pin.permissions_rp_id = Some("example.com".to_string());
         assert_eq!(
-            pin_protocol_v1.has_no_rp_id_permission(),
+            client_pin.has_no_rp_id_permission(),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -1191,19 +1183,13 @@ mod test {
     #[test]
     fn test_has_no_or_rp_id_permission() {
         let mut rng = ThreadRng256 {};
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
+        assert_eq!(client_pin.has_no_or_rp_id_permission("example.com"), Ok(()));
+        assert_eq!(client_pin.permissions_rp_id, None);
+        client_pin.permissions_rp_id = Some("example.com".to_string());
+        assert_eq!(client_pin.has_no_or_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_permission("example.com"),
-            Ok(())
-        );
-        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
-        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
-        assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_permission("example.com"),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_permission("another.example.com"),
+            client_pin.has_no_or_rp_id_permission("another.example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -1211,20 +1197,20 @@ mod test {
     #[test]
     fn test_has_no_or_rp_id_hash_permission() {
         let mut rng = ThreadRng256 {};
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
         let rp_id_hash = Sha256::hash(b"example.com");
         assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_hash_permission(&rp_id_hash),
+            client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash),
             Ok(())
         );
-        assert_eq!(pin_protocol_v1.permissions_rp_id, None);
-        pin_protocol_v1.permissions_rp_id = Some("example.com".to_string());
+        assert_eq!(client_pin.permissions_rp_id, None);
+        client_pin.permissions_rp_id = Some("example.com".to_string());
         assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_hash_permission(&rp_id_hash),
+            client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash),
             Ok(())
         );
         assert_eq!(
-            pin_protocol_v1.has_no_or_rp_id_hash_permission(&[0x4A; 32]),
+            client_pin.has_no_or_rp_id_hash_permission(&[0x4A; 32]),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -1232,21 +1218,15 @@ mod test {
     #[test]
     fn test_ensure_rp_id_permission() {
         let mut rng = ThreadRng256 {};
-        let mut pin_protocol_v1 = PinProtocolV1::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
+        assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
-            pin_protocol_v1.ensure_rp_id_permission("example.com"),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.permissions_rp_id,
+            client_pin.permissions_rp_id,
             Some(String::from("example.com"))
         );
+        assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
-            pin_protocol_v1.ensure_rp_id_permission("example.com"),
-            Ok(())
-        );
-        assert_eq!(
-            pin_protocol_v1.ensure_rp_id_permission("counter-example.com"),
+            client_pin.ensure_rp_id_permission("counter-example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

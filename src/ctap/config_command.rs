@@ -103,9 +103,7 @@ pub fn process_config(
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
-        if !client_pin.verify_pin_auth_token(&config_data, &auth_param) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-        }
+        client_pin.verify_pin_auth_token(&config_data, &auth_param)?;
     }
 
     match sub_command {

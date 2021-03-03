@@ -17,8 +17,6 @@ use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
 use super::rng256::Rng256;
-use super::sha256::Sha256;
-use super::Hash256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -62,15 +60,15 @@ impl SecKey {
         // - https://www.secg.org/sec1-v2.pdf
     }
 
-    /// Creates a shared key using the Diffie Hellman key agreement.
+    /// Performs the handshake using the Diffie Hellman key agreement.
     ///
-    /// The key agreement is defined in the FIDO2 specification,
-    /// Section 6.5.5.4. "Obtaining the Shared Secret"
-    pub fn exchange_x_sha256(&self, other: &PubKey) -> [u8; 32] {
+    /// This function generates the Z in the PIN protocol v1 specification.
+    /// https://drafts.fidoalliance.org/fido-2/stable-links-to-latest/fido-client-to-authenticator-protocol.html#pinProto1
+    pub fn exchange_x(&self, other: &PubKey) -> [u8; 32] {
         let p = self.exchange_raw(other);
         let mut x: [u8; 32] = [Default::default(); 32];
         p.getx().to_int().to_bin(&mut x);
-        Sha256::hash(&x)
+        x
     }
 }
 
@@ -123,7 +121,7 @@ mod test {
 
     /** Test that the exchanged key is the same on both sides **/
     #[test]
-    fn test_exchange_x_sha256_is_symmetric() {
+    fn test_exchange_x_is_symmetric() {
         let mut rng = ThreadRng256 {};
 
         for _ in 0..ITERATIONS {
@@ -131,12 +129,12 @@ mod test {
             let pk_a = sk_a.genpk();
             let sk_b = SecKey::gensk(&mut rng);
             let pk_b = sk_b.genpk();
-            assert_eq!(sk_a.exchange_x_sha256(&pk_b), sk_b.exchange_x_sha256(&pk_a));
+            assert_eq!(sk_a.exchange_x(&pk_b), sk_b.exchange_x(&pk_a));
         }
     }
 
     #[test]
-    fn test_exchange_x_sha256_bytes_is_symmetric() {
+    fn test_exchange_x_bytes_is_symmetric() {
         let mut rng = ThreadRng256 {};
 
         for _ in 0..ITERATIONS {
@@ -150,7 +148,7 @@ mod test {
 
             let pk_a = PubKey::from_bytes_uncompressed(&pk_bytes_a).unwrap();
             let pk_b = PubKey::from_bytes_uncompressed(&pk_bytes_b).unwrap();
-            assert_eq!(sk_a.exchange_x_sha256(&pk_b), sk_b.exchange_x_sha256(&pk_a));
+            assert_eq!(sk_a.exchange_x(&pk_b), sk_b.exchange_x(&pk_a));
         }
     }
 

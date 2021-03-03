@@ -24,6 +24,7 @@ pub mod data_formats;
 pub mod hid;
 mod key_material;
 mod large_blobs;
+mod pin_protocol;
 pub mod response;
 pub mod status_code;
 mod storage;
@@ -648,12 +649,8 @@ where
                     // Specification is unclear, could be CTAP2_ERR_INVALID_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
-                if !self
-                    .client_pin
-                    .verify_pin_auth_token(&client_data_hash, &pin_auth)
-                {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                }
+                self.client_pin
+                    .verify_pin_auth_token(&client_data_hash, &pin_auth)?;
                 self.client_pin
                     .has_permission(PinPermission::MakeCredential)?;
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;
@@ -816,10 +813,11 @@ where
         if extensions.hmac_secret.is_some() || extensions.cred_blob {
             let encrypted_output = if let Some(hmac_secret_input) = extensions.hmac_secret {
                 let cred_random = self.generate_cred_random(&credential.private_key, has_uv)?;
-                Some(
-                    self.client_pin
-                        .process_hmac_secret(hmac_secret_input, &cred_random)?,
-                )
+                Some(self.client_pin.process_hmac_secret(
+                    self.rng,
+                    hmac_secret_input,
+                    &cred_random,
+                )?)
             } else {
                 None
             };
@@ -939,12 +937,8 @@ where
                     // Specification is unclear, could be CTAP2_ERR_UNSUPPORTED_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
-                if !self
-                    .client_pin
-                    .verify_pin_auth_token(&client_data_hash, &pin_auth)
-                {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                }
+                self.client_pin
+                    .verify_pin_auth_token(&client_data_hash, &pin_auth)?;
                 self.client_pin
                     .has_permission(PinPermission::GetAssertion)?;
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;

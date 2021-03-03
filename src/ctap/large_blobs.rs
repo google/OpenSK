@@ -101,9 +101,7 @@ impl LargeBlobs {
                 LittleEndian::write_u32(&mut offset_bytes, offset as u32);
                 message.extend(&offset_bytes);
                 message.extend(&Sha256::hash(set.as_slice()));
-                if !client_pin.verify_pin_auth_token(&message, &pin_uv_auth_param) {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-                }
+                client_pin.verify_pin_auth_token(&message, &pin_uv_auth_param)?;
             }
             if offset + set.len() > self.expected_length {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);

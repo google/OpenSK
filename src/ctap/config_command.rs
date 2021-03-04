@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::client_pin::ClientPin;
 use super::command::AuthenticatorConfigParameters;
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
-use super::pin_protocol_v1::PinProtocolV1;
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
@@ -76,7 +76,7 @@ fn process_set_min_pin_length(
 /// Processes the AuthenticatorConfig command.
 pub fn process_config(
     persistent_store: &mut PersistentStore,
-    pin_protocol_v1: &mut PinProtocolV1,
+    client_pin: &mut ClientPin,
     params: AuthenticatorConfigParameters,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let AuthenticatorConfigParameters {
@@ -103,7 +103,7 @@ pub fn process_config(
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
-        if !pin_protocol_v1.verify_pin_auth_token(&config_data, &auth_param) {
+        if !client_pin.verify_pin_auth_token(&config_data, &auth_param) {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
     }
@@ -136,7 +136,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
@@ -144,8 +144,7 @@ mod test {
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
 
         if ENTERPRISE_ATTESTATION_MODE.is_some() {
             assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
@@ -164,7 +163,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
@@ -172,8 +171,7 @@ mod test {
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert!(persistent_store.has_always_uv().unwrap());
 
@@ -183,8 +181,7 @@ mod test {
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         if ENFORCE_ALWAYS_UV {
             assert_eq!(
                 config_response,
@@ -202,7 +199,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
         let pin_uv_auth_param = Some(vec![
@@ -215,8 +212,7 @@ mod test {
             pin_uv_auth_param: pin_uv_auth_param.clone(),
             pin_uv_auth_protocol: Some(1),
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         if ENFORCE_ALWAYS_UV {
             assert_eq!(
                 config_response,
@@ -233,8 +229,7 @@ mod test {
             pin_uv_auth_param,
             pin_uv_auth_protocol: Some(1),
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert!(!persistent_store.has_always_uv().unwrap());
     }
@@ -264,13 +259,12 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         // First, increase minimum PIN length from 4 to 6 without PIN auth.
         let min_pin_length = 6;
         let config_params = create_min_pin_config_params(min_pin_length, None);
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
 
@@ -284,8 +278,7 @@ mod test {
             0xB2, 0xDE,
         ];
         config_params.pin_uv_auth_param = Some(pin_auth);
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
 
@@ -296,8 +289,7 @@ mod test {
             0xA7, 0x71,
         ];
         config_params.pin_uv_auth_param = Some(pin_auth);
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
@@ -311,15 +303,14 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         // First, set RP IDs without PIN auth.
         let min_pin_length = 6;
         let min_pin_length_rp_ids = vec!["example.com".to_string()];
         let config_params =
             create_min_pin_config_params(min_pin_length, Some(min_pin_length_rp_ids.clone()));
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
         assert_eq!(
@@ -339,8 +330,7 @@ mod test {
             0xD6, 0xDA,
         ];
         config_params.pin_uv_auth_param = Some(pin_auth.clone());
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
         assert_eq!(
@@ -353,8 +343,7 @@ mod test {
         let mut config_params =
             create_min_pin_config_params(9, Some(min_pin_length_rp_ids.clone()));
         config_params.pin_uv_auth_param = Some(pin_auth.clone());
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -372,8 +361,7 @@ mod test {
             Some(vec!["counter.example.com".to_string()]),
         );
         config_params.pin_uv_auth_param = Some(pin_auth);
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -391,7 +379,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
         // Increase min PIN, force PIN change.
@@ -402,8 +390,7 @@ mod test {
             0xA8, 0xC8,
         ]);
         config_params.pin_uv_auth_param = pin_uv_auth_param;
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
         assert_eq!(persistent_store.has_force_pin_change(), Ok(true));
@@ -415,7 +402,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -435,8 +422,7 @@ mod test {
             pin_uv_auth_param,
             pin_uv_auth_protocol: Some(1),
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.has_force_pin_change(), Ok(true));
     }
@@ -447,7 +433,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut pin_protocol_v1 = PinProtocolV1::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::VendorPrototype,
@@ -455,8 +441,7 @@ mod test {
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
         };
-        let config_response =
-            process_config(&mut persistent_store, &mut pin_protocol_v1, config_params);
+        let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)

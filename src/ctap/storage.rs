@@ -14,6 +14,7 @@
 
 mod key;
 
+use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::customization::{
     DEFAULT_MIN_PIN_LENGTH, DEFAULT_MIN_PIN_LENGTH_RP_IDS, ENFORCE_ALWAYS_UV,
     MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_RP_IDS_LENGTH, MAX_SUPPORTED_RESIDENT_KEYS,
@@ -24,7 +25,6 @@ use crate::ctap::data_formats::{
     PublicKeyCredentialUserEntity,
 };
 use crate::ctap::key_material;
-use crate::ctap::pin_protocol_v1::PIN_AUTH_LENGTH;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 use crate::embedded_flash::{new_storage, Storage};

@@ -304,7 +304,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
 
 #[derive(Debug, PartialEq)]
 pub struct AuthenticatorClientPinParameters {
-    pub pin_protocol: u64,
+    pub pin_uv_auth_protocol: u64,
     pub sub_command: ClientPinSubCommand,
     pub key_agreement: Option<CoseKey>,
     pub pin_auth: Option<Vec<u8>>,
@@ -320,7 +320,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
-                0x01 => pin_protocol,
+                0x01 => pin_uv_auth_protocol,
                 0x02 => sub_command,
                 0x03 => key_agreement,
                 0x04 => pin_auth,
@@ -331,7 +331,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             } = extract_map(cbor_value)?;
         }
 
-        let pin_protocol = extract_unsigned(ok_or_missing(pin_protocol)?)?;
+        let pin_uv_auth_protocol = extract_unsigned(ok_or_missing(pin_uv_auth_protocol)?)?;
         let sub_command = ClientPinSubCommand::try_from(ok_or_missing(sub_command)?)?;
         let key_agreement = key_agreement.map(CoseKey::try_from).transpose()?;
         let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
@@ -346,7 +346,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
         let permissions_rp_id = permissions_rp_id.map(extract_text_string).transpose()?;
 
         Ok(AuthenticatorClientPinParameters {
-            pin_protocol,
+            pin_uv_auth_protocol,
             sub_command,
             key_agreement,
             pin_auth,
@@ -506,7 +506,7 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
 pub struct AuthenticatorCredentialManagementParameters {
     pub sub_command: CredentialManagementSubCommand,
     pub sub_command_params: Option<CredentialManagementSubCommandParameters>,
-    pub pin_protocol: Option<u64>,
+    pub pin_uv_auth_protocol: Option<u64>,
     pub pin_auth: Option<Vec<u8>>,
 }
 
@@ -518,7 +518,7 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
             let {
                 0x01 => sub_command,
                 0x02 => sub_command_params,
-                0x03 => pin_protocol,
+                0x03 => pin_uv_auth_protocol,
                 0x04 => pin_auth,
             } = extract_map(cbor_value)?;
         }
@@ -527,13 +527,13 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
         let sub_command_params = sub_command_params
             .map(CredentialManagementSubCommandParameters::try_from)
             .transpose()?;
-        let pin_protocol = pin_protocol.map(extract_unsigned).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
         let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
 
         Ok(AuthenticatorCredentialManagementParameters {
             sub_command,
             sub_command_params,
-            pin_protocol,
+            pin_uv_auth_protocol,
             pin_auth,
         })
     }
@@ -706,7 +706,7 @@ mod test {
             AuthenticatorClientPinParameters::try_from(cbor_value).unwrap();
 
         let expected_client_pin_parameters = AuthenticatorClientPinParameters {
-            pin_protocol: 1,
+            pin_uv_auth_protocol: 1,
             sub_command: ClientPinSubCommand::GetPinRetries,
             key_agreement: Some(cose_key),
             pin_auth: Some(vec![0xBB]),
@@ -765,7 +765,7 @@ mod test {
         let expected_cred_management_parameters = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
             sub_command_params: Some(params),
-            pin_protocol: Some(1),
+            pin_uv_auth_protocol: Some(1),
             pin_auth: Some(vec![0x9A; 16]),
         };
 

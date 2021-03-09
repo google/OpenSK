@@ -31,14 +31,21 @@ use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
 ///
-/// The code assumes that this value is a multiple of the AES block length and
-/// fits an u8.
+/// The code assumes that this value is a multiple of the AES block length, fits
+/// an u8 and is at most as long as a SHA256. The value is fixed for all PIN
+/// protocols.
 pub const PIN_AUTH_LENGTH: usize = 16;
 
 /// The length of the pinUvAuthToken used throughout PIN protocols.
+///
+/// The code assumes that this value is a multiple of the AES block length. It
+/// is fixed since CTAP2.1.
 pub const PIN_TOKEN_LENGTH: usize = 32;
 
 /// The length of the encrypted PINs when received by SetPin or ChangePin.
+///
+/// The code assumes that this value is a multiple of the AES block length. It
+/// is fixed since CTAP2.1.
 const PIN_PADDED_LENGTH: usize = 64;
 
 /// Computes and encrypts the HMAC-secret outputs.

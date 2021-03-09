@@ -122,7 +122,7 @@ pub trait SharedSecret {
     fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode>;
 }
 
-fn encrypt(
+fn aes256_cbc_encrypt(
     rng: &mut dyn Rng256,
     key: &[u8; 32],
     plaintext: &[u8],
@@ -149,7 +149,11 @@ fn encrypt(
     Ok(ciphertext)
 }
 
-fn decrypt(key: &[u8; 32], ciphertext: &[u8], has_iv: bool) -> Result<Vec<u8>, Ctap2StatusCode> {
+fn aes256_cbc_decrypt(
+    key: &[u8; 32],
+    ciphertext: &[u8],
+    has_iv: bool,
+) -> Result<Vec<u8>, Ctap2StatusCode> {
     if ciphertext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -186,6 +190,17 @@ fn verify_v1(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2St
     }
 }
 
+fn verify_v2(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+    if signature.len() != 32 {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    if verify_hmac_256::<Sha256>(key, message, array_ref![signature, 0, 32]) {
+        Ok(())
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+    }
+}
+
 pub struct SharedSecretV1 {
     common_secret: [u8; 32],
 }
@@ -213,26 +228,15 @@ impl SharedSecret for SharedSecretV1 {
         rng: &mut dyn Rng256,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        encrypt(rng, &self.common_secret, plaintext, false)
+        aes256_cbc_encrypt(rng, &self.common_secret, plaintext, false)
     }
 
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        decrypt(&self.common_secret, ciphertext, false)
+        aes256_cbc_decrypt(&self.common_secret, ciphertext, false)
     }
 
     fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
         verify_v1(&self.common_secret, message, signature)
-    }
-}
-
-fn verify_v2(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-    if signature.len() != 32 {
-        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-    }
-    if verify_hmac_256::<Sha256>(key, message, array_ref![signature, 0, 32]) {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
     }
 }
 
@@ -271,11 +275,11 @@ impl SharedSecret for SharedSecretV2 {
         rng: &mut dyn Rng256,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        encrypt(rng, self.get_aes_key(), plaintext, true)
+        aes256_cbc_encrypt(rng, self.get_aes_key(), plaintext, true)
     }
 
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        decrypt(self.get_aes_key(), ciphertext, true)
+        aes256_cbc_decrypt(self.get_aes_key(), ciphertext, true)
     }
 
     fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {

@@ -55,7 +55,7 @@ const PIN_PADDED_LENGTH: usize = 64;
 /// for those salts.
 fn encrypt_hmac_secret_output(
     rng: &mut impl Rng256,
-    shared_secret: &mut dyn SharedSecret,
+    shared_secret: &dyn SharedSecret,
     salt_enc: &[u8],
     cred_random: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -73,7 +73,7 @@ fn encrypt_hmac_secret_output(
 
 /// Decrypts the new_pin_enc and outputs the found PIN.
 fn decrypt_pin(
-    shared_secret: &mut dyn SharedSecret,
+    shared_secret: &dyn SharedSecret,
     new_pin_enc: Vec<u8>,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     let decrypted_pin = shared_secret.decrypt(&new_pin_enc)?;
@@ -93,7 +93,7 @@ fn decrypt_pin(
 /// truncated for persistent storage.
 fn check_and_store_new_pin(
     persistent_store: &mut PersistentStore,
-    shared_secret: &mut dyn SharedSecret,
+    shared_secret: &dyn SharedSecret,
     new_pin_enc: Vec<u8>,
 ) -> Result<(), Ctap2StatusCode> {
     let pin = decrypt_pin(shared_secret, new_pin_enc)?;
@@ -148,7 +148,7 @@ impl ClientPin {
         &mut self,
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
-        shared_secret: &mut dyn SharedSecret,
+        shared_secret: &dyn SharedSecret,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
         match persistent_store.pin_hash()? {
@@ -211,10 +211,10 @@ impl ClientPin {
         if persistent_store.pin_hash()?.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
-        let mut shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
+        let shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
         shared_secret.verify(&new_pin_enc, &pin_auth)?;
 
-        check_and_store_new_pin(persistent_store, shared_secret.as_mut(), new_pin_enc)?;
+        check_and_store_new_pin(persistent_store, shared_secret.as_ref(), new_pin_enc)?;
         persistent_store.reset_pin_retries()?;
         Ok(())
     }
@@ -231,13 +231,13 @@ impl ClientPin {
         if persistent_store.pin_retries()? == 0 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
         }
-        let mut shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
+        let shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
         let mut auth_param_data = new_pin_enc.clone();
         auth_param_data.extend(&pin_hash_enc);
         shared_secret.verify(&auth_param_data, &pin_auth)?;
-        self.verify_pin_hash_enc(rng, persistent_store, shared_secret.as_mut(), pin_hash_enc)?;
+        self.verify_pin_hash_enc(rng, persistent_store, shared_secret.as_ref(), pin_hash_enc)?;
 
-        check_and_store_new_pin(persistent_store, shared_secret.as_mut(), new_pin_enc)?;
+        check_and_store_new_pin(persistent_store, shared_secret.as_ref(), new_pin_enc)?;
         self.pin_protocol_v1.reset_pin_uv_auth_token(rng);
         Ok(())
     }
@@ -252,8 +252,8 @@ impl ClientPin {
         if persistent_store.pin_retries()? == 0 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
         }
-        let mut shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
-        self.verify_pin_hash_enc(rng, persistent_store, shared_secret.as_mut(), pin_hash_enc)?;
+        let shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
+        self.verify_pin_hash_enc(rng, persistent_store, shared_secret.as_ref(), pin_hash_enc)?;
         if persistent_store.has_force_pin_change()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
@@ -419,9 +419,9 @@ impl ClientPin {
             salt_enc,
             salt_auth,
         } = hmac_secret_input;
-        let mut shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
+        let shared_secret = self.pin_protocol_v1.decapsulate(key_agreement, 1)?;
         shared_secret.verify(&salt_enc, &salt_auth)?;
-        encrypt_hmac_secret_output(rng, shared_secret.as_mut(), &salt_enc[..], cred_random)
+        encrypt_hmac_secret_output(rng, shared_secret.as_ref(), &salt_enc[..], cred_random)
     }
 
     /// Check if the required command's token permission is granted.
@@ -510,13 +510,13 @@ mod test {
     /// Encrypts the message with a zero IV and key derived from shared_secret.
     fn encrypt_message(shared_secret: &[u8; 32], message: &[u8]) -> Vec<u8> {
         let mut rng = ThreadRng256 {};
-        let mut shared_secret = SharedSecretV1::new_test(*shared_secret);
+        let shared_secret = SharedSecretV1::new_test(*shared_secret);
         shared_secret.encrypt(&mut rng, message).unwrap()
     }
 
     /// Decrypts the message with a zero IV and key derived from shared_secret.
     fn decrypt_message(shared_secret: &[u8; 32], message: &[u8]) -> Vec<u8> {
-        let mut shared_secret = SharedSecretV1::new_test(*shared_secret);
+        let shared_secret = SharedSecretV1::new_test(*shared_secret);
         shared_secret.decrypt(message).unwrap()
     }
 
@@ -551,7 +551,7 @@ mod test {
             0xC4, 0x12,
         ];
         persistent_store.set_pin(&pin_hash, 4).unwrap();
-        let mut shared_secret = SharedSecretV1::new_test([0x88; 32]);
+        let shared_secret = SharedSecretV1::new_test([0x88; 32]);
 
         let mut client_pin = ClientPin::new(&mut rng);
         let pin_hash_enc = vec![
@@ -562,7 +562,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
-                &mut shared_secret,
+                &shared_secret,
                 pin_hash_enc
             ),
             Ok(())
@@ -573,7 +573,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
-                &mut shared_secret,
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -588,7 +588,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
-                &mut shared_secret,
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
@@ -600,7 +600,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
-                &mut shared_secret,
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -611,7 +611,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut rng,
                 &mut persistent_store,
-                &mut shared_secret,
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -922,7 +922,7 @@ mod test {
 
     #[test]
     fn test_decrypt_pin() {
-        let mut shared_secret = SharedSecretV1::new_test([0x88; 32]);
+        let shared_secret = SharedSecretV1::new_test([0x88; 32]);
 
         // "1234"
         let new_pin_enc = vec![
@@ -933,7 +933,7 @@ mod test {
             0x18, 0x35, 0x06, 0x66, 0x97, 0x84, 0x68, 0xC2,
         ];
         assert_eq!(
-            decrypt_pin(&mut shared_secret, new_pin_enc),
+            decrypt_pin(&shared_secret, new_pin_enc),
             Ok(b"1234".to_vec()),
         );
 
@@ -946,21 +946,21 @@ mod test {
             0x7C, 0xC7, 0x2D, 0x43, 0x74, 0x4C, 0x1D, 0x7E,
         ];
         assert_eq!(
-            decrypt_pin(&mut shared_secret, new_pin_enc),
+            decrypt_pin(&shared_secret, new_pin_enc),
             Ok(b"123".to_vec()),
         );
 
         // Encrypted PIN is too short.
         let new_pin_enc = vec![0x44; 63];
         assert_eq!(
-            decrypt_pin(&mut shared_secret, new_pin_enc),
+            decrypt_pin(&shared_secret, new_pin_enc),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
         // Encrypted PIN is too long.
         let new_pin_enc = vec![0x44; 65];
         assert_eq!(
-            decrypt_pin(&mut shared_secret, new_pin_enc),
+            decrypt_pin(&shared_secret, new_pin_enc),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
     }
@@ -970,7 +970,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         let shared_secret_hash = [0x88; 32];
-        let mut shared_secret = SharedSecretV1::new_test(shared_secret_hash);
+        let shared_secret = SharedSecretV1::new_test(shared_secret_hash);
 
         let test_cases = vec![
             // Accept PIN "1234".
@@ -995,7 +995,7 @@ mod test {
             let old_pin_hash = persistent_store.pin_hash().unwrap();
             let new_pin_enc = encrypt_pin(&shared_secret_hash, pin);
             assert_eq!(
-                check_and_store_new_pin(&mut persistent_store, &mut shared_secret, new_pin_enc),
+                check_and_store_new_pin(&mut persistent_store, &shared_secret, new_pin_enc),
                 result
             );
             if result.is_ok() {
@@ -1010,21 +1010,18 @@ mod test {
     fn test_encrypt_hmac_secret_output() {
         let mut rng = ThreadRng256 {};
         let shared_secret_hash = [0x88; 32];
-        let mut shared_secret = SharedSecretV1::new_test(shared_secret_hash);
+        let shared_secret = SharedSecretV1::new_test(shared_secret_hash);
         let salt_enc = [0x5E; 32];
         let cred_random = [0xC9; 32];
-        let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random);
+        let output = encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random);
         assert_eq!(output.unwrap().len(), 32);
 
         let salt_enc = [0x5E; 48];
-        let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random);
+        let output = encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random);
         assert_eq!(output, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         let salt_enc = [0x5E; 64];
-        let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random);
+        let output = encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random);
         assert_eq!(output.unwrap().len(), 64);
 
         let mut salt_enc = [0x00; 32];
@@ -1039,16 +1036,14 @@ mod test {
         let salt_enc1 = encrypt_message(&shared_secret_hash, &salt1);
         salt_enc.copy_from_slice(salt_enc1.as_slice());
         let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random)
-                .unwrap();
+            encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random).unwrap();
         let output_dec = decrypt_message(&shared_secret_hash, &output);
         assert_eq!(&output_dec, &expected_output1);
 
         let salt_enc2 = &encrypt_message(&shared_secret_hash, &salt2);
         salt_enc.copy_from_slice(salt_enc2.as_slice());
         let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random)
-                .unwrap();
+            encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random).unwrap();
         let output_dec = decrypt_message(&shared_secret_hash, &output);
         assert_eq!(&output_dec, &expected_output2);
 
@@ -1059,8 +1054,7 @@ mod test {
         let salt_enc12 = encrypt_message(&shared_secret_hash, &salt12);
         salt_enc.copy_from_slice(salt_enc12.as_slice());
         let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random)
-                .unwrap();
+            encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random).unwrap();
         let output_dec = decrypt_message(&shared_secret_hash, &output);
         assert_eq!(&output_dec[..32], &expected_output1);
         assert_eq!(&output_dec[32..], &expected_output2);
@@ -1071,8 +1065,7 @@ mod test {
         let salt_enc02 = encrypt_message(&shared_secret_hash, &salt02);
         salt_enc.copy_from_slice(salt_enc02.as_slice());
         let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random)
-                .unwrap();
+            encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random).unwrap();
         let output_dec = decrypt_message(&shared_secret_hash, &output);
         assert_eq!(&output_dec[32..], &expected_output2);
 
@@ -1082,8 +1075,7 @@ mod test {
         let salt_enc10 = encrypt_message(&shared_secret_hash, &salt10);
         salt_enc.copy_from_slice(salt_enc10.as_slice());
         let output =
-            encrypt_hmac_secret_output(&mut rng, &mut shared_secret, &salt_enc, &cred_random)
-                .unwrap();
+            encrypt_hmac_secret_output(&mut rng, &shared_secret, &salt_enc, &cred_random).unwrap();
         let output_dec = decrypt_message(&shared_secret_hash, &output);
         assert_eq!(&output_dec[..32], &expected_output1);
     }

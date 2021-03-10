@@ -109,22 +109,18 @@ pub fn verify_pin_uv_auth_token(
 
 pub trait SharedSecret {
     /// Returns the encrypted plaintext.
-    fn encrypt(
-        &mut self,
-        rng: &mut dyn Rng256,
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, Ctap2StatusCode>;
+    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode>;
 
     /// Returns the decrypted ciphertext.
-    fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode>;
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode>;
 
     /// Verifies that the signature is a valid MAC for the given message.
-    fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode>;
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode>;
 }
 
 fn aes256_cbc_encrypt(
     rng: &mut dyn Rng256,
-    key: &[u8; 32],
+    aes_enc_key: &crypto::aes256::EncryptionKey,
     plaintext: &[u8],
     has_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -142,15 +138,14 @@ fn aes256_cbc_encrypt(
     for block in plaintext.chunks_exact(16) {
         blocks.push(*array_ref!(block, 0, 16));
     }
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(key);
-    cbc_encrypt(&aes_enc_key, iv, &mut blocks);
+    cbc_encrypt(aes_enc_key, iv, &mut blocks);
     let mut ciphertext = if has_iv { iv.to_vec() } else { vec![] };
     ciphertext.extend(blocks.iter().flatten());
     Ok(ciphertext)
 }
 
 fn aes256_cbc_decrypt(
-    key: &[u8; 32],
+    aes_enc_key: &crypto::aes256::EncryptionKey,
     ciphertext: &[u8],
     has_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -173,8 +168,7 @@ fn aes256_cbc_decrypt(
     for block in block_iter {
         blocks.push(*array_ref!(block, 0, 16));
     }
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(key);
-    let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
+    let aes_dec_key = crypto::aes256::DecryptionKey::new(aes_enc_key);
     cbc_decrypt(&aes_dec_key, iv, &mut blocks);
     Ok(blocks.iter().flatten().cloned().collect::<Vec<u8>>())
 }
@@ -203,87 +197,72 @@ fn verify_v2(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2St
 
 pub struct SharedSecretV1 {
     common_secret: [u8; 32],
+    aes_enc_key: crypto::aes256::EncryptionKey,
 }
 
 impl SharedSecretV1 {
     /// Creates a new shared secret from the handshake result.
     fn new(handshake: [u8; 32]) -> SharedSecretV1 {
+        let common_secret = Sha256::hash(&handshake);
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&common_secret);
         SharedSecretV1 {
-            common_secret: Sha256::hash(&handshake),
+            common_secret,
+            aes_enc_key,
         }
     }
 
     /// Creates a new shared secret for testing.
     #[cfg(test)]
     pub fn new_test(hash: [u8; 32]) -> SharedSecretV1 {
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&hash);
         SharedSecretV1 {
             common_secret: hash,
+            aes_enc_key,
         }
     }
 }
 
 impl SharedSecret for SharedSecretV1 {
-    fn encrypt(
-        &mut self,
-        rng: &mut dyn Rng256,
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(rng, &self.common_secret, plaintext, false)
+    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, false)
     }
 
-    fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_decrypt(&self.common_secret, ciphertext, false)
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_decrypt(&self.aes_enc_key, ciphertext, false)
     }
 
-    fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
         verify_v1(&self.common_secret, message, signature)
     }
 }
 
 pub struct SharedSecretV2 {
-    handshake: [u8; 32],
-    aes_key: Option<[u8; 32]>,
-    hmac_key: Option<[u8; 32]>,
+    aes_enc_key: crypto::aes256::EncryptionKey,
+    hmac_key: [u8; 32],
 }
 
 impl SharedSecretV2 {
     /// Creates a new shared secret from the handshake result.
     fn new(handshake: [u8; 32]) -> SharedSecretV2 {
+        let aes_key = hkdf_empty_salt_256::<Sha256>(&handshake, b"CTAP2 AES key");
         SharedSecretV2 {
-            handshake,
-            aes_key: None,
-            hmac_key: None,
+            aes_enc_key: crypto::aes256::EncryptionKey::new(&aes_key),
+            hmac_key: hkdf_empty_salt_256::<Sha256>(&handshake, b"CTAP2 HMAC key"),
         }
-    }
-
-    fn get_aes_key(&mut self) -> &[u8; 32] {
-        let handshake = &self.handshake;
-        self.aes_key
-            .get_or_insert_with(|| hkdf_empty_salt_256::<Sha256>(handshake, b"CTAP2 AES key"))
-    }
-
-    fn get_hmac_key(&mut self) -> &[u8; 32] {
-        let handshake = &self.handshake;
-        self.hmac_key
-            .get_or_insert_with(|| hkdf_empty_salt_256::<Sha256>(handshake, b"CTAP2 HMAC key"))
     }
 }
 
 impl SharedSecret for SharedSecretV2 {
-    fn encrypt(
-        &mut self,
-        rng: &mut dyn Rng256,
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(rng, self.get_aes_key(), plaintext, true)
+    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, true)
     }
 
-    fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_decrypt(self.get_aes_key(), ciphertext, true)
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_decrypt(&self.aes_enc_key, ciphertext, true)
     }
 
-    fn verify(&mut self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-        verify_v2(self.get_hmac_key(), message, signature)
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+        verify_v2(&self.hmac_key, message, signature)
     }
 }
 
@@ -315,7 +294,7 @@ mod test {
     #[test]
     fn test_shared_secret_v1_encrypt_decrypt() {
         let mut rng = ThreadRng256 {};
-        let mut shared_secret = SharedSecretV1::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(&mut rng, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
@@ -323,7 +302,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v1_verify() {
-        let mut shared_secret = SharedSecretV1::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::new([0x55; 32]);
         let message = [0xAA];
         let signature = [
             0x8B, 0x60, 0x15, 0x7D, 0xF3, 0x44, 0x82, 0x2E, 0x54, 0x34, 0x7A, 0x01, 0xFB, 0x02,
@@ -343,7 +322,7 @@ mod test {
     #[test]
     fn test_shared_secret_v2_encrypt_decrypt() {
         let mut rng = ThreadRng256 {};
-        let mut shared_secret = SharedSecretV2::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(&mut rng, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
@@ -351,7 +330,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_verify() {
-        let mut shared_secret = SharedSecretV2::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::new([0x55; 32]);
         let message = [0xAA];
         let signature = [
             0xC0, 0x3F, 0x2A, 0x22, 0x5C, 0xC3, 0x4E, 0x05, 0xC1, 0x0E, 0x72, 0x9C, 0x8D, 0xD5,
@@ -386,10 +365,10 @@ mod test {
         let pin_protocol1 = PinProtocol::new(&mut rng);
         let pin_protocol2 = PinProtocol::new(&mut rng);
         for protocol in 1..=2 {
-            let mut shared_secret1 = pin_protocol1
+            let shared_secret1 = pin_protocol1
                 .decapsulate(pin_protocol2.get_public_key(), protocol)
                 .unwrap();
-            let mut shared_secret2 = pin_protocol2
+            let shared_secret2 = pin_protocol2
                 .decapsulate(pin_protocol1.get_public_key(), protocol)
                 .unwrap();
             let plaintext = vec![0xAA; 64];

@@ -290,9 +290,7 @@ pub fn process_credential_management(
                     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
                 }
             }
-            if !client_pin.verify_pin_auth_token(&management_data, &pin_auth) {
-                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-            }
+            client_pin.verify_pin_auth_token(&management_data, &pin_auth)?;
             // The RP ID permission is handled differently per subcommand below.
             client_pin.has_permission(PinPermission::CredentialManagement)?;
         }

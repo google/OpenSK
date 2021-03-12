@@ -1223,7 +1223,8 @@ mod test {
     use super::command::AuthenticatorAttestationMaterial;
     use super::data_formats::{
         CoseKey, GetAssertionHmacSecretInput, GetAssertionOptions, MakeCredentialExtensions,
-        MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+        MakeCredentialOptions, PinUvAuthProtocol, PublicKeyCredentialRpEntity,
+        PublicKeyCredentialUserEntity,
     };
     use super::*;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
@@ -1983,6 +1984,7 @@ mod test {
             key_agreement: CoseKey::from(pk),
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
         };
         let get_extensions = GetAssertionExtensions {
             hmac_secret: Some(hmac_secret_input),
@@ -2040,6 +2042,7 @@ mod test {
             key_agreement: CoseKey::from(pk),
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
         };
         let get_extensions = GetAssertionExtensions {
             hmac_secret: Some(hmac_secret_input),

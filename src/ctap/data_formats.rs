@@ -356,6 +356,7 @@ pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
     pub salt_auth: Vec<u8>,
+    pub pin_uv_auth_protocol: PinUvAuthProtocol,
 }
 
 impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
@@ -367,16 +368,21 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
                 1 => key_agreement,
                 2 => salt_enc,
                 3 => salt_auth,
+                4 => pin_uv_auth_protocol,
             } = extract_map(cbor_value)?;
         }
 
         let key_agreement = CoseKey::try_from(ok_or_missing(key_agreement)?)?;
         let salt_enc = extract_byte_string(ok_or_missing(salt_enc)?)?;
         let salt_auth = extract_byte_string(ok_or_missing(salt_auth)?)?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .unwrap_or(Ok(PinUvAuthProtocol::V1))?;
         Ok(Self {
             key_agreement,
             salt_enc,
             salt_auth,
+            pin_uv_auth_protocol,
         })
     }
 }
@@ -806,6 +812,24 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
         }
         ecdh::PubKey::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PinUvAuthProtocol {
+    V1,
+    V2,
+}
+
+impl TryFrom<cbor::Value> for PinUvAuthProtocol {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        match extract_unsigned(cbor_value)? {
+            1 => Ok(PinUvAuthProtocol::V1),
+            2 => Ok(PinUvAuthProtocol::V2),
+            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        }
     }
 }
 
@@ -1569,7 +1593,7 @@ mod test {
     }
 
     #[test]
-    fn test_from_get_assertion_extensions() {
+    fn test_from_get_assertion_extensions_default_protocol() {
         let mut rng = ThreadRng256 {};
         let sk = crypto::ecdh::SecKey::gensk(&mut rng);
         let pk = sk.genpk();
@@ -1588,6 +1612,7 @@ mod test {
             key_agreement: cose_key,
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
         };
         let expected_extensions = GetAssertionExtensions {
             hmac_secret: Some(expected_input),
@@ -1595,6 +1620,38 @@ mod test {
             large_blob_key: Some(true),
         };
         assert_eq!(extensions, Ok(expected_extensions));
+    }
+
+    #[test]
+    fn test_from_get_assertion_extensions_with_protocol() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
+        let cbor_extensions = cbor_map! {
+            "hmac-secret" => cbor_map! {
+                1 => cbor::Value::from(cose_key.clone()),
+                2 => vec![0x02; 32],
+                3 => vec![0x03; 16],
+                4 => 2,
+            },
+            "credBlob" => true,
+            "largeBlobKey" => true,
+        };
+        let extensions = GetAssertionExtensions::try_from(cbor_extensions);
+        let expected_input = GetAssertionHmacSecretInput {
+            key_agreement: cose_key,
+            salt_enc: vec![0x02; 32],
+            salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V2,
+        };
+        let expected_extensions = GetAssertionExtensions {
+            hmac_secret: Some(expected_input),
+            cred_blob: true,
+            large_blob_key: Some(true),
+        };
+        assert_eq!(extensions, Ok(expected_extensions));
+        // TODO more tests, check default
     }
 
     #[test]
@@ -1757,6 +1814,25 @@ mod test {
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
+    }
+
+    #[test]
+    fn test_from_pin_uv_auth_protocol() {
+        let cbor_protocol: cbor::Value = cbor_int!(0x01);
+        assert_eq!(
+            PinUvAuthProtocol::try_from(cbor_protocol),
+            Ok(PinUvAuthProtocol::V1)
+        );
+        let cbor_protocol: cbor::Value = cbor_int!(0x02);
+        assert_eq!(
+            PinUvAuthProtocol::try_from(cbor_protocol),
+            Ok(PinUvAuthProtocol::V2)
+        );
+        let cbor_protocol: cbor::Value = cbor_int!(0x03);
+        assert_eq!(
+            PinUvAuthProtocol::try_from(cbor_protocol),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 
     #[test]

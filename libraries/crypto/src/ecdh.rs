@@ -20,6 +20,7 @@ use super::rng256::Rng256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
+#[derive(Clone)]
 pub struct SecKey {
     a: NonZeroExponentP256,
 }

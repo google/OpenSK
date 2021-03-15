@@ -375,9 +375,8 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
         let key_agreement = CoseKey::try_from(ok_or_missing(key_agreement)?)?;
         let salt_enc = extract_byte_string(ok_or_missing(salt_enc)?)?;
         let salt_auth = extract_byte_string(ok_or_missing(salt_auth)?)?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol
-            .map(PinUvAuthProtocol::try_from)
-            .unwrap_or(Ok(PinUvAuthProtocol::V1))?;
+        let pin_uv_auth_protocol =
+            pin_uv_auth_protocol.map_or(Ok(PinUvAuthProtocol::V1), PinUvAuthProtocol::try_from)?;
         Ok(Self {
             key_agreement,
             salt_enc,
@@ -644,7 +643,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let cred_protect_policy = cred_protect_policy
             .map(CredentialProtectionPolicy::try_from)
             .transpose()?;
-        let creation_order = creation_order.map(extract_unsigned).unwrap_or(Ok(0))?;
+        let creation_order = creation_order.map_or(Ok(0), extract_unsigned)?;
         let user_name = user_name.map(extract_text_string).transpose()?;
         let user_icon = user_icon.map(extract_text_string).transpose()?;
         let cred_blob = cred_blob.map(extract_byte_string).transpose()?;

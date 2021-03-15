@@ -142,7 +142,7 @@ impl ClientPin {
 
     /// Computes the shared secret for the given version.
     fn get_shared_secret(
-        &mut self,
+        &self,
         pin_uv_auth_protocol: PinUvAuthProtocol,
         key_agreement: CoseKey,
     ) -> Result<Box<dyn SharedSecret>, Ctap2StatusCode> {
@@ -534,10 +534,17 @@ impl ClientPin {
     pub fn new_test(
         key_agreement_key: crypto::ecdh::SecKey,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
+        pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> ClientPin {
+        use crypto::rng256::ThreadRng256;
+        let mut rng = ThreadRng256 {};
+        let (key_agreement_key_v1, key_agreement_key_v2) = match pin_uv_auth_protocol {
+            PinUvAuthProtocol::V1 => (key_agreement_key, crypto::ecdh::SecKey::gensk(&mut rng)),
+            PinUvAuthProtocol::V2 => (crypto::ecdh::SecKey::gensk(&mut rng), key_agreement_key),
+        };
         ClientPin {
-            pin_protocol_v1: PinProtocol::new_test(key_agreement_key.clone(), pin_uv_auth_token),
-            pin_protocol_v2: PinProtocol::new_test(key_agreement_key, pin_uv_auth_token),
+            pin_protocol_v1: PinProtocol::new_test(key_agreement_key_v1, pin_uv_auth_token),
+            pin_protocol_v2: PinProtocol::new_test(key_agreement_key_v2, pin_uv_auth_token),
             consecutive_pin_mismatches: 0,
             permissions: 0xFF,
             permissions_rp_id: None,
@@ -569,6 +576,29 @@ mod test {
         shared_secret.encrypt(&mut rng, &padded_pin).unwrap()
     }
 
+    /// Generates a ClientPin instance and a shared secret for testing.
+    ///
+    /// The shared secret for the desired PIN protocol is generated in a
+    /// handshake with itself. The other protocol has a random private key, so
+    /// tests using the wrong combination of PIN protocol and shared secret
+    /// should fail.
+    fn create_client_pin_and_shared_secret(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) -> (ClientPin, Box<dyn SharedSecret>) {
+        let mut rng = ThreadRng256 {};
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pk = key_agreement_key.genpk();
+        let key_agreement = CoseKey::from(pk);
+        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
+        let shared_secret = client_pin
+            .get_pin_protocol(pin_uv_auth_protocol)
+            .decapsulate(key_agreement, pin_uv_auth_protocol)
+            .unwrap();
+        (client_pin, shared_secret)
+    }
+
     /// Generates standard input parameters to the ClientPin command.
     ///
     /// All fields are populated for simplicity, even though most are unused.
@@ -577,15 +607,7 @@ mod test {
         sub_command: ClientPinSubCommand,
     ) -> (ClientPin, AuthenticatorClientPinParameters) {
         let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pk = key_agreement_key.genpk();
-        let key_agreement = CoseKey::from(pk);
-        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
-        let shared_secret = client_pin
-            .get_pin_protocol(pin_uv_auth_protocol)
-            .decapsulate(key_agreement.clone(), pin_uv_auth_protocol)
-            .unwrap();
+        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 
         let pin = b"1234";
         let mut padded_pin = [0u8; 64];
@@ -603,7 +625,11 @@ mod test {
         let params = AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             sub_command,
-            key_agreement: Some(key_agreement),
+            key_agreement: Some(
+                client_pin
+                    .get_pin_protocol(pin_uv_auth_protocol)
+                    .get_public_key(),
+            ),
             pin_uv_auth_param: Some(pin_uv_auth_param),
             new_pin_enc: Some(new_pin_enc),
             pin_hash_enc: Some(pin_hash_enc),
@@ -782,7 +808,7 @@ mod test {
         let (mut client_pin, mut params) =
             create_client_pin_and_parameters(pin_uv_auth_protocol, ClientPinSubCommand::ChangePin);
         let shared_secret = client_pin
-            .pin_protocol_v1
+            .get_pin_protocol(pin_uv_auth_protocol)
             .decapsulate(
                 params.key_agreement.clone().unwrap(),
                 params.pin_uv_auth_protocol,
@@ -1072,20 +1098,14 @@ mod test {
         salt: Vec<u8>,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pk = key_agreement_key.genpk();
-        let key_agreement = CoseKey::from(pk);
-        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
-        let pin_protocol = client_pin.get_pin_protocol(pin_uv_auth_protocol);
-        let shared_secret = pin_protocol
-            .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
-            .unwrap();
+        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 
         let salt_enc = shared_secret.as_ref().encrypt(&mut rng, &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement,
+            key_agreement: client_pin
+                .get_pin_protocol(pin_uv_auth_protocol)
+                .get_public_key(),
             salt_enc,
             salt_auth,
             pin_uv_auth_protocol,
@@ -1095,24 +1115,17 @@ mod test {
     }
 
     fn test_helper_process_hmac_secret_bad_salt_auth(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let cred_random = [0xC9; 32];
-        let salt_enc = vec![0x01; 32];
-
         let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pk = key_agreement_key.genpk();
-        let key_agreement = CoseKey::from(pk);
-        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
-        let pin_protocol = client_pin.get_pin_protocol(pin_uv_auth_protocol);
-        let shared_secret = pin_protocol
-            .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
-            .unwrap();
+        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
+        let cred_random = [0xC9; 32];
 
+        let salt_enc = vec![0x01; 32];
         let mut salt_auth = shared_secret.authenticate(&salt_enc);
         salt_auth[0] = 0x00;
         let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement,
+            key_agreement: client_pin
+                .get_pin_protocol(pin_uv_auth_protocol)
+                .get_public_key(),
             salt_enc,
             salt_auth,
             pin_uv_auth_protocol,

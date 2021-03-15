@@ -351,7 +351,7 @@ pub fn process_credential_management(
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::PublicKeyCredentialType;
+    use super::super::data_formats::{PinUvAuthProtocol, PublicKeyCredentialType};
     use super::super::CtapState;
     use super::*;
     use crypto::rng256::{Rng256, ThreadRng256};
@@ -382,7 +382,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let credential_source = create_credential_source(&mut rng);
 
         let user_immediately_present = |_| Ok(());
@@ -453,7 +454,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let credential_source1 = create_credential_source(&mut rng);
         let mut credential_source2 = create_credential_source(&mut rng);
         credential_source2.rp_id = "another.example.com".to_string();
@@ -550,7 +552,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let credential_source = create_credential_source(&mut rng);
 
         let user_immediately_present = |_| Ok(());
@@ -632,7 +635,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let credential_source1 = create_credential_source(&mut rng);
         let mut credential_source2 = create_credential_source(&mut rng);
         credential_source2.user_handle = vec![0x02];
@@ -737,7 +741,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut credential_source = create_credential_source(&mut rng);
         credential_source.credential_id = vec![0x1D; 32];
 
@@ -808,7 +813,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut credential_source = create_credential_source(&mut rng);
         credential_source.credential_id = vec![0x1D; 32];
 
@@ -880,7 +886,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);

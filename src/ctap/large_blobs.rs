@@ -135,6 +135,7 @@ impl LargeBlobs {
 
 #[cfg(test)]
 mod test {
+    use super::super::data_formats::PinUvAuthProtocol;
     use super::*;
     use crypto::rng256::ThreadRng256;
 
@@ -144,7 +145,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         let large_blob = vec![
@@ -175,7 +177,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -237,7 +240,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -283,7 +287,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -329,7 +334,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 20;
@@ -358,7 +364,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 20;

@@ -27,7 +27,7 @@
 //!
 //! The store is flash-efficient in the sense that it uses the storage [lifetime](Store::lifetime)
 //! efficiently. For each page, all words are written at least once between erase cycles and all
-//! erase cycles are used. However, not all written words are user content: lifetime is also
+//! erase cycles are used. However, not all written words are user content: Lifetime is also
 //! consumed with metadata and compaction.
 //!
 //! The store is extendable with other entries than key-values. It is essentially a framework

@@ -1223,7 +1223,8 @@ mod test {
     use super::command::AuthenticatorAttestationMaterial;
     use super::data_formats::{
         CoseKey, GetAssertionHmacSecretInput, GetAssertionOptions, MakeCredentialExtensions,
-        MakeCredentialOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+        MakeCredentialOptions, PinUvAuthProtocol, PublicKeyCredentialRpEntity,
+        PublicKeyCredentialUserEntity,
     };
     use super::*;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
@@ -1983,6 +1984,7 @@ mod test {
             key_agreement: CoseKey::from(pk),
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
         };
         let get_extensions = GetAssertionExtensions {
             hmac_secret: Some(hmac_secret_input),
@@ -2040,6 +2042,7 @@ mod test {
             key_agreement: CoseKey::from(pk),
             salt_enc: vec![0x02; 32],
             salt_auth: vec![0x03; 16],
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
         };
         let get_extensions = GetAssertionExtensions {
             hmac_secret: Some(hmac_secret_input),
@@ -2317,7 +2320,8 @@ mod test {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x88; 32];
-        let client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);

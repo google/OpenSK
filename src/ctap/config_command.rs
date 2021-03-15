@@ -126,6 +126,7 @@ pub fn process_config(
 mod test {
     use super::*;
     use crate::ctap::customization::ENFORCE_ALWAYS_UV;
+    use crate::ctap::data_formats::PinUvAuthProtocol;
     use crypto::rng256::ThreadRng256;
 
     #[test]
@@ -134,7 +135,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
@@ -161,7 +163,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
@@ -197,7 +200,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
         let pin_uv_auth_param = Some(vec![
@@ -257,7 +261,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         // First, increase minimum PIN length from 4 to 6 without PIN auth.
         let min_pin_length = 6;
@@ -301,7 +306,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         // First, set RP IDs without PIN auth.
         let min_pin_length = 6;
@@ -377,7 +383,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
         // Increase min PIN, force PIN change.
@@ -400,7 +407,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -431,7 +439,8 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin = ClientPin::new_test(key_agreement_key, pin_uv_auth_token);
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::VendorPrototype,

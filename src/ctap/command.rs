@@ -18,8 +18,8 @@ use super::data_formats::{
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
     CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
     GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialUserEntity, SetMinPinLengthParams,
+    PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
 use super::key_material;
 use super::status_code::Ctap2StatusCode;
@@ -302,12 +302,12 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AuthenticatorClientPinParameters {
-    pub pin_uv_auth_protocol: u64,
+    pub pin_uv_auth_protocol: PinUvAuthProtocol,
     pub sub_command: ClientPinSubCommand,
     pub key_agreement: Option<CoseKey>,
-    pub pin_auth: Option<Vec<u8>>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
     pub new_pin_enc: Option<Vec<u8>>,
     pub pin_hash_enc: Option<Vec<u8>>,
     pub permissions: Option<u8>,
@@ -323,7 +323,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
                 0x01 => pin_uv_auth_protocol,
                 0x02 => sub_command,
                 0x03 => key_agreement,
-                0x04 => pin_auth,
+                0x04 => pin_uv_auth_param,
                 0x05 => new_pin_enc,
                 0x06 => pin_hash_enc,
                 0x09 => permissions,
@@ -331,10 +331,11 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             } = extract_map(cbor_value)?;
         }
 
-        let pin_uv_auth_protocol = extract_unsigned(ok_or_missing(pin_uv_auth_protocol)?)?;
+        let pin_uv_auth_protocol =
+            PinUvAuthProtocol::try_from(ok_or_missing(pin_uv_auth_protocol)?)?;
         let sub_command = ClientPinSubCommand::try_from(ok_or_missing(sub_command)?)?;
         let key_agreement = key_agreement.map(CoseKey::try_from).transpose()?;
-        let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
+        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let new_pin_enc = new_pin_enc.map(extract_byte_string).transpose()?;
         let pin_hash_enc = pin_hash_enc.map(extract_byte_string).transpose()?;
         // We expect a bit field of 8 bits, and drop everything else.
@@ -349,7 +350,7 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             sub_command,
             key_agreement,
-            pin_auth,
+            pin_uv_auth_param,
             new_pin_enc,
             pin_hash_enc,
             permissions,
@@ -706,10 +707,10 @@ mod test {
             AuthenticatorClientPinParameters::try_from(cbor_value).unwrap();
 
         let expected_client_pin_parameters = AuthenticatorClientPinParameters {
-            pin_uv_auth_protocol: 1,
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
             sub_command: ClientPinSubCommand::GetPinRetries,
             key_agreement: Some(cose_key),
-            pin_auth: Some(vec![0xBB]),
+            pin_uv_auth_param: Some(vec![0xBB]),
             new_pin_enc: Some(vec![0xCC]),
             pin_hash_enc: Some(vec![0xDD]),
             permissions: Some(0x03),

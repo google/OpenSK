@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
-use crate::ctap::data_formats::CoseKey;
+use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
 use alloc::boxed::Box;
 use alloc::vec;
@@ -21,6 +21,8 @@ use alloc::vec::Vec;
 use core::convert::TryInto;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::hkdf::hkdf_empty_salt_256;
+#[cfg(test)]
+use crypto::hmac::hmac_256;
 use crypto::hmac::{verify_hmac_256, verify_hmac_256_first_128bits};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
@@ -64,14 +66,13 @@ impl PinProtocol {
     pub fn decapsulate(
         &self,
         peer_cose_key: CoseKey,
-        pin_uv_auth_protocol: u64,
+        pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> Result<Box<dyn SharedSecret>, Ctap2StatusCode> {
         let pk: crypto::ecdh::PubKey = CoseKey::try_into(peer_cose_key)?;
         let handshake = self.key_agreement_key.exchange_x(&pk);
         match pin_uv_auth_protocol {
-            1 => Ok(Box::new(SharedSecretV1::new(handshake))),
-            2 => Ok(Box::new(SharedSecretV2::new(handshake))),
-            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+            PinUvAuthProtocol::V1 => Ok(Box::new(SharedSecretV1::new(handshake))),
+            PinUvAuthProtocol::V2 => Ok(Box::new(SharedSecretV2::new(handshake))),
         }
     }
 
@@ -98,12 +99,11 @@ pub fn verify_pin_uv_auth_token(
     token: &[u8; PIN_TOKEN_LENGTH],
     message: &[u8],
     signature: &[u8],
-    pin_uv_auth_protocol: u64,
+    pin_uv_auth_protocol: PinUvAuthProtocol,
 ) -> Result<(), Ctap2StatusCode> {
     match pin_uv_auth_protocol {
-        1 => verify_v1(token, message, signature),
-        2 => verify_v2(token, message, signature),
-        _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        PinUvAuthProtocol::V1 => verify_v1(token, message, signature),
+        PinUvAuthProtocol::V2 => verify_v2(token, message, signature),
     }
 }
 
@@ -116,6 +116,10 @@ pub trait SharedSecret {
 
     /// Verifies that the signature is a valid MAC for the given message.
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode>;
+
+    /// Creates a signature that matches verify.
+    #[cfg(test)]
+    fn authenticate(&self, message: &[u8]) -> Vec<u8>;
 }
 
 fn aes256_cbc_encrypt(
@@ -210,16 +214,6 @@ impl SharedSecretV1 {
             aes_enc_key,
         }
     }
-
-    /// Creates a new shared secret for testing.
-    #[cfg(test)]
-    pub fn new_test(hash: [u8; 32]) -> SharedSecretV1 {
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&hash);
-        SharedSecretV1 {
-            common_secret: hash,
-            aes_enc_key,
-        }
-    }
 }
 
 impl SharedSecret for SharedSecretV1 {
@@ -233,6 +227,11 @@ impl SharedSecret for SharedSecretV1 {
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
         verify_v1(&self.common_secret, message, signature)
+    }
+
+    #[cfg(test)]
+    fn authenticate(&self, message: &[u8]) -> Vec<u8> {
+        hmac_256::<Sha256>(&self.common_secret, message)[..16].to_vec()
     }
 }
 
@@ -263,6 +262,11 @@ impl SharedSecret for SharedSecretV2 {
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
         verify_v2(&self.hmac_key, message, signature)
+    }
+
+    #[cfg(test)]
+    fn authenticate(&self, message: &[u8]) -> Vec<u8> {
+        hmac_256::<Sha256>(&self.hmac_key, message).to_vec()
     }
 }
 
@@ -301,6 +305,14 @@ mod test {
     }
 
     #[test]
+    fn test_shared_secret_v1_authenticate_verify() {
+        let shared_secret = SharedSecretV1::new([0x55; 32]);
+        let message = [0xAA; 32];
+        let signature = shared_secret.authenticate(&message);
+        assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
+    }
+
+    #[test]
     fn test_shared_secret_v1_verify() {
         let shared_secret = SharedSecretV1::new([0x55; 32]);
         let message = [0xAA];
@@ -329,6 +341,14 @@ mod test {
     }
 
     #[test]
+    fn test_shared_secret_v2_authenticate_verify() {
+        let shared_secret = SharedSecretV2::new([0x55; 32]);
+        let message = [0xAA; 32];
+        let signature = shared_secret.authenticate(&message);
+        assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
+    }
+
+    #[test]
     fn test_shared_secret_v2_verify() {
         let shared_secret = SharedSecretV2::new([0x55; 32]);
         let message = [0xAA];
@@ -349,22 +369,11 @@ mod test {
     }
 
     #[test]
-    fn test_decapsulate_invalid() {
-        let mut rng = ThreadRng256 {};
-        let pin_protocol = PinProtocol::new(&mut rng);
-        let shared_secret = pin_protocol.decapsulate(pin_protocol.get_public_key(), 3);
-        assert_eq!(
-            shared_secret.err(),
-            Some(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
-    }
-
-    #[test]
     fn test_decapsulate_symmetric() {
         let mut rng = ThreadRng256 {};
         let pin_protocol1 = PinProtocol::new(&mut rng);
         let pin_protocol2 = PinProtocol::new(&mut rng);
-        for protocol in 1..=2 {
+        for &protocol in &[PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
             let shared_secret1 = pin_protocol1
                 .decapsulate(pin_protocol2.get_public_key(), protocol)
                 .unwrap();
@@ -386,19 +395,24 @@ mod test {
             0x49, 0x68,
         ];
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &signature, 1),
+            verify_pin_uv_auth_token(&token, &message, &signature, PinUvAuthProtocol::V1),
             Ok(())
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&[0x12; PIN_TOKEN_LENGTH], &message, &signature, 1),
+            verify_pin_uv_auth_token(
+                &[0x12; PIN_TOKEN_LENGTH],
+                &message,
+                &signature,
+                PinUvAuthProtocol::V1
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &[0xBB], &signature, 1),
+            verify_pin_uv_auth_token(&token, &[0xBB], &signature, PinUvAuthProtocol::V1),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &[0x12; 16], 1),
+            verify_pin_uv_auth_token(&token, &message, &[0x12; 16], PinUvAuthProtocol::V1),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -413,31 +427,25 @@ mod test {
             0x36, 0x93, 0xF7, 0x84,
         ];
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &signature, 2),
+            verify_pin_uv_auth_token(&token, &message, &signature, PinUvAuthProtocol::V2),
             Ok(())
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&[0x12; PIN_TOKEN_LENGTH], &message, &signature, 2),
+            verify_pin_uv_auth_token(
+                &[0x12; PIN_TOKEN_LENGTH],
+                &message,
+                &signature,
+                PinUvAuthProtocol::V2
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &[0xBB], &signature, 2),
+            verify_pin_uv_auth_token(&token, &[0xBB], &signature, PinUvAuthProtocol::V2),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &[0x12; 32], 2),
+            verify_pin_uv_auth_token(&token, &message, &[0x12; 32], PinUvAuthProtocol::V2),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-    }
-
-    #[test]
-    fn test_verify_pin_uv_auth_token_invalid_protocol() {
-        let token = [0x91; PIN_TOKEN_LENGTH];
-        let message = [0xAA];
-        let signature = [];
-        assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &signature, 3),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
     }
 }

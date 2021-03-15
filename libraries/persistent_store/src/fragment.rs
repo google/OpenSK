@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helper functions for fragmented entries.
+//! Support for fragmented entries.
 //!
 //! This module permits to handle entries larger than the [maximum value
 //! length](Store::max_value_length) by storing ordered consecutive fragments in a sequence of keys.
@@ -36,7 +36,7 @@ pub trait Keys {
     ///
     /// # Preconditions
     ///
-    /// The position must be within the length: `pos < len()`.
+    /// The position must be within the length: `pos` < [`Self::len`].
     fn key(&self, pos: usize) -> usize;
 }
 

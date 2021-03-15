@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Flash storage for testing.
+//!
+//! [`BufferStorage`] implements the flash [`Storage`] interface but doesn't interface with an
+//! actual flash storage. Instead it uses a buffer in memory to represent the storage state.
+
 use crate::{Storage, StorageError, StorageIndex, StorageResult};
 use alloc::borrow::Borrow;
 use alloc::boxed::Box;
@@ -63,8 +68,8 @@ pub struct BufferOptions {
     ///
     /// When set, the following conditions would panic:
     /// - A bit is written from 0 to 1.
-    /// - A word is written more than `max_word_writes`.
-    /// - A page is erased more than `max_page_erases`.
+    /// - A word is written more than [`Self::max_word_writes`].
+    /// - A page is erased more than [`Self::max_page_erases`].
     pub strict_mode: bool,
 }
 
@@ -110,15 +115,13 @@ impl BufferStorage {
     ///
     /// Before each subsequent mutable operation (write or erase), the delay is decremented if
     /// positive. If the delay is elapsed, the operation is saved and an error is returned.
-    /// Subsequent operations will panic until the interrupted operation is [corrupted] or the
-    /// interruption is [reset].
+    /// Subsequent operations will panic until either of:
+    /// - The interrupted operation is [corrupted](BufferStorage::corrupt_operation).
+    /// - The interruption is [reset](BufferStorage::reset_interruption).
     ///
     /// # Panics
     ///
     /// Panics if an interruption is already armed.
-    ///
-    /// [corrupted]: struct.BufferStorage.html#method.corrupt_operation
-    /// [reset]: struct.BufferStorage.html#method.reset_interruption
     pub fn arm_interruption(&mut self, delay: usize) {
         self.interruption.arm(delay);
     }
@@ -130,10 +133,8 @@ impl BufferStorage {
     /// # Panics
     ///
     /// Panics if any of the following conditions hold:
-    /// - An interruption was not [armed].
+    /// - An interruption was not [armed](BufferStorage::arm_interruption).
     /// - An interruption was armed and it has triggered.
-    ///
-    /// [armed]: struct.BufferStorage.html#method.arm_interruption
     pub fn disarm_interruption(&mut self) -> usize {
         self.interruption.get().err().unwrap()
     }
@@ -142,16 +143,14 @@ impl BufferStorage {
     ///
     /// # Panics
     ///
-    /// Panics if an interruption was not [armed].
-    ///
-    /// [armed]: struct.BufferStorage.html#method.arm_interruption
+    /// Panics if an interruption was not [armed](BufferStorage::arm_interruption).
     pub fn reset_interruption(&mut self) {
         let _ = self.interruption.get();
     }
 
     /// Corrupts an interrupted operation.
     ///
-    /// Applies the [corruption function] to the storage. Counters are updated accordingly:
+    /// Applies the corruption function to the storage. Counters are updated accordingly:
     /// - If a word is fully written, its counter is incremented regardless of whether other words
     ///   of the same operation have been fully written.
     /// - If a page is fully erased, its counter is incremented (and its word counters are reset).
@@ -159,13 +158,10 @@ impl BufferStorage {
     /// # Panics
     ///
     /// Panics if any of the following conditions hold:
-    /// - An interruption was not [armed].
+    /// - An interruption was not [armed](BufferStorage::arm_interruption).
     /// - An interruption was armed but did not trigger.
     /// - The corruption function corrupts more bits than allowed.
     /// - The interrupted operation itself would have panicked.
-    ///
-    /// [armed]: struct.BufferStorage.html#method.arm_interruption
-    /// [corruption function]: type.BufferCorruptFunction.html
     pub fn corrupt_operation(&mut self, corrupt: BufferCorruptFunction) {
         let operation = self.interruption.get().unwrap();
         let range = self.operation_range(&operation).unwrap();
@@ -217,7 +213,8 @@ impl BufferStorage {
     ///
     /// # Panics
     ///
-    /// Panics if the maximum number of erase cycles per page is reached.
+    /// Panics if the [maximum number of erase cycles per page](BufferOptions::max_page_erases) is
+    /// reached.
     fn incr_page_erases(&mut self, page: usize) {
         // Check that pages are not erased too many times.
         if self.options.strict_mode {
@@ -243,7 +240,8 @@ impl BufferStorage {
     ///
     /// # Panics
     ///
-    /// Panics if the maximum number of writes per word is reached.
+    /// Panics if the [maximum number of writes per word](BufferOptions::max_word_writes) is
+    /// reached.
     fn incr_word_writes(&mut self, index: usize, value: &[u8], complete: &[u8]) {
         let word_size = self.word_size();
         for i in 0..value.len() / word_size {

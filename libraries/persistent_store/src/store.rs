@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Store implementation.
+
 use crate::format::{
     is_erased, CompactInfo, Format, Header, InitInfo, InternalEntry, Padding, ParsedWord, Position,
     Word, WordState,
@@ -55,17 +57,14 @@ pub enum StoreError {
     ///
     /// The consequences depend on the storage failure. In particular, the operation may or may not
     /// have succeeded, and the storage may have become invalid. Before doing any other operation,
-    /// the store should be [recovered]. The operation may then be retried if idempotent.
-    ///
-    /// [recovered]: struct.Store.html#method.recover
+    /// the store should be [recovered](Store::recover). The operation may then be retried if
+    /// idempotent.
     StorageError,
 
     /// Storage is invalid.
     ///
-    /// The storage should be erased and the store [recovered]. The store would be empty and have
-    /// lost track of lifetime.
-    ///
-    /// [recovered]: struct.Store.html#method.recover
+    /// The storage should be erased and the store [recovered](Store::recover). The store would be
+    /// empty and have lost track of lifetime.
     InvalidStorage,
 }
 
@@ -92,14 +91,12 @@ pub type StoreResult<T> = Result<T, StoreError>;
 
 /// Progression ratio for store metrics.
 ///
-/// This is used for the [capacity] and [lifetime] metrics. Those metrics are measured in words.
+/// This is used for the [`Store::capacity`] and [`Store::lifetime`] metrics. Those metrics are
+/// measured in words.
 ///
 /// # Invariant
 ///
-/// - The used value does not exceed the total: `used <= total`.
-///
-/// [capacity]: struct.Store.html#method.capacity
-/// [lifetime]: struct.Store.html#method.lifetime
+/// - The used value does not exceed the total: `used` ≤ `total`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct StoreRatio {
     /// How much of the metric is used.
@@ -148,11 +145,11 @@ impl StoreHandle {
         self.key as usize
     }
 
-    /// Returns the length of value of the entry.
+    /// Returns the value length of the entry.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if the entry has been deleted or compacted.
+    /// Returns [`StoreError::InvalidArgument`] if the entry has been deleted or compacted.
     pub fn get_length<S: Storage>(&self, store: &Store<S>) -> StoreResult<usize> {
         store.get_length(self)
     }
@@ -161,7 +158,7 @@ impl StoreHandle {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if the entry has been deleted or compacted.
+    /// Returns [`StoreError::InvalidArgument`] if the entry has been deleted or compacted.
     pub fn get_value<S: Storage>(&self, store: &Store<S>) -> StoreResult<Vec<u8>> {
         store.get_value(self)
     }
@@ -211,7 +208,7 @@ pub struct Store<S: Storage> {
 
     /// The list of the position of the user entries.
     ///
-    /// The position is encoded as the word offset from the [head](Store#structfield.head).
+    /// The position is encoded as the word offset from the [head](Store::head).
     entries: Option<Vec<u16>>,
 }
 
@@ -224,7 +221,8 @@ impl<S: Storage> Store<S> {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if the storage is not supported.
+    /// Returns [`StoreError::InvalidArgument`] if the storage is not
+    /// [supported](Format::is_storage_supported).
     pub fn new(storage: S) -> Result<Store<S>, (StoreError, S)> {
         let format = match Format::new(&storage) {
             None => return Err((StoreError::InvalidArgument, storage)),
@@ -258,7 +256,7 @@ impl<S: Storage> Store<S> {
         )))
     }
 
-    /// Returns the current capacity in words.
+    /// Returns the current and total capacity in words.
     ///
     /// The capacity represents the size of what is stored.
     pub fn capacity(&self) -> StoreResult<StoreRatio> {
@@ -271,7 +269,7 @@ impl<S: Storage> Store<S> {
         Ok(StoreRatio { used, total })
     }
 
-    /// Returns the current lifetime in words.
+    /// Returns the current and total lifetime in words.
     ///
     /// The lifetime represents the age of the storage. The limit is an over-approximation by at
     /// most the maximum length of a value (the actual limit depends on the length of the prefix of
@@ -286,10 +284,11 @@ impl<S: Storage> Store<S> {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` in the following circumstances:
-    /// - There are too many updates.
+    /// Returns [`StoreError::InvalidArgument`] in the following circumstances:
+    /// - There are [too many](Format::max_updates) updates.
     /// - The updates overlap, i.e. their keys are not disjoint.
-    /// - The updates are invalid, e.g. key out of bound or value too long.
+    /// - The updates are invalid, e.g. key [out of bound](Format::max_key) or value [too
+    ///   long](Format::max_value_len).
     pub fn transaction<ByteSlice: Borrow<[u8]>>(
         &mut self,
         updates: &[StoreUpdate<ByteSlice>],

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::client_pin::ClientPin;
+use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorConfigParameters;
+use super::customization::ENTERPRISE_ATTESTATION_MODE;
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
-use super::{check_pin_uv_auth_protocol, ENTERPRISE_ATTESTATION_MODE};
 use alloc::vec;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
@@ -91,10 +91,10 @@ pub fn process_config(
         _ => true,
     } && persistent_store.has_always_uv()?;
     if persistent_store.pin_hash()?.is_some() || enforce_uv {
-        // TODO(kaczmarczyck) The error code is specified inconsistently with other commands.
-        check_pin_uv_auth_protocol(pin_uv_auth_protocol)
-            .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
-        let auth_param = pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        let pin_uv_auth_param =
+            pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        let pin_uv_auth_protocol =
+            pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
         // Constants are taken from the specification, section 6.11, step 4.2.
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
@@ -103,7 +103,12 @@ pub fn process_config(
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
-        client_pin.verify_pin_auth_token(&config_data, &auth_param)?;
+        client_pin.verify_pin_uv_auth_token(
+            &config_data,
+            &pin_uv_auth_param,
+            pin_uv_auth_protocol,
+        )?;
+        client_pin.has_permission(PinPermission::AuthenticatorConfiguration)?;
     }
 
     match sub_command {
@@ -127,6 +132,7 @@ mod test {
     use super::*;
     use crate::ctap::customization::ENFORCE_ALWAYS_UV;
     use crate::ctap::data_formats::PinUvAuthProtocol;
+    use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
     use crypto::rng256::ThreadRng256;
 
     #[test]
@@ -194,25 +200,24 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_process_toggle_always_uv_with_pin() {
+    fn test_helper_process_toggle_always_uv_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
         persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
-        let pin_uv_auth_param = Some(vec![
-            0x99, 0xBA, 0x0A, 0x57, 0x9D, 0x95, 0x5A, 0x44, 0xE3, 0x77, 0xCF, 0x95, 0x51, 0x3F,
-            0xFD, 0xBE,
-        ]);
+        let mut config_data = vec![0xFF; 32];
+        config_data.extend(&[0x0D, ConfigSubCommand::ToggleAlwaysUv as u8]);
+        let pin_uv_auth_param =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token, &config_data, pin_uv_auth_protocol);
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
             sub_command_params: None,
-            pin_uv_auth_param: pin_uv_auth_param.clone(),
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_param: Some(pin_uv_auth_param.clone()),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         if ENFORCE_ALWAYS_UV {
@@ -228,12 +233,22 @@ mod test {
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
             sub_command_params: None,
-            pin_uv_auth_param,
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_param: Some(pin_uv_auth_param),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert!(!persistent_store.has_always_uv().unwrap());
+    }
+
+    #[test]
+    fn test_process_toggle_always_uv_with_pin_v1() {
+        test_helper_process_toggle_always_uv_with_pin(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_toggle_always_uv_with_pin_v2() {
+        test_helper_process_toggle_always_uv_with_pin(PinUvAuthProtocol::V2);
     }
 
     fn create_min_pin_config_params(
@@ -251,7 +266,7 @@ mod test {
                 set_min_pin_length_params,
             )),
             pin_uv_auth_param: None,
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         }
     }
 
@@ -276,22 +291,22 @@ mod test {
         persistent_store.set_pin(&[0x88; 16], 8).unwrap();
         let min_pin_length = 8;
         let mut config_params = create_min_pin_config_params(min_pin_length, None);
-        let pin_auth = vec![
+        let pin_uv_auth_param = vec![
             0x5C, 0x69, 0x71, 0x29, 0xBD, 0xCC, 0x53, 0xE8, 0x3C, 0x97, 0x62, 0xDD, 0x90, 0x29,
             0xB2, 0xDE,
         ];
-        config_params.pin_uv_auth_param = Some(pin_auth);
+        config_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
 
         // Third, decreasing the minimum PIN length from 8 to 7 fails.
         let mut config_params = create_min_pin_config_params(7, None);
-        let pin_auth = vec![
+        let pin_uv_auth_param = vec![
             0xC5, 0xEA, 0xC1, 0x5E, 0x7F, 0x80, 0x70, 0x1A, 0x4E, 0xC4, 0xAD, 0x85, 0x35, 0xD8,
             0xA7, 0x71,
         ];
-        config_params.pin_uv_auth_param = Some(pin_auth);
+        config_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
@@ -329,11 +344,11 @@ mod test {
         persistent_store.set_pin(&[0x88; 16], 8).unwrap();
         let mut config_params =
             create_min_pin_config_params(min_pin_length, Some(min_pin_length_rp_ids.clone()));
-        let pin_auth = vec![
+        let pin_uv_auth_param = vec![
             0x40, 0x51, 0x2D, 0xAC, 0x2D, 0xE2, 0x15, 0x77, 0x5C, 0xF9, 0x5B, 0x62, 0x9A, 0x2D,
             0xD6, 0xDA,
         ];
-        config_params.pin_uv_auth_param = Some(pin_auth.clone());
+        config_params.pin_uv_auth_param = Some(pin_uv_auth_param.clone());
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(persistent_store.min_pin_length(), Ok(min_pin_length));
@@ -346,7 +361,7 @@ mod test {
         // One PIN auth shouldn't work for different lengths.
         let mut config_params =
             create_min_pin_config_params(9, Some(min_pin_length_rp_ids.clone()));
-        config_params.pin_uv_auth_param = Some(pin_auth.clone());
+        config_params.pin_uv_auth_param = Some(pin_uv_auth_param.clone());
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
@@ -364,7 +379,7 @@ mod test {
             min_pin_length,
             Some(vec!["counter.example.com".to_string()]),
         );
-        config_params.pin_uv_auth_param = Some(pin_auth);
+        config_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(
             config_response,
@@ -426,7 +441,7 @@ mod test {
                 set_min_pin_length_params,
             )),
             pin_uv_auth_param,
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         };
         let config_response = process_config(&mut persistent_store, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));

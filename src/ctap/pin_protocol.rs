@@ -94,6 +94,19 @@ impl PinProtocol {
     }
 }
 
+/// Authenticates the pinUvAuthToken for the given PIN protocol.
+#[cfg(test)]
+pub fn authenticate_pin_uv_auth_token(
+    token: &[u8; PIN_TOKEN_LENGTH],
+    message: &[u8],
+    pin_uv_auth_protocol: PinUvAuthProtocol,
+) -> Vec<u8> {
+    match pin_uv_auth_protocol {
+        PinUvAuthProtocol::V1 => hmac_256::<Sha256>(token, message)[..16].to_vec(),
+        PinUvAuthProtocol::V2 => hmac_256::<Sha256>(token, message).to_vec(),
+    }
+}
+
 /// Verifies the pinUvAuthToken for the given PIN protocol.
 pub fn verify_pin_uv_auth_token(
     token: &[u8; PIN_TOKEN_LENGTH],

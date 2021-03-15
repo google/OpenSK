@@ -155,7 +155,7 @@ pub struct AuthenticatorMakeCredentialParameters {
     // Same for options, use defaults when not present.
     pub options: MakeCredentialOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
-    pub pin_uv_auth_protocol: Option<u64>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
     pub enterprise_attestation: Option<u64>,
 }
 
@@ -213,7 +213,9 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
             .unwrap_or_default();
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
         let enterprise_attestation = enterprise_attestation.map(extract_unsigned).transpose()?;
 
         Ok(AuthenticatorMakeCredentialParameters {
@@ -241,7 +243,7 @@ pub struct AuthenticatorGetAssertionParameters {
     // Same for options, use defaults when not present.
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<Vec<u8>>,
-    pub pin_uv_auth_protocol: Option<u64>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
@@ -288,7 +290,9 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
             .unwrap_or_default();
 
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
 
         Ok(AuthenticatorGetAssertionParameters {
             rp_id,
@@ -366,7 +370,7 @@ pub struct AuthenticatorLargeBlobsParameters {
     pub offset: usize,
     pub length: Option<usize>,
     pub pin_uv_auth_param: Option<Vec<u8>>,
-    pub pin_uv_auth_protocol: Option<u64>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
@@ -394,7 +398,9 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
             .transpose()?
             .map(|u| u as usize);
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
 
         if get.is_none() && set.is_none() {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -439,7 +445,7 @@ pub struct AuthenticatorConfigParameters {
     pub sub_command: ConfigSubCommand,
     pub sub_command_params: Option<ConfigSubCommandParams>,
     pub pin_uv_auth_param: Option<Vec<u8>>,
-    pub pin_uv_auth_protocol: Option<u64>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
@@ -463,7 +469,9 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
             _ => None,
         };
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
 
         Ok(AuthenticatorConfigParameters {
             sub_command,
@@ -507,8 +515,8 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
 pub struct AuthenticatorCredentialManagementParameters {
     pub sub_command: CredentialManagementSubCommand,
     pub sub_command_params: Option<CredentialManagementSubCommandParameters>,
-    pub pin_uv_auth_protocol: Option<u64>,
-    pub pin_auth: Option<Vec<u8>>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
@@ -520,7 +528,7 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
                 0x01 => sub_command,
                 0x02 => sub_command_params,
                 0x03 => pin_uv_auth_protocol,
-                0x04 => pin_auth,
+                0x04 => pin_uv_auth_param,
             } = extract_map(cbor_value)?;
         }
 
@@ -528,14 +536,16 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
         let sub_command_params = sub_command_params
             .map(CredentialManagementSubCommandParameters::try_from)
             .transpose()?;
-        let pin_uv_auth_protocol = pin_uv_auth_protocol.map(extract_unsigned).transpose()?;
-        let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
+        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
 
         Ok(AuthenticatorCredentialManagementParameters {
             sub_command,
             sub_command_params,
             pin_uv_auth_protocol,
-            pin_auth,
+            pin_uv_auth_param,
         })
     }
 }
@@ -630,7 +640,7 @@ mod test {
             extensions: MakeCredentialExtensions::default(),
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
             enterprise_attestation: Some(2),
         };
 
@@ -677,7 +687,7 @@ mod test {
             extensions: GetAssertionExtensions::default(),
             options,
             pin_uv_auth_param: Some(vec![0x12, 0x34]),
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         };
 
         assert_eq!(
@@ -766,8 +776,8 @@ mod test {
         let expected_cred_management_parameters = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
             sub_command_params: Some(params),
-            pin_uv_auth_protocol: Some(1),
-            pin_auth: Some(vec![0x9A; 16]),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param: Some(vec![0x9A; 16]),
         };
 
         assert_eq!(
@@ -821,7 +831,7 @@ mod test {
             offset: 0,
             length: Some(MIN_LARGE_BLOB_LEN),
             pin_uv_auth_param: Some(vec![0xA9]),
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         };
         assert_eq!(
             returned_large_blobs_parameters,
@@ -843,7 +853,7 @@ mod test {
             offset: 1,
             length: None,
             pin_uv_auth_param: Some(vec![0xA9]),
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         };
         assert_eq!(
             returned_large_blobs_parameters,

@@ -816,8 +816,8 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PinUvAuthProtocol {
-    V1,
-    V2,
+    V1 = 1,
+    V2 = 2,
 }
 
 impl TryFrom<cbor::Value> for PinUvAuthProtocol {

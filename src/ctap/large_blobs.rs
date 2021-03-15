@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::check_pin_uv_auth_protocol;
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
@@ -91,17 +90,20 @@ impl LargeBlobs {
             if persistent_store.pin_hash()?.is_some() || persistent_store.has_always_uv()? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
-                // TODO(kaczmarczyck) Error codes for PIN protocol differ across commands.
-                // Change to Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED for None?
-                check_pin_uv_auth_protocol(pin_uv_auth_protocol)?;
-                client_pin.has_permission(PinPermission::LargeBlobWrite)?;
-                let mut message = vec![0xFF; 32];
-                message.extend(&[0x0C, 0x00]);
+                let pin_uv_auth_protocol =
+                    pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
+                let mut large_blob_data = vec![0xFF; 32];
+                large_blob_data.extend(&[0x0C, 0x00]);
                 let mut offset_bytes = [0u8; 4];
                 LittleEndian::write_u32(&mut offset_bytes, offset as u32);
-                message.extend(&offset_bytes);
-                message.extend(&Sha256::hash(set.as_slice()));
-                client_pin.verify_pin_auth_token(&message, &pin_uv_auth_param)?;
+                large_blob_data.extend(&offset_bytes);
+                large_blob_data.extend(&Sha256::hash(set.as_slice()));
+                client_pin.verify_pin_uv_auth_token(
+                    &large_blob_data,
+                    &pin_uv_auth_param,
+                    pin_uv_auth_protocol,
+                )?;
+                client_pin.has_permission(PinPermission::LargeBlobWrite)?;
             }
             if offset + set.len() > self.expected_length {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -136,6 +138,7 @@ impl LargeBlobs {
 #[cfg(test)]
 mod test {
     use super::super::data_formats::PinUvAuthProtocol;
+    use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crypto::rng256::ThreadRng256;
 
@@ -358,14 +361,13 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_process_command_commit_with_pin() {
+    fn test_helper_process_command_commit_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 20;
@@ -374,18 +376,23 @@ mod test {
         large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
         persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_uv_auth_param = Some(vec![
-            0x68, 0x0C, 0x3F, 0x6A, 0x62, 0x47, 0xE6, 0x7C, 0x23, 0x1F, 0x79, 0xE3, 0xDC, 0x6D,
-            0xC3, 0xDE,
-        ]);
+        let mut large_blob_data = vec![0xFF; 32];
+        // Command constant and offset bytes.
+        large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        large_blob_data.extend(&Sha256::hash(&large_blob));
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &large_blob_data,
+            pin_uv_auth_protocol,
+        );
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: None,
             set: Some(large_blob),
             offset: 0,
             length: Some(BLOB_LEN),
-            pin_uv_auth_param,
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_param: Some(pin_uv_auth_param),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let large_blobs_response =
             large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
@@ -393,5 +400,15 @@ mod test {
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))
         );
+    }
+
+    #[test]
+    fn test_process_command_commit_with_pin_v1() {
+        test_helper_process_command_commit_with_pin(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_command_commit_with_pin_v2() {
+        test_helper_process_command_commit_with_pin(PinUvAuthProtocol::V2);
     }
 }

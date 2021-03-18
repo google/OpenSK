@@ -44,9 +44,9 @@ use self::customization::{
 };
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, EnterpriseAttestationMode,
-    GetAssertionExtensions, PackedAttestationStatement, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameter, PublicKeyCredentialSource, PublicKeyCredentialType,
-    PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    GetAssertionExtensions, PackedAttestationStatement, PinUvAuthProtocol,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 use self::large_blobs::{LargeBlobs, MAX_MSG_SIZE};
@@ -109,25 +109,12 @@ pub const U2F_VERSION_STRING: &str = "U2F_V2";
 // TODO(#106) change to final string when ready
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
-// This is the currently supported PIN protocol version.
-const PIN_PROTOCOL_VERSION: u64 = 1;
-
 // We currently only support one algorithm for signatures: ES256.
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::ES256,
 };
-
-// Checks the PIN protocol parameter against all supported versions.
-pub fn check_pin_uv_auth_protocol(
-    pin_uv_auth_protocol: Option<u64>,
-) -> Result<(), Ctap2StatusCode> {
-    match pin_uv_auth_protocol {
-        Some(PIN_PROTOCOL_VERSION) => Ok(()),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-    }
-}
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
 // (as of 2020-01-20) and truncates to "max" bytes, not breaking the encoding.
@@ -526,7 +513,7 @@ where
     fn pin_uv_auth_precheck(
         &mut self,
         pin_uv_auth_param: &Option<Vec<u8>>,
-        pin_uv_auth_protocol: Option<u64>,
+        pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
         cid: ChannelID,
     ) -> Result<(), Ctap2StatusCode> {
         if let Some(auth_param) = &pin_uv_auth_param {
@@ -539,11 +526,9 @@ where
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
                 }
             }
-
-            check_pin_uv_auth_protocol(pin_uv_auth_protocol)
-        } else {
-            Ok(())
+            pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
         }
+        Ok(())
     }
 
     fn process_make_credential(
@@ -644,13 +629,16 @@ where
         // User verification depends on the PIN auth inputs, which are checked here.
         let ed_flag = if has_extension_output { ED_FLAG } else { 0 };
         let flags = match pin_uv_auth_param {
-            Some(pin_auth) => {
+            Some(pin_uv_auth_param) => {
                 if self.persistent_store.pin_hash()?.is_none() {
                     // Specification is unclear, could be CTAP2_ERR_INVALID_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
-                self.client_pin
-                    .verify_pin_auth_token(&client_data_hash, &pin_auth)?;
+                self.client_pin.verify_pin_uv_auth_token(
+                    &client_data_hash,
+                    &pin_uv_auth_param,
+                    pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?;
                 self.client_pin
                     .has_permission(PinPermission::MakeCredential)?;
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;
@@ -932,13 +920,16 @@ where
         // not support internal UV. User presence is requested as an option.
         let has_uv = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
-            Some(pin_auth) => {
+            Some(pin_uv_auth_param) => {
                 if self.persistent_store.pin_hash()?.is_none() {
                     // Specification is unclear, could be CTAP2_ERR_UNSUPPORTED_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
-                self.client_pin
-                    .verify_pin_auth_token(&client_data_hash, &pin_auth)?;
+                self.client_pin.verify_pin_uv_auth_token(
+                    &client_data_hash,
+                    &pin_uv_auth_param,
+                    pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?;
                 self.client_pin
                     .has_permission(PinPermission::GetAssertion)?;
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;
@@ -1082,7 +1073,11 @@ where
                 aaguid: self.persistent_store.aaguid()?,
                 options: Some(options_map),
                 max_msg_size: Some(MAX_MSG_SIZE as u64),
-                pin_protocols: Some(vec![PIN_PROTOCOL_VERSION]),
+                // The order implies preference. We favor the new V2.
+                pin_protocols: Some(vec![
+                    PinUvAuthProtocol::V2 as u64,
+                    PinUvAuthProtocol::V1 as u64,
+                ]),
                 max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
@@ -1220,12 +1215,14 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::command::AuthenticatorAttestationMaterial;
+    use super::client_pin::PIN_TOKEN_LENGTH;
+    use super::command::{AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters};
     use super::data_formats::{
-        CoseKey, GetAssertionHmacSecretInput, GetAssertionOptions, MakeCredentialExtensions,
-        MakeCredentialOptions, PinUvAuthProtocol, PublicKeyCredentialRpEntity,
-        PublicKeyCredentialUserEntity,
+        ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, GetAssertionOptions,
+        MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
+        PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
+    use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
     use crypto::rng256::ThreadRng256;
@@ -1316,7 +1313,7 @@ mod test {
                 "alwaysUv" => false,
             },
             0x05 => MAX_MSG_SIZE as u64,
-            0x06 => cbor_array_vec![vec![1]],
+            0x06 => cbor_array_vec![vec![2, 1]],
             0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
             0x08 => CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array_vec![vec!["usb"]],
@@ -1755,6 +1752,52 @@ mod test {
         assert_eq!(stored_credential.large_blob_key.unwrap(), large_blob_key);
     }
 
+    fn test_helper_process_make_credential_with_pin_and_uv(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) {
+        let mut rng = ThreadRng256 {};
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
+
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.client_pin = client_pin;
+        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+
+        let client_data_hash = [0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.options.uv = true;
+        make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
+        make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+
+        check_make_response(
+            make_credential_response,
+            0x45,
+            &ctap_state.persistent_store.aaguid().unwrap(),
+            0x20,
+            &[],
+        );
+    }
+
+    #[test]
+    fn test_process_make_credential_with_pin_and_uv_v1() {
+        test_helper_process_make_credential_with_pin_and_uv(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_make_credential_with_pin_and_uv_v2() {
+        test_helper_process_make_credential_with_pin_and_uv(PinUvAuthProtocol::V2);
+    }
+
     #[test]
     fn test_non_resident_process_make_credential_with_pin() {
         let mut rng = ThreadRng256 {};
@@ -1810,7 +1853,7 @@ mod test {
         ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
-        make_credential_params.pin_uv_auth_protocol = Some(1);
+        make_credential_params.pin_uv_auth_protocol = Some(PinUvAuthProtocol::V1);
         let make_credential_response =
             ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
@@ -1951,10 +1994,62 @@ mod test {
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
     }
 
-    #[test]
-    fn test_process_get_assertion_hmac_secret() {
+    fn get_assertion_hmac_secret_params(
+        key_agreement_key: crypto::ecdh::SecKey,
+        key_agreement_response: ResponseData,
+        credential_id: Option<Vec<u8>>,
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) -> AuthenticatorGetAssertionParameters {
         let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let platform_public_key = key_agreement_key.genpk();
+        let public_key = match key_agreement_response {
+            ResponseData::AuthenticatorClientPin(Some(client_pin_response)) => {
+                client_pin_response.key_agreement.unwrap()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let pin_protocol = PinProtocol::new_test(key_agreement_key, [0x91; 32]);
+        let shared_secret = pin_protocol
+            .decapsulate(public_key, pin_uv_auth_protocol)
+            .unwrap();
+
+        let salt = vec![0x01; 32];
+        let salt_enc = shared_secret.as_ref().encrypt(&mut rng, &salt).unwrap();
+        let salt_auth = shared_secret.authenticate(&salt_enc);
+        let hmac_secret_input = GetAssertionHmacSecretInput {
+            key_agreement: CoseKey::from(platform_public_key),
+            salt_enc,
+            salt_auth,
+            pin_uv_auth_protocol,
+        };
+        let get_extensions = GetAssertionExtensions {
+            hmac_secret: Some(hmac_secret_input),
+            ..Default::default()
+        };
+
+        let credential_descriptor = credential_id.map(|key_id| PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id,
+            transports: None,
+        });
+        let allow_list = credential_descriptor.map(|c| vec![c]);
+        AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list,
+            extensions: get_extensions,
+            options: GetAssertionOptions {
+                up: true,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        }
+    }
+
+    fn test_helper_process_get_assertion_hmac_secret(pin_uv_auth_protocol: PinUvAuthProtocol) {
+        let mut rng = ThreadRng256 {};
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
 
@@ -1979,51 +2074,50 @@ mod test {
             _ => panic!("Invalid response type"),
         };
 
-        let pk = sk.genpk();
-        let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement: CoseKey::from(pk),
-            salt_enc: vec![0x02; 32],
-            salt_auth: vec![0x03; 16],
-            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
-        };
-        let get_extensions = GetAssertionExtensions {
-            hmac_secret: Some(hmac_secret_input),
-            ..Default::default()
-        };
-
-        let cred_desc = PublicKeyCredentialDescriptor {
-            key_type: PublicKeyCredentialType::PublicKey,
-            key_id: credential_id,
-            transports: None,
-        };
-        let get_assertion_params = AuthenticatorGetAssertionParameters {
-            rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
-            allow_list: Some(vec![cred_desc]),
-            extensions: get_extensions,
-            options: GetAssertionOptions {
-                up: false,
-                uv: false,
-            },
+        let client_pin_params = AuthenticatorClientPinParameters {
+            pin_uv_auth_protocol,
+            sub_command: ClientPinSubCommand::GetKeyAgreement,
+            key_agreement: None,
             pin_uv_auth_param: None,
-            pin_uv_auth_protocol: None,
+            new_pin_enc: None,
+            pin_hash_enc: None,
+            permissions: None,
+            permissions_rp_id: None,
         };
+        let key_agreement_response = ctap_state.client_pin.process_command(
+            ctap_state.rng,
+            &mut ctap_state.persistent_store,
+            client_pin_params,
+        );
+        let get_assertion_params = get_assertion_hmac_secret_params(
+            key_agreement_key,
+            key_agreement_response.unwrap(),
+            Some(credential_id),
+            pin_uv_auth_protocol,
+        );
         let get_assertion_response = ctap_state.process_get_assertion(
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-
-        assert_eq!(
-            get_assertion_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION)
-        );
+        assert!(get_assertion_response.is_ok());
     }
 
     #[test]
-    fn test_resident_process_get_assertion_hmac_secret() {
+    fn test_process_get_assertion_hmac_secret_v1() {
+        test_helper_process_get_assertion_hmac_secret(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_get_assertion_hmac_secret_v2() {
+        test_helper_process_get_assertion_hmac_secret(PinUvAuthProtocol::V2);
+    }
+
+    fn test_helper_resident_process_get_assertion_hmac_secret(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) {
         let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
 
@@ -2037,40 +2131,43 @@ mod test {
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
-        let pk = sk.genpk();
-        let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement: CoseKey::from(pk),
-            salt_enc: vec![0x02; 32],
-            salt_auth: vec![0x03; 16],
-            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
-        };
-        let get_extensions = GetAssertionExtensions {
-            hmac_secret: Some(hmac_secret_input),
-            ..Default::default()
-        };
-
-        let get_assertion_params = AuthenticatorGetAssertionParameters {
-            rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
-            allow_list: None,
-            extensions: get_extensions,
-            options: GetAssertionOptions {
-                up: false,
-                uv: false,
-            },
+        let client_pin_params = AuthenticatorClientPinParameters {
+            pin_uv_auth_protocol,
+            sub_command: ClientPinSubCommand::GetKeyAgreement,
+            key_agreement: None,
             pin_uv_auth_param: None,
-            pin_uv_auth_protocol: None,
+            new_pin_enc: None,
+            pin_hash_enc: None,
+            permissions: None,
+            permissions_rp_id: None,
         };
+        let key_agreement_response = ctap_state.client_pin.process_command(
+            ctap_state.rng,
+            &mut ctap_state.persistent_store,
+            client_pin_params,
+        );
+        let get_assertion_params = get_assertion_hmac_secret_params(
+            key_agreement_key,
+            key_agreement_response.unwrap(),
+            None,
+            pin_uv_auth_protocol,
+        );
         let get_assertion_response = ctap_state.process_get_assertion(
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
+        assert!(get_assertion_response.is_ok());
+    }
 
-        assert_eq!(
-            get_assertion_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION)
-        );
+    #[test]
+    fn test_process_resident_get_assertion_hmac_secret_v1() {
+        test_helper_resident_process_get_assertion_hmac_secret(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_resident_process_get_assertion_hmac_secret_v2() {
+        test_helper_resident_process_get_assertion_hmac_secret(PinUvAuthProtocol::V2);
     }
 
     #[test]
@@ -2315,13 +2412,14 @@ mod test {
         assert_eq!(large_blob_key, vec![0x1C; 32]);
     }
 
-    #[test]
-    fn test_process_get_next_assertion_two_credentials_with_uv() {
+    fn test_helper_process_get_next_assertion_two_credentials_with_uv(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x88; 32];
         let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
 
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
@@ -2352,22 +2450,24 @@ mod test {
 
         // The PIN length is outside of the test scope and most likely incorrect.
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_uv_auth_param = Some(vec![
-            0x6F, 0x52, 0x83, 0xBF, 0x1A, 0x91, 0xEE, 0x67, 0xE9, 0xD4, 0x4C, 0x80, 0x08, 0x79,
-            0x90, 0x8D,
-        ]);
+        let client_data_hash = vec![0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash,
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
                 up: false,
                 uv: true,
             },
-            pin_uv_auth_param,
-            pin_uv_auth_protocol: Some(1),
+            pin_uv_auth_param: Some(pin_uv_auth_param),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let get_assertion_response = ctap_state.process_get_assertion(
             get_assertion_params,
@@ -2402,6 +2502,16 @@ mod test {
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         );
+    }
+
+    #[test]
+    fn test_process_get_next_assertion_two_credentials_with_uv_v1() {
+        test_helper_process_get_next_assertion_two_credentials_with_uv(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_get_next_assertion_two_credentials_with_uv_v2() {
+        test_helper_process_get_next_assertion_two_credentials_with_uv(PinUvAuthProtocol::V2);
     }
 
     #[test]

@@ -22,7 +22,7 @@ use super::data_formats::{
 use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
-use super::{check_pin_uv_auth_protocol, StatefulCommand, StatefulPermission};
+use super::{StatefulCommand, StatefulPermission};
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
@@ -259,7 +259,7 @@ pub fn process_credential_management(
         sub_command,
         sub_command_params,
         pin_uv_auth_protocol,
-        pin_auth,
+        pin_uv_auth_param,
     } = cred_management_params;
 
     match (sub_command, stateful_command_permission.get_command()) {
@@ -282,15 +282,21 @@ pub fn process_credential_management(
         | CredentialManagementSubCommand::EnumerateCredentialsBegin
         | CredentialManagementSubCommand::DeleteCredential
         | CredentialManagementSubCommand::UpdateUserInformation => {
-            check_pin_uv_auth_protocol(pin_uv_auth_protocol)?;
-            let pin_auth = pin_auth.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+            let pin_uv_auth_param =
+                pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+            let pin_uv_auth_protocol =
+                pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
             let mut management_data = vec![sub_command as u8];
             if let Some(sub_command_params) = sub_command_params.clone() {
                 if !cbor::write(sub_command_params.into(), &mut management_data) {
                     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
                 }
             }
-            client_pin.verify_pin_auth_token(&management_data, &pin_auth)?;
+            client_pin.verify_pin_uv_auth_token(
+                &management_data,
+                &pin_uv_auth_param,
+                pin_uv_auth_protocol,
+            )?;
             // The RP ID permission is handled differently per subcommand below.
             client_pin.has_permission(PinPermission::CredentialManagement)?;
         }
@@ -352,6 +358,7 @@ pub fn process_credential_management(
 #[cfg(test)]
 mod test {
     use super::super::data_formats::{PinUvAuthProtocol, PublicKeyCredentialType};
+    use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::super::CtapState;
     use super::*;
     use crypto::rng256::{Rng256, ThreadRng256};
@@ -377,13 +384,12 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_process_get_creds_metadata() {
+    fn test_helper_process_get_creds_metadata(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut rng = ThreadRng256 {};
         let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
         let credential_source = create_credential_source(&mut rng);
 
         let user_immediately_present = |_| Ok(());
@@ -391,16 +397,18 @@ mod test {
         ctap_state.client_pin = client_pin;
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
-            0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
-            0xFB, 0x00,
-        ]);
+        let management_data = vec![CredentialManagementSubCommand::GetCredsMetadata as u8];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &management_data,
+            pin_uv_auth_protocol,
+        );
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
             sub_command_params: None,
-            pin_uv_auth_protocol: Some(1),
-            pin_auth: pin_auth.clone(),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+            pin_uv_auth_param: Some(pin_uv_auth_param.clone()),
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -427,8 +435,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
             sub_command_params: None,
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+            pin_uv_auth_param: Some(pin_uv_auth_param),
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -447,6 +455,16 @@ mod test {
             }
             _ => panic!("Invalid response type"),
         };
+    }
+
+    #[test]
+    fn test_process_get_creds_metadata_v1() {
+        test_helper_process_get_creds_metadata(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_get_creds_metadata_v2() {
+        test_helper_process_get_creds_metadata(PinUvAuthProtocol::V2);
     }
 
     #[test]
@@ -474,7 +492,7 @@ mod test {
             .unwrap();
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
+        let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
         ]);
@@ -482,8 +500,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateRpsBegin,
             sub_command_params: None,
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -507,7 +525,7 @@ mod test {
             sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
             sub_command_params: None,
             pin_uv_auth_protocol: None,
-            pin_auth: None,
+            pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -532,7 +550,7 @@ mod test {
             sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
             sub_command_params: None,
             pin_uv_auth_protocol: None,
-            pin_auth: None,
+            pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -571,7 +589,7 @@ mod test {
         }
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
+        let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
         ]);
@@ -582,8 +600,8 @@ mod test {
         let mut cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateRpsBegin,
             sub_command_params: None,
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
         };
 
         for _ in 0..NUM_CREDENTIALS {
@@ -613,7 +631,7 @@ mod test {
                 sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
                 sub_command_params: None,
                 pin_uv_auth_protocol: None,
-                pin_auth: None,
+                pin_uv_auth_param: None,
             };
         }
 
@@ -658,7 +676,7 @@ mod test {
             .unwrap();
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
+        let pin_uv_auth_param = Some(vec![
             0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
             0x2B, 0x68,
         ]);
@@ -673,8 +691,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
             sub_command_params: Some(sub_command_params),
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -697,7 +715,7 @@ mod test {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
             sub_command_params: None,
             pin_uv_auth_protocol: None,
-            pin_auth: None,
+            pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -721,7 +739,7 @@ mod test {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
             sub_command_params: None,
             pin_uv_auth_protocol: None,
-            pin_auth: None,
+            pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -756,7 +774,7 @@ mod test {
             .unwrap();
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
+        let pin_uv_auth_param = Some(vec![
             0xBD, 0xE3, 0xEF, 0x8A, 0x77, 0x01, 0xB1, 0x69, 0x19, 0xE6, 0x62, 0xB9, 0x9B, 0x89,
             0x9C, 0x64,
         ]);
@@ -774,8 +792,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::DeleteCredential,
             sub_command_params: Some(sub_command_params.clone()),
-            pin_uv_auth_protocol: Some(1),
-            pin_auth: pin_auth.clone(),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param: pin_uv_auth_param.clone(),
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -792,8 +810,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::DeleteCredential,
             sub_command_params: Some(sub_command_params),
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -828,7 +846,7 @@ mod test {
             .unwrap();
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
+        let pin_uv_auth_param = Some(vec![
             0xA5, 0x55, 0x8F, 0x03, 0xC3, 0xD3, 0x73, 0x1C, 0x07, 0xDA, 0x1F, 0x8C, 0xC7, 0xBD,
             0x9D, 0xB7,
         ]);
@@ -852,8 +870,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::UpdateUserInformation,
             sub_command_params: Some(sub_command_params),
-            pin_uv_auth_protocol: Some(1),
-            pin_auth,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,
@@ -882,44 +900,7 @@ mod test {
     }
 
     #[test]
-    fn test_process_credential_management_invalid_pin_uv_auth_protocol() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.client_pin = client_pin;
-
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
-        let pin_auth = Some(vec![
-            0xC5, 0xFB, 0x75, 0x55, 0x98, 0xB5, 0x19, 0x01, 0xB3, 0x31, 0x7D, 0xFE, 0x1D, 0xF5,
-            0xFB, 0x00,
-        ]);
-
-        let cred_management_params = AuthenticatorCredentialManagementParameters {
-            sub_command: CredentialManagementSubCommand::GetCredsMetadata,
-            sub_command_params: None,
-            pin_uv_auth_protocol: Some(123456),
-            pin_auth,
-        };
-        let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
-            &mut ctap_state.stateful_command_permission,
-            &mut ctap_state.client_pin,
-            cred_management_params,
-            DUMMY_CLOCK_VALUE,
-        );
-        assert_eq!(
-            cred_management_response,
-            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-        );
-    }
-
-    #[test]
-    fn test_process_credential_management_invalid_pin_auth() {
+    fn test_process_credential_management_invalid_pin_uv_auth_param() {
         let mut rng = ThreadRng256 {};
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
@@ -929,8 +910,8 @@ mod test {
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
             sub_command_params: None,
-            pin_uv_auth_protocol: Some(1),
-            pin_auth: Some(vec![0u8; 16]),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param: Some(vec![0u8; 16]),
         };
         let cred_management_response = process_credential_management(
             &mut ctap_state.persistent_store,

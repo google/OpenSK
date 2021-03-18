@@ -90,14 +90,12 @@ fn check_and_store_new_pin(
 }
 
 #[cfg_attr(test, derive(IntoEnumIterator))]
-// TODO remove when all variants are used
-#[allow(dead_code)]
 pub enum PinPermission {
     // All variants should use integers with a single bit set.
     MakeCredential = 0x01,
     GetAssertion = 0x02,
     CredentialManagement = 0x04,
-    BioEnrollment = 0x08,
+    _BioEnrollment = 0x08,
     LargeBlobWrite = 0x10,
     AuthenticatorConfiguration = 0x20,
 }
@@ -414,18 +412,19 @@ impl ClientPin {
         Ok(ResponseData::AuthenticatorClientPin(response))
     }
 
-    /// Verifies the HMAC for the PIN protocol V1 pinUvAuthToken.
-    pub fn verify_pin_auth_token(
+    /// Verifies the HMAC for the pinUvAuthToken of the given version.
+    pub fn verify_pin_uv_auth_token(
         &self,
         hmac_contents: &[u8],
         pin_uv_auth_param: &[u8],
+        pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> Result<(), Ctap2StatusCode> {
         verify_pin_uv_auth_token(
-            self.get_pin_protocol(PinUvAuthProtocol::V1)
+            self.get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token(),
             hmac_contents,
             pin_uv_auth_param,
-            PinUvAuthProtocol::V1,
+            pin_uv_auth_protocol,
         )
     }
 
@@ -554,6 +553,7 @@ impl ClientPin {
 
 #[cfg(test)]
 mod test {
+    use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use alloc::vec;
     use crypto::rng256::ThreadRng256;
@@ -637,6 +637,48 @@ mod test {
             permissions_rp_id: Some("example.com".to_string()),
         };
         (client_pin, params)
+    }
+
+    #[test]
+    fn test_mix_pin_protocols() {
+        let mut rng = ThreadRng256 {};
+        let client_pin = ClientPin::new(&mut rng);
+        let pin_protocol_v1 = client_pin.get_pin_protocol(PinUvAuthProtocol::V1);
+        let pin_protocol_v2 = client_pin.get_pin_protocol(PinUvAuthProtocol::V2);
+        let message = vec![0xAA; 16];
+
+        let shared_secret_v1 = pin_protocol_v1
+            .decapsulate(pin_protocol_v1.get_public_key(), PinUvAuthProtocol::V1)
+            .unwrap();
+        let shared_secret_v2 = pin_protocol_v2
+            .decapsulate(pin_protocol_v2.get_public_key(), PinUvAuthProtocol::V2)
+            .unwrap();
+        let ciphertext = shared_secret_v1.encrypt(&mut rng, &message).unwrap();
+        let plaintext = shared_secret_v2.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
+        let ciphertext = shared_secret_v2.encrypt(&mut rng, &message).unwrap();
+        let plaintext = shared_secret_v1.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
+
+        let fake_secret_v1 = pin_protocol_v1
+            .decapsulate(pin_protocol_v2.get_public_key(), PinUvAuthProtocol::V1)
+            .unwrap();
+        let ciphertext = shared_secret_v1.encrypt(&mut rng, &message).unwrap();
+        let plaintext = fake_secret_v1.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
+        let ciphertext = fake_secret_v1.encrypt(&mut rng, &message).unwrap();
+        let plaintext = shared_secret_v1.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
+
+        let fake_secret_v2 = pin_protocol_v2
+            .decapsulate(pin_protocol_v1.get_public_key(), PinUvAuthProtocol::V2)
+            .unwrap();
+        let ciphertext = shared_secret_v2.encrypt(&mut rng, &message).unwrap();
+        let plaintext = fake_secret_v2.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
+        let ciphertext = fake_secret_v2.encrypt(&mut rng, &message).unwrap();
+        let plaintext = shared_secret_v2.decrypt(&ciphertext).unwrap();
+        assert_ne!(&message, &plaintext);
     }
 
     fn test_helper_verify_pin_hash_enc(pin_uv_auth_protocol: PinUvAuthProtocol) {
@@ -1306,6 +1348,77 @@ mod test {
         assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
             client_pin.ensure_rp_id_permission("counter-example.com"),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_verify_pin_uv_auth_token() {
+        let mut rng = ThreadRng256 {};
+        let client_pin = ClientPin::new(&mut rng);
+        let message = [0xAA];
+
+        let pin_uv_auth_token_v1 = client_pin
+            .get_pin_protocol(PinUvAuthProtocol::V1)
+            .get_pin_uv_auth_token();
+        let pin_uv_auth_param_v1 =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+        let pin_uv_auth_token_v2 = client_pin
+            .get_pin_protocol(PinUvAuthProtocol::V2)
+            .get_pin_uv_auth_token();
+        let pin_uv_auth_param_v2 =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V2);
+        let pin_uv_auth_param_v1_from_v2_token =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V1);
+        let pin_uv_auth_param_v2_from_v1_token =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
+
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v1,
+                PinUvAuthProtocol::V1
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v2,
+                PinUvAuthProtocol::V2
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v1,
+                PinUvAuthProtocol::V2
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v2,
+                PinUvAuthProtocol::V1
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v1_from_v2_token,
+                PinUvAuthProtocol::V1
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v2_from_v1_token,
+                PinUvAuthProtocol::V2
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

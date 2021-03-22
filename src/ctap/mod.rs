@@ -29,6 +29,7 @@ pub mod response;
 pub mod status_code;
 mod storage;
 mod timed_permission;
+mod token_state;
 
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
@@ -301,11 +302,12 @@ where
         }
     }
 
-    pub fn update_command_permission(&mut self, now: ClockValue) {
+    pub fn update_timeouts(&mut self, now: ClockValue) {
         // Ignore the result, just update.
         let _ = self
             .stateful_command_permission
             .check_command_permission(now);
+        self.client_pin.update_timeouts(now);
     }
 
     pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
@@ -465,6 +467,7 @@ where
                         self.rng,
                         &mut self.persistent_store,
                         params,
+                        now,
                     ),
                     Command::AuthenticatorReset => self.process_reset(cid, now),
                     Command::AuthenticatorCredentialManagement(params) => {
@@ -641,6 +644,10 @@ where
                 )?;
                 self.client_pin
                     .has_permission(PinPermission::MakeCredential)?;
+                self.client_pin.check_user_verified_flag()?;
+                // Checking for the correct permissions_rp_id is specified earlier.
+                // Error codes are identical though, so the implementation can be identical with
+                // GetAssertion.
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;
                 UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
             }
@@ -660,6 +667,7 @@ where
         };
 
         (self.check_user_presence)(cid)?;
+        self.client_pin.clear_token_flags();
 
         let sk = crypto::ecdsa::SecKey::gensk(self.rng);
         let pk = sk.genpk();
@@ -932,6 +940,10 @@ where
                 )?;
                 self.client_pin
                     .has_permission(PinPermission::GetAssertion)?;
+                // Checking for the UV flag is specified earlier for GetAssertion.
+                // Error codes are identical though, so the implementation can be identical with
+                // MakeCredential.
+                self.client_pin.check_user_verified_flag()?;
                 self.client_pin.ensure_rp_id_permission(&rp_id)?;
                 UV_FLAG
             }
@@ -987,6 +999,7 @@ where
         // For CTAP 2.1, it was moved to a later protocol step.
         if options.up {
             (self.check_user_presence)(cid)?;
+            self.client_pin.clear_token_flags();
         }
 
         let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
@@ -1777,7 +1790,7 @@ mod test {
         make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(make_credential_params.clone(), DUMMY_CHANNEL_ID);
 
         check_make_response(
             make_credential_response,
@@ -1786,6 +1799,13 @@ mod test {
             0x20,
             &[],
         );
+
+        let make_credential_response =
+            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        )
     }
 
     #[test]
@@ -2088,6 +2108,7 @@ mod test {
             ctap_state.rng,
             &mut ctap_state.persistent_store,
             client_pin_params,
+            DUMMY_CLOCK_VALUE,
         );
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
@@ -2145,6 +2166,7 @@ mod test {
             ctap_state.rng,
             &mut ctap_state.persistent_store,
             client_pin_params,
+            DUMMY_CLOCK_VALUE,
         );
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
@@ -2423,7 +2445,6 @@ mod test {
 
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        ctap_state.client_pin = client_pin;
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user1 = PublicKeyCredentialUserEntity {
@@ -2448,6 +2469,7 @@ mod test {
             .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
+        ctap_state.client_pin = client_pin;
         // The PIN length is outside of the test scope and most likely incorrect.
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
         let client_data_hash = vec![0xCD];

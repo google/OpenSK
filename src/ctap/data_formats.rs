@@ -148,7 +148,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialType {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialparameters
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PublicKeyCredentialParameter {
     pub cred_type: PublicKeyCredentialType,
     pub alg: SignatureAlgorithm,
@@ -387,7 +387,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 }
 
 // Even though options are optional, we can use the default if not present.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MakeCredentialOptions {
     pub rk: bool,
     pub uv: bool,
@@ -484,7 +484,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
     // This is the default for all numbers not covered above.

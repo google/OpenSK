@@ -20,6 +20,7 @@ use super::pin_protocol::{verify_pin_uv_auth_token, PinProtocol, SharedSecret};
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
+use super::token_state::PinUvAuthTokenState;
 use alloc::boxed::Box;
 use alloc::str;
 use alloc::string::String;
@@ -30,6 +31,7 @@ use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
+use libtock_drivers::timer::ClockValue;
 use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
@@ -104,8 +106,7 @@ pub struct ClientPin {
     pin_protocol_v1: PinProtocol,
     pin_protocol_v2: PinProtocol,
     consecutive_pin_mismatches: u8,
-    permissions: u8,
-    permissions_rp_id: Option<String>,
+    pin_uv_auth_token_state: PinUvAuthTokenState,
 }
 
 impl ClientPin {
@@ -114,8 +115,7 @@ impl ClientPin {
             pin_protocol_v1: PinProtocol::new(rng),
             pin_protocol_v2: PinProtocol::new(rng),
             consecutive_pin_mismatches: 0,
-            permissions: 0,
-            permissions_rp_id: None,
+            pin_uv_auth_token_state: PinUvAuthTokenState::new(),
         }
     }
 
@@ -290,6 +290,7 @@ impl ClientPin {
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
         client_pin_params: AuthenticatorClientPinParameters,
+        now: ClockValue,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         let AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
@@ -314,14 +315,17 @@ impl ClientPin {
         if persistent_store.has_force_pin_change()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
-
         let pin_token = shared_secret.encrypt(
             rng,
             self.get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token(),
         )?;
-        self.permissions = 0x03;
-        self.permissions_rp_id = None;
+
+        self.pin_protocol_v1.reset_pin_uv_auth_token(rng);
+        self.pin_protocol_v2.reset_pin_uv_auth_token(rng);
+        self.pin_uv_auth_token_state
+            .begin_using_pin_uv_auth_token(now);
+        self.pin_uv_auth_token_state.set_default_permissions();
 
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
@@ -350,6 +354,7 @@ impl ClientPin {
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
         mut client_pin_params: AuthenticatorClientPinParameters,
+        now: ClockValue,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         let permissions = ok_or_missing(client_pin_params.permissions)?;
         // Mutating client_pin_params is just an optimization to move it into
@@ -364,10 +369,10 @@ impl ClientPin {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 
-        let response = self.process_get_pin_token(rng, persistent_store, client_pin_params)?;
-
-        self.permissions = permissions;
-        self.permissions_rp_id = permissions_rp_id;
+        let response = self.process_get_pin_token(rng, persistent_store, client_pin_params, now)?;
+        self.pin_uv_auth_token_state.set_permissions(permissions);
+        self.pin_uv_auth_token_state
+            .set_permissions_rp_id(permissions_rp_id);
 
         Ok(response)
     }
@@ -378,6 +383,7 @@ impl ClientPin {
         rng: &mut impl Rng256,
         persistent_store: &mut PersistentStore,
         client_pin_params: AuthenticatorClientPinParameters,
+        now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let response = match client_pin_params.sub_command {
             ClientPinSubCommand::GetPinRetries => {
@@ -395,7 +401,7 @@ impl ClientPin {
                 None
             }
             ClientPinSubCommand::GetPinToken => {
-                Some(self.process_get_pin_token(rng, persistent_store, client_pin_params)?)
+                Some(self.process_get_pin_token(rng, persistent_store, client_pin_params, now)?)
             }
             ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_uv_with_permissions(client_pin_params)?,
@@ -406,6 +412,7 @@ impl ClientPin {
                     rng,
                     persistent_store,
                     client_pin_params,
+                    now,
                 )?,
             ),
         };
@@ -419,6 +426,9 @@ impl ClientPin {
         pin_uv_auth_param: &[u8],
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> Result<(), Ctap2StatusCode> {
+        if !self.pin_uv_auth_token_state.is_in_use() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
+        }
         verify_pin_uv_auth_token(
             self.get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token(),
@@ -435,8 +445,7 @@ impl ClientPin {
         self.pin_protocol_v2.regenerate(rng);
         self.pin_protocol_v2.reset_pin_uv_auth_token(rng);
         self.consecutive_pin_mismatches = 0;
-        self.permissions = 0;
-        self.permissions_rp_id = None;
+        self.pin_uv_auth_token_state.stop_using_pin_uv_auth_token();
     }
 
     /// Verifies, computes and encrypts the HMAC-secret outputs.
@@ -476,30 +485,43 @@ impl ClientPin {
         shared_secret.encrypt(rng, &output)
     }
 
-    /// Check if the required command's token permission is granted.
-    pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
-        // Relies on the fact that all permissions are represented by powers of two.
-        if permission as u8 & self.permissions != 0 {
+    /// Consumes flags and permissions related to the pinUvAuthToken.
+    pub fn clear_token_flags(&mut self) {
+        self.pin_uv_auth_token_state.clear_user_verified_flag();
+        self.pin_uv_auth_token_state
+            .clear_pin_uv_auth_token_permissions_except_lbw();
+    }
+
+    /// Updates the running timers, triggers timeout events.
+    pub fn update_timeouts(&mut self, now: ClockValue) {
+        self.pin_uv_auth_token_state
+            .pin_uv_auth_token_usage_timer_observer(now);
+    }
+
+    /// Checks if user verification is cached for use of the pinUvAuthToken.
+    pub fn check_user_verified_flag(&mut self) -> Result<(), Ctap2StatusCode> {
+        if self.pin_uv_auth_token_state.get_user_verified_flag_value() {
             Ok(())
         } else {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         }
     }
 
+    /// Check if the required command's token permission is granted.
+    pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
+        self.pin_uv_auth_token_state.has_permission(permission)
+    }
+
     /// Check if no RP ID is associated with the token permission.
     pub fn has_no_rp_id_permission(&self) -> Result<(), Ctap2StatusCode> {
-        if self.permissions_rp_id.is_some() {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
-        }
-        Ok(())
+        self.pin_uv_auth_token_state.has_no_permissions_rp_id()
     }
 
     /// Check if no or the passed RP ID is associated with the token permission.
     pub fn has_no_or_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
-        match &self.permissions_rp_id {
-            Some(p) if rp_id != p => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-            _ => Ok(()),
-        }
+        self.pin_uv_auth_token_state
+            .has_no_permissions_rp_id()
+            .or_else(|_| self.pin_uv_auth_token_state.has_permissions_rp_id(rp_id))
     }
 
     /// Check if no RP ID is associated with the token permission, or it matches the hash.
@@ -507,26 +529,28 @@ impl ClientPin {
         &self,
         rp_id_hash: &[u8],
     ) -> Result<(), Ctap2StatusCode> {
-        match &self.permissions_rp_id {
-            Some(p) if rp_id_hash != Sha256::hash(p.as_bytes()) => {
-                Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-            }
-            _ => Ok(()),
-        }
+        self.pin_uv_auth_token_state
+            .has_no_permissions_rp_id()
+            .or_else(|_| {
+                self.pin_uv_auth_token_state
+                    .has_permissions_rp_id_hash(rp_id_hash)
+            })
     }
 
     /// Check if the passed RP ID is associated with the token permission.
     ///
     /// If no RP ID is associated, associate the passed RP ID as a side effect.
     pub fn ensure_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
-        match &self.permissions_rp_id {
-            Some(p) if rp_id != p => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
-            None => {
-                self.permissions_rp_id = Some(String::from(rp_id));
-                Ok(())
-            }
-            _ => Ok(()),
+        if self
+            .pin_uv_auth_token_state
+            .has_no_permissions_rp_id()
+            .is_ok()
+        {
+            self.pin_uv_auth_token_state
+                .set_permissions_rp_id(Some(String::from(rp_id)));
+            return Ok(());
         }
+        self.pin_uv_auth_token_state.has_permissions_rp_id(rp_id)
     }
 
     #[cfg(test)]
@@ -541,12 +565,16 @@ impl ClientPin {
             PinUvAuthProtocol::V1 => (key_agreement_key, crypto::ecdh::SecKey::gensk(&mut rng)),
             PinUvAuthProtocol::V2 => (crypto::ecdh::SecKey::gensk(&mut rng), key_agreement_key),
         };
+        let mut pin_uv_auth_token_state = PinUvAuthTokenState::new();
+        pin_uv_auth_token_state.set_permissions(0xFF);
+        const CLOCK_FREQUENCY_HZ: usize = 32768;
+        const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
+        pin_uv_auth_token_state.begin_using_pin_uv_auth_token(DUMMY_CLOCK_VALUE);
         ClientPin {
             pin_protocol_v1: PinProtocol::new_test(key_agreement_key_v1, pin_uv_auth_token),
             pin_protocol_v2: PinProtocol::new_test(key_agreement_key_v2, pin_uv_auth_token),
             consecutive_pin_mismatches: 0,
-            permissions: 0xFF,
-            permissions_rp_id: None,
+            pin_uv_auth_token_state,
         }
     }
 }
@@ -557,6 +585,10 @@ mod test {
     use super::*;
     use alloc::vec;
     use crypto::rng256::ThreadRng256;
+    use libtock_drivers::timer::Duration;
+
+    const CLOCK_FREQUENCY_HZ: usize = 32768;
+    const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
 
     /// Stores a PIN hash corresponding to the dummy PIN "1234".
     fn set_standard_pin(persistent_store: &mut PersistentStore) {
@@ -782,7 +814,7 @@ mod test {
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
         });
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Ok(ResponseData::AuthenticatorClientPin(expected_response))
         );
     }
@@ -810,7 +842,7 @@ mod test {
             retries: None,
         });
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Ok(ResponseData::AuthenticatorClientPin(expected_response))
         );
     }
@@ -831,7 +863,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Ok(ResponseData::AuthenticatorClientPin(None))
         );
     }
@@ -865,14 +897,24 @@ mod test {
         let pin_uv_auth_param = shared_secret.authenticate(&auth_param_data);
         params.pin_uv_auth_param = Some(pin_uv_auth_param);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params.clone()),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                params.clone(),
+                DUMMY_CLOCK_VALUE
+            ),
             Ok(ResponseData::AuthenticatorClientPin(None))
         );
 
         let mut bad_params = params.clone();
         bad_params.pin_hash_enc = Some(vec![0xEE; 16]);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, bad_params),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                bad_params,
+                DUMMY_CLOCK_VALUE
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
 
@@ -880,7 +922,7 @@ mod test {
             persistent_store.decr_pin_retries().unwrap();
         }
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED)
         );
     }
@@ -905,13 +947,41 @@ mod test {
         set_standard_pin(&mut persistent_store);
 
         assert!(client_pin
-            .process_command(&mut rng, &mut persistent_store, params.clone())
+            .process_command(
+                &mut rng,
+                &mut persistent_store,
+                params.clone(),
+                DUMMY_CLOCK_VALUE
+            )
             .is_ok());
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::MakeCredential),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::GetAssertion),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_no_permissions_rp_id(),
+            Ok(())
+        );
 
         let mut bad_params = params;
         bad_params.pin_hash_enc = Some(vec![0xEE; 16]);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, bad_params),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                bad_params,
+                DUMMY_CLOCK_VALUE
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
     }
@@ -937,7 +1007,7 @@ mod test {
 
         assert_eq!(persistent_store.force_pin_change(), Ok(()));
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID),
         );
     }
@@ -964,32 +1034,65 @@ mod test {
         set_standard_pin(&mut persistent_store);
 
         assert!(client_pin
-            .process_command(&mut rng, &mut persistent_store, params.clone())
+            .process_command(
+                &mut rng,
+                &mut persistent_store,
+                params.clone(),
+                DUMMY_CLOCK_VALUE
+            )
             .is_ok());
-        assert_eq!(client_pin.permissions, 0x03);
         assert_eq!(
-            client_pin.permissions_rp_id,
-            Some(String::from("example.com"))
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::MakeCredential),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::GetAssertion),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permissions_rp_id("example.com"),
+            Ok(())
         );
 
         let mut bad_params = params.clone();
         bad_params.permissions = Some(0x00);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, bad_params),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                bad_params,
+                DUMMY_CLOCK_VALUE
+            ),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
         let mut bad_params = params.clone();
         bad_params.permissions_rp_id = None;
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, bad_params),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                bad_params,
+                DUMMY_CLOCK_VALUE
+            ),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
         let mut bad_params = params;
         bad_params.pin_hash_enc = Some(vec![0xEE; 16]);
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, bad_params),
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                bad_params,
+                DUMMY_CLOCK_VALUE
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
     }
@@ -1017,7 +1120,7 @@ mod test {
 
         assert_eq!(persistent_store.force_pin_change(), Ok(()));
         assert_eq!(
-            client_pin.process_command(&mut rng, &mut persistent_store, params),
+            client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
     }
@@ -1275,14 +1378,21 @@ mod test {
     fn test_has_permission() {
         let mut rng = ThreadRng256 {};
         let mut client_pin = ClientPin::new(&mut rng);
-        client_pin.permissions = 0x7F;
-        for permission in PinPermission::into_enum_iter() {
-            assert_eq!(client_pin.has_permission(permission), Ok(()));
-        }
-        client_pin.permissions = 0x00;
+        client_pin.pin_uv_auth_token_state.set_permissions(0x7F);
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(
-                client_pin.has_permission(permission),
+                client_pin
+                    .pin_uv_auth_token_state
+                    .has_permission(permission),
+                Ok(())
+            );
+        }
+        client_pin.pin_uv_auth_token_state.set_permissions(0x00);
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(
+                client_pin
+                    .pin_uv_auth_token_state
+                    .has_permission(permission),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
             );
         }
@@ -1293,8 +1403,9 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut client_pin = ClientPin::new(&mut rng);
         assert_eq!(client_pin.has_no_rp_id_permission(), Ok(()));
-        assert_eq!(client_pin.permissions_rp_id, None);
-        client_pin.permissions_rp_id = Some("example.com".to_string());
+        client_pin
+            .pin_uv_auth_token_state
+            .set_permissions_rp_id(Some("example.com".to_string()));
         assert_eq!(
             client_pin.has_no_rp_id_permission(),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -1306,8 +1417,9 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut client_pin = ClientPin::new(&mut rng);
         assert_eq!(client_pin.has_no_or_rp_id_permission("example.com"), Ok(()));
-        assert_eq!(client_pin.permissions_rp_id, None);
-        client_pin.permissions_rp_id = Some("example.com".to_string());
+        client_pin
+            .pin_uv_auth_token_state
+            .set_permissions_rp_id(Some("example.com".to_string()));
         assert_eq!(client_pin.has_no_or_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
             client_pin.has_no_or_rp_id_permission("another.example.com"),
@@ -1324,8 +1436,9 @@ mod test {
             client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash),
             Ok(())
         );
-        assert_eq!(client_pin.permissions_rp_id, None);
-        client_pin.permissions_rp_id = Some("example.com".to_string());
+        client_pin
+            .pin_uv_auth_token_state
+            .set_permissions_rp_id(Some("example.com".to_string()));
         assert_eq!(
             client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash),
             Ok(())
@@ -1342,12 +1455,14 @@ mod test {
         let mut client_pin = ClientPin::new(&mut rng);
         assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
-            client_pin.permissions_rp_id,
-            Some(String::from("example.com"))
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permissions_rp_id("example.com"),
+            Ok(())
         );
         assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
-            client_pin.ensure_rp_id_permission("counter-example.com"),
+            client_pin.ensure_rp_id_permission("another.example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -1355,8 +1470,11 @@ mod test {
     #[test]
     fn test_verify_pin_uv_auth_token() {
         let mut rng = ThreadRng256 {};
-        let client_pin = ClientPin::new(&mut rng);
+        let mut client_pin = ClientPin::new(&mut rng);
         let message = [0xAA];
+        client_pin
+            .pin_uv_auth_token_state
+            .begin_using_pin_uv_auth_token(DUMMY_CLOCK_VALUE);
 
         let pin_uv_auth_token_v1 = client_pin
             .get_pin_protocol(PinUvAuthProtocol::V1)
@@ -1424,6 +1542,28 @@ mod test {
     }
 
     #[test]
+    fn test_verify_pin_uv_auth_token_not_in_use() {
+        let mut rng = ThreadRng256 {};
+        let client_pin = ClientPin::new(&mut rng);
+        let message = [0xAA];
+
+        let pin_uv_auth_token_v1 = client_pin
+            .get_pin_protocol(PinUvAuthProtocol::V1)
+            .get_pin_uv_auth_token();
+        let pin_uv_auth_param_v1 =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &message,
+                &pin_uv_auth_param_v1,
+                PinUvAuthProtocol::V1
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[test]
     fn test_reset() {
         let mut rng = ThreadRng256 {};
         let mut client_pin = ClientPin::new(&mut rng);
@@ -1431,8 +1571,10 @@ mod test {
         let public_key_v2 = client_pin.pin_protocol_v2.get_public_key();
         let token_v1 = *client_pin.pin_protocol_v1.get_pin_uv_auth_token();
         let token_v2 = *client_pin.pin_protocol_v2.get_pin_uv_auth_token();
-        client_pin.permissions = 0xFF;
-        client_pin.permissions_rp_id = Some(String::from("example.com"));
+        client_pin.pin_uv_auth_token_state.set_permissions(0xFF);
+        client_pin
+            .pin_uv_auth_token_state
+            .set_permissions_rp_id(Some(String::from("example.com")));
         client_pin.reset(&mut rng);
         assert_ne!(public_key_v1, client_pin.pin_protocol_v1.get_public_key());
         assert_ne!(public_key_v2, client_pin.pin_protocol_v2.get_public_key());
@@ -1451,5 +1593,95 @@ mod test {
             );
         }
         assert_eq!(client_pin.has_no_rp_id_permission(), Ok(()));
+    }
+
+    #[test]
+    fn test_update_timeouts() {
+        let (mut client_pin, mut params) = create_client_pin_and_parameters(
+            PinUvAuthProtocol::V2,
+            ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
+        );
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        set_standard_pin(&mut persistent_store);
+        params.permissions = Some(0xFF);
+
+        assert!(client_pin
+            .process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE)
+            .is_ok());
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(
+                client_pin
+                    .pin_uv_auth_token_state
+                    .has_permission(permission),
+                Ok(())
+            );
+        }
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permissions_rp_id("example.com"),
+            Ok(())
+        );
+
+        let timeout = DUMMY_CLOCK_VALUE.wrapping_add(Duration::from_ms(30001));
+        client_pin.update_timeouts(timeout);
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(
+                client_pin
+                    .pin_uv_auth_token_state
+                    .has_permission(permission),
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+            );
+        }
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permissions_rp_id("example.com"),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_clear_token_flags() {
+        let (mut client_pin, mut params) = create_client_pin_and_parameters(
+            PinUvAuthProtocol::V2,
+            ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
+        );
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        set_standard_pin(&mut persistent_store);
+        params.permissions = Some(0xFF);
+
+        assert!(client_pin
+            .process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE)
+            .is_ok());
+        for permission in PinPermission::into_enum_iter() {
+            assert_eq!(
+                client_pin
+                    .pin_uv_auth_token_state
+                    .has_permission(permission),
+                Ok(())
+            );
+        }
+        assert_eq!(client_pin.check_user_verified_flag(), Ok(()));
+
+        client_pin.clear_token_flags();
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::CredentialManagement),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        assert_eq!(
+            client_pin
+                .pin_uv_auth_token_state
+                .has_permission(PinPermission::LargeBlobWrite),
+            Ok(())
+        );
+        assert_eq!(
+            client_pin.check_user_verified_flag(),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
     }
 }

@@ -143,7 +143,7 @@ impl Command {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AuthenticatorMakeCredentialParameters {
     pub client_data_hash: Vec<u8>,
     pub rp: PublicKeyCredentialRpEntity,

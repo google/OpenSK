@@ -139,6 +139,8 @@ pub struct AuthenticatorGetInfoResponse {
     // Missing response fields as they are only relevant for internal UV:
     // - 0x11: preferredPlatformUvAttempts
     // - 0x12: uvModality
+    // Add them when your hardware supports any kind of user verification within
+    // the boundary of the device, e.g. fingerprint or built-in keyboard.
     pub certifications: Option<BTreeMap<String, i64>>,
     pub remaining_discoverable_credentials: Option<u64>,
     // - 0x15: vendorPrototypeConfigCommands missing as we don't support it.

@@ -17,6 +17,7 @@ mod client_pin;
 pub mod command;
 mod config_command;
 mod credential_management;
+mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 mod customization;
@@ -38,6 +39,7 @@ use self::command::{
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
+use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
     DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
     MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
@@ -71,7 +73,6 @@ use cbor::cbor_map_options;
 use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
@@ -338,23 +339,11 @@ where
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let master_keys = self.persistent_store.master_keys()?;
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-        let mut sk_bytes = [0; 32];
-        private_key.to_bytes(&mut sk_bytes);
-        let mut iv = [0; 16];
-        iv.copy_from_slice(&self.rng.gen_uniform_u8x32()[..16]);
+        let mut plaintext = [0; 64];
+        private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
+        plaintext[32..64].copy_from_slice(application);
 
-        let mut blocks = [[0u8; 16]; 4];
-        blocks[0].copy_from_slice(&sk_bytes[..16]);
-        blocks[1].copy_from_slice(&sk_bytes[16..]);
-        blocks[2].copy_from_slice(&application[..16]);
-        blocks[3].copy_from_slice(&application[16..]);
-        cbc_encrypt(&aes_enc_key, iv, &mut blocks);
-
-        let mut encrypted_id = Vec::with_capacity(0x70);
-        encrypted_id.extend(&iv);
-        for b in &blocks {
-            encrypted_id.extend(b);
-        }
+        let mut encrypted_id = aes256_cbc_encrypt(self.rng, &aes_enc_key, &plaintext, true)?;
         let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
@@ -381,26 +370,12 @@ where
             return Ok(None);
         }
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-        let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
-        let mut iv = [0; 16];
-        iv.copy_from_slice(&credential_id[..16]);
-        let mut blocks = [[0u8; 16]; 4];
-        for i in 0..4 {
-            blocks[i].copy_from_slice(&credential_id[16 * (i + 1)..16 * (i + 2)]);
-        }
 
-        cbc_decrypt(&aes_dec_key, iv, &mut blocks);
-        let mut decrypted_sk = [0; 32];
-        let mut decrypted_rp_id_hash = [0; 32];
-        decrypted_sk[..16].clone_from_slice(&blocks[0]);
-        decrypted_sk[16..].clone_from_slice(&blocks[1]);
-        decrypted_rp_id_hash[..16].clone_from_slice(&blocks[2]);
-        decrypted_rp_id_hash[16..].clone_from_slice(&blocks[3]);
-        if rp_id_hash != decrypted_rp_id_hash {
+        let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, &credential_id[..payload_size], true)?;
+        if rp_id_hash != &decrypted_id[32..64] {
             return Ok(None);
         }
-
-        let sk_option = crypto::ecdsa::SecKey::from_bytes(&decrypted_sk);
+        let sk_option = crypto::ecdsa::SecKey::from_bytes(array_ref!(decrypted_id, 0, 32));
         Ok(sk_option.map(|sk| PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
@@ -1237,8 +1212,10 @@ mod test {
         PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
+    use super::storage::MasterKeys;
     use super::*;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
+    use crypto::cbc::{cbc_decrypt, cbc_encrypt};
     use crypto::rng256::ThreadRng256;
 
     const CLOCK_FREQUENCY_HZ: usize = 32768;
@@ -2947,5 +2924,129 @@ mod test {
                 }
             ))
         );
+    }
+
+    // Encrypts the private key and relying party ID hash into a credential ID. Other
+    // information, such as a user name, are not stored, because encrypted credential IDs
+    // are used for credentials stored server-side. Also, we want the key handle to be
+    // compatible with U2F.
+    pub fn legacy_encrypt_key_handle(
+        rng: &mut impl Rng256,
+        master_keys: &MasterKeys,
+        private_key: crypto::ecdsa::SecKey,
+        application: &[u8; 32],
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+        let mut sk_bytes = [0; 32];
+        private_key.to_bytes(&mut sk_bytes);
+        let mut iv = [0; 16];
+        iv.copy_from_slice(&rng.gen_uniform_u8x32()[..16]);
+
+        let mut blocks = [[0u8; 16]; 4];
+        blocks[0].copy_from_slice(&sk_bytes[..16]);
+        blocks[1].copy_from_slice(&sk_bytes[16..]);
+        blocks[2].copy_from_slice(&application[..16]);
+        blocks[3].copy_from_slice(&application[16..]);
+        cbc_encrypt(&aes_enc_key, iv, &mut blocks);
+
+        let mut encrypted_id = Vec::with_capacity(0x70);
+        encrypted_id.extend(&iv);
+        for b in &blocks {
+            encrypted_id.extend(b);
+        }
+        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        encrypted_id.extend(&id_hmac);
+        Ok(encrypted_id)
+    }
+
+    // Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
+    // None is returned if the HMAC test fails or the relying party does not match the
+    // decrypted relying party ID hash.
+    pub fn legacy_decrypt_credential_source(
+        master_keys: &MasterKeys,
+        credential_id: Vec<u8>,
+        rp_id_hash: &[u8],
+    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+        if credential_id.len() != CREDENTIAL_ID_SIZE {
+            return Ok(None);
+        }
+        let payload_size = credential_id.len() - 32;
+        if !verify_hmac_256::<Sha256>(
+            &master_keys.hmac,
+            &credential_id[..payload_size],
+            array_ref![credential_id, payload_size, 32],
+        ) {
+            return Ok(None);
+        }
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+        let aes_dec_key = crypto::aes256::DecryptionKey::new(&aes_enc_key);
+        let mut iv = [0; 16];
+        iv.copy_from_slice(&credential_id[..16]);
+        let mut blocks = [[0u8; 16]; 4];
+        for i in 0..4 {
+            blocks[i].copy_from_slice(&credential_id[16 * (i + 1)..16 * (i + 2)]);
+        }
+
+        cbc_decrypt(&aes_dec_key, iv, &mut blocks);
+        let mut decrypted_sk = [0; 32];
+        let mut decrypted_rp_id_hash = [0; 32];
+        decrypted_sk[..16].clone_from_slice(&blocks[0]);
+        decrypted_sk[16..].clone_from_slice(&blocks[1]);
+        decrypted_rp_id_hash[..16].clone_from_slice(&blocks[2]);
+        decrypted_rp_id_hash[16..].clone_from_slice(&blocks[3]);
+        if rp_id_hash != decrypted_rp_id_hash {
+            return Ok(None);
+        }
+
+        let sk_option = crypto::ecdsa::SecKey::from_bytes(&decrypted_sk);
+        Ok(sk_option.map(|sk| PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id,
+            private_key: sk,
+            rp_id: String::from(""),
+            user_handle: vec![],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+        }))
+    }
+
+    #[test]
+    fn test_backwards_compatible() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let master_keys = ctap_state.persistent_store.master_keys().unwrap();
+
+        // Usually, the relying party ID or its hash is provided by the client.
+        // We are not testing the correctness of our SHA256 here, only if it is checked.
+        let rp_id_hash = [0x55; 32];
+
+        let encrypted_id = ctap_state
+            .encrypt_key_handle(private_key.clone(), &rp_id_hash)
+            .unwrap();
+        let decrypted_source =
+            legacy_decrypt_credential_source(&master_keys, encrypted_id, &rp_id_hash)
+                .unwrap()
+                .unwrap();
+        assert_eq!(private_key, decrypted_source.private_key);
+
+        let encrypted_id = legacy_encrypt_key_handle(
+            ctap_state.rng,
+            &master_keys,
+            private_key.clone(),
+            &rp_id_hash,
+        )
+        .unwrap();
+        let decrypted_source = ctap_state
+            .decrypt_credential_source(encrypted_id, &rp_id_hash)
+            .unwrap()
+            .unwrap();
+        assert_eq!(private_key, decrypted_source.private_key);
     }
 }

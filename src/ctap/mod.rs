@@ -1101,6 +1101,7 @@ where
                 firmware_version: None,
                 max_cred_blob_length: Some(MAX_CRED_BLOB_LENGTH as u64),
                 max_rp_ids_for_set_min_pin_length: Some(MAX_RP_IDS_LENGTH as u64),
+                certifications: None,
                 remaining_discoverable_credentials: Some(
                     self.persistent_store.remaining_credentials()? as u64,
                 ),

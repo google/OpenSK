@@ -200,6 +200,7 @@ impl ClientPin {
             key_agreement: None,
             pin_token: None,
             retries: Some(persistent_store.pin_retries()? as u64),
+            power_cycle_state: Some(self.consecutive_pin_mismatches >= 3),
         })
     }
 
@@ -215,6 +216,7 @@ impl ClientPin {
             key_agreement,
             pin_token: None,
             retries: None,
+            power_cycle_state: None,
         })
     }
 
@@ -331,6 +333,7 @@ impl ClientPin {
             key_agreement: None,
             pin_token: Some(pin_token),
             retries: None,
+            power_cycle_state: None,
         })
     }
 
@@ -812,6 +815,24 @@ mod test {
             key_agreement: None,
             pin_token: None,
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
+            power_cycle_state: Some(false),
+        });
+        assert_eq!(
+            client_pin.process_command(
+                &mut rng,
+                &mut persistent_store,
+                params.clone(),
+                DUMMY_CLOCK_VALUE
+            ),
+            Ok(ResponseData::AuthenticatorClientPin(expected_response))
+        );
+
+        client_pin.consecutive_pin_mismatches = 3;
+        let expected_response = Some(AuthenticatorClientPinResponse {
+            key_agreement: None,
+            pin_token: None,
+            retries: Some(persistent_store.pin_retries().unwrap() as u64),
+            power_cycle_state: Some(true),
         });
         assert_eq!(
             client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
@@ -840,6 +861,7 @@ mod test {
             key_agreement: params.key_agreement.clone(),
             pin_token: None,
             retries: None,
+            power_cycle_state: None,
         });
         assert_eq!(
             client_pin.process_command(&mut rng, &mut persistent_store, params, DUMMY_CLOCK_VALUE),
@@ -1266,7 +1288,7 @@ mod test {
 
         let salt_enc = vec![0x01; 32];
         let mut salt_auth = shared_secret.authenticate(&salt_enc);
-        salt_auth[0] = 0x00;
+        salt_auth[0] ^= 0x01;
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: client_pin
                 .get_pin_protocol(pin_uv_auth_protocol)

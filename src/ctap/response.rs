@@ -20,7 +20,7 @@ use super::data_formats::{
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use cbor::{cbor_array_vec, cbor_bool, cbor_map_btree, cbor_map_options, cbor_text};
+use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_btree, cbor_map_options, cbor_text};
 
 #[derive(Debug, PartialEq)]
 pub enum ResponseData {
@@ -92,6 +92,7 @@ pub struct AuthenticatorGetAssertionResponse {
     pub signature: Vec<u8>,
     pub user: Option<PublicKeyCredentialUserEntity>,
     pub number_of_credentials: Option<u64>,
+    // 0x06: userSelected missing as we don't support displays.
     pub large_blob_key: Option<Vec<u8>>,
 }
 
@@ -135,7 +136,14 @@ pub struct AuthenticatorGetInfoResponse {
     pub firmware_version: Option<u64>,
     pub max_cred_blob_length: Option<u64>,
     pub max_rp_ids_for_set_min_pin_length: Option<u64>,
+    // Missing response fields as they are only relevant for internal UV:
+    // - 0x11: preferredPlatformUvAttempts
+    // - 0x12: uvModality
+    // Add them when your hardware supports any kind of user verification within
+    // the boundary of the device, e.g. fingerprint or built-in keyboard.
+    pub certifications: Option<BTreeMap<String, i64>>,
     pub remaining_discoverable_credentials: Option<u64>,
+    // - 0x15: vendorPrototypeConfigCommands missing as we don't support it.
 }
 
 impl From<AuthenticatorGetInfoResponse> for cbor::Value {
@@ -157,15 +165,24 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             firmware_version,
             max_cred_blob_length,
             max_rp_ids_for_set_min_pin_length,
+            certifications,
             remaining_discoverable_credentials,
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
-            let option_map: BTreeMap<_, _> = options
+            let options_map: BTreeMap<_, _> = options
                 .into_iter()
                 .map(|(key, value)| (cbor_text!(key), cbor_bool!(value)))
                 .collect();
-            cbor_map_btree!(option_map)
+            cbor_map_btree!(options_map)
+        });
+
+        let certifications_cbor: Option<cbor::Value> = certifications.map(|certifications| {
+            let certifications_map: BTreeMap<_, _> = certifications
+                .into_iter()
+                .map(|(key, value)| (cbor_text!(key), cbor_int!(value)))
+                .collect();
+            cbor_map_btree!(certifications_map)
         });
 
         cbor_map_options! {
@@ -185,6 +202,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x0E => firmware_version,
             0x0F => max_cred_blob_length,
             0x10 => max_rp_ids_for_set_min_pin_length,
+            0x13 => certifications_cbor,
             0x14 => remaining_discoverable_credentials,
         }
     }
@@ -195,6 +213,8 @@ pub struct AuthenticatorClientPinResponse {
     pub key_agreement: Option<CoseKey>,
     pub pin_token: Option<Vec<u8>>,
     pub retries: Option<u64>,
+    pub power_cycle_state: Option<bool>,
+    // - 0x05: uvRetries missing as we don't support internal UV.
 }
 
 impl From<AuthenticatorClientPinResponse> for cbor::Value {
@@ -203,12 +223,14 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
             key_agreement,
             pin_token,
             retries,
+            power_cycle_state,
         } = client_pin_response;
 
         cbor_map_options! {
             0x01 => key_agreement.map(cbor::Value::from),
             0x02 => pin_token,
             0x03 => retries,
+            0x04 => power_cycle_state,
         }
     }
 }
@@ -401,6 +423,7 @@ mod test {
             firmware_version: None,
             max_cred_blob_length: None,
             max_rp_ids_for_set_min_pin_length: None,
+            certifications: None,
             remaining_discoverable_credentials: None,
         };
         let response_cbor: Option<cbor::Value> =
@@ -417,6 +440,8 @@ mod test {
     fn test_get_info_optionals_into_cbor() {
         let mut options_map = BTreeMap::new();
         options_map.insert(String::from("rk"), true);
+        let mut certifications_map = BTreeMap::new();
+        certifications_map.insert(String::from("example-cert"), 1);
         let get_info_response = AuthenticatorGetInfoResponse {
             versions: vec!["FIDO_2_0".to_string()],
             extensions: Some(vec!["extension".to_string()]),
@@ -434,6 +459,7 @@ mod test {
             firmware_version: Some(0),
             max_cred_blob_length: Some(1024),
             max_rp_ids_for_set_min_pin_length: Some(8),
+            certifications: Some(certifications_map),
             remaining_discoverable_credentials: Some(150),
         };
         let response_cbor: Option<cbor::Value> =
@@ -455,6 +481,7 @@ mod test {
             0x0E => 0,
             0x0F => 1024,
             0x10 => 8,
+            0x13 => cbor_map! {"example-cert" => 1},
             0x14 => 150,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
@@ -462,15 +489,23 @@ mod test {
 
     #[test]
     fn test_used_client_pin_into_cbor() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pk = sk.genpk();
+        let cose_key = CoseKey::from(pk);
         let client_pin_response = AuthenticatorClientPinResponse {
-            key_agreement: None,
+            key_agreement: Some(cose_key.clone()),
             pin_token: Some(vec![70]),
-            retries: None,
+            retries: Some(8),
+            power_cycle_state: Some(false),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorClientPin(Some(client_pin_response)).into();
         let expected_cbor = cbor_map_options! {
+            0x01 => cbor::Value::from(cose_key),
             0x02 => vec![70],
+            0x03 => 8,
+            0x04 => false,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }

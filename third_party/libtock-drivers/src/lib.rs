@@ -3,6 +3,7 @@
 pub mod buttons;
 pub mod console;
 pub mod crp;
+pub mod ctap_transport;
 pub mod led;
 #[cfg(feature = "with_nfc")]
 pub mod nfc;

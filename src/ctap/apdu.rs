@@ -15,12 +15,20 @@
 use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
+use core::fmt::Write;
+use libtock_drivers::console::Console;
+
+macro_rules! print_to_console {
+    ($x:ident, $($tts:tt)*) => {
+        writeln!($x, $($tts)*).unwrap();
+        $x.flush();
+    }
+}
 
 const APDU_HEADER_LEN: usize = 4;
 
-#[cfg_attr(test, derive(Clone, Debug))]
 #[allow(non_camel_case_types, dead_code)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ApduStatusCode {
     SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
@@ -51,9 +59,8 @@ pub enum ApduInstructions {
     GetResponse = 0xC0,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
 #[allow(dead_code)]
-#[derive(Default, PartialEq)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct ApduHeader {
     pub cla: u8,
     pub ins: u8,
@@ -72,8 +79,7 @@ impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
     }
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// The APDU cases
 pub enum Case {
     Le1,
@@ -85,18 +91,16 @@ pub enum Case {
     Le3,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
 #[allow(dead_code)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ApduType {
     Instruction,
     Short(Case),
     Extended(Case),
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
 #[allow(dead_code)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct APDU {
     pub header: ApduHeader,
     pub lc: u16,
@@ -109,7 +113,11 @@ impl TryFrom<&[u8]> for APDU {
     type Error = ApduStatusCode;
 
     fn try_from(frame: &[u8]) -> Result<Self, ApduStatusCode> {
+        let mut console = Console::new();
+        print_to_console!(console, "Trying to decode APDU");
+
         if frame.len() < APDU_HEADER_LEN as usize {
+            print_to_console!(console, "APDU wrong header length");
             return Err(ApduStatusCode::SW_WRONG_DATA);
         }
         //        +-----+-----+----+----+

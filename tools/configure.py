@@ -64,8 +64,8 @@ def info(msg):
 def get_opensk_devices(batch_mode):
   devices = []
   for dev in hid.CtapHidDevice.list_devices():
-    if (dev.descriptor["vendor_id"],
-        dev.descriptor["product_id"]) == OPENSK_VID_PID:
+    if (dev.descriptor.vid,
+        dev.descriptor.pid) == OPENSK_VID_PID:
       if dev.capabilities & hid.CAPABILITY.CBOR:
         if batch_mode:
           devices.append(ctap2.CTAP2(dev))
@@ -110,7 +110,7 @@ def main(args):
     # Some sanity/validity checks
     now = datetime.datetime.now()
     if cert.not_valid_before > now:
-      fatal("Certificate validity starts in the future.")
+      error("Certificate validity starts in the future.")
     if cert.not_valid_after <= now:
       fatal("Certificate expired.")
     pub_key = cert.public_key()
@@ -140,7 +140,7 @@ def main(args):
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
     info(("Programming device {} AAGUID {} ({}). "
           "Please touch the device to confirm...").format(
-              authenticator.device.descriptor.get("product_string", "Unknown"),
+              authenticator.device.descriptor.path,
               aaguid, authenticator.device))
     try:
       result = authenticator.send_cbor(

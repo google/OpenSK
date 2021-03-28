@@ -20,8 +20,17 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::Into;
 use core::convert::TryFrom;
+use core::fmt::Write;
 use crypto::rng256::Rng256;
+use libtock_drivers::console::Console;
 use libtock_drivers::timer::ClockValue;
+
+macro_rules! print_to_console {
+    ($x:ident, $($tts:tt)*) => {
+        writeln!($x, $($tts)*).unwrap();
+        $x.flush();
+    }
+}
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;
@@ -82,10 +91,16 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
+        let mut console = Console::new();
+        print_to_console!(console, "Trying to decode U2fCommand");
         let apdu: APDU = match APDU::try_from(message) {
-            Ok(apdu) => apdu,
+            Ok(apdu) => {
+                print_to_console!(console, "APDU successfully decoded: {:?}", apdu);
+                apdu
+            }
             Err(apdu_status_code) => {
-                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
+                print_to_console!(console, "Error decoding APDU: {:?}", apdu_status_code);
+                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap());
             }
         };
 
@@ -99,12 +114,14 @@ impl TryFrom<&[u8]> for U2fCommand {
         // | CLA | INS | P1 | P2 | Lc1 | Lc2 | Lc3 |
         // +-----+-----+----+----+-----+-----+-----+
         if apdu.header.cla != Ctap1Command::CTAP1_CLA {
+            print_to_console!(console, "Error parsing U2f: Invalid CLA");
             return Err(Ctap1StatusCode::SW_CLA_INVALID);
         }
 
         // Since there is always request data, the expected length is either omitted or
         // encoded in 2 bytes.
         if lc != apdu.data.len() && lc + 2 != apdu.data.len() {
+            print_to_console!(console, "Error parsing U2f: Invalid Length");
             return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
         }
 
@@ -114,7 +131,12 @@ impl TryFrom<&[u8]> for U2fCommand {
             // + Challenge (32B) | Application (32B) |
             // +-----------------+-------------------+
             Ctap1Command::U2F_REGISTER => {
+                print_to_console!(console, "Received U2F Register command");
                 if lc != 64 {
+                    print_to_console!(
+                        console,
+                        "Error parsing U2f Register Instruction: Invalid Length"
+                    );
                     return Err(Ctap1StatusCode::SW_WRONG_LENGTH);
                 }
                 Ok(Self::Register {
@@ -190,6 +212,7 @@ impl Ctap1Command {
         R: Rng256,
         CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
     {
+        let mut console = Console::new();
         let command = U2fCommand::try_from(message)?;
         match command {
             U2fCommand::Register {
@@ -197,9 +220,16 @@ impl Ctap1Command {
                 application,
             } => {
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
-                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
+                    print_to_console!(console, "User presence condition not satisfied");
                 }
-                Ctap1Command::process_register(challenge, application, ctap_state)
+                let result =
+                    Ctap1Command::process_register(challenge, application, ctap_state).unwrap();
+                print_to_console!(
+                    console,
+                    "Result of processing register command: {} bytes",
+                    result.len()
+                );
+                Ok(result)
             }
 
             U2fCommand::Authenticate {
@@ -212,15 +242,22 @@ impl Ctap1Command {
                 if flags == Ctap1Flags::EnforceUpAndSign
                     && !ctap_state.u2f_up_state.consume_up(clock_value)
                 {
-                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
+                    print_to_console!(console, "User presence condition not satisfied");
                 }
-                Ctap1Command::process_authenticate(
+                let result = Ctap1Command::process_authenticate(
                     challenge,
                     application,
                     key_handle,
                     flags,
                     ctap_state,
                 )
+                .unwrap();
+                print_to_console!(
+                    console,
+                    "Result of processing authenticate command: {} bytes",
+                    result.len()
+                );
+                Ok(result)
             }
 
             // U2F raw message format specification (version 20170411) section 6.3

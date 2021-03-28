@@ -15,7 +15,7 @@
 pub mod apdu;
 pub mod command;
 #[cfg(feature = "with_ctap1")]
-mod ctap1;
+pub mod ctap1;
 pub mod data_formats;
 pub mod hid;
 mod key_material;

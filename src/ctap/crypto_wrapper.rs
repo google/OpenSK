@@ -23,12 +23,12 @@ pub fn aes256_cbc_encrypt(
     rng: &mut dyn Rng256,
     aes_enc_key: &crypto::aes256::EncryptionKey,
     plaintext: &[u8],
-    has_iv: bool,
+    embeds_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     if plaintext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
-    let iv = if has_iv {
+    let iv = if embeds_iv {
         let random_bytes = rng.gen_uniform_u8x32();
         *array_ref!(random_bytes, 0, 16)
     } else {
@@ -40,7 +40,7 @@ pub fn aes256_cbc_encrypt(
         blocks.push(*array_ref!(block, 0, 16));
     }
     cbc_encrypt(aes_enc_key, iv, &mut blocks);
-    let mut ciphertext = if has_iv { iv.to_vec() } else { vec![] };
+    let mut ciphertext = if embeds_iv { iv.to_vec() } else { vec![] };
     ciphertext.extend(blocks.iter().flatten());
     Ok(ciphertext)
 }
@@ -49,7 +49,7 @@ pub fn aes256_cbc_encrypt(
 pub fn aes256_cbc_decrypt(
     aes_enc_key: &crypto::aes256::EncryptionKey,
     ciphertext: &[u8],
-    has_iv: bool,
+    embeds_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     if ciphertext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -57,7 +57,7 @@ pub fn aes256_cbc_decrypt(
     let mut block_len = ciphertext.len() / 16;
     // TODO(https://github.com/rust-lang/rust/issues/74985) Use array_chunks when stable.
     let mut block_iter = ciphertext.chunks_exact(16);
-    let iv = if has_iv {
+    let iv = if embeds_iv {
         block_len -= 1;
         let iv_block = block_iter
             .next()
@@ -98,5 +98,50 @@ mod test {
         let ciphertext = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, false).unwrap();
         let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, false).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_correct_iv_usage() {
+        let mut rng = ThreadRng256 {};
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let plaintext = vec![0xAA; 64];
+        let mut ciphertext_no_iv =
+            aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, false).unwrap();
+        let mut ciphertext_with_iv = vec![0u8; 16];
+        ciphertext_with_iv.append(&mut ciphertext_no_iv);
+        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext_with_iv, true).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_iv_manipulation_property() {
+        let mut rng = ThreadRng256 {};
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let plaintext = vec![0xAA; 64];
+        let mut ciphertext = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        let mut expected_plaintext = plaintext;
+        for i in 0..16 {
+            ciphertext[i] ^= 0xBB;
+            expected_plaintext[i] ^= 0xBB;
+        }
+        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, true).unwrap();
+        assert_eq!(decrypted, expected_plaintext);
+    }
+
+    #[test]
+    fn test_chaining() {
+        let mut rng = ThreadRng256 {};
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let plaintext = vec![0xAA; 64];
+        let ciphertext1 = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        let ciphertext2 = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        assert_eq!(ciphertext1.len(), 80);
+        assert_eq!(ciphertext2.len(), 80);
+        // The ciphertext should mutate in all blocks with a different IV.
+        let block_iter1 = ciphertext1.chunks_exact(16);
+        let block_iter2 = ciphertext2.chunks_exact(16);
+        for (block1, block2) in block_iter1.zip(block_iter2) {
+            assert_ne!(block1, block2);
+        }
     }
 }

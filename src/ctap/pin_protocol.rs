@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
+use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
 use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryInto;
-use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::hkdf::hkdf_empty_salt_256;
 #[cfg(test)]
 use crypto::hmac::hmac_256;
@@ -133,61 +132,6 @@ pub trait SharedSecret {
     /// Creates a signature that matches verify.
     #[cfg(test)]
     fn authenticate(&self, message: &[u8]) -> Vec<u8>;
-}
-
-fn aes256_cbc_encrypt(
-    rng: &mut dyn Rng256,
-    aes_enc_key: &crypto::aes256::EncryptionKey,
-    plaintext: &[u8],
-    has_iv: bool,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
-    if plaintext.len() % 16 != 0 {
-        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-    }
-    let iv = if has_iv {
-        let random_bytes = rng.gen_uniform_u8x32();
-        *array_ref!(random_bytes, 0, 16)
-    } else {
-        [0u8; 16]
-    };
-    let mut blocks = Vec::with_capacity(plaintext.len() / 16);
-    // TODO(https://github.com/rust-lang/rust/issues/74985) Use array_chunks when stable.
-    for block in plaintext.chunks_exact(16) {
-        blocks.push(*array_ref!(block, 0, 16));
-    }
-    cbc_encrypt(aes_enc_key, iv, &mut blocks);
-    let mut ciphertext = if has_iv { iv.to_vec() } else { vec![] };
-    ciphertext.extend(blocks.iter().flatten());
-    Ok(ciphertext)
-}
-
-fn aes256_cbc_decrypt(
-    aes_enc_key: &crypto::aes256::EncryptionKey,
-    ciphertext: &[u8],
-    has_iv: bool,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
-    if ciphertext.len() % 16 != 0 {
-        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-    }
-    let mut block_len = ciphertext.len() / 16;
-    // TODO(https://github.com/rust-lang/rust/issues/74985) Use array_chunks when stable.
-    let mut block_iter = ciphertext.chunks_exact(16);
-    let iv = if has_iv {
-        block_len -= 1;
-        let iv_block = block_iter
-            .next()
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        *array_ref!(iv_block, 0, 16)
-    } else {
-        [0u8; 16]
-    };
-    let mut blocks = Vec::with_capacity(block_len);
-    for block in block_iter {
-        blocks.push(*array_ref!(block, 0, 16));
-    }
-    let aes_dec_key = crypto::aes256::DecryptionKey::new(aes_enc_key);
-    cbc_decrypt(&aes_dec_key, iv, &mut blocks);
-    Ok(blocks.iter().flatten().cloned().collect::<Vec<u8>>())
 }
 
 fn verify_v1(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {

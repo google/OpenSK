@@ -409,8 +409,11 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
             Some(options_entry) => extract_bool(options_entry)?,
             None => false,
         };
-        if up.is_some() {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+        // In CTAP2.0, the up option is supposed to always fail when present.
+        if let Some(options_entry) = up {
+            if !extract_bool(options_entry)? {
+                return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+            }
         }
         let uv = match uv {
             Some(options_entry) => extract_bool(options_entry)?,

@@ -554,6 +554,68 @@ where
             false
         };
 
+        // MakeCredential always requires user presence.
+        // User verification depends on the PIN auth inputs, which are checked here.
+        // The ED flag is added later, if applicable.
+        let has_uv = pin_uv_auth_param.is_some();
+        let mut flags = match pin_uv_auth_param {
+            Some(pin_uv_auth_param) => {
+                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
+                if self.persistent_store.pin_hash()?.is_none() {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
+                }
+                self.client_pin.verify_pin_uv_auth_token(
+                    &client_data_hash,
+                    &pin_uv_auth_param,
+                    pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
+                )?;
+                self.client_pin
+                    .has_permission(PinPermission::MakeCredential)?;
+                self.client_pin.check_user_verified_flag()?;
+                // Checking for the correct permissions_rp_id is specified earlier.
+                // Error codes are identical though, so the implementation can be identical with
+                // GetAssertion.
+                self.client_pin.ensure_rp_id_permission(&rp_id)?;
+                UV_FLAG
+            }
+            None => {
+                if options.uv {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+                }
+                if self.persistent_store.has_always_uv()? {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                }
+                // Corresponds to makeCredUvNotRqd set to true.
+                if options.rk && self.persistent_store.pin_hash()?.is_some() {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                }
+                0x00
+            }
+        };
+        flags |= UP_FLAG | AT_FLAG;
+
+        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+        if let Some(exclude_list) = exclude_list {
+            for cred_desc in exclude_list {
+                if self
+                    .persistent_store
+                    .find_credential(&rp_id, &cred_desc.key_id, !has_uv)?
+                    .is_some()
+                    || self
+                        .decrypt_credential_source(cred_desc.key_id, &rp_id_hash)?
+                        .is_some()
+                {
+                    // Perform this check, so bad actors can't brute force exclude_list
+                    // without user interaction.
+                    let _ = (self.check_user_presence)(cid);
+                    return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
+                }
+            }
+        }
+
+        (self.check_user_presence)(cid)?;
+        self.client_pin.clear_token_flags();
+
         let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             < DEFAULT_CRED_PROTECT.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
@@ -576,73 +638,16 @@ where
             None
         };
         let has_extension_output = extensions.hmac_secret
-            || cred_protect_policy.is_some()
+            || extensions.cred_protect.is_some()
             || min_pin_length
             || has_cred_blob_output;
+        if has_extension_output {
+            flags |= ED_FLAG
+        };
         let large_blob_key = match (options.rk, extensions.large_blob_key) {
             (true, Some(true)) => Some(self.rng.gen_uniform_u8x32().to_vec()),
             _ => None,
         };
-
-        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-        if let Some(exclude_list) = exclude_list {
-            for cred_desc in exclude_list {
-                if self
-                    .persistent_store
-                    .find_credential(&rp_id, &cred_desc.key_id, pin_uv_auth_param.is_none())?
-                    .is_some()
-                    || self
-                        .decrypt_credential_source(cred_desc.key_id, &rp_id_hash)?
-                        .is_some()
-                {
-                    // Perform this check, so bad actors can't brute force exclude_list
-                    // without user interaction.
-                    (self.check_user_presence)(cid)?;
-                    return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
-                }
-            }
-        }
-
-        // MakeCredential always requires user presence.
-        // User verification depends on the PIN auth inputs, which are checked here.
-        let ed_flag = if has_extension_output { ED_FLAG } else { 0 };
-        let flags = match pin_uv_auth_param {
-            Some(pin_uv_auth_param) => {
-                if self.persistent_store.pin_hash()?.is_none() {
-                    // Specification is unclear, could be CTAP2_ERR_INVALID_OPTION.
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
-                }
-                self.client_pin.verify_pin_uv_auth_token(
-                    &client_data_hash,
-                    &pin_uv_auth_param,
-                    pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
-                )?;
-                self.client_pin
-                    .has_permission(PinPermission::MakeCredential)?;
-                self.client_pin.check_user_verified_flag()?;
-                // Checking for the correct permissions_rp_id is specified earlier.
-                // Error codes are identical though, so the implementation can be identical with
-                // GetAssertion.
-                self.client_pin.ensure_rp_id_permission(&rp_id)?;
-                UP_FLAG | UV_FLAG | AT_FLAG | ed_flag
-            }
-            None => {
-                if self.persistent_store.has_always_uv()? {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
-                }
-                // Corresponds to makeCredUvNotRqd set to true.
-                if options.rk && self.persistent_store.pin_hash()?.is_some() {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
-                }
-                if options.uv {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-                }
-                UP_FLAG | AT_FLAG | ed_flag
-            }
-        };
-
-        (self.check_user_presence)(cid)?;
-        self.client_pin.clear_token_flags();
 
         let sk = crypto::ecdsa::SecKey::gensk(self.rng);
         let pk = sk.genpk();
@@ -699,9 +704,10 @@ where
             } else {
                 None
             };
+            let cred_protect_output = extensions.cred_protect.and(cred_protect_policy);
             let extensions_output = cbor_map_options! {
                 "hmac-secret" => hmac_secret_output,
-                "credProtect" => cred_protect_policy,
+                "credProtect" => cred_protect_output,
                 "minPinLength" => min_pin_length_output,
                 "credBlob" => cred_blob_output,
             };
@@ -904,8 +910,8 @@ where
         let has_uv = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
+                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
                 if self.persistent_store.pin_hash()?.is_none() {
-                    // Specification is unclear, could be CTAP2_ERR_UNSUPPORTED_OPTION.
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -923,11 +929,11 @@ where
                 UV_FLAG
             }
             None => {
-                if self.persistent_store.has_always_uv()? {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
-                }
                 if options.uv {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+                }
+                if options.up && self.persistent_store.has_always_uv()? {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 0x00
             }
@@ -970,14 +976,13 @@ where
             (credential, stored_credentials)
         };
 
+        let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
+
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
-        // For CTAP 2.1, it was moved to a later protocol step.
         if options.up {
             (self.check_user_presence)(cid)?;
             self.client_pin.clear_token_flags();
         }
-
-        let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         self.increment_global_signature_counter()?;
 

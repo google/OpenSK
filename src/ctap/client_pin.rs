@@ -198,7 +198,7 @@ impl ClientPin {
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
-            pin_token: None,
+            pin_uv_auth_token: None,
             retries: Some(persistent_store.pin_retries()? as u64),
             power_cycle_state: Some(self.consecutive_pin_mismatches >= 3),
         })
@@ -214,7 +214,7 @@ impl ClientPin {
         );
         Ok(AuthenticatorClientPinResponse {
             key_agreement,
-            pin_token: None,
+            pin_uv_auth_token: None,
             retries: None,
             power_cycle_state: None,
         })
@@ -298,10 +298,15 @@ impl ClientPin {
             pin_uv_auth_protocol,
             key_agreement,
             pin_hash_enc,
+            permissions,
+            permissions_rp_id,
             ..
         } = client_pin_params;
         let key_agreement = ok_or_missing(key_agreement)?;
         let pin_hash_enc = ok_or_missing(pin_hash_enc)?;
+        if permissions.is_some() || permissions_rp_id.is_some() {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
 
         if persistent_store.pin_retries()? == 0 {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
@@ -317,21 +322,21 @@ impl ClientPin {
         if persistent_store.has_force_pin_change()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
-        let pin_token = shared_secret.encrypt(
-            rng,
-            self.get_pin_protocol(pin_uv_auth_protocol)
-                .get_pin_uv_auth_token(),
-        )?;
 
         self.pin_protocol_v1.reset_pin_uv_auth_token(rng);
         self.pin_protocol_v2.reset_pin_uv_auth_token(rng);
         self.pin_uv_auth_token_state
             .begin_using_pin_uv_auth_token(now);
         self.pin_uv_auth_token_state.set_default_permissions();
+        let pin_uv_auth_token = shared_secret.encrypt(
+            rng,
+            self.get_pin_protocol(pin_uv_auth_protocol)
+                .get_pin_uv_auth_token(),
+        )?;
 
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
-            pin_token: Some(pin_token),
+            pin_uv_auth_token: Some(pin_uv_auth_token),
             retries: None,
             power_cycle_state: None,
         })
@@ -359,9 +364,10 @@ impl ClientPin {
         mut client_pin_params: AuthenticatorClientPinParameters,
         now: ClockValue,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
-        let permissions = ok_or_missing(client_pin_params.permissions)?;
         // Mutating client_pin_params is just an optimization to move it into
         // process_get_pin_token, without cloning permissions_rp_id here.
+        // getPinToken requires permissions* to be None.
+        let permissions = ok_or_missing(client_pin_params.permissions.take())?;
         let permissions_rp_id = client_pin_params.permissions_rp_id.take();
 
         if permissions == 0 {
@@ -657,6 +663,13 @@ mod test {
             .as_ref()
             .encrypt(&mut rng, &pin_hash[..16])
             .unwrap();
+        let (permissions, permissions_rp_id) = match sub_command {
+            ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions
+            | ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => {
+                (Some(0x03), Some("example.com".to_string()))
+            }
+            _ => (None, None),
+        };
         let params = AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             sub_command,
@@ -668,8 +681,8 @@ mod test {
             pin_uv_auth_param: Some(pin_uv_auth_param),
             new_pin_enc: Some(new_pin_enc),
             pin_hash_enc: Some(pin_hash_enc),
-            permissions: Some(0x03),
-            permissions_rp_id: Some("example.com".to_string()),
+            permissions,
+            permissions_rp_id,
         };
         (client_pin, params)
     }
@@ -813,7 +826,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let expected_response = Some(AuthenticatorClientPinResponse {
             key_agreement: None,
-            pin_token: None,
+            pin_uv_auth_token: None,
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
             power_cycle_state: Some(false),
         });
@@ -830,7 +843,7 @@ mod test {
         client_pin.consecutive_pin_mismatches = 3;
         let expected_response = Some(AuthenticatorClientPinResponse {
             key_agreement: None,
-            pin_token: None,
+            pin_uv_auth_token: None,
             retries: Some(persistent_store.pin_retries().unwrap() as u64),
             power_cycle_state: Some(true),
         });
@@ -859,7 +872,7 @@ mod test {
         let mut persistent_store = PersistentStore::new(&mut rng);
         let expected_response = Some(AuthenticatorClientPinResponse {
             key_agreement: params.key_agreement.clone(),
-            pin_token: None,
+            pin_uv_auth_token: None,
             retries: None,
             power_cycle_state: None,
         });
@@ -964,18 +977,37 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetPinToken,
         );
+        let shared_secret = client_pin
+            .get_pin_protocol(pin_uv_auth_protocol)
+            .decapsulate(
+                params.key_agreement.clone().unwrap(),
+                params.pin_uv_auth_protocol,
+            )
+            .unwrap();
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
 
-        assert!(client_pin
+        let response = client_pin
             .process_command(
                 &mut rng,
                 &mut persistent_store,
                 params.clone(),
-                DUMMY_CLOCK_VALUE
+                DUMMY_CLOCK_VALUE,
             )
-            .is_ok());
+            .unwrap();
+        let encrypted_token = match response {
+            ResponseData::AuthenticatorClientPin(Some(response)) => {
+                response.pin_uv_auth_token.unwrap()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        assert_eq!(
+            &shared_secret.decrypt(&encrypted_token).unwrap(),
+            client_pin
+                .get_pin_protocol(pin_uv_auth_protocol)
+                .get_pin_uv_auth_token()
+        );
         assert_eq!(
             client_pin
                 .pin_uv_auth_token_state
@@ -1051,18 +1083,37 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
         );
+        let shared_secret = client_pin
+            .get_pin_protocol(pin_uv_auth_protocol)
+            .decapsulate(
+                params.key_agreement.clone().unwrap(),
+                params.pin_uv_auth_protocol,
+            )
+            .unwrap();
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
         set_standard_pin(&mut persistent_store);
 
-        assert!(client_pin
+        let response = client_pin
             .process_command(
                 &mut rng,
                 &mut persistent_store,
                 params.clone(),
-                DUMMY_CLOCK_VALUE
+                DUMMY_CLOCK_VALUE,
             )
-            .is_ok());
+            .unwrap();
+        let encrypted_token = match response {
+            ResponseData::AuthenticatorClientPin(Some(response)) => {
+                response.pin_uv_auth_token.unwrap()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        assert_eq!(
+            &shared_secret.decrypt(&encrypted_token).unwrap(),
+            client_pin
+                .get_pin_protocol(pin_uv_auth_protocol)
+                .get_pin_uv_auth_token()
+        );
         assert_eq!(
             client_pin
                 .pin_uv_auth_token_state

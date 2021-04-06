@@ -72,7 +72,7 @@ impl PersistentStore {
         let mut store = PersistentStore {
             store: persistent_store::Store::new(storage).ok().unwrap(),
         };
-        store.init(rng).unwrap();
+        store.init(rng).ok().unwrap();
         store
     }
 

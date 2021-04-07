@@ -1696,7 +1696,7 @@ mod test {
         let cbor_packed_attestation_statement = cbor_map! {
             "alg" => 1,
             "sig" => vec![0x55, 0x55, 0x55, 0x55],
-            "x5c" => cbor_array_vec![vec![certificate]],
+            "x5c" => cbor_array![certificate],
             "ecdaaKeyId" => vec![0xEC, 0xDA, 0x1D],
         };
         let packed_attestation_statement = PackedAttestationStatement {
@@ -1884,7 +1884,7 @@ mod test {
         };
         let cbor_params = cbor_map! {
             0x01 => 6,
-            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x02 => cbor_array!("example.com".to_string()),
             0x03 => true,
         };
         assert_eq!(cbor::Value::from(params.clone()), cbor_params);
@@ -1903,7 +1903,7 @@ mod test {
             ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params);
         let cbor_params = cbor_map! {
             0x01 => 6,
-            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x02 => cbor_array!("example.com".to_string()),
             0x03 => true,
         };
         assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);

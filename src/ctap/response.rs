@@ -19,7 +19,7 @@ use super::data_formats::{
 };
 use alloc::string::String;
 use alloc::vec::Vec;
-use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_btree, cbor_map_options, cbor_text};
+use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_collection, cbor_map_options, cbor_text};
 
 #[derive(Debug, PartialEq)]
 pub enum ResponseData {
@@ -173,7 +173,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
                 .into_iter()
                 .map(|(key, value)| (cbor_text!(key), cbor_bool!(value)))
                 .collect();
-            cbor_map_btree!(options_map)
+            cbor_map_collection!(options_map)
         });
 
         let certifications_cbor: Option<cbor::Value> = certifications.map(|certifications| {
@@ -181,7 +181,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
                 .into_iter()
                 .map(|(key, value)| (cbor_text!(key), cbor_int!(value)))
                 .collect();
-            cbor_map_btree!(certifications_map)
+            cbor_map_collection!(certifications_map)
         });
 
         cbor_map_options! {
@@ -336,7 +336,7 @@ mod test {
         let cbor_packed_attestation_statement = cbor_map! {
             "alg" => 1,
             "sig" => vec![0x55, 0x55, 0x55, 0x55],
-            "x5c" => cbor_array_vec![vec![certificate]],
+            "x5c" => cbor_array![certificate],
             "ecdaaKeyId" => vec![0xEC, 0xDA, 0x1D],
         };
 
@@ -460,16 +460,16 @@ mod test {
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
         let expected_cbor = cbor_map_options! {
-            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
-            0x02 => cbor_array_vec![vec!["extension"]],
+            0x01 => cbor_array!["FIDO_2_0"],
+            0x02 => cbor_array!["extension"],
             0x03 => vec![0x00; 16],
             0x04 => cbor_map! {"rk" => true},
             0x05 => 1024,
-            0x06 => cbor_array_vec![vec![1]],
+            0x06 => cbor_array![1],
             0x07 => 20,
             0x08 => 256,
-            0x09 => cbor_array_vec![vec!["usb"]],
-            0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x09 => cbor_array!["usb"],
+            0x0A => cbor_array![ES256_CRED_PARAM],
             0x0B => 1024,
             0x0C => false,
             0x0D => 4,

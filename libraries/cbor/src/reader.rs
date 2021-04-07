@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::values::{Constants, KeyType, SimpleValue, Value};
-use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_btree, cbor_text, cbor_unsigned};
+use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_text, cbor_unsigned};
 use alloc::str;
 use alloc::vec::Vec;
 
@@ -189,7 +189,7 @@ impl<'a> Reader<'a> {
                 return Err(DecoderError::IncorrectMapKeyType);
             }
         }
-        Ok(cbor_map_btree!(value_map))
+        Ok(cbor_map_collection!(value_map))
     }
 
     fn decode_to_simple_value(

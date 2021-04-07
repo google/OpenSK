@@ -193,7 +193,7 @@ macro_rules! cbor_map_options {
 }
 
 #[macro_export]
-macro_rules! cbor_map_btree {
+macro_rules! cbor_map_collection {
     ( $tree:expr ) => {{
         $crate::values::Value::from($tree)
     }};
@@ -608,20 +608,21 @@ mod test {
     }
 
     #[test]
-    fn test_cbor_map_btree_empty() {
-        let a = cbor_map_btree!(BTreeMap::new());
+    fn test_cbor_map_collection_empty() {
+        let a = cbor_map_collection!(BTreeMap::new());
         let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }
 
     #[test]
-    fn test_cbor_map_btree_foo() {
-        let a = cbor_map_btree!(
-            [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
-                .iter()
-                .cloned()
-                .collect::<Vec<(KeyType, Value)>>()
-        );
+    fn test_cbor_map_collection_foo() {
+        let a = cbor_map_collection!([(
+            KeyType::Unsigned(2),
+            Value::KeyValue(KeyType::Unsigned(3))
+        )]
+        .iter()
+        .cloned()
+        .collect::<Vec<(KeyType, Value)>>());
         let b = Value::Map(
             [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
                 .iter()

@@ -63,7 +63,6 @@ use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -1033,26 +1032,29 @@ where
                 versions.insert(0, String::from(U2F_VERSION_STRING))
             }
         }
-        let mut options_map = BTreeMap::new();
-        options_map.insert(String::from("rk"), true);
-        options_map.insert(
-            String::from("clientPin"),
-            self.persistent_store.pin_hash()?.is_some(),
-        );
-        options_map.insert(String::from("up"), true);
-        options_map.insert(String::from("pinUvAuthToken"), true);
-        options_map.insert(String::from("largeBlobs"), true);
+        let mut options = vec![];
         if ENTERPRISE_ATTESTATION_MODE.is_some() {
-            options_map.insert(
+            options.push((
                 String::from("ep"),
                 self.persistent_store.enterprise_attestation()?,
-            );
+            ));
         }
-        options_map.insert(String::from("authnrCfg"), true);
-        options_map.insert(String::from("credMgmt"), true);
-        options_map.insert(String::from("setMinPINLength"), true);
-        options_map.insert(String::from("makeCredUvNotRqd"), !has_always_uv);
-        options_map.insert(String::from("alwaysUv"), has_always_uv);
+        options.append(&mut vec![
+            (String::from("rk"), true),
+            (String::from("up"), true),
+            (String::from("alwaysUv"), has_always_uv),
+            (String::from("credMgmt"), true),
+            (String::from("authnrCfg"), true),
+            (
+                String::from("clientPin"),
+                self.persistent_store.pin_hash()?.is_some(),
+            ),
+            (String::from("largeBlobs"), true),
+            (String::from("pinUvAuthToken"), true),
+            (String::from("setMinPINLength"), true),
+            (String::from("makeCredUvNotRqd"), !has_always_uv),
+        ]);
+
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions,
@@ -1064,7 +1066,7 @@ where
                     String::from("largeBlobKey"),
                 ]),
                 aaguid: self.persistent_store.aaguid()?,
-                options: Some(options_map),
+                options: Some(options),
                 max_msg_size: Some(MAX_MSG_SIZE as u64),
                 // The order implies preference. We favor the new V2.
                 pin_protocols: Some(vec![

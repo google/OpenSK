@@ -157,9 +157,9 @@ macro_rules! cbor_map {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValue};
-            let mut _map = ::alloc::collections::BTreeMap::new();
+            let mut _map = ::alloc::vec::Vec::new();
             $(
-                _map.insert($key.into_cbor_key(), $value.into_cbor_value());
+                _map.push(($key.into_cbor_key(), $value.into_cbor_value()));
             )*
             $crate::values::Value::Map(_map)
         }
@@ -178,12 +178,12 @@ macro_rules! cbor_map_options {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValueOption};
-            let mut _map = ::alloc::collections::BTreeMap::<_, $crate::values::Value>::new();
+            let mut _map = ::alloc::vec::Vec::<(_, $crate::values::Value)>::new();
             $(
             {
                 let opt: Option<$crate::values::Value> = $value.into_cbor_value_option();
                 if let Some(val) = opt {
-                    _map.insert($key.into_cbor_key(), val);
+                    _map.push(($key.into_cbor_key(), val));
                 }
             }
             )*
@@ -194,9 +194,9 @@ macro_rules! cbor_map_options {
 
 #[macro_export]
 macro_rules! cbor_map_btree {
-    ( $tree:expr ) => {
-        $crate::values::Value::Map($tree)
-    };
+    ( $tree:expr ) => {{
+        $crate::values::Value::from($tree)
+    }};
 }
 
 #[macro_export]
@@ -421,7 +421,7 @@ mod test {
                 Value::KeyValue(KeyType::Unsigned(0)),
                 Value::KeyValue(KeyType::Unsigned(1)),
             ]),
-            Value::Map(BTreeMap::new()),
+            Value::Map(Vec::new()),
             Value::Map(
                 [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
                     .iter()
@@ -518,7 +518,7 @@ mod test {
                         Value::KeyValue(KeyType::Unsigned(1)),
                     ]),
                 ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
+                (KeyType::Unsigned(9), Value::Map(Vec::new())),
                 (
                     KeyType::Unsigned(10),
                     Value::Map(
@@ -589,7 +589,7 @@ mod test {
                         Value::KeyValue(KeyType::Unsigned(1)),
                     ]),
                 ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
+                (KeyType::Unsigned(9), Value::Map(Vec::new())),
                 (
                     KeyType::Unsigned(10),
                     Value::Map(
@@ -610,7 +610,7 @@ mod test {
     #[test]
     fn test_cbor_map_btree_empty() {
         let a = cbor_map_btree!(BTreeMap::new());
-        let b = Value::Map(BTreeMap::new());
+        let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }
 
@@ -620,20 +620,26 @@ mod test {
             [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
                 .iter()
                 .cloned()
-                .collect()
+                .collect::<Vec<(KeyType, Value)>>()
         );
         let b = Value::Map(
             [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
                 .iter()
                 .cloned()
-                .collect(),
+                .collect::<Vec<(KeyType, Value)>>(),
         );
         assert_eq!(a, b);
     }
 
     fn extract_map(cbor_value: Value) -> BTreeMap<KeyType, Value> {
         match cbor_value {
-            Value::Map(map) => map,
+            Value::Map(map) => {
+                let mut tree_map = BTreeMap::<KeyType, Value>::new();
+                for (k, v) in map {
+                    tree_map.insert(k, v);
+                }
+                tree_map
+            }
             _ => panic!("Expected CBOR map."),
         }
     }

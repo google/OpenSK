@@ -56,8 +56,9 @@ impl<'a> Writer<'a> {
                     }
                 }
             }
-            Value::Map(map) => {
+            Value::Map(mut map) => {
                 self.start_item(5, map.len() as u64);
+                map.sort_by(|a, b| a.0.cmp(&b.0));
                 for (k, v) in map {
                     if !self.encode_cbor(Value::KeyValue(k), remaining_depth - 1) {
                         return false;
@@ -209,9 +210,16 @@ mod test {
     #[test]
     fn test_write_map() {
         let value_map = cbor_map! {
-            "aa" => "AA",
-            "e" => "E",
-            "" => ".",
+            0 => "a",
+            23 => "b",
+            24 => "c",
+            std::u8::MAX as i64 => "d",
+            256 => "e",
+            std::u16::MAX as i64 => "f",
+            65536 => "g",
+            std::u32::MAX as i64 => "h",
+            4294967296_i64 => "i",
+            std::i64::MAX => "j",
             -1 => "k",
             -24 => "l",
             -25 => "m",
@@ -224,16 +232,9 @@ mod test {
             b"a" => 2,
             b"bar" => 3,
             b"foo" => 4,
-            0 => "a",
-            23 => "b",
-            24 => "c",
-            std::u8::MAX as i64 => "d",
-            256 => "e",
-            std::u16::MAX as i64 => "f",
-            65536 => "g",
-            std::u32::MAX as i64 => "h",
-            4294967296_i64 => "i",
-            std::i64::MAX => "j",
+            "" => ".",
+            "e" => "E",
+            "aa" => "AA",
         };
         let expected_cbor = vec![
             0xb8, 0x19, // map of 25 pairs:

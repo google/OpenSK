@@ -706,10 +706,10 @@ where
             };
             let cred_protect_output = extensions.cred_protect.and(cred_protect_policy);
             let extensions_output = cbor_map_options! {
-                "hmac-secret" => hmac_secret_output,
-                "credProtect" => cred_protect_output,
-                "minPinLength" => min_pin_length_output,
                 "credBlob" => cred_blob_output,
+                "credProtect" => cred_protect_output,
+                "hmac-secret" => hmac_secret_output,
+                "minPinLength" => min_pin_length_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -805,8 +805,8 @@ where
                 None
             };
             let extensions_output = cbor_map_options! {
-                "hmac-secret" => encrypted_output,
                 "credBlob" => cred_blob,
+                "hmac-secret" => encrypted_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -1294,17 +1294,17 @@ mod test {
                 ]],
             0x03 => ctap_state.persistent_store.aaguid().unwrap(),
             0x04 => cbor_map_options! {
-                "rk" => true,
-                "clientPin" => false,
-                "up" => true,
-                "pinUvAuthToken" => true,
-                "largeBlobs" => true,
                 "ep" => ENTERPRISE_ATTESTATION_MODE.map(|_| false),
-                "authnrCfg" => true,
+                "rk" => true,
+                "up" => true,
+                "alwaysUv" => false,
                 "credMgmt" => true,
+                "authnrCfg" => true,
+                "clientPin" => false,
+                "largeBlobs" => true,
+                "pinUvAuthToken" => true,
                 "setMinPINLength" => true,
                 "makeCredUvNotRqd" => true,
-                "alwaysUv" => false,
             },
             0x05 => MAX_MSG_SIZE as u64,
             0x06 => cbor_array_vec![vec![2, 1]],

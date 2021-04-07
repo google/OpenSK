@@ -21,7 +21,7 @@ use core::cmp::Ordering;
 pub enum Value {
     KeyValue(KeyType),
     Array(Vec<Value>),
-    Map(BTreeMap<KeyType, Value>),
+    Map(Vec<(KeyType, Value)>),
     // TAG is omitted
     Simple(SimpleValue),
 }
@@ -180,6 +180,22 @@ where
 {
     fn from(t: T) -> Self {
         Value::KeyValue(KeyType::from(t))
+    }
+}
+
+impl From<Vec<(KeyType, Value)>> for Value {
+    fn from(map: Vec<(KeyType, Value)>) -> Self {
+        Value::Map(map)
+    }
+}
+
+impl From<BTreeMap<KeyType, Value>> for Value {
+    fn from(map: BTreeMap<KeyType, Value>) -> Self {
+        let mut map_array = Vec::new();
+        for (k, v) in map {
+            map_array.push((k, v));
+        }
+        Value::Map(map_array)
     }
 }
 

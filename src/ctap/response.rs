@@ -385,17 +385,17 @@ mod test {
             ResponseData::AuthenticatorGetAssertion(get_assertion_response).into();
         let expected_cbor = cbor_map_options! {
             0x01 => cbor_map! {
-                "type" => "public-key",
                 "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+                "type" => "public-key",
                 "transports" => cbor_array!["usb"],
             },
             0x02 => vec![0xAD],
             0x03 => vec![0x51],
             0x04 => cbor_map! {
                 "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
+                "icon" => "example.com/foo/icon.png".to_string(),
                 "name" => "foo".to_string(),
                 "displayName" => "bar".to_string(),
-                "icon" => "example.com/foo/icon.png".to_string(),
             },
             0x05 => 2,
             0x07 => vec![0x1B],

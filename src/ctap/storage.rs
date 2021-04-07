@@ -1370,13 +1370,13 @@ mod test {
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
-            user_display_name: None,
-            cred_protect_policy: None,
+            user_display_name: Some(String::from("Display Name")),
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
+            user_name: Some(String::from("name")),
+            user_icon: Some(String::from("icon")),
+            cred_blob: Some(vec![0xCB]),
+            large_blob_key: Some(vec![0x1B]),
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

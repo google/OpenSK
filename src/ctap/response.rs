@@ -211,7 +211,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
 #[derive(Debug, PartialEq)]
 pub struct AuthenticatorClientPinResponse {
     pub key_agreement: Option<CoseKey>,
-    pub pin_token: Option<Vec<u8>>,
+    pub pin_uv_auth_token: Option<Vec<u8>>,
     pub retries: Option<u64>,
     pub power_cycle_state: Option<bool>,
     // - 0x05: uvRetries missing as we don't support internal UV.
@@ -221,14 +221,14 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     fn from(client_pin_response: AuthenticatorClientPinResponse) -> Self {
         let AuthenticatorClientPinResponse {
             key_agreement,
-            pin_token,
+            pin_uv_auth_token,
             retries,
             power_cycle_state,
         } = client_pin_response;
 
         cbor_map_options! {
             0x01 => key_agreement.map(cbor::Value::from),
-            0x02 => pin_token,
+            0x02 => pin_uv_auth_token,
             0x03 => retries,
             0x04 => power_cycle_state,
         }
@@ -495,7 +495,7 @@ mod test {
         let cose_key = CoseKey::from(pk);
         let client_pin_response = AuthenticatorClientPinResponse {
             key_agreement: Some(cose_key.clone()),
-            pin_token: Some(vec![70]),
+            pin_uv_auth_token: Some(vec![70]),
             retries: Some(8),
             power_cycle_state: Some(false),
         };

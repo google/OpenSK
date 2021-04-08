@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::super::customization::MAX_MSG_SIZE;
 use super::{ChannelID, CtapHid, HidPacket, Message, ProcessedPacket};
 use alloc::vec::Vec;
 use core::mem::swap;
@@ -45,6 +46,8 @@ pub enum Error {
     UnexpectedContinuation,
     // Expected a continuation packet with a specific sequence number, got another sequence number.
     UnexpectedSeq,
+    // The length of a message is too big.
+    UnexpectedLen,
     // This packet arrived after a timeout.
     Timeout,
 }
@@ -107,7 +110,7 @@ impl MessageAssembler {
             // Expecting an initialization packet.
             match processed_packet {
                 ProcessedPacket::InitPacket { cmd, len, data } => {
-                    Ok(self.accept_init_packet(*cid, cmd, len, data, timestamp))
+                    self.parse_init_packet(*cid, cmd, len, data, timestamp)
                 }
                 ProcessedPacket::ContinuationPacket { .. } => {
                     // CTAP specification (version 20190130) section 8.1.5.4
@@ -129,7 +132,7 @@ impl MessageAssembler {
                 ProcessedPacket::InitPacket { cmd, len, data } => {
                     self.reset();
                     if cmd == CtapHid::COMMAND_INIT {
-                        Ok(self.accept_init_packet(*cid, cmd, len, data, timestamp))
+                        self.parse_init_packet(*cid, cmd, len, data, timestamp)
                     } else {
                         Err((*cid, Error::UnexpectedInit))
                     }
@@ -151,24 +154,25 @@ impl MessageAssembler {
         }
     }
 
-    fn accept_init_packet(
+    fn parse_init_packet(
         &mut self,
         cid: ChannelID,
         cmd: u8,
         len: usize,
         data: &[u8],
         timestamp: Timestamp<isize>,
-    ) -> Option<Message> {
-        // TODO: Should invalid commands/payload lengths be rejected early, i.e. as soon as the
-        // initialization packet is received, or should we build a message and then catch the
-        // error?
-        // The specification (version 20190130) isn't clear on this point.
+    ) -> Result<Option<Message>, (ChannelID, Error)> {
+        // Reject invalid lengths early to reduce the risk of running out of memory.
+        // TODO: also reject invalid commands early?
+        if len > MAX_MSG_SIZE {
+            return Err((cid, Error::UnexpectedLen));
+        }
         self.cid = cid;
         self.last_timestamp = timestamp;
         self.cmd = cmd;
         self.seq = 0;
         self.remaining_payload_len = len;
-        self.append_payload(data)
+        Ok(self.append_payload(data))
     }
 
     fn append_payload(&mut self, data: &[u8]) -> Option<Message> {

@@ -42,7 +42,7 @@ use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
     DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
-    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
+    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_MSG_SIZE,
     MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
 };
 use self::data_formats::{
@@ -52,7 +52,7 @@ use self::data_formats::{
     PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::ChannelID;
-use self::large_blobs::{LargeBlobs, MAX_MSG_SIZE};
+use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -1119,15 +1118,9 @@ pub(super) fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>,
 
 pub(super) fn extract_map(
     cbor_value: cbor::Value,
-) -> Result<BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
+) -> Result<Vec<(cbor::KeyType, cbor::Value)>, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::Map(map) => {
-            let mut tree_map = BTreeMap::<cbor::KeyType, cbor::Value>::new();
-            for (k, v) in map {
-                tree_map.insert(k, v);
-            }
-            Ok(tree_map)
-        }
+        cbor::Value::Map(map) => Ok(map),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
@@ -1148,7 +1141,6 @@ pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2Status
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
-    use alloc::collections::BTreeMap;
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
@@ -1377,21 +1369,18 @@ mod test {
             extract_map(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(extract_map(cbor_map! {}), Ok(BTreeMap::new()));
+        assert_eq!(extract_map(cbor_map! {}), Ok(Vec::new()));
         assert_eq!(
             extract_map(cbor_map! {
                 1 => cbor_false!(),
                 b"bin" => -42,
                 "foo" => b"bar",
             }),
-            Ok([
+            Ok(vec![
                 (cbor_unsigned!(1), cbor_false!()),
                 (cbor_bytes_lit!(b"bin"), cbor_int!(-42)),
                 (cbor_text!("foo"), cbor_bytes_lit!(b"bar")),
-            ]
-            .iter()
-            .cloned()
-            .collect::<BTreeMap<_, _>>())
+            ])
         );
     }
 

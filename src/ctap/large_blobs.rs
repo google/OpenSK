@@ -14,6 +14,7 @@
 
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
+use super::customization::MAX_MSG_SIZE;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
@@ -23,10 +24,6 @@ use byteorder::{ByteOrder, LittleEndian};
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 
-/// This is maximum message size supported by the authenticator. 1024 is the default.
-/// Increasing this values can speed up commands with longer responses, but lead to
-/// packets dropping or unexpected failures.
-pub const MAX_MSG_SIZE: usize = 1024;
 /// The length of the truncated hash that as appended to the large blob data.
 const TRUNCATED_HASH_LEN: usize = 16;
 

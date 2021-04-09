@@ -322,6 +322,9 @@ impl CtapHid {
                         receive::Error::UnexpectedSeq => {
                             CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ)
                         }
+                        receive::Error::UnexpectedLen => {
+                            CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN)
+                        }
                         receive::Error::Timeout => {
                             CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT)
                         }

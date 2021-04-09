@@ -119,6 +119,15 @@ pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
 /// VendorFacilitated.
 pub const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 
+/// Maximum message size send for CTAP commands.
+///
+/// The maximum value is 7609, as HID packets can not encode longer messages.
+/// 1024 is the default mentioned in the authenticatorLargeBlobs commands.
+/// Larger values are preferred, as that allows more parameters in commands.
+/// If long commands are too unreliable on your hardware, consider decreasing
+/// this value.
+pub const MAX_MSG_SIZE: usize = 7609;
+
 /// Sets the number of consecutive failed PINs before blocking interaction.
 ///
 /// # Invariant
@@ -256,6 +265,8 @@ mod test {
         } else {
             assert!(ENTERPRISE_RP_ID_LIST.is_empty());
         }
+        assert!(MAX_MSG_SIZE >= 1024);
+        assert!(MAX_MSG_SIZE <= 7609);
         assert!(MAX_PIN_RETRIES <= 8);
         assert!(MAX_CRED_BLOB_LENGTH >= 32);
         if let Some(count) = MAX_CREDENTIAL_COUNT_IN_LIST {

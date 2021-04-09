@@ -57,8 +57,9 @@ impl<'a> Writer<'a> {
                 }
             }
             Value::Map(mut map) => {
-                self.start_item(5, map.len() as u64);
                 map.sort_by(|a, b| a.0.cmp(&b.0));
+                map.dedup_by(|a, b| a.0.eq(&b.0));
+                self.start_item(5, map.len() as u64);
                 for (k, v) in map {
                     if !self.encode_cbor(Value::KeyValue(k), remaining_depth - 1) {
                         return false;
@@ -287,6 +288,52 @@ mod test {
             0x62, 0x41, 0x41, // value "AA"
         ];
         assert_eq!(write_return(value_map), Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_write_map_sorted() {
+        let sorted_map = cbor_map! {
+            0 => "a",
+            1 => "b",
+            -1 => "c",
+            -2 => "d",
+            b"a" => "e",
+            b"b" => "f",
+            "" => "g",
+            "c" => "h",
+        };
+        let unsorted_map = cbor_map! {
+            1 => "b",
+            -2 => "d",
+            b"b" => "f",
+            "c" => "h",
+            "" => "g",
+            b"a" => "e",
+            -1 => "c",
+            0 => "a",
+        };
+        assert_eq!(write_return(sorted_map), write_return(unsorted_map));
+    }
+
+    #[test]
+    fn test_write_map_duplicates() {
+        let unique_map = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "h",
+        };
+        let duplicate_map = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "h",
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "h",
+        };
+        assert_eq!(write_return(unique_map), write_return(duplicate_map));
     }
 
     #[test]

@@ -316,7 +316,6 @@ macro_rules! cbor_key_bytes {
 #[cfg(test)]
 mod test {
     use super::super::values::{KeyType, SimpleValue, Value};
-    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_cbor_simple_values() {
@@ -596,7 +595,7 @@ mod test {
 
     #[test]
     fn test_cbor_map_collection_empty() {
-        let a = cbor_map_collection!(BTreeMap::new());
+        let a = cbor_map_collection!(Vec::<(_,_)>::new());
         let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }

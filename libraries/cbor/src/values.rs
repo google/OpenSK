@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -186,16 +185,6 @@ where
 impl From<Vec<(KeyType, Value)>> for Value {
     fn from(map: Vec<(KeyType, Value)>) -> Self {
         Value::Map(map)
-    }
-}
-
-impl From<BTreeMap<KeyType, Value>> for Value {
-    fn from(map: BTreeMap<KeyType, Value>) -> Self {
-        let mut map_array = Vec::new();
-        for (k, v) in map {
-            map_array.push((k, v));
-        }
-        Value::Map(map_array)
     }
 }
 

@@ -132,6 +132,23 @@ macro_rules! assert_sorted_keys {
     };
 }
 
+/// Creates a CBOR Value of type Map with the specified key-value pairs.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Values.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_map;
+/// let map = cbor_map! {
+///   0x01 => false,
+///   "02" => -3,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map {
     // trailing comma case
@@ -153,6 +170,26 @@ macro_rules! cbor_map {
     };
 }
 
+/// Creates a CBOR Value of type Map with key-value pairs where values can be Options.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Value Options.
+/// The map entry is included iff the Value is not an Option or Option is Some.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_map_options;
+/// let missing_value: Option<bool> = None;
+/// let map = cbor_map_options! {
+///   0x01 => Some(false),
+///   "02" => -3,
+///   "not in map" => missing_value,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map_options {
     // trailing comma case
@@ -179,6 +216,7 @@ macro_rules! cbor_map_options {
     };
 }
 
+/// Creates a CBOR Value of type Map from a Vec<(KeyType, Value)>.
 #[macro_export]
 macro_rules! cbor_map_collection {
     ( $tree:expr ) => {{
@@ -186,6 +224,17 @@ macro_rules! cbor_map_collection {
     }};
 }
 
+/// Creates a CBOR Value of type Array with the given elements.
+///
+/// Elements are expressions and converted into CBOR Values. Elements are comma-separated.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_array;
+/// let array = cbor_array![1, "2"];
+/// ```
 #[macro_export]
 macro_rules! cbor_array {
     // trailing comma case
@@ -203,6 +252,7 @@ macro_rules! cbor_array {
     };
 }
 
+/// Creates a CBOR Value of type Array from a Vec<Value>.
 #[macro_export]
 macro_rules! cbor_array_vec {
     ( $vec:expr ) => {{
@@ -595,7 +645,7 @@ mod test {
 
     #[test]
     fn test_cbor_map_collection_empty() {
-        let a = cbor_map_collection!(Vec::<(_,_)>::new());
+        let a = cbor_map_collection!(Vec::<(_, _)>::new());
         let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }

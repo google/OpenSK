@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::values::{Constants, KeyType, Value};
+use super::values::{Constants, Value};
 use alloc::vec::Vec;
 
 pub fn write(value: Value, encoded_cbor: &mut Vec<u8>) -> bool {
@@ -36,15 +36,13 @@ impl<'a> Writer<'a> {
             return false;
         }
         match value {
-            Value::KeyValue(KeyType::Unsigned(unsigned)) => self.start_item(0, unsigned),
-            Value::KeyValue(KeyType::Negative(negative)) => {
-                self.start_item(1, -(negative + 1) as u64)
-            }
-            Value::KeyValue(KeyType::ByteString(byte_string)) => {
+            Value::Unsigned(unsigned) => self.start_item(0, unsigned),
+            Value::Negative(negative) => self.start_item(1, -(negative + 1) as u64),
+            Value::ByteString(byte_string) => {
                 self.start_item(2, byte_string.len() as u64);
                 self.encoded_cbor.extend(byte_string);
             }
-            Value::KeyValue(KeyType::TextString(text_string)) => {
+            Value::TextString(text_string) => {
                 self.start_item(3, text_string.len() as u64);
                 self.encoded_cbor.extend(text_string.into_bytes());
             }
@@ -65,7 +63,7 @@ impl<'a> Writer<'a> {
                 }
                 self.start_item(5, map_len as u64);
                 for (k, v) in map {
-                    if !self.encode_cbor(Value::KeyValue(k), remaining_depth - 1) {
+                    if !self.encode_cbor(k, remaining_depth - 1) {
                         return false;
                     }
                     if !self.encode_cbor(v, remaining_depth - 1) {

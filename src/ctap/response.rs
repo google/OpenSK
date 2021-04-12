@@ -326,7 +326,7 @@ mod test {
 
     #[test]
     fn test_make_credential_into_cbor() {
-        let certificate: cbor::values::KeyType = cbor_bytes![vec![0x5C, 0x5C, 0x5C, 0x5C]];
+        let certificate = cbor_bytes![vec![0x5C, 0x5C, 0x5C, 0x5C]];
         let att_stmt = PackedAttestationStatement {
             alg: 1,
             sig: vec![0x55, 0x55, 0x55, 0x55],

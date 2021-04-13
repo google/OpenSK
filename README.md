@@ -24,15 +24,16 @@ few limitations:
 
 ### FIDO2
 
-Although we tested and implemented our firmware based on the published
-[CTAP2.0 specifications](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html),
-our implementation was not reviewed nor officially tested and doesn't claim to
-be FIDO Certified.
-We started adding features of the upcoming next version of the
-[CTAP2.1 specifications](https://fidoalliance.org/specs/fido2/fido-client-to-authenticator-protocol-v2.1-rd-20191217.html).
-The development is currently between 2.0 and 2.1, with updates hidden behind
-a feature flag.
-Please add the flag `--ctap2.1` to the deploy command to include them.
+The stable branch implements the published
+[CTAP2.0 specifications](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html)
+and is FIDO certified.
+
+<img alt="FIDO2 certified L1" src="docs/img/FIDO2_Certified_L1.png" width="200px">
+
+It already contains some preview features of 2.1, that you can try by adding the
+flag `--ctap2.1` to the deploy command. The full
+[CTAP2.1 specification](https://fidoalliance.org/specs/fido-v2.1-rd-20201208/fido-client-to-authenticator-protocol-v2.1-rd-20201208.html)
+is work in progress in the develop branch and is tested less thoroughly.
 
 ### Cryptography
 

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -62,8 +61,8 @@ impl From<PublicKeyCredentialRpEntity> for cbor::Value {
     fn from(entity: PublicKeyCredentialRpEntity) -> Self {
         cbor_map_options! {
             "id" => entity.rp_id,
-            "name" => entity.rp_name,
             "icon" => entity.rp_icon,
+            "name" => entity.rp_name,
         }
     }
 }
@@ -108,9 +107,9 @@ impl From<PublicKeyCredentialUserEntity> for cbor::Value {
     fn from(entity: PublicKeyCredentialUserEntity) -> Self {
         cbor_map_options! {
             "id" => entity.user_id,
+            "icon" => entity.user_icon,
             "name" => entity.user_name,
             "displayName" => entity.user_display_name,
-            "icon" => entity.user_icon,
         }
     }
 }
@@ -174,8 +173,8 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
 impl From<PublicKeyCredentialParameter> for cbor::Value {
     fn from(cred_param: PublicKeyCredentialParameter) -> Self {
         cbor_map_options! {
-            "type" => cred_param.cred_type,
             "alg" => cred_param.alg,
+            "type" => cred_param.cred_type,
         }
     }
 }
@@ -262,8 +261,8 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
 impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     fn from(desc: PublicKeyCredentialDescriptor) -> Self {
         cbor_map_options! {
-            "type" => desc.key_type,
             "id" => desc.key_id,
+            "type" => desc.key_type,
             "transports" => desc.transports.map(|vec| cbor_array_vec!(vec)),
         }
     }
@@ -1119,7 +1118,7 @@ pub(super) fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>,
 
 pub(super) fn extract_map(
     cbor_value: cbor::Value,
-) -> Result<BTreeMap<cbor::KeyType, cbor::Value>, Ctap2StatusCode> {
+) -> Result<Vec<(cbor::KeyType, cbor::Value)>, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Map(map) => Ok(map),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
@@ -1142,7 +1141,6 @@ pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2Status
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
-    use alloc::collections::BTreeMap;
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
@@ -1371,21 +1369,18 @@ mod test {
             extract_map(cbor_array![]),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(extract_map(cbor_map! {}), Ok(BTreeMap::new()));
+        assert_eq!(extract_map(cbor_map! {}), Ok(Vec::new()));
         assert_eq!(
             extract_map(cbor_map! {
                 1 => cbor_false!(),
-                "foo" => b"bar",
                 b"bin" => -42,
+                "foo" => b"bar",
             }),
-            Ok([
+            Ok(vec![
                 (cbor_unsigned!(1), cbor_false!()),
-                (cbor_text!("foo"), cbor_bytes_lit!(b"bar")),
                 (cbor_bytes_lit!(b"bin"), cbor_int!(-42)),
-            ]
-            .iter()
-            .cloned()
-            .collect::<BTreeMap<_, _>>())
+                (cbor_text!("foo"), cbor_bytes_lit!(b"bar")),
+            ])
         );
     }
 
@@ -1419,8 +1414,8 @@ mod test {
     fn test_from_public_key_credential_rp_entity() {
         let cbor_rp_entity = cbor_map! {
             "id" => "example.com",
-            "name" => "Example",
             "icon" => "example.com/icon.png",
+            "name" => "Example",
         };
         let rp_entity = PublicKeyCredentialRpEntity::try_from(cbor_rp_entity);
         let expected_rp_entity = PublicKeyCredentialRpEntity {
@@ -1435,9 +1430,9 @@ mod test {
     fn test_from_into_public_key_credential_user_entity() {
         let cbor_user_entity = cbor_map! {
             "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
+            "icon" => "example.com/foo/icon.png",
             "name" => "foo",
             "displayName" => "bar",
-            "icon" => "example.com/foo/icon.png",
         };
         let user_entity = PublicKeyCredentialUserEntity::try_from(cbor_user_entity.clone());
         let expected_user_entity = PublicKeyCredentialUserEntity {
@@ -1541,8 +1536,8 @@ mod test {
     #[test]
     fn test_from_into_public_key_credential_parameter() {
         let cbor_credential_parameter = cbor_map! {
-            "type" => "public-key",
             "alg" => ES256_ALGORITHM,
+            "type" => "public-key",
         };
         let credential_parameter =
             PublicKeyCredentialParameter::try_from(cbor_credential_parameter.clone());
@@ -1558,8 +1553,8 @@ mod test {
     #[test]
     fn test_from_into_public_key_credential_descriptor() {
         let cbor_credential_descriptor = cbor_map! {
-            "type" => "public-key",
             "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+            "type" => "public-key",
             "transports" => cbor_array!["usb"],
         };
         let credential_descriptor =
@@ -1577,11 +1572,11 @@ mod test {
     #[test]
     fn test_from_make_credential_extensions() {
         let cbor_extensions = cbor_map! {
-            "hmac-secret" => true,
-            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
-            "minPinLength" => true,
             "credBlob" => vec![0xCB],
+            "credProtect" => CredentialProtectionPolicy::UserVerificationRequired,
+            "hmac-secret" => true,
             "largeBlobKey" => true,
+            "minPinLength" => true,
         };
         let extensions = MakeCredentialExtensions::try_from(cbor_extensions);
         let expected_extensions = MakeCredentialExtensions {
@@ -1601,12 +1596,12 @@ mod test {
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
+            "credBlob" => true,
             "hmac-secret" => cbor_map! {
                 1 => cbor::Value::from(cose_key.clone()),
                 2 => vec![0x02; 32],
                 3 => vec![0x03; 16],
             },
-            "credBlob" => true,
             "largeBlobKey" => true,
         };
         let extensions = GetAssertionExtensions::try_from(cbor_extensions);
@@ -1631,13 +1626,13 @@ mod test {
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
+            "credBlob" => true,
             "hmac-secret" => cbor_map! {
                 1 => cbor::Value::from(cose_key.clone()),
                 2 => vec![0x02; 32],
                 3 => vec![0x03; 16],
                 4 => 2,
             },
-            "credBlob" => true,
             "largeBlobKey" => true,
         };
         let extensions = GetAssertionExtensions::try_from(cbor_extensions);
@@ -1690,7 +1685,7 @@ mod test {
         let cbor_packed_attestation_statement = cbor_map! {
             "alg" => 1,
             "sig" => vec![0x55, 0x55, 0x55, 0x55],
-            "x5c" => cbor_array_vec![vec![certificate]],
+            "x5c" => cbor_array![certificate],
             "ecdaaKeyId" => vec![0xEC, 0xDA, 0x1D],
         };
         let packed_attestation_statement = PackedAttestationStatement {
@@ -1878,7 +1873,7 @@ mod test {
         };
         let cbor_params = cbor_map! {
             0x01 => 6,
-            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x02 => cbor_array!("example.com".to_string()),
             0x03 => true,
         };
         assert_eq!(cbor::Value::from(params.clone()), cbor_params);
@@ -1897,7 +1892,7 @@ mod test {
             ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params);
         let cbor_params = cbor_map! {
             0x01 => 6,
-            0x02 => cbor_array_vec!(vec!["example.com".to_string()]),
+            0x02 => cbor_array!("example.com".to_string()),
             0x03 => true,
         };
         assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);

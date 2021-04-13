@@ -594,14 +594,14 @@ mod test {
             0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
             0x02 => cbor_map! {
                 "id" => "example.com",
-                "name" => "Example",
                 "icon" => "example.com/icon.png",
+                "name" => "Example",
             },
             0x03 => cbor_map! {
                 "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
+                "icon" => "example.com/foo/icon.png",
                 "name" => "foo",
                 "displayName" => "bar",
-                "icon" => "example.com/foo/icon.png",
             },
             0x04 => cbor_array![ES256_CRED_PARAM],
             0x05 => cbor_array![],
@@ -656,8 +656,8 @@ mod test {
             0x01 => "example.com",
             0x02 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
             0x03 => cbor_array![ cbor_map! {
-                "type" => "public-key",
                 "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+                "type" => "public-key",
                 "transports" => cbor_array!["usb"],
             } ],
             0x06 => vec![0x12, 0x34],

@@ -63,7 +63,6 @@ use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -706,10 +705,10 @@ where
             };
             let cred_protect_output = extensions.cred_protect.and(cred_protect_policy);
             let extensions_output = cbor_map_options! {
-                "hmac-secret" => hmac_secret_output,
-                "credProtect" => cred_protect_output,
-                "minPinLength" => min_pin_length_output,
                 "credBlob" => cred_blob_output,
+                "credProtect" => cred_protect_output,
+                "hmac-secret" => hmac_secret_output,
+                "minPinLength" => min_pin_length_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -805,8 +804,8 @@ where
                 None
             };
             let extensions_output = cbor_map_options! {
-                "hmac-secret" => encrypted_output,
                 "credBlob" => cred_blob,
+                "hmac-secret" => encrypted_output,
             };
             if !cbor::write(extensions_output, &mut auth_data) {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -1033,26 +1032,29 @@ where
                 versions.insert(0, String::from(U2F_VERSION_STRING))
             }
         }
-        let mut options_map = BTreeMap::new();
-        options_map.insert(String::from("rk"), true);
-        options_map.insert(
-            String::from("clientPin"),
-            self.persistent_store.pin_hash()?.is_some(),
-        );
-        options_map.insert(String::from("up"), true);
-        options_map.insert(String::from("pinUvAuthToken"), true);
-        options_map.insert(String::from("largeBlobs"), true);
+        let mut options = vec![];
         if ENTERPRISE_ATTESTATION_MODE.is_some() {
-            options_map.insert(
+            options.push((
                 String::from("ep"),
                 self.persistent_store.enterprise_attestation()?,
-            );
+            ));
         }
-        options_map.insert(String::from("authnrCfg"), true);
-        options_map.insert(String::from("credMgmt"), true);
-        options_map.insert(String::from("setMinPINLength"), true);
-        options_map.insert(String::from("makeCredUvNotRqd"), !has_always_uv);
-        options_map.insert(String::from("alwaysUv"), has_always_uv);
+        options.append(&mut vec![
+            (String::from("rk"), true),
+            (String::from("up"), true),
+            (String::from("alwaysUv"), has_always_uv),
+            (String::from("credMgmt"), true),
+            (String::from("authnrCfg"), true),
+            (
+                String::from("clientPin"),
+                self.persistent_store.pin_hash()?.is_some(),
+            ),
+            (String::from("largeBlobs"), true),
+            (String::from("pinUvAuthToken"), true),
+            (String::from("setMinPINLength"), true),
+            (String::from("makeCredUvNotRqd"), !has_always_uv),
+        ]);
+
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
                 versions,
@@ -1064,7 +1066,7 @@ where
                     String::from("largeBlobKey"),
                 ]),
                 aaguid: self.persistent_store.aaguid()?,
-                options: Some(options_map),
+                options: Some(options),
                 max_msg_size: Some(MAX_MSG_SIZE as u64),
                 // The order implies preference. We favor the new V2.
                 pin_protocols: Some(vec![
@@ -1285,33 +1287,33 @@ mod test {
                     String::from(FIDO2_VERSION_STRING),
                     String::from(FIDO2_1_VERSION_STRING),
                 ]],
-            0x02 => cbor_array_vec![vec![
+            0x02 => cbor_array![
                     String::from("hmac-secret"),
                     String::from("credProtect"),
                     String::from("minPinLength"),
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
-                ]],
+                ],
             0x03 => ctap_state.persistent_store.aaguid().unwrap(),
             0x04 => cbor_map_options! {
-                "rk" => true,
-                "clientPin" => false,
-                "up" => true,
-                "pinUvAuthToken" => true,
-                "largeBlobs" => true,
                 "ep" => ENTERPRISE_ATTESTATION_MODE.map(|_| false),
-                "authnrCfg" => true,
+                "rk" => true,
+                "up" => true,
+                "alwaysUv" => false,
                 "credMgmt" => true,
+                "authnrCfg" => true,
+                "clientPin" => false,
+                "largeBlobs" => true,
+                "pinUvAuthToken" => true,
                 "setMinPINLength" => true,
                 "makeCredUvNotRqd" => true,
-                "alwaysUv" => false,
             },
             0x05 => MAX_MSG_SIZE as u64,
-            0x06 => cbor_array_vec![vec![2, 1]],
+            0x06 => cbor_array![2, 1],
             0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
             0x08 => CREDENTIAL_ID_SIZE as u64,
-            0x09 => cbor_array_vec![vec!["usb"]],
-            0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x09 => cbor_array!["usb"],
+            0x0A => cbor_array![ES256_CRED_PARAM],
             0x0B => MAX_LARGE_BLOB_ARRAY_SIZE as u64,
             0x0C => false,
             0x0D => ctap_state.persistent_store.min_pin_length().unwrap() as u64,

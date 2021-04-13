@@ -17,10 +17,9 @@ use super::data_formats::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
     PublicKeyCredentialUserEntity,
 };
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_btree, cbor_map_options, cbor_text};
+use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_collection, cbor_map_options, cbor_text};
 
 #[derive(Debug, PartialEq)]
 pub enum ResponseData {
@@ -123,7 +122,7 @@ pub struct AuthenticatorGetInfoResponse {
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
     pub aaguid: [u8; 16],
-    pub options: Option<BTreeMap<String, bool>>,
+    pub options: Option<Vec<(String, bool)>>,
     pub max_msg_size: Option<u64>,
     pub pin_protocols: Option<Vec<u64>>,
     pub max_credential_count_in_list: Option<u64>,
@@ -141,7 +140,7 @@ pub struct AuthenticatorGetInfoResponse {
     // - 0x12: uvModality
     // Add them when your hardware supports any kind of user verification within
     // the boundary of the device, e.g. fingerprint or built-in keyboard.
-    pub certifications: Option<BTreeMap<String, i64>>,
+    pub certifications: Option<Vec<(String, i64)>>,
     pub remaining_discoverable_credentials: Option<u64>,
     // - 0x15: vendorPrototypeConfigCommands missing as we don't support it.
 }
@@ -170,19 +169,19 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
-            let options_map: BTreeMap<_, _> = options
+            let options_map: Vec<(_, _)> = options
                 .into_iter()
                 .map(|(key, value)| (cbor_text!(key), cbor_bool!(value)))
                 .collect();
-            cbor_map_btree!(options_map)
+            cbor_map_collection!(options_map)
         });
 
         let certifications_cbor: Option<cbor::Value> = certifications.map(|certifications| {
-            let certifications_map: BTreeMap<_, _> = certifications
+            let certifications_map: Vec<(_, _)> = certifications
                 .into_iter()
                 .map(|(key, value)| (cbor_text!(key), cbor_int!(value)))
                 .collect();
-            cbor_map_btree!(certifications_map)
+            cbor_map_collection!(certifications_map)
         });
 
         cbor_map_options! {
@@ -337,7 +336,7 @@ mod test {
         let cbor_packed_attestation_statement = cbor_map! {
             "alg" => 1,
             "sig" => vec![0x55, 0x55, 0x55, 0x55],
-            "x5c" => cbor_array_vec![vec![certificate]],
+            "x5c" => cbor_array![certificate],
             "ecdaaKeyId" => vec![0xEC, 0xDA, 0x1D],
         };
 
@@ -385,17 +384,17 @@ mod test {
             ResponseData::AuthenticatorGetAssertion(get_assertion_response).into();
         let expected_cbor = cbor_map_options! {
             0x01 => cbor_map! {
-                "type" => "public-key",
                 "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+                "type" => "public-key",
                 "transports" => cbor_array!["usb"],
             },
             0x02 => vec![0xAD],
             0x03 => vec![0x51],
             0x04 => cbor_map! {
                 "id" => vec![0x1D, 0x1D, 0x1D, 0x1D],
+                "icon" => "example.com/foo/icon.png".to_string(),
                 "name" => "foo".to_string(),
                 "displayName" => "bar".to_string(),
-                "icon" => "example.com/foo/icon.png".to_string(),
             },
             0x05 => 2,
             0x07 => vec![0x1B],
@@ -438,15 +437,11 @@ mod test {
 
     #[test]
     fn test_get_info_optionals_into_cbor() {
-        let mut options_map = BTreeMap::new();
-        options_map.insert(String::from("rk"), true);
-        let mut certifications_map = BTreeMap::new();
-        certifications_map.insert(String::from("example-cert"), 1);
         let get_info_response = AuthenticatorGetInfoResponse {
             versions: vec!["FIDO_2_0".to_string()],
             extensions: Some(vec!["extension".to_string()]),
             aaguid: [0x00; 16],
-            options: Some(options_map),
+            options: Some(vec![(String::from("rk"), true)]),
             max_msg_size: Some(1024),
             pin_protocols: Some(vec![1]),
             max_credential_count_in_list: Some(20),
@@ -459,22 +454,22 @@ mod test {
             firmware_version: Some(0),
             max_cred_blob_length: Some(1024),
             max_rp_ids_for_set_min_pin_length: Some(8),
-            certifications: Some(certifications_map),
+            certifications: Some(vec![(String::from("example-cert"), 1)]),
             remaining_discoverable_credentials: Some(150),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
         let expected_cbor = cbor_map_options! {
-            0x01 => cbor_array_vec![vec!["FIDO_2_0"]],
-            0x02 => cbor_array_vec![vec!["extension"]],
+            0x01 => cbor_array!["FIDO_2_0"],
+            0x02 => cbor_array!["extension"],
             0x03 => vec![0x00; 16],
             0x04 => cbor_map! {"rk" => true},
             0x05 => 1024,
-            0x06 => cbor_array_vec![vec![1]],
+            0x06 => cbor_array![1],
             0x07 => 20,
             0x08 => 256,
-            0x09 => cbor_array_vec![vec!["usb"]],
-            0x0A => cbor_array_vec![vec![ES256_CRED_PARAM]],
+            0x09 => cbor_array!["usb"],
+            0x0A => cbor_array![ES256_CRED_PARAM],
             0x0B => 1024,
             0x0C => false,
             0x0D => 4,

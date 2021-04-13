@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use super::values::{Constants, KeyType, SimpleValue, Value};
-use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_btree, cbor_text, cbor_unsigned};
-use alloc::collections::BTreeMap;
+use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_text, cbor_unsigned};
 use alloc::str;
 use alloc::vec::Vec;
 
@@ -174,7 +173,7 @@ impl<'a> Reader<'a> {
         size_value: u64,
         remaining_depth: i8,
     ) -> Result<Value, DecoderError> {
-        let mut value_map = BTreeMap::new();
+        let mut value_map = Vec::new();
         let mut last_key_option = None;
         for _ in 0..size_value {
             let key_value = self.decode_complete_data_item(remaining_depth - 1)?;
@@ -185,12 +184,12 @@ impl<'a> Reader<'a> {
                     }
                 }
                 last_key_option = Some(key.clone());
-                value_map.insert(key, self.decode_complete_data_item(remaining_depth - 1)?);
+                value_map.push((key, self.decode_complete_data_item(remaining_depth - 1)?));
             } else {
                 return Err(DecoderError::IncorrectMapKeyType);
             }
         }
-        Ok(cbor_map_btree!(value_map))
+        Ok(cbor_map_collection!(value_map))
     }
 
     fn decode_to_simple_value(

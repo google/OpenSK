@@ -56,8 +56,14 @@ impl<'a> Writer<'a> {
                     }
                 }
             }
-            Value::Map(map) => {
-                self.start_item(5, map.len() as u64);
+            Value::Map(mut map) => {
+                map.sort_by(|a, b| a.0.cmp(&b.0));
+                let map_len = map.len();
+                map.dedup_by(|a, b| a.0.eq(&b.0));
+                if map_len != map.len() {
+                    return false;
+                }
+                self.start_item(5, map_len as u64);
                 for (k, v) in map {
                     if !self.encode_cbor(Value::KeyValue(k), remaining_depth - 1) {
                         return false;
@@ -209,9 +215,16 @@ mod test {
     #[test]
     fn test_write_map() {
         let value_map = cbor_map! {
-            "aa" => "AA",
-            "e" => "E",
-            "" => ".",
+            0 => "a",
+            23 => "b",
+            24 => "c",
+            std::u8::MAX as i64 => "d",
+            256 => "e",
+            std::u16::MAX as i64 => "f",
+            65536 => "g",
+            std::u32::MAX as i64 => "h",
+            4294967296_i64 => "i",
+            std::i64::MAX => "j",
             -1 => "k",
             -24 => "l",
             -25 => "m",
@@ -224,16 +237,9 @@ mod test {
             b"a" => 2,
             b"bar" => 3,
             b"foo" => 4,
-            0 => "a",
-            23 => "b",
-            24 => "c",
-            std::u8::MAX as i64 => "d",
-            256 => "e",
-            std::u16::MAX as i64 => "f",
-            65536 => "g",
-            std::u32::MAX as i64 => "h",
-            4294967296_i64 => "i",
-            std::i64::MAX => "j",
+            "" => ".",
+            "e" => "E",
+            "aa" => "AA",
         };
         let expected_cbor = vec![
             0xb8, 0x19, // map of 25 pairs:
@@ -286,6 +292,67 @@ mod test {
             0x62, 0x41, 0x41, // value "AA"
         ];
         assert_eq!(write_return(value_map), Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_write_map_sorted() {
+        let sorted_map = cbor_map! {
+            0 => "a",
+            1 => "b",
+            -1 => "c",
+            -2 => "d",
+            b"a" => "e",
+            b"b" => "f",
+            "" => "g",
+            "c" => "h",
+        };
+        let unsorted_map = cbor_map! {
+            1 => "b",
+            -2 => "d",
+            b"b" => "f",
+            "c" => "h",
+            "" => "g",
+            b"a" => "e",
+            -1 => "c",
+            0 => "a",
+        };
+        assert_eq!(write_return(sorted_map), write_return(unsorted_map));
+    }
+
+    #[test]
+    fn test_write_map_duplicates() {
+        let duplicate0 = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "g",
+            0 => "b",
+        };
+        assert_eq!(write_return(duplicate0), None);
+        let duplicate1 = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "g",
+            -1 => "d",
+        };
+        assert_eq!(write_return(duplicate1), None);
+        let duplicate2 = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "g",
+            b"a" => "f",
+        };
+        assert_eq!(write_return(duplicate2), None);
+        let duplicate3 = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "g",
+            "c" => "h",
+        };
+        assert_eq!(write_return(duplicate3), None);
     }
 
     #[test]

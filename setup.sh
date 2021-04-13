@@ -46,4 +46,4 @@ mkdir -p elf2tab
 cargo install elf2tab --version 0.6.0 --root elf2tab/
 
 # Install python dependencies to factory configure OpenSK (crypto, JTAG lockdown)
-pip3 install --user --upgrade colorama tqdm cryptography fido2
+pip3 install --user --upgrade colorama tqdm cryptography "fido2>=0.9.1"

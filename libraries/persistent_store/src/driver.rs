@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Store wrapper for testing.
+//!
+//! [`StoreDriver`] wraps a [`Store`] and compares its behavior with its associated [`StoreModel`].
+
 use crate::format::{Format, Position};
 #[cfg(test)]
 use crate::StoreUpdate;

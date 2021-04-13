@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -177,7 +177,7 @@ impl CtapHid {
                 match message.cmd {
                     // CTAP specification (version 20190130) section 8.1.9.1.1
                     CtapHid::COMMAND_MSG => {
-                        // If we don't have CTAP1 backward compatibilty, this command in invalid.
+                        // If we don't have CTAP1 backward compatibilty, this command is invalid.
                         #[cfg(not(feature = "with_ctap1"))]
                         return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD);
 
@@ -219,7 +219,7 @@ impl CtapHid {
                                 cid,
                                 cmd: CtapHid::COMMAND_CBOR,
                                 payload: vec![
-                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_RESPONSE_TOO_LONG as u8,
+                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8,
                                 ],
                             })
                             .unwrap()
@@ -321,6 +321,9 @@ impl CtapHid {
                         }
                         receive::Error::UnexpectedSeq => {
                             CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ)
+                        }
+                        receive::Error::UnexpectedLen => {
+                            CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN)
                         }
                         receive::Error::Timeout => {
                             CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT)

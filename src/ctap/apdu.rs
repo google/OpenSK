@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2020-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,8 @@ use core::convert::TryFrom;
 
 const APDU_HEADER_LEN: usize = 4;
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(non_camel_case_types, dead_code)]
-#[derive(PartialEq)]
 pub enum ApduStatusCode {
     SW_SUCCESS = 0x90_00,
     /// Command successfully executed; 'XX' bytes of data are
@@ -30,6 +29,7 @@ pub enum ApduStatusCode {
     SW_WRONG_DATA = 0x6a_80,
     SW_WRONG_LENGTH = 0x67_00,
     SW_COND_USE_NOT_SATISFIED = 0x69_85,
+    SW_COMMAND_NOT_ALLOWED = 0x69_86,
     SW_FILE_NOT_FOUND = 0x6a_82,
     SW_INCORRECT_P1P2 = 0x6a_86,
     /// Instruction code not supported or invalid
@@ -51,9 +51,8 @@ pub enum ApduInstructions {
     GetResponse = 0xC0,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[allow(dead_code)]
-#[derive(Default, PartialEq)]
 pub struct ApduHeader {
     pub cla: u8,
     pub ins: u8,
@@ -72,8 +71,7 @@ impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
     }
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// The APDU cases
 pub enum Case {
     Le1,
@@ -85,18 +83,16 @@ pub enum Case {
     Le3,
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-#[derive(PartialEq)]
 pub enum ApduType {
     Instruction,
     Short(Case),
     Extended(Case),
 }
 
-#[cfg_attr(test, derive(Clone, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-#[derive(PartialEq)]
 pub struct APDU {
     pub header: ApduHeader,
     pub lc: u16,

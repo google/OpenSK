@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,7 @@ pub type Ctap1StatusCode = ApduStatusCode;
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Clone, Debug))]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Ctap1Flags {
     CheckOnly = 0x07,
     EnforceUpAndSign = 0x03,
@@ -56,7 +55,7 @@ impl Into<u8> for Ctap1Flags {
     }
 }
 
-#[cfg_attr(any(test, feature = "debug_ctap"), derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 // TODO: remove #allow when https://github.com/rust-lang/rust/issues/64362 is fixed
 enum U2fCommand {
     #[allow(dead_code)]
@@ -190,6 +189,12 @@ impl Ctap1Command {
         R: Rng256,
         CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
     {
+        if !ctap_state
+            .allows_ctap1()
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+        {
+            return Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED);
+        }
         let command = U2fCommand::try_from(message)?;
         match command {
             U2fCommand::Register {
@@ -397,6 +402,21 @@ mod test {
         message.push(CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);
         message
+    }
+
+    #[test]
+    fn test_process_allowed() {
+        let mut rng = ThreadRng256 {};
+        let dummy_user_presence = |_| panic!("Unexpected user presence check in CTAP1");
+        let mut ctap_state = CtapState::new(&mut rng, dummy_user_presence, START_CLOCK_VALUE);
+        ctap_state.persistent_store.toggle_always_uv().unwrap();
+
+        let application = [0x0A; 32];
+        let message = create_register_message(&application);
+        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
+        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
+        let response = Ctap1Command::process_command(&message, &mut ctap_state, START_CLOCK_VALUE);
+        assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED));
     }
 
     #[test]

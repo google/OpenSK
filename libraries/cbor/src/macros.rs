@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use crate::values::{KeyType, Value};
-use alloc::collections::btree_map;
+use alloc::vec;
 use core::cmp::Ordering;
 use core::iter::Peekable;
 
-/// This macro generates code to extract multiple values from a `BTreeMap<KeyType, Value>` at once
-/// in an optimized manner, consuming the input map.
+/// This macro generates code to extract multiple values from a `Vec<(KeyType, Value)>` at once
+/// in an optimized manner, consuming the input vector.
 ///
-/// It takes as input a `BTreeMap` as well as a list of identifiers and keys, and generates code
+/// It takes as input a `Vec` as well as a list of identifiers and keys, and generates code
 /// that assigns the corresponding values to new variables using the given identifiers. Each of
 /// these variables has type `Option<Value>`, to account for the case where keys aren't found.
 ///
@@ -32,33 +32,20 @@ use core::iter::Peekable;
 /// the keys are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can
 /// change at runtime.
 ///
-/// Semantically, provided that the keys are sorted as specified above, the following two snippets
-/// of code are equivalent, but the `destructure_cbor_map!` version is more optimized, as it doesn't
-/// re-balance the `BTreeMap` for each key, contrary to the `BTreeMap::remove` operations.
+/// Example usage:
 ///
 /// ```rust
 /// # extern crate alloc;
 /// # use cbor::destructure_cbor_map;
 /// #
 /// # fn main() {
-/// #     let map = alloc::collections::BTreeMap::new();
+/// #     let map = alloc::vec::Vec::new();
 /// destructure_cbor_map! {
 ///     let {
 ///         1 => x,
 ///         "key" => y,
 ///     } = map;
 /// }
-/// # }
-/// ```
-///
-/// ```rust
-/// # extern crate alloc;
-/// #
-/// # fn main() {
-/// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
-/// use cbor::values::IntoCborKey;
-/// let x: Option<cbor::Value> = map.remove(&1.into_cbor_key());
-/// let y: Option<cbor::Value> = map.remove(&"key".into_cbor_key());
 /// # }
 /// ```
 #[macro_export]
@@ -100,7 +87,7 @@ macro_rules! destructure_cbor_map {
 /// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
 /// CTAP2 application of OpenSK.
 pub fn destructure_cbor_map_peek_value(
-    it: &mut Peekable<btree_map::IntoIter<KeyType, Value>>,
+    it: &mut Peekable<vec::IntoIter<(KeyType, Value)>>,
     needle: KeyType,
 ) -> Option<Value> {
     loop {
@@ -145,6 +132,23 @@ macro_rules! assert_sorted_keys {
     };
 }
 
+/// Creates a CBOR Value of type Map with the specified key-value pairs.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Values.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_map;
+/// let map = cbor_map! {
+///   0x01 => false,
+///   "02" => -3,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map {
     // trailing comma case
@@ -157,15 +161,35 @@ macro_rules! cbor_map {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValue};
-            let mut _map = ::alloc::collections::BTreeMap::new();
+            let mut _map = ::alloc::vec::Vec::new();
             $(
-                _map.insert($key.into_cbor_key(), $value.into_cbor_value());
+                _map.push(($key.into_cbor_key(), $value.into_cbor_value()));
             )*
             $crate::values::Value::Map(_map)
         }
     };
 }
 
+/// Creates a CBOR Value of type Map with key-value pairs where values can be Options.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Value Options.
+/// The map entry is included iff the Value is not an Option or Option is Some.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_map_options;
+/// let missing_value: Option<bool> = None;
+/// let map = cbor_map_options! {
+///   0x01 => Some(false),
+///   "02" => -3,
+///   "not in map" => missing_value,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map_options {
     // trailing comma case
@@ -178,12 +202,12 @@ macro_rules! cbor_map_options {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::{IntoCborKey, IntoCborValueOption};
-            let mut _map = ::alloc::collections::BTreeMap::<_, $crate::values::Value>::new();
+            let mut _map = ::alloc::vec::Vec::<(_, $crate::values::Value)>::new();
             $(
             {
                 let opt: Option<$crate::values::Value> = $value.into_cbor_value_option();
                 if let Some(val) = opt {
-                    _map.insert($key.into_cbor_key(), val);
+                    _map.push(($key.into_cbor_key(), val));
                 }
             }
             )*
@@ -192,13 +216,25 @@ macro_rules! cbor_map_options {
     };
 }
 
+/// Creates a CBOR Value of type Map from a Vec<(KeyType, Value)>.
 #[macro_export]
-macro_rules! cbor_map_btree {
-    ( $tree:expr ) => {
-        $crate::values::Value::Map($tree)
-    };
+macro_rules! cbor_map_collection {
+    ( $tree:expr ) => {{
+        $crate::values::Value::from($tree)
+    }};
 }
 
+/// Creates a CBOR Value of type Array with the given elements.
+///
+/// Elements are expressions and converted into CBOR Values. Elements are comma-separated.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use cbor::cbor_array;
+/// let array = cbor_array![1, "2"];
+/// ```
 #[macro_export]
 macro_rules! cbor_array {
     // trailing comma case
@@ -216,6 +252,7 @@ macro_rules! cbor_array {
     };
 }
 
+/// Creates a CBOR Value of type Array from a Vec<Value>.
 #[macro_export]
 macro_rules! cbor_array_vec {
     ( $vec:expr ) => {{
@@ -329,7 +366,6 @@ macro_rules! cbor_key_bytes {
 #[cfg(test)]
 mod test {
     use super::super::values::{KeyType, SimpleValue, Value};
-    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_cbor_simple_values() {
@@ -421,7 +457,7 @@ mod test {
                 Value::KeyValue(KeyType::Unsigned(0)),
                 Value::KeyValue(KeyType::Unsigned(1)),
             ]),
-            Value::Map(BTreeMap::new()),
+            Value::Map(Vec::new()),
             Value::Map(
                 [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
                     .iter()
@@ -518,7 +554,7 @@ mod test {
                         Value::KeyValue(KeyType::Unsigned(1)),
                     ]),
                 ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
+                (KeyType::Unsigned(9), Value::Map(Vec::new())),
                 (
                     KeyType::Unsigned(10),
                     Value::Map(
@@ -589,7 +625,7 @@ mod test {
                         Value::KeyValue(KeyType::Unsigned(1)),
                     ]),
                 ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
+                (KeyType::Unsigned(9), Value::Map(Vec::new())),
                 (
                     KeyType::Unsigned(10),
                     Value::Map(
@@ -608,30 +644,26 @@ mod test {
     }
 
     #[test]
-    fn test_cbor_map_btree_empty() {
-        let a = cbor_map_btree!(BTreeMap::new());
-        let b = Value::Map(BTreeMap::new());
+    fn test_cbor_map_collection_empty() {
+        let a = cbor_map_collection!(Vec::<(_, _)>::new());
+        let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }
 
     #[test]
-    fn test_cbor_map_btree_foo() {
-        let a = cbor_map_btree!(
-            [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
-                .iter()
-                .cloned()
-                .collect()
-        );
-        let b = Value::Map(
-            [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
-                .iter()
-                .cloned()
-                .collect(),
-        );
+    fn test_cbor_map_collection_foo() {
+        let a = cbor_map_collection!(vec![(
+            KeyType::Unsigned(2),
+            Value::KeyValue(KeyType::Unsigned(3))
+        )]);
+        let b = Value::Map(vec![(
+            KeyType::Unsigned(2),
+            Value::KeyValue(KeyType::Unsigned(3)),
+        )]);
         assert_eq!(a, b);
     }
 
-    fn extract_map(cbor_value: Value) -> BTreeMap<KeyType, Value> {
+    fn extract_map(cbor_value: Value) -> Vec<(KeyType, Value)> {
         match cbor_value {
             Value::Map(map) => map,
             _ => panic!("Expected CBOR map."),

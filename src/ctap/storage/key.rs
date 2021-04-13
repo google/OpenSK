@@ -84,21 +84,33 @@ make_partition! {
 
     /// The credentials.
     ///
-    /// Depending on `MAX_SUPPORTED_RESIDENTIAL_KEYS`, only a prefix of those keys is used. Each
-    /// board may configure `MAX_SUPPORTED_RESIDENTIAL_KEYS` depending on the storage size.
+    /// Depending on `MAX_SUPPORTED_RESIDENT_KEYS`, only a prefix of those keys is used. Each
+    /// board may configure `MAX_SUPPORTED_RESIDENT_KEYS` depending on the storage size.
     CREDENTIALS = 1700..2000;
+
+    /// Storage for the serialized large blob array.
+    ///
+    /// The stored large blob can be too big for one key, so it has to be sharded.
+    LARGE_BLOB_SHARDS = 2000..2004;
+
+    /// If this entry exists and is empty, alwaysUv is enabled.
+    ALWAYS_UV = 2038;
+
+    /// If this entry exists and is empty, enterprise attestation is enabled.
+    ENTERPRISE_ATTESTATION = 2039;
+
+    /// If this entry exists and is empty, the PIN needs to be changed.
+    FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.
     CRED_RANDOM_SECRET = 2041;
 
     /// List of RP IDs allowed to read the minimum PIN length.
-    #[cfg(feature = "with_ctap2_1")]
-    _MIN_PIN_LENGTH_RP_IDS = 2042;
+    MIN_PIN_LENGTH_RP_IDS = 2042;
 
     /// The minimum PIN length.
     ///
     /// If the entry is absent, the minimum PIN length is `DEFAULT_MIN_PIN_LENGTH`.
-    #[cfg(feature = "with_ctap2_1")]
     MIN_PIN_LENGTH = 2043;
 
     /// The number of PIN retries.
@@ -106,10 +118,11 @@ make_partition! {
     /// If the entry is absent, the number of PIN retries is `MAX_PIN_RETRIES`.
     PIN_RETRIES = 2044;
 
-    /// The PIN hash.
+    /// The PIN hash and length.
     ///
-    /// If the entry is absent, there is no PIN set.
-    PIN_HASH = 2045;
+    /// If the entry is absent, there is no PIN set. The first byte represents
+    /// the length, the following are an array with the hash.
+    PIN_PROPERTIES = 2045;
 
     /// The encryption and hmac keys.
     ///
@@ -128,8 +141,8 @@ mod test {
 
     #[test]
     fn enough_credentials() {
-        use super::super::MAX_SUPPORTED_RESIDENTIAL_KEYS;
-        assert!(MAX_SUPPORTED_RESIDENTIAL_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
+        use crate::ctap::customization::MAX_SUPPORTED_RESIDENT_KEYS;
+        assert!(MAX_SUPPORTED_RESIDENT_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
     }
 
     #[test]

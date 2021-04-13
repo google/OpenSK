@@ -22,6 +22,7 @@ pub mod cbc;
 mod ec;
 pub mod ecdh;
 pub mod ecdsa;
+pub mod hkdf;
 pub mod hmac;
 pub mod rng256;
 pub mod sha256;

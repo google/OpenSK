@@ -120,8 +120,8 @@ fn main() {
         }
 
         // These calls are making sure that even for long inactivity, wrapping clock values
-        // never randomly wink or grant user presence for U2F.
-        ctap_state.update_command_permission(now);
+        // don't cause problems with timers.
+        ctap_state.update_timeouts(now);
         ctap_hid.wink_permission = ctap_hid.wink_permission.check_expiration(now);
 
         if has_packet {

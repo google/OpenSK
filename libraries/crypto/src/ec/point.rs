@@ -542,7 +542,6 @@ impl Add for &PointProjective {
     }
 }
 
-#[cfg(feature = "derive_debug")]
 impl core::fmt::Debug for PointP256 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("PointP256")
@@ -552,7 +551,6 @@ impl core::fmt::Debug for PointP256 {
     }
 }
 
-#[cfg(feature = "derive_debug")]
 impl PartialEq for PointP256 {
     fn eq(&self, other: &PointP256) -> bool {
         self.x == other.x && self.y == other.y

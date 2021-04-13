@@ -44,7 +44,6 @@ cargo test --manifest-path tools/heapviz/Cargo.toml
 echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features with_ctap2_1
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
 cargo check --release --target=thumbv7em-none-eabi --features panic_console
 cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
@@ -92,7 +91,7 @@ then
   cargo test --release --features std
   cd ../..
   cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std,derive_debug
+  RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
@@ -104,7 +103,7 @@ then
   cargo test --features std
   cd ../..
   cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --features std,derive_debug
+  RUSTFLAGS='-C target-feature=+aes' cargo test --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --features std
@@ -116,16 +115,4 @@ then
 
   echo "Running unit tests on the desktop (debug mode + CTAP1)..."
   cargo test --features std,with_ctap1
-
-  echo "Running unit tests on the desktop (release mode + CTAP2.1)..."
-  cargo test --release --features std,with_ctap2_1
-
-  echo "Running unit tests on the desktop (debug mode + CTAP2.1)..."
-  cargo test --features std,with_ctap2_1
-
-  echo "Running unit tests on the desktop (release mode + CTAP1 + CTAP2.1)..."
-  cargo test --release --features std,with_ctap1,with_ctap2_1
-
-  echo "Running unit tests on the desktop (debug mode + CTAP1 + CTAP2.1)..."
-  cargo test --features std,with_ctap1,with_ctap2_1
 fi

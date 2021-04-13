@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -21,7 +20,7 @@ use core::cmp::Ordering;
 pub enum Value {
     KeyValue(KeyType),
     Array(Vec<Value>),
-    Map(BTreeMap<KeyType, Value>),
+    Map(Vec<(KeyType, Value)>),
     // TAG is omitted
     Simple(SimpleValue),
 }
@@ -180,6 +179,12 @@ where
 {
     fn from(t: T) -> Self {
         Value::KeyValue(KeyType::from(t))
+    }
+}
+
+impl From<Vec<(KeyType, Value)>> for Value {
+    fn from(map: Vec<(KeyType, Value)>) -> Self {
+        Value::Map(map)
     }
 }
 

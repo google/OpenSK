@@ -35,19 +35,20 @@ impl<'a> Writer<'a> {
         if remaining_depth < 0 {
             return false;
         }
+        let type_label = value.type_label();
         match value {
-            Value::Unsigned(unsigned) => self.start_item(0, unsigned),
-            Value::Negative(negative) => self.start_item(1, -(negative + 1) as u64),
+            Value::Unsigned(unsigned) => self.start_item(type_label, unsigned),
+            Value::Negative(negative) => self.start_item(type_label, -(negative + 1) as u64),
             Value::ByteString(byte_string) => {
-                self.start_item(2, byte_string.len() as u64);
+                self.start_item(type_label, byte_string.len() as u64);
                 self.encoded_cbor.extend(byte_string);
             }
             Value::TextString(text_string) => {
-                self.start_item(3, text_string.len() as u64);
+                self.start_item(type_label, text_string.len() as u64);
                 self.encoded_cbor.extend(text_string.into_bytes());
             }
             Value::Array(array) => {
-                self.start_item(4, array.len() as u64);
+                self.start_item(type_label, array.len() as u64);
                 for el in array {
                     if !self.encode_cbor(el, remaining_depth - 1) {
                         return false;
@@ -61,7 +62,7 @@ impl<'a> Writer<'a> {
                 if map_len != map.len() {
                     return false;
                 }
-                self.start_item(5, map_len as u64);
+                self.start_item(type_label, map_len as u64);
                 for (k, v) in map {
                     if !self.encode_cbor(k, remaining_depth - 1) {
                         return false;
@@ -71,7 +72,7 @@ impl<'a> Writer<'a> {
                     }
                 }
             }
-            Value::Simple(simple_value) => self.start_item(7, simple_value as u64),
+            Value::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
         }
         true
     }

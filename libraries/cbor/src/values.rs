@@ -69,6 +69,8 @@ impl Value {
     }
 
     pub fn type_label(&self) -> u8 {
+        // TODO use enum discriminant instead when stable
+        // https://github.com/rust-lang/rust/issues/60553
         match self {
             Value::Unsigned(_) => 0,
             Value::Negative(_) => 1,

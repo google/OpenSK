@@ -24,5 +24,5 @@ pub mod values;
 pub mod writer;
 
 pub use self::reader::read;
-pub use self::values::{KeyType, SimpleValue, Value};
+pub use self::values::{SimpleValue, Value};
 pub use self::writer::write;

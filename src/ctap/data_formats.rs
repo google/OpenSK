@@ -586,8 +586,8 @@ enum PublicKeyCredentialSourceField {
     // - CredRandom = 5,
 }
 
-impl From<PublicKeyCredentialSourceField> for cbor::KeyType {
-    fn from(field: PublicKeyCredentialSourceField) -> cbor::KeyType {
+impl From<PublicKeyCredentialSourceField> for cbor::Value {
+    fn from(field: PublicKeyCredentialSourceField) -> cbor::Value {
         (field as u64).into()
     }
 }
@@ -1076,35 +1076,35 @@ impl From<CredentialManagementSubCommandParameters> for cbor::Value {
 
 pub(super) fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => Ok(unsigned),
+        cbor::Value::Unsigned(unsigned) => Ok(unsigned),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
 pub(super) fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::Unsigned(unsigned)) => {
+        cbor::Value::Unsigned(unsigned) => {
             if unsigned <= core::i64::MAX as u64 {
                 Ok(unsigned as i64)
             } else {
                 Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
             }
         }
-        cbor::Value::KeyValue(cbor::KeyType::Negative(signed)) => Ok(signed),
+        cbor::Value::Negative(signed) => Ok(signed),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
 pub fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::ByteString(byte_string)) => Ok(byte_string),
+        cbor::Value::ByteString(byte_string) => Ok(byte_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
 pub(super) fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
     match cbor_value {
-        cbor::Value::KeyValue(cbor::KeyType::TextString(text_string)) => Ok(text_string),
+        cbor::Value::TextString(text_string) => Ok(text_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
@@ -1118,7 +1118,7 @@ pub(super) fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>,
 
 pub(super) fn extract_map(
     cbor_value: cbor::Value,
-) -> Result<Vec<(cbor::KeyType, cbor::Value)>, Ctap2StatusCode> {
+) -> Result<Vec<(cbor::Value, cbor::Value)>, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Map(map) => Ok(map),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
@@ -1681,7 +1681,7 @@ mod test {
 
     #[test]
     fn test_into_packed_attestation_statement() {
-        let certificate: cbor::values::KeyType = cbor_bytes![vec![0x5C, 0x5C, 0x5C, 0x5C]];
+        let certificate = cbor_bytes![vec![0x5C, 0x5C, 0x5C, 0x5C]];
         let cbor_packed_attestation_statement = cbor_map! {
             "alg" => 1,
             "sig" => vec![0x55, 0x55, 0x55, 0x55],

@@ -17,6 +17,7 @@ You will need one the following supported boards:
 *   [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
     to have a more practical form factor.
 *   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
+*   [Feitian OpenSK dongle](https://feitiantech.github.io/OpenSK_USB/).
 
 In the case of the Nordic USB dongle, you may also need the following extra
 hardware:
@@ -125,6 +126,7 @@ This is the expected content after running our `setup.sh` script:
 
 File              | Purpose
 ----------------- | --------------------------------------------------------
+`aaguid.txt`      | Text file containaing the AAGUID value
 `opensk_ca.csr`   | Certificate sign request for the Root CA
 `opensk_ca.key`   | ECC secp256r1 private key used for the Root CA
 `opensk_ca.pem`   | PEM encoded certificate of the Root CA
@@ -136,9 +138,11 @@ File              | Purpose
 If you want to use your own attestation certificate and private key, simply
 replace `opensk_cert.pem` and `opensk.key` files.
 
-Our build script `build.rs` is responsible for converting `opensk_cert.pem` and
-`opensk.key` files into raw data that is then used by the Rust file:
-`src/ctap/key_material.rs`.
+Our build script `build.rs` is responsible for converting the `aaguid.txt` file
+into raw data that is then used by the Rust file `src/ctap/key_material.rs`.
+
+Our configuration script `tools/configure.py` is responsible for configuring
+an OpenSK device with the correct certificate and private key.
 
 ### Flashing a firmware
 

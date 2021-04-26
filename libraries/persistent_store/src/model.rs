@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Store specification.
+
 use crate::format::Format;
 use crate::{usize_to_nat, StoreError, StoreRatio, StoreResult, StoreUpdate};
 use std::collections::HashMap;
 
 /// Models the mutable operations of a store.
 ///
-/// The model doesn't model the storage and read-only operations. This is done by the driver.
+/// The model doesn't model the storage and read-only operations. This is done by the
+/// [driver](crate::StoreDriver).
 #[derive(Clone, Debug)]
 pub struct StoreModel {
     /// Represents the content of the store.
@@ -34,7 +37,7 @@ pub enum StoreOperation {
     /// Applies a transaction.
     Transaction {
         /// The list of updates to be applied.
-        updates: Vec<StoreUpdate>,
+        updates: Vec<StoreUpdate<Vec<u8>>>,
     },
 
     /// Deletes all keys above a threshold.
@@ -89,7 +92,7 @@ impl StoreModel {
     }
 
     /// Applies a transaction.
-    fn transaction(&mut self, updates: Vec<StoreUpdate>) -> StoreResult<()> {
+    fn transaction(&mut self, updates: Vec<StoreUpdate<Vec<u8>>>) -> StoreResult<()> {
         // Fail if the transaction is invalid.
         if self.format.transaction_valid(&updates).is_none() {
             return Err(StoreError::InvalidArgument);

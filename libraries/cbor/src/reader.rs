@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::values::{Constants, KeyType, SimpleValue, Value};
-use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_btree, cbor_text, cbor_unsigned};
-use alloc::collections::BTreeMap;
+use super::values::{Constants, SimpleValue, Value};
+use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_text, cbor_unsigned};
 use alloc::str;
 use alloc::vec::Vec;
 
@@ -23,7 +22,6 @@ pub enum DecoderError {
     UnsupportedMajorType,
     UnknownAdditionalInfo,
     IncompleteCborData,
-    IncorrectMapKeyType,
     TooMuchNesting,
     InvalidUtf8,
     ExtranousData,
@@ -135,7 +133,7 @@ impl<'a> Reader<'a> {
         if signed_size < 0 {
             Err(DecoderError::OutOfRangeIntegerValue)
         } else {
-            Ok(Value::KeyValue(KeyType::Negative(-(size_value as i64) - 1)))
+            Ok(Value::Negative(-(size_value as i64) - 1))
         }
     }
 
@@ -174,23 +172,19 @@ impl<'a> Reader<'a> {
         size_value: u64,
         remaining_depth: i8,
     ) -> Result<Value, DecoderError> {
-        let mut value_map = BTreeMap::new();
+        let mut value_map = Vec::new();
         let mut last_key_option = None;
         for _ in 0..size_value {
-            let key_value = self.decode_complete_data_item(remaining_depth - 1)?;
-            if let Value::KeyValue(key) = key_value {
-                if let Some(last_key) = last_key_option {
-                    if last_key >= key {
-                        return Err(DecoderError::OutOfOrderKey);
-                    }
+            let key = self.decode_complete_data_item(remaining_depth - 1)?;
+            if let Some(last_key) = last_key_option {
+                if last_key >= key {
+                    return Err(DecoderError::OutOfOrderKey);
                 }
-                last_key_option = Some(key.clone());
-                value_map.insert(key, self.decode_complete_data_item(remaining_depth - 1)?);
-            } else {
-                return Err(DecoderError::IncorrectMapKeyType);
             }
+            last_key_option = Some(key.clone());
+            value_map.push((key, self.decode_complete_data_item(remaining_depth - 1)?));
         }
-        Ok(cbor_map_btree!(value_map))
+        Ok(cbor_map_collection!(value_map))
     }
 
     fn decode_to_simple_value(
@@ -613,19 +607,6 @@ mod test {
         for cbor in cases {
             assert_eq!(read(&cbor), Err(DecoderError::IncompleteCborData));
         }
-    }
-
-    #[test]
-    fn test_read_unsupported_map_key_format_error() {
-        // While CBOR can handle all types as map keys, we only support a subset.
-        let bad_map_cbor = vec![
-            0xa2, // map of 2 pairs
-            0x82, 0x01, 0x02, // invalid key : [1, 2]
-            0x02, // value : 2
-            0x61, 0x64, // key : "d"
-            0x03, // value : 3
-        ];
-        assert_eq!(read(&bad_map_cbor), Err(DecoderError::IncorrectMapKeyType));
     }
 
     #[test]

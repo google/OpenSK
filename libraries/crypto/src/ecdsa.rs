@@ -21,14 +21,16 @@ use super::rng256::Rng256;
 use super::{Hash256, HashBlockSize64Bytes};
 use alloc::vec;
 use alloc::vec::Vec;
+#[cfg(test)]
+use arrayref::array_mut_ref;
 #[cfg(feature = "std")]
 use arrayref::array_ref;
-use arrayref::{array_mut_ref, mut_array_refs};
-use cbor::{cbor_bytes, cbor_map_options};
+use arrayref::mut_array_refs;
 use core::marker::PhantomData;
 
-#[derive(Clone, PartialEq)]
-#[cfg_attr(feature = "derive_debug", derive(Debug))]
+pub const NBYTES: usize = int256::NBYTES;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
@@ -38,6 +40,7 @@ pub struct Signature {
     s: NonZeroExponentP256,
 }
 
+#[derive(Clone)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -58,10 +61,11 @@ impl SecKey {
         }
     }
 
-    // ECDSA signature based on a RNG to generate a suitable randomization parameter.
-    // Under the hood, rejection sampling is used to make sure that the randomization parameter is
-    // uniformly distributed.
-    // The provided RNG must be cryptographically secure; otherwise this method is insecure.
+    /// Creates an ECDSA signature based on a RNG.
+    ///
+    /// Under the hood, rejection sampling is used to make sure that the
+    /// randomization parameter is uniformly distributed. The provided RNG must
+    /// be cryptographically secure; otherwise this method is insecure.
     pub fn sign_rng<H, R>(&self, msg: &[u8], rng: &mut R) -> Signature
     where
         H: Hash256,
@@ -77,8 +81,7 @@ impl SecKey {
         }
     }
 
-    // Deterministic ECDSA signature based on RFC 6979 to generate a suitable randomization
-    // parameter.
+    /// Creates a deterministic ECDSA signature based on RFC 6979.
     pub fn sign_rfc6979<H>(&self, msg: &[u8]) -> Signature
     where
         H: Hash256 + HashBlockSize64Bytes,
@@ -101,8 +104,10 @@ impl SecKey {
         }
     }
 
-    // Try signing a curve element given a randomization parameter k. If no signature can be
-    // obtained from this k, None is returned and the caller should try again with another value.
+    /// Try signing a curve element given a randomization parameter k.
+    ///
+    /// If no signature can be obtained from this k, None is returned and the
+    /// caller should try again with another value.
     fn try_sign(&self, k: &NonZeroExponentP256, msg: &ExponentP256) -> Option<Signature> {
         let r = ExponentP256::modn(PointP256::base_point_mul(k.as_exponent()).getx().to_int());
         // The branching here is fine because all this reveals is that k generated an unsuitable r.
@@ -214,7 +219,6 @@ impl Signature {
 }
 
 impl PubKey {
-    pub const ES256_ALGORITHM: i64 = -7;
     #[cfg(feature = "with_ctap1")]
     const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
 
@@ -242,35 +246,10 @@ impl PubKey {
         representation
     }
 
-    // Encodes the key according to CBOR Object Signing and Encryption, defined in RFC 8152.
-    pub fn to_cose_key(&self) -> Option<Vec<u8>> {
-        const EC2_KEY_TYPE: i64 = 2;
-        const P_256_CURVE: i64 = 1;
-        let mut x_bytes = vec![0; int256::NBYTES];
-        self.p
-            .getx()
-            .to_int()
-            .to_bin(array_mut_ref![x_bytes.as_mut_slice(), 0, int256::NBYTES]);
-        let x_byte_cbor: cbor::Value = cbor_bytes!(x_bytes);
-        let mut y_bytes = vec![0; int256::NBYTES];
-        self.p
-            .gety()
-            .to_int()
-            .to_bin(array_mut_ref![y_bytes.as_mut_slice(), 0, int256::NBYTES]);
-        let y_byte_cbor: cbor::Value = cbor_bytes!(y_bytes);
-        let cbor_value = cbor_map_options! {
-            1 => EC2_KEY_TYPE,
-            3 => PubKey::ES256_ALGORITHM,
-            -1 => P_256_CURVE,
-            -2 => x_byte_cbor,
-            -3 => y_byte_cbor,
-        };
-        let mut encoded_key = Vec::new();
-        if cbor::write(cbor_value, &mut encoded_key) {
-            Some(encoded_key)
-        } else {
-            None
-        }
+    /// Writes the coordinates into the passed in arrays.
+    pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
+        self.p.getx().to_int().to_bin(x);
+        self.p.gety().to_int().to_bin(y);
     }
 
     #[cfg(feature = "std")]

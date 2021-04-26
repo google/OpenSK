@@ -12,32 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloc::collections::BTreeMap;
+use super::writer::write;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Value {
-    KeyValue(KeyType),
-    Array(Vec<Value>),
-    Map(BTreeMap<KeyType, Value>),
-    // TAG is omitted
-    Simple(SimpleValue),
-}
-
-// The specification recommends to limit the available keys.
-// Currently supported are both integer and string types.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum KeyType {
     Unsigned(u64),
     // We only use 63 bits of information here.
     Negative(i64),
     ByteString(Vec<u8>),
     TextString(String),
+    Array(Vec<Value>),
+    Map(Vec<(Value, Value)>),
+    // TAG is omitted
+    Simple(SimpleValue),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleValue {
     FalseValue = 20,
     TrueValue = 21,
@@ -58,6 +51,15 @@ impl Constants {
 }
 
 impl Value {
+    // For simplicity, this only takes i64. Construct directly for the last bit.
+    pub fn integer(int: i64) -> Value {
+        if int >= 0 {
+            Value::Unsigned(int as u64)
+        } else {
+            Value::Negative(int)
+        }
+    }
+
     pub fn bool_value(b: bool) -> Value {
         if b {
             Value::Simple(SimpleValue::TrueValue)
@@ -67,8 +69,13 @@ impl Value {
     }
 
     pub fn type_label(&self) -> u8 {
+        // TODO use enum discriminant instead when stable
+        // https://github.com/rust-lang/rust/issues/60553
         match self {
-            Value::KeyValue(key) => key.type_label(),
+            Value::Unsigned(_) => 0,
+            Value::Negative(_) => 1,
+            Value::ByteString(_) => 2,
+            Value::TextString(_) => 3,
             Value::Array(_) => 4,
             Value::Map(_) => 5,
             Value::Simple(_) => 7,
@@ -76,29 +83,11 @@ impl Value {
     }
 }
 
-impl KeyType {
-    // For simplicity, this only takes i64. Construct directly for the last bit.
-    pub fn integer(int: i64) -> KeyType {
-        if int >= 0 {
-            KeyType::Unsigned(int as u64)
-        } else {
-            KeyType::Negative(int)
-        }
-    }
-
-    pub fn type_label(&self) -> u8 {
-        match self {
-            KeyType::Unsigned(_) => 0,
-            KeyType::Negative(_) => 1,
-            KeyType::ByteString(_) => 2,
-            KeyType::TextString(_) => 3,
-        }
-    }
-}
-
-impl Ord for KeyType {
-    fn cmp(&self, other: &KeyType) -> Ordering {
-        use super::values::KeyType::{ByteString, Negative, TextString, Unsigned};
+impl Ord for Value {
+    fn cmp(&self, other: &Value) -> Ordering {
+        use super::values::Value::{
+            Array, ByteString, Map, Negative, Simple, TextString, Unsigned,
+        };
         let self_type_value = self.type_label();
         let other_type_value = other.type_label();
         if self_type_value != other_type_value {
@@ -109,14 +98,32 @@ impl Ord for KeyType {
             (Negative(n1), Negative(n2)) => n1.cmp(n2).reverse(),
             (ByteString(b1), ByteString(b2)) => b1.len().cmp(&b2.len()).then(b1.cmp(b2)),
             (TextString(t1), TextString(t2)) => t1.len().cmp(&t2.len()).then(t1.cmp(t2)),
-            _ => unreachable!(),
+            (Array(a1), Array(a2)) if a1.len() != a2.len() => a1.len().cmp(&a2.len()),
+            (Map(m1), Map(m2)) if m1.len() != m2.len() => m1.len().cmp(&m2.len()),
+            (Simple(s1), Simple(s2)) => s1.cmp(s2),
+            (v1, v2) => {
+                // This case could handle all of the above as well. Checking individually is faster.
+                let mut encoding1 = Vec::new();
+                write(v1.clone(), &mut encoding1);
+                let mut encoding2 = Vec::new();
+                write(v2.clone(), &mut encoding2);
+                encoding1.cmp(&encoding2)
+            }
         }
     }
 }
 
-impl PartialOrd for KeyType {
-    fn partial_cmp(&self, other: &KeyType) -> Option<Ordering> {
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Value) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Eq for Value {}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Value) -> bool {
+        self.cmp(other) == Ordering::Equal
     }
 }
 
@@ -132,73 +139,57 @@ impl SimpleValue {
     }
 }
 
-impl From<u64> for KeyType {
+impl From<u64> for Value {
     fn from(unsigned: u64) -> Self {
-        KeyType::Unsigned(unsigned)
+        Value::Unsigned(unsigned)
     }
 }
 
-impl From<i64> for KeyType {
+impl From<i64> for Value {
     fn from(i: i64) -> Self {
-        KeyType::integer(i)
+        Value::integer(i)
     }
 }
 
-impl From<i32> for KeyType {
+impl From<i32> for Value {
     fn from(i: i32) -> Self {
-        KeyType::integer(i as i64)
+        Value::integer(i as i64)
     }
 }
 
-impl From<Vec<u8>> for KeyType {
+impl From<Vec<u8>> for Value {
     fn from(bytes: Vec<u8>) -> Self {
-        KeyType::ByteString(bytes)
+        Value::ByteString(bytes)
     }
 }
 
-impl From<&[u8]> for KeyType {
+impl From<&[u8]> for Value {
     fn from(bytes: &[u8]) -> Self {
-        KeyType::ByteString(bytes.to_vec())
+        Value::ByteString(bytes.to_vec())
     }
 }
 
-impl From<String> for KeyType {
+impl From<String> for Value {
     fn from(text: String) -> Self {
-        KeyType::TextString(text)
+        Value::TextString(text)
     }
 }
 
-impl From<&str> for KeyType {
+impl From<&str> for Value {
     fn from(text: &str) -> Self {
-        KeyType::TextString(text.to_string())
+        Value::TextString(text.to_string())
     }
 }
 
-impl<T> From<T> for Value
-where
-    KeyType: From<T>,
-{
-    fn from(t: T) -> Self {
-        Value::KeyValue(KeyType::from(t))
+impl From<Vec<(Value, Value)>> for Value {
+    fn from(map: Vec<(Value, Value)>) -> Self {
+        Value::Map(map)
     }
 }
 
 impl From<bool> for Value {
     fn from(b: bool) -> Self {
         Value::bool_value(b)
-    }
-}
-
-pub trait IntoCborKey {
-    fn into_cbor_key(self) -> KeyType;
-}
-
-impl<T> IntoCborKey for T
-where
-    KeyType: From<T>,
-{
-    fn into_cbor_key(self) -> KeyType {
-        KeyType::from(self)
     }
 }
 
@@ -239,32 +230,69 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{cbor_key_bytes, cbor_key_int, cbor_key_text};
+    use super::*;
+    use crate::{cbor_array, cbor_bool, cbor_bytes, cbor_int, cbor_map, cbor_text};
 
     #[test]
-    fn test_key_type_ordering() {
-        assert!(cbor_key_int!(0) < cbor_key_int!(23));
-        assert!(cbor_key_int!(23) < cbor_key_int!(24));
-        assert!(cbor_key_int!(24) < cbor_key_int!(1000));
-        assert!(cbor_key_int!(1000) < cbor_key_int!(1000000));
-        assert!(cbor_key_int!(1000000) < cbor_key_int!(std::i64::MAX));
-        assert!(cbor_key_int!(std::i64::MAX) < cbor_key_int!(-1));
-        assert!(cbor_key_int!(-1) < cbor_key_int!(-23));
-        assert!(cbor_key_int!(-23) < cbor_key_int!(-24));
-        assert!(cbor_key_int!(-24) < cbor_key_int!(-1000));
-        assert!(cbor_key_int!(-1000) < cbor_key_int!(-1000000));
-        assert!(cbor_key_int!(-1000000) < cbor_key_int!(std::i64::MIN));
-        assert!(cbor_key_int!(std::i64::MIN) < cbor_key_bytes!(vec![]));
-        assert!(cbor_key_bytes!(vec![]) < cbor_key_bytes!(vec![0x00]));
-        assert!(cbor_key_bytes!(vec![0x00]) < cbor_key_bytes!(vec![0x01]));
-        assert!(cbor_key_bytes!(vec![0x01]) < cbor_key_bytes!(vec![0xFF]));
-        assert!(cbor_key_bytes!(vec![0xFF]) < cbor_key_bytes!(vec![0x00, 0x00]));
-        assert!(cbor_key_bytes!(vec![0x00, 0x00]) < cbor_key_text!(""));
-        assert!(cbor_key_text!("") < cbor_key_text!("a"));
-        assert!(cbor_key_text!("a") < cbor_key_text!("b"));
-        assert!(cbor_key_text!("b") < cbor_key_text!("aa"));
-        assert!(cbor_key_int!(1) < cbor_key_bytes!(vec![0x00]));
-        assert!(cbor_key_int!(1) < cbor_key_text!("s"));
-        assert!(cbor_key_int!(-1) < cbor_key_text!("s"));
+    fn test_value_ordering() {
+        assert!(cbor_int!(0) < cbor_int!(23));
+        assert!(cbor_int!(23) < cbor_int!(24));
+        assert!(cbor_int!(24) < cbor_int!(1000));
+        assert!(cbor_int!(1000) < cbor_int!(1000000));
+        assert!(cbor_int!(1000000) < cbor_int!(std::i64::MAX));
+        assert!(cbor_int!(std::i64::MAX) < cbor_int!(-1));
+        assert!(cbor_int!(-1) < cbor_int!(-23));
+        assert!(cbor_int!(-23) < cbor_int!(-24));
+        assert!(cbor_int!(-24) < cbor_int!(-1000));
+        assert!(cbor_int!(-1000) < cbor_int!(-1000000));
+        assert!(cbor_int!(-1000000) < cbor_int!(std::i64::MIN));
+        assert!(cbor_int!(std::i64::MIN) < cbor_bytes!(vec![]));
+        assert!(cbor_bytes!(vec![]) < cbor_bytes!(vec![0x00]));
+        assert!(cbor_bytes!(vec![0x00]) < cbor_bytes!(vec![0x01]));
+        assert!(cbor_bytes!(vec![0x01]) < cbor_bytes!(vec![0xFF]));
+        assert!(cbor_bytes!(vec![0xFF]) < cbor_bytes!(vec![0x00, 0x00]));
+        assert!(cbor_bytes!(vec![0x00, 0x00]) < cbor_text!(""));
+        assert!(cbor_text!("") < cbor_text!("a"));
+        assert!(cbor_text!("a") < cbor_text!("b"));
+        assert!(cbor_text!("b") < cbor_text!("aa"));
+        assert!(cbor_text!("aa") < cbor_array![]);
+        assert!(cbor_array![] < cbor_array![0]);
+        assert!(cbor_array![0] < cbor_array![-1]);
+        assert!(cbor_array![1] < cbor_array![b""]);
+        assert!(cbor_array![b""] < cbor_array![""]);
+        assert!(cbor_array![""] < cbor_array![cbor_array![]]);
+        assert!(cbor_array![cbor_array![]] < cbor_array![cbor_map! {}]);
+        assert!(cbor_array![cbor_map! {}] < cbor_array![false]);
+        assert!(cbor_array![false] < cbor_array![0, 0]);
+        assert!(cbor_array![0, 0] < cbor_map! {});
+        assert!(cbor_map! {} < cbor_map! {0 => 0});
+        assert!(cbor_map! {0 => 0} < cbor_map! {0 => 1});
+        assert!(cbor_map! {0 => 1} < cbor_map! {1 => 0});
+        assert!(cbor_map! {1 => 0} < cbor_map! {-1 => 0});
+        assert!(cbor_map! {-1 => 0} < cbor_map! {b"" => 0});
+        assert!(cbor_map! {b"" => 0} < cbor_map! {"" => 0});
+        assert!(cbor_map! {"" => 0} < cbor_map! {cbor_array![] => 0});
+        assert!(cbor_map! {cbor_array![] => 0} < cbor_map! {cbor_map!{} => 0});
+        assert!(cbor_map! {cbor_map!{} => 0} < cbor_map! {false => 0});
+        assert!(cbor_map! {false => 0} < cbor_map! {0 => 0, 0 => 0});
+        assert!(cbor_map! {0 => 0, 0 => 0} < cbor_bool!(false));
+        assert!(cbor_bool!(false) < cbor_bool!(true));
+        assert!(cbor_bool!(true) < Value::Simple(SimpleValue::NullValue));
+        assert!(Value::Simple(SimpleValue::NullValue) < Value::Simple(SimpleValue::Undefined));
+        assert!(cbor_int!(1) < cbor_bytes!(vec![0x00]));
+        assert!(cbor_int!(1) < cbor_text!("s"));
+        assert!(cbor_int!(1) < cbor_array![]);
+        assert!(cbor_int!(1) < cbor_map! {});
+        assert!(cbor_int!(1) < cbor_bool!(false));
+        assert!(cbor_int!(-1) < cbor_text!("s"));
+        assert!(cbor_int!(-1) < cbor_array![]);
+        assert!(cbor_int!(-1) < cbor_map! {});
+        assert!(cbor_int!(-1) < cbor_bool!(false));
+        assert!(cbor_bytes!(vec![0x00]) < cbor_array![]);
+        assert!(cbor_bytes!(vec![0x00]) < cbor_map! {});
+        assert!(cbor_bytes!(vec![0x00]) < cbor_bool!(false));
+        assert!(cbor_text!("s") < cbor_map! {});
+        assert!(cbor_text!("s") < cbor_bool!(false));
+        assert!(cbor_array![] < cbor_bool!(false));
     }
 }

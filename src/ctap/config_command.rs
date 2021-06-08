@@ -20,6 +20,7 @@ use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 use alloc::vec;
+use sk_cbor as cbor;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
 fn process_enable_enterprise_attestation(

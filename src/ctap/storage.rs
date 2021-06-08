@@ -32,11 +32,12 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use cbor::cbor_array_vec;
 use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
 use persistent_store::{fragment, StoreUpdate};
+use sk_cbor as cbor;
+use sk_cbor::cbor_array_vec;
 
 /// Wrapper for master keys.
 pub struct MasterKeys {

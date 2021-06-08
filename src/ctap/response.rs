@@ -19,7 +19,10 @@ use super::data_formats::{
 };
 use alloc::string::String;
 use alloc::vec::Vec;
-use cbor::{cbor_array_vec, cbor_bool, cbor_int, cbor_map_collection, cbor_map_options, cbor_text};
+use sk_cbor as cbor;
+use sk_cbor::{
+    cbor_array_vec, cbor_bool, cbor_int, cbor_map_collection, cbor_map_options, cbor_text,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum ResponseData {

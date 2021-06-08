@@ -68,7 +68,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
-use cbor::cbor_map_options;
 use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
@@ -80,6 +79,8 @@ use crypto::Hash256;
 use libtock_drivers::console::Console;
 use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
+use sk_cbor as cbor;
+use sk_cbor::cbor_map_options;
 
 pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
 // Our credential ID consists of

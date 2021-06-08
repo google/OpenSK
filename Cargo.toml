@@ -13,7 +13,7 @@ edition = "2018"
 libtock_core = { path = "third_party/libtock-rs/core" }
 libtock_drivers = { path = "third_party/libtock-drivers" }
 lang_items = { path = "third_party/lang-items" }
-cbor = { path = "libraries/cbor" }
+sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
 persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }

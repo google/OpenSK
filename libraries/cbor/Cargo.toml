@@ -1,5 +1,5 @@
 [package]
-name = "cbor"
+name = "sk-cbor"
 version = "0.1.0"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",

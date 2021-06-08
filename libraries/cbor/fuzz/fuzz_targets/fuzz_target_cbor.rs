@@ -3,6 +3,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use libfuzzer_sys::fuzz_target;
+use sk_cbor as cbor;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(value) = cbor::read(data) {

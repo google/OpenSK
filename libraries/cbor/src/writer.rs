@@ -101,6 +101,7 @@ mod test {
         cbor_array, cbor_array_vec, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null,
         cbor_text, cbor_true, cbor_undefined,
     };
+    use alloc::vec;
 
     fn write_return(value: Value) -> Option<Vec<u8>> {
         let mut encoded_cbor = Vec::new();
@@ -129,7 +130,7 @@ mod test {
                 vec![0x1B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
             ),
             (
-                std::i64::MAX,
+                core::i64::MAX,
                 vec![0x1B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
@@ -154,7 +155,7 @@ mod test {
                 vec![0x3B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
             ),
             (
-                std::i64::MIN,
+                core::i64::MIN,
                 vec![0x3B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
@@ -187,7 +188,7 @@ mod test {
             ("\"\\", vec![0x62, 0x22, 0x5C]),
             ("ü", vec![0x62, 0xC3, 0xBC]),
             (
-                std::str::from_utf8(&unicode_3byte).unwrap(),
+                core::str::from_utf8(&unicode_3byte).unwrap(),
                 vec![0x63, 0xE6, 0xB0, 0xB4],
             ),
             ("𐅑", vec![0x64, 0xF0, 0x90, 0x85, 0x91]),
@@ -217,13 +218,13 @@ mod test {
             0 => "a",
             23 => "b",
             24 => "c",
-            std::u8::MAX as i64 => "d",
+            core::u8::MAX as i64 => "d",
             256 => "e",
-            std::u16::MAX as i64 => "f",
+            core::u16::MAX as i64 => "f",
             65536 => "g",
-            std::u32::MAX as i64 => "h",
+            core::u32::MAX as i64 => "h",
             4294967296_i64 => "i",
-            std::i64::MAX => "j",
+            core::i64::MAX => "j",
             -1 => "k",
             -24 => "l",
             -25 => "m",
@@ -232,7 +233,7 @@ mod test {
             -65537 => "p",
             -4294967296_i64 => "q",
             -4294967297_i64 => "r",
-            std::i64::MIN => "s",
+            core::i64::MIN => "s",
             b"a" => 2,
             b"bar" => 3,
             b"foo" => 4,

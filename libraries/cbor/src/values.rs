@@ -232,6 +232,7 @@ where
 mod test {
     use super::*;
     use crate::{cbor_array, cbor_bool, cbor_bytes, cbor_int, cbor_map, cbor_text};
+    use alloc::vec;
 
     #[test]
     fn test_value_ordering() {
@@ -239,14 +240,14 @@ mod test {
         assert!(cbor_int!(23) < cbor_int!(24));
         assert!(cbor_int!(24) < cbor_int!(1000));
         assert!(cbor_int!(1000) < cbor_int!(1000000));
-        assert!(cbor_int!(1000000) < cbor_int!(std::i64::MAX));
-        assert!(cbor_int!(std::i64::MAX) < cbor_int!(-1));
+        assert!(cbor_int!(1000000) < cbor_int!(core::i64::MAX));
+        assert!(cbor_int!(core::i64::MAX) < cbor_int!(-1));
         assert!(cbor_int!(-1) < cbor_int!(-23));
         assert!(cbor_int!(-23) < cbor_int!(-24));
         assert!(cbor_int!(-24) < cbor_int!(-1000));
         assert!(cbor_int!(-1000) < cbor_int!(-1000000));
-        assert!(cbor_int!(-1000000) < cbor_int!(std::i64::MIN));
-        assert!(cbor_int!(std::i64::MIN) < cbor_bytes!(vec![]));
+        assert!(cbor_int!(-1000000) < cbor_int!(core::i64::MIN));
+        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(vec![]));
         assert!(cbor_bytes!(vec![]) < cbor_bytes!(vec![0x00]));
         assert!(cbor_bytes!(vec![0x00]) < cbor_bytes!(vec![0x01]));
         assert!(cbor_bytes!(vec![0x01]) < cbor_bytes!(vec![0xFF]));

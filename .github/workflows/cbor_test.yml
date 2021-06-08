@@ -29,10 +29,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/cbor/Cargo.toml --release --features std
+          args: --manifest-path libraries/cbor/Cargo.toml --release
 
       - name: Unit testing of CBOR library (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/cbor/Cargo.toml --features std
+          args: --manifest-path libraries/cbor/Cargo.toml

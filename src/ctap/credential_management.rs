@@ -30,6 +30,7 @@ use alloc::vec::Vec;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 use libtock_drivers::timer::ClockValue;
+use sk_cbor as cbor;
 
 /// Generates a set with all existing RP IDs.
 fn get_stored_rp_ids(

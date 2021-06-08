@@ -26,8 +26,9 @@ use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use cbor::destructure_cbor_map;
 use core::convert::TryFrom;
+use sk_cbor as cbor;
+use sk_cbor::destructure_cbor_map;
 
 // This constant is a consequence of the structure of messages.
 const MIN_LARGE_BLOB_LEN: usize = 17;

@@ -16,11 +16,12 @@ use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
+use sk_cbor as cbor;
+use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
 
 // Used as the identifier for ECDSA in assertion signatures and COSE.
 const ES256_ALGORITHM: i64 = -7;

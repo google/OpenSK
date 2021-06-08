@@ -36,7 +36,7 @@ use core::iter::Peekable;
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::destructure_cbor_map;
+/// # use sk_cbor::destructure_cbor_map;
 /// #
 /// # fn main() {
 /// #     let map = alloc::vec::Vec::new();
@@ -143,7 +143,7 @@ macro_rules! assert_sorted_keys {
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::cbor_map;
+/// # use sk_cbor::cbor_map;
 /// let map = cbor_map! {
 ///   0x01 => false,
 ///   "02" => -3,
@@ -182,7 +182,7 @@ macro_rules! cbor_map {
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::cbor_map_options;
+/// # use sk_cbor::cbor_map_options;
 /// let missing_value: Option<bool> = None;
 /// let map = cbor_map_options! {
 ///   0x01 => Some(false),
@@ -232,7 +232,7 @@ macro_rules! cbor_map_collection {
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::cbor_array;
+/// # use sk_cbor::cbor_array;
 /// let array = cbor_array![1, "2"];
 /// ```
 #[macro_export]
@@ -339,7 +339,7 @@ macro_rules! cbor_bytes {
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::cbor_bytes_lit;
+/// # use sk_cbor::cbor_bytes_lit;
 /// let byte_array = cbor_bytes_lit!(b"foo");
 /// ```
 #[macro_export]

@@ -11,7 +11,6 @@ edition = "2018"
 
 [dependencies]
 libtock_drivers = { path = "../../third_party/libtock-drivers" }
-cbor = { path = "../cbor" }
 arrayref = "0.3.6"
 subtle = { version = "2.2.3", default-features = false, features = ["nightly"] }
 byteorder = { version = "1", default-features = false }

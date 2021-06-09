@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Functionality for serializing CBOR values into bytes.
+
 use super::values::{Constants, Value};
 use alloc::vec::Vec;
 
+/// Convert a [`Value`] to serialized CBOR data, consuming it along the way and appending to the provided vector.
+/// Returns a `bool` indicating whether conversion succeeded.
 pub fn write(value: Value, encoded_cbor: &mut Vec<u8>) -> bool {
     let mut writer = Writer::new(encoded_cbor);
     writer.encode_cbor(value, Writer::MAX_NESTING_DEPTH)

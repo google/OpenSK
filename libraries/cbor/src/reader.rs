@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Functionality for deserializing CBOR data into values.
+
 use super::values::{Constants, SimpleValue, Value};
 use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_text, cbor_unsigned};
 use alloc::str;
 use alloc::vec::Vec;
 
+/// Possible errors from a deserialization operation.
 #[derive(Debug, PartialEq)]
 pub enum DecoderError {
     UnsupportedMajorType,
@@ -32,6 +35,8 @@ pub enum DecoderError {
     OutOfRangeIntegerValue,
 }
 
+/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there
+/// is no additional data.
 pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
     let mut reader = Reader::new(encoded_cbor);
     let value = reader.decode_complete_data_item(Reader::MAX_NESTING_DEPTH)?;

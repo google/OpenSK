@@ -243,6 +243,8 @@ class RemoveConstAction(argparse.Action):
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L138-L147
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L1028-L1052
     items = getattr(namespace, self.dest, [])
+    if items is None:
+      items = []
     if isinstance(items, list):
       items = items[:]
     else:
@@ -914,6 +916,8 @@ if __name__ == "__main__":
       help=("When set, the output of elf2tab is appended to this file."),
   )
 
+  main_parser.set_defaults(features=["with_ctap1"])
+
   # Start parsing to know if we're going to list things or not.
   partial_args, _ = main_parser.parse_known_args()
 
@@ -983,7 +987,5 @@ if __name__ == "__main__":
       const="nfct_test",
       help=("Compiles and installs the nfct_test example that tests the "
             "NFC driver."))
-
-  main_parser.set_defaults(features=["with_ctap1"])
 
   main(main_parser.parse_args())

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Convenience macros for working with CBOR values.
+
 use crate::values::Value;
 use alloc::vec;
 use core::cmp::Ordering;
@@ -110,6 +112,7 @@ pub fn destructure_cbor_map_peek_value(
     }
 }
 
+/// Assert that the keys in a vector of key-value pairs are in canonical order.
 #[macro_export]
 macro_rules! assert_sorted_keys {
     // Last key

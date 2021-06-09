@@ -12,24 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Types for expressing CBOR values.
+
 use super::writer::write;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+/// Possible CBOR values.
 #[derive(Clone, Debug)]
 pub enum Value {
+    /// Unsigned integer value (uint).
     Unsigned(u64),
-    // We only use 63 bits of information here.
+    /// Signed integer value (nint). Only 63 bits of information are used here.
     Negative(i64),
+    /// Byte string (bstr).
     ByteString(Vec<u8>),
+    /// Text string (tstr).
     TextString(String),
+    /// Array/tuple of values.
     Array(Vec<Value>),
+    /// Map of key-value pairs.
     Map(Vec<(Value, Value)>),
     // TAG is omitted
+    /// Simple value.
     Simple(SimpleValue),
 }
 
+/// Specific simple CBOR values.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleValue {
     FalseValue = 20,
@@ -38,20 +48,30 @@ pub enum SimpleValue {
     Undefined = 23,
 }
 
+/// Constant values required for CBOR encoding.
 pub struct Constants {}
 
 impl Constants {
+    /// Number of bits used to shift left the major type of a CBOR type byte.
     pub const MAJOR_TYPE_BIT_SHIFT: u8 = 5;
+    /// Mask to retrieve the additional information held in a CBOR type bytes,
+    /// ignoring the major type.
     pub const ADDITIONAL_INFORMATION_MASK: u8 = 0x1F;
+    /// Additional information value that indicates the largest inline value.
     pub const ADDITIONAL_INFORMATION_MAX_INT: u8 = 23;
+    /// Additional information value indicating that a 1-byte length follows.
     pub const ADDITIONAL_INFORMATION_1_BYTE: u8 = 24;
+    /// Additional information value indicating that a 2-byte length follows.
     pub const ADDITIONAL_INFORMATION_2_BYTES: u8 = 25;
+    /// Additional information value indicating that a 4-byte length follows.
     pub const ADDITIONAL_INFORMATION_4_BYTES: u8 = 26;
+    /// Additional information value indicating that an 8-byte length follows.
     pub const ADDITIONAL_INFORMATION_8_BYTES: u8 = 27;
 }
 
 impl Value {
-    // For simplicity, this only takes i64. Construct directly for the last bit.
+    /// Create an appropriate CBOR integer value (uint/nint).
+    /// For simplicity, this only takes i64. Construct directly for the last bit.
     pub fn integer(int: i64) -> Value {
         if int >= 0 {
             Value::Unsigned(int as u64)
@@ -60,6 +80,7 @@ impl Value {
         }
     }
 
+    /// Create a CBOR boolean simple value.
     pub fn bool_value(b: bool) -> Value {
         if b {
             Value::Simple(SimpleValue::TrueValue)
@@ -68,6 +89,7 @@ impl Value {
         }
     }
 
+    /// Return the major type for the [`Value`].
     pub fn type_label(&self) -> u8 {
         // TODO use enum discriminant instead when stable
         // https://github.com/rust-lang/rust/issues/60553
@@ -128,6 +150,7 @@ impl PartialEq for Value {
 }
 
 impl SimpleValue {
+    /// Create a simple value from its encoded value.
     pub fn from_integer(int: u64) -> Option<SimpleValue> {
         match int {
             20 => Some(SimpleValue::FalseValue),
@@ -193,7 +216,9 @@ impl From<bool> for Value {
     }
 }
 
+/// Trait that indicates that a type can be converted to a CBOR [`Value`].
 pub trait IntoCborValue {
+    /// Convert `self` into a CBOR [`Value`], consuming it along the way.
     fn into_cbor_value(self) -> Value;
 }
 
@@ -206,7 +231,9 @@ where
     }
 }
 
+/// Trait that indicates that a type can be converted to a CBOR [`Option<Value>`].
 pub trait IntoCborValueOption {
+    /// Convert `self` into a CBOR [`Option<Value>`], consuming it along the way.
     fn into_cbor_value_option(self) -> Option<Value>;
 }
 

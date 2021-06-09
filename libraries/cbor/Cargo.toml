@@ -5,8 +5,14 @@ authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
   "Jean-Michel Picod <jmichel@google.com>",
+  "David Drysdale <drysdale@google.com>",
 ]
 license = "Apache-2.0"
 edition = "2018"
+description = "CBOR parsing library"
+homepage = "https://github.com/google/OpenSK"
+repository = "https://github.com/google/OpenSK"
+keywords = ["cbor", "serialization", "no_std"]
+categories = ["encoding"]
 
 [dependencies]

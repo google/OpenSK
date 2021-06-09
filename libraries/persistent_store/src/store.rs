@@ -30,7 +30,6 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 use core::cmp::{max, min, Ordering};
 use core::convert::TryFrom;
-use core::option::NoneError;
 #[cfg(feature = "std")]
 use std::collections::HashSet;
 
@@ -78,16 +77,15 @@ impl From<StorageError> for StoreError {
     }
 }
 
-impl From<NoneError> for StoreError {
-    fn from(error: NoneError) -> StoreError {
-        match error {
-            NoneError => StoreError::InvalidStorage,
-        }
-    }
-}
-
 /// Result of store operations.
 pub type StoreResult<T> = Result<T, StoreError>;
+
+/// Converts an Option into a StoreResult.
+///
+/// The None case is considered invalid and returns [`StoreError::InvalidStorage`].
+fn or_invalid<T>(x: Option<T>) -> StoreResult<T> {
+    x.ok_or(StoreError::InvalidStorage)
+}
 
 /// Progression ratio for store metrics.
 ///
@@ -242,8 +240,8 @@ impl<S: Storage> Store<S> {
 
     /// Iterates over the entries.
     pub fn iter<'a>(&'a self) -> StoreResult<StoreIter<'a>> {
-        let head = self.head?;
-        Ok(Box::new(self.entries.as_ref()?.iter().map(
+        let head = or_invalid(self.head)?;
+        Ok(Box::new(or_invalid(self.entries.as_ref())?.iter().map(
             move |&offset| {
                 let pos = head + offset as Nat;
                 match self.parse_entry(&mut pos.clone())? {
@@ -532,7 +530,7 @@ impl<S: Storage> Store<S> {
     /// Recover a possible interrupted operation which is not a compaction.
     fn recover_operation(&mut self) -> StoreResult<()> {
         self.entries = Some(Vec::new());
-        let mut pos = self.head?;
+        let mut pos = or_invalid(self.head)?;
         let mut prev_pos = pos;
         let end = pos + self.format.virt_size();
         while pos < end {
@@ -672,7 +670,7 @@ impl<S: Storage> Store<S> {
     ///
     /// In particular, the handle has not been compacted.
     fn check_handle(&self, handle: &StoreHandle) -> StoreResult<()> {
-        if handle.pos < self.head? {
+        if handle.pos < or_invalid(self.head)? {
             Err(StoreError::InvalidArgument)
         } else {
             Ok(())
@@ -702,7 +700,7 @@ impl<S: Storage> Store<S> {
 
     /// Compacts one page.
     fn compact(&mut self) -> StoreResult<()> {
-        let head = self.head?;
+        let head = or_invalid(self.head)?;
         if head.cycle(&self.format) >= self.format.max_page_erases() {
             return Err(StoreError::NoLifetime);
         }
@@ -717,7 +715,7 @@ impl<S: Storage> Store<S> {
 
     /// Continues a compaction after its compact page info has been written.
     fn compact_copy(&mut self) -> StoreResult<()> {
-        let mut head = self.head?;
+        let mut head = or_invalid(self.head)?;
         let page = head.page(&self.format);
         let end = head.next_page(&self.format);
         let mut tail = match self.parse_compact(page)? {
@@ -773,9 +771,9 @@ impl<S: Storage> Store<S> {
         };
         let head = self.format.page_head(init, page);
         if let Some(entries) = &mut self.entries {
-            let head_offset = u16::try_from(head - self.head?).ok()?;
+            let head_offset = or_invalid(u16::try_from(head - or_invalid(self.head)?).ok())?;
             for entry in entries {
-                *entry = entry.checked_sub(head_offset)?;
+                *entry = or_invalid(entry.checked_sub(head_offset))?;
             }
         }
         self.head = Some(head);
@@ -791,7 +789,7 @@ impl<S: Storage> Store<S> {
     fn transaction_apply(&mut self, sorted_keys: &[Nat], marker: Position) -> StoreResult<()> {
         self.delete_keys(&sorted_keys, marker)?;
         self.set_padding(marker)?;
-        let end = self.head? + self.format.virt_size();
+        let end = or_invalid(self.head)? + self.format.virt_size();
         let mut pos = marker + 1;
         while pos < end {
             let entry_pos = pos;
@@ -826,8 +824,8 @@ impl<S: Storage> Store<S> {
 
     /// Deletes entries matching a predicate up to a certain position.
     fn delete_if(&mut self, end: Position, delete: impl Fn(Nat) -> bool) -> StoreResult<()> {
-        let head = self.head?;
-        let mut entries = self.entries.take()?;
+        let head = or_invalid(self.head)?;
+        let mut entries = or_invalid(self.entries.take())?;
         let mut i = 0;
         while i < entries.len() {
             let pos = head + entries[i] as Nat;
@@ -924,20 +922,20 @@ impl<S: Storage> Store<S> {
             }
         }
         // There is always at least one initialized page.
-        Ok(best?)
+        or_invalid(best)
     }
 
     /// Returns the number of words that can be written without compaction.
     fn immediate_capacity(&self) -> StoreResult<Nat> {
         let tail = self.tail()?;
-        let end = self.head? + self.format.virt_size();
+        let end = or_invalid(self.head)? + self.format.virt_size();
         Ok(end.get().saturating_sub(tail.get()))
     }
 
     /// Returns the position of the first word in the store.
     #[cfg(feature = "std")]
     pub(crate) fn head(&self) -> StoreResult<Position> {
-        Ok(self.head?)
+        or_invalid(self.head)
     }
 
     /// Returns one past the position of the last word in the store.
@@ -957,8 +955,8 @@ impl<S: Storage> Store<S> {
             None => return Ok(()),
             Some(x) => x,
         };
-        let head = self.head?;
-        let offset = u16::try_from(pos - head).ok()?;
+        let head = or_invalid(self.head)?;
+        let offset = or_invalid(u16::try_from(pos - head).ok())?;
         debug_assert!(!entries.contains(&offset));
         entries.push(offset);
         Ok(())
@@ -969,9 +967,9 @@ impl<S: Storage> Store<S> {
             None => return Ok(()),
             Some(x) => x,
         };
-        let head = self.head?;
-        let offset = u16::try_from(pos - head).ok()?;
-        let i = entries.iter().position(|x| *x == offset)?;
+        let head = or_invalid(self.head)?;
+        let offset = or_invalid(u16::try_from(pos - head).ok())?;
+        let i = or_invalid(entries.iter().position(|x| *x == offset))?;
         entries.swap_remove(i);
         Ok(())
     }

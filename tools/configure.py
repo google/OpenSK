@@ -107,7 +107,7 @@ def main(args):
 
     cert = x509.load_pem_x509_certificate(args.certificate.read())
     # Some sanity/validity checks
-    now = datetime.datetime.now()
+    now = datetime.datetime.utcnow()
     if cert.not_valid_before > now:
       fatal("Certificate validity starts in the future.")
     if cert.not_valid_after <= now:

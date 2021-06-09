@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 fn main() {
     println!("cargo:rerun-if-changed=crypto_data/aaguid.txt");
+    println!("cargo:rerun-if-changed=layout.ld");
+    println!("cargo:rerun-if-changed=nrf52840_layout.ld");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let aaguid_bin_path = Path::new(&out_dir).join("opensk_aaguid.bin");

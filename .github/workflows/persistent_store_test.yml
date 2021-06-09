@@ -12,33 +12,20 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: true
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
 
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-
-      - name: Build Persistent store library
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --manifest-path libraries/persistent_store/Cargo.toml --release --target=thumbv7em-none-eabi
+          override: true
 
       - name: Unit testing of Persistent store library (release mode)
         uses: actions-rs/cargo@v1
         with:
-          toolchain: nightly
           command: test
           args: --manifest-path libraries/persistent_store/Cargo.toml --release --features=std
 
       - name: Unit testing of Persistent store library (debug mode)
         uses: actions-rs/cargo@v1
         with:
-          toolchain: nightly
           command: test
           args: --manifest-path libraries/persistent_store/Cargo.toml --features=std

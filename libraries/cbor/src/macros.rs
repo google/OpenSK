@@ -336,6 +336,14 @@ macro_rules! cbor_bytes {
     };
 }
 
+/// Creates a CBOR Value of type Tag with the given tag and object.
+#[macro_export]
+macro_rules! cbor_tagged {
+    ( $t:expr, $x: expr ) => {
+        $crate::values::Value::Tag($t, ::alloc::boxed::Box::new($x))
+    };
+}
+
 /// Creates a CBOR Value of type Byte String with the given byte string literal.
 ///
 /// Example usage:

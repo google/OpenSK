@@ -15,6 +15,7 @@
 //! Types for expressing CBOR values.
 
 use super::writer::write;
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -34,7 +35,8 @@ pub enum Value {
     Array(Vec<Value>),
     /// Map of key-value pairs.
     Map(Vec<(Value, Value)>),
-    // TAG is omitted
+    /// Tagged value.
+    Tag(u64, Box<Value>),
     /// Simple value.
     Simple(SimpleValue),
 }
@@ -100,6 +102,7 @@ impl Value {
             Value::TextString(_) => 3,
             Value::Array(_) => 4,
             Value::Map(_) => 5,
+            Value::Tag(_, _) => 6,
             Value::Simple(_) => 7,
         }
     }
@@ -108,7 +111,7 @@ impl Value {
 impl Ord for Value {
     fn cmp(&self, other: &Value) -> Ordering {
         use super::values::Value::{
-            Array, ByteString, Map, Negative, Simple, TextString, Unsigned,
+            Array, ByteString, Map, Negative, Simple, Tag, TextString, Unsigned,
         };
         let self_type_value = self.type_label();
         let other_type_value = other.type_label();
@@ -122,6 +125,7 @@ impl Ord for Value {
             (TextString(t1), TextString(t2)) => t1.len().cmp(&t2.len()).then(t1.cmp(t2)),
             (Array(a1), Array(a2)) if a1.len() != a2.len() => a1.len().cmp(&a2.len()),
             (Map(m1), Map(m2)) if m1.len() != m2.len() => m1.len().cmp(&m2.len()),
+            (Tag(t1, v1), Tag(t2, v2)) => t1.cmp(t2).then(v1.cmp(v2)),
             (Simple(s1), Simple(s2)) => s1.cmp(s2),
             (v1, v2) => {
                 // This case could handle all of the above as well. Checking individually is faster.
@@ -258,7 +262,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{cbor_array, cbor_bool, cbor_bytes, cbor_int, cbor_map, cbor_text};
+    use crate::{cbor_array, cbor_bool, cbor_bytes, cbor_int, cbor_map, cbor_tagged, cbor_text};
     use alloc::vec;
 
     #[test]
@@ -315,12 +319,17 @@ mod test {
         assert!(cbor_int!(-1) < cbor_text!("s"));
         assert!(cbor_int!(-1) < cbor_array![]);
         assert!(cbor_int!(-1) < cbor_map! {});
+        assert!(cbor_int!(-1) < cbor_tagged!(1, cbor_text!("s")));
         assert!(cbor_int!(-1) < cbor_bool!(false));
         assert!(cbor_bytes!(vec![0x00]) < cbor_array![]);
         assert!(cbor_bytes!(vec![0x00]) < cbor_map! {});
         assert!(cbor_bytes!(vec![0x00]) < cbor_bool!(false));
+        assert!(cbor_bytes!(vec![0x00]) < cbor_tagged!(1, cbor_text!("s")));
         assert!(cbor_text!("s") < cbor_map! {});
         assert!(cbor_text!("s") < cbor_bool!(false));
+        assert!(cbor_text!("s") < cbor_tagged!(1, cbor_text!("s")));
         assert!(cbor_array![] < cbor_bool!(false));
+        assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_tagged!(2, cbor_int!(0)));
+        assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_bool!(false));
     }
 }

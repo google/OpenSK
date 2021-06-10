@@ -76,6 +76,12 @@ impl<'a> Writer<'a> {
                     }
                 }
             }
+            Value::Tag(tag, inner_value) => {
+                self.start_item(type_label, tag);
+                if !self.encode_cbor(*inner_value, remaining_depth - 1) {
+                    return false;
+                }
+            }
             Value::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
         }
         true
@@ -103,7 +109,7 @@ mod test {
     use super::*;
     use crate::{
         cbor_array, cbor_array_vec, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null,
-        cbor_text, cbor_true, cbor_undefined,
+        cbor_tagged, cbor_text, cbor_true, cbor_undefined,
     };
     use alloc::vec;
 
@@ -394,6 +400,33 @@ mod test {
             0x03,
         ];
         assert_eq!(write_return(value_map), Some(expected_cbor));
+    }
+
+    #[test]
+    fn test_write_tagged() {
+        let cases = vec![
+            (cbor_tagged!(6, cbor_int!(0x42)), vec![0xc6, 0x18, 0x42]),
+            (cbor_tagged!(1, cbor_true!()), vec![0xc1, 0xf5]),
+            (
+                cbor_tagged!(
+                    1000,
+                    cbor_map! {
+                        "a" => 1,
+                        "b" => cbor_array![2, 3],
+                    }
+                ),
+                vec![
+                    0xd9, 0x03, 0xe8, 0xa2, // map of 2 pairs
+                    0x61, 0x61, // "a"
+                    0x01, 0x61, 0x62, // "b"
+                    0x82, // array with 2 elements
+                    0x02, 0x03,
+                ],
+            ),
+        ];
+        for (value, correct_cbor) in cases {
+            assert_eq!(write_return(value), Some(correct_cbor));
+        }
     }
 
     #[test]

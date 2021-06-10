@@ -15,7 +15,9 @@
 //! Functionality for deserializing CBOR data into values.
 
 use super::values::{Constants, SimpleValue, Value};
-use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_text, cbor_unsigned};
+use crate::{
+    cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_tagged, cbor_text, cbor_unsigned,
+};
 use alloc::str;
 use alloc::vec::Vec;
 
@@ -80,6 +82,7 @@ impl<'a> Reader<'a> {
                     3 => self.read_text_string_content(size_value),
                     4 => self.read_array_content(size_value, remaining_depth),
                     5 => self.read_map_content(size_value, remaining_depth),
+                    6 => self.read_tagged_content(size_value, remaining_depth),
                     7 => self.decode_to_simple_value(size_value, additional_info),
                     _ => Err(DecoderError::UnsupportedMajorType),
                 }
@@ -185,6 +188,15 @@ impl<'a> Reader<'a> {
             value_map.push((key, self.decode_complete_data_item(remaining_depth - 1)?));
         }
         Ok(cbor_map_collection!(value_map))
+    }
+
+    fn read_tagged_content(
+        &mut self,
+        tag_value: u64,
+        remaining_depth: i8,
+    ) -> Result<Value, DecoderError> {
+        let inner_value = self.decode_complete_data_item(remaining_depth - 1)?;
+        Ok(cbor_tagged!(tag_value, inner_value))
     }
 
     fn decode_to_simple_value(
@@ -547,6 +559,35 @@ mod test {
     }
 
     #[test]
+    fn test_read_tagged() {
+        let cases = vec![
+            (cbor_tagged!(6, cbor_int!(0x42)), vec![0xc6, 0x18, 0x42]),
+            (cbor_tagged!(1, cbor_true!()), vec![0xc1, 0xf5]),
+            (
+                cbor_tagged!(
+                    1000,
+                    cbor_map! {
+                        "a" => 1,
+                        "b" => cbor_array![2, 3],
+                    }
+                ),
+                vec![
+                    0xd9, 0x03, 0xe8, 0xa2, // map of 2 pairs
+                    0x61, 0x61, // "a"
+                    0x01, 0x61, 0x62, // "b"
+                    0x82, // array with 2 elements
+                    0x02, 0x03,
+                ],
+            ),
+        ];
+        for (value, mut cbor) in cases {
+            assert_eq!(read(&cbor), Ok(value));
+            cbor.push(0x01);
+            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+        }
+    }
+
+    #[test]
     fn test_read_integer_out_of_range() {
         let cases = vec![
             // The positive case is impossible since we support u64.
@@ -777,22 +818,6 @@ mod test {
         ];
         for cbor in cases {
             assert_eq!(read(&cbor), Err(DecoderError::IncompleteCborData));
-        }
-    }
-
-    #[test]
-    fn test_read_unsupported_major_type() {
-        let cases = vec![
-            vec![0xC0],
-            vec![0xD8, 0xFF],
-            // multi-dimensional array example using tags
-            vec![
-                0x82, 0x82, 0x02, 0x03, 0xd8, 0x41, 0x4a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00,
-                0x03, 0x00, 0x04, 0x00, 0x05,
-            ],
-        ];
-        for cbor in cases {
-            assert_eq!(read(&cbor), Err(DecoderError::UnsupportedMajorType));
         }
     }
 }

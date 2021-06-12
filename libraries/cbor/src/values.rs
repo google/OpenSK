@@ -130,9 +130,9 @@ impl Ord for Value {
             (v1, v2) => {
                 // This case could handle all of the above as well. Checking individually is faster.
                 let mut encoding1 = Vec::new();
-                write(v1.clone(), &mut encoding1);
+                let _ = write(v1.clone(), &mut encoding1);
                 let mut encoding2 = Vec::new();
-                write(v2.clone(), &mut encoding2);
+                let _ = write(v2.clone(), &mut encoding2);
                 encoding1.cmp(&encoding2)
             }
         }

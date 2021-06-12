@@ -98,6 +98,9 @@ const AT_FLAG: u8 = 0x40;
 // Set this bit when an extension is used.
 const ED_FLAG: u8 = 0x80;
 
+// CTAP2 specification section 6 requires that the depth of nested CBOR structures be limited to at most four levels.
+const MAX_CBOR_NESTING_DEPTH: i8 = 4;
+
 pub const TOUCH_TIMEOUT_MS: isize = 30000;
 #[cfg(feature = "with_ctap1")]
 const U2F_UP_PROMPT_TIMEOUT: Duration<isize> = Duration::from_ms(10000);
@@ -117,6 +120,17 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::ES256,
 };
+
+// Helpers to perform CBOR read/write while respecting CTAP2 nesting limits.
+fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, cbor::reader::DecoderError> {
+    cbor::reader::read_nested(encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
+}
+fn cbor_write(
+    value: cbor::Value,
+    mut encoded_cbor: &mut Vec<u8>,
+) -> Result<(), cbor::writer::EncoderError> {
+    cbor::writer::write_nested(value, &mut encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
+}
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
 // (as of 2020-01-20) and truncates to "max" bytes, not breaking the encoding.
@@ -474,7 +488,7 @@ where
                     Ok(response_data) => {
                         let mut response_vec = vec![0x00];
                         if let Some(value) = response_data.into() {
-                            if !cbor::write(value, &mut response_vec) {
+                            if cbor_write(value, &mut response_vec).is_err() {
                                 response_vec =
                                     vec![Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8];
                             }
@@ -690,7 +704,7 @@ where
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        if !cbor::write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data) {
+        if cbor_write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data).is_err() {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         if has_extension_output {
@@ -711,7 +725,7 @@ where
                 "hmac-secret" => hmac_secret_output,
                 "minPinLength" => min_pin_length_output,
             };
-            if !cbor::write(extensions_output, &mut auth_data) {
+            if cbor_write(extensions_output, &mut auth_data).is_err() {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
@@ -808,7 +822,7 @@ where
                 "credBlob" => cred_blob,
                 "hmac-secret" => encrypted_output,
             };
-            if !cbor::write(extensions_output, &mut auth_data) {
+            if cbor_write(extensions_output, &mut auth_data).is_err() {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
@@ -1324,7 +1338,7 @@ mod test {
         };
 
         let mut response_cbor = vec![0x00];
-        assert!(cbor::write(expected_cbor, &mut response_cbor));
+        assert!(cbor_write(expected_cbor, &mut response_cbor).is_ok());
         assert_eq!(info_reponse, response_cbor);
     }
 
@@ -2646,7 +2660,7 @@ mod test {
             },
             4 => cbor_array![ES256_CRED_PARAM],
         };
-        assert!(cbor::write(cbor_value, &mut command_cbor));
+        assert!(cbor_write(cbor_value, &mut command_cbor).is_ok());
         ctap_state.process_command(&command_cbor, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
         let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);

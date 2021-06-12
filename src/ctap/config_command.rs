@@ -20,7 +20,6 @@ use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 use alloc::vec;
-use sk_cbor as cbor;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
 fn process_enable_enterprise_attestation(
@@ -100,7 +99,7 @@ pub fn process_config(
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
         if let Some(sub_command_params) = sub_command_params.clone() {
-            if !cbor::write(sub_command_params.into(), &mut config_data) {
+            if super::cbor_write(sub_command_params.into(), &mut config_data).is_err() {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }

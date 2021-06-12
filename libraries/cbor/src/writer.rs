@@ -17,11 +17,29 @@
 use super::values::{Constants, Value};
 use alloc::vec::Vec;
 
+/// Possible errors from a serialization operation.
+#[derive(Debug, PartialEq)]
+pub enum EncoderError {
+    TooMuchNesting,
+    DuplicateMapKey,
+}
+
 /// Convert a [`Value`] to serialized CBOR data, consuming it along the way and appending to the provided vector.
-/// Returns a `bool` indicating whether conversion succeeded.
-pub fn write(value: Value, encoded_cbor: &mut Vec<u8>) -> bool {
+/// Supports arbitrarily nested CBOR (so the [`EncoderError::TooMuchNesting`] error is never emitted).
+pub fn write(value: Value, encoded_cbor: &mut Vec<u8>) -> Result<(), EncoderError> {
+    write_nested(value, encoded_cbor, None)
+}
+
+/// Convert a [`Value`] to serialized CBOR data, consuming it along the way and appending to the provided vector.  If
+/// `max_nest` is `Some(max)`, then nested structures are only supported up to the given limit (returning
+/// [`DecoderError::TooMuchNesting`] if the limit is hit).
+pub fn write_nested(
+    value: Value,
+    encoded_cbor: &mut Vec<u8>,
+    max_nest: Option<i8>,
+) -> Result<(), EncoderError> {
     let mut writer = Writer::new(encoded_cbor);
-    writer.encode_cbor(value, Writer::MAX_NESTING_DEPTH)
+    writer.encode_cbor(value, max_nest)
 }
 
 struct Writer<'a> {
@@ -29,15 +47,17 @@ struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    const MAX_NESTING_DEPTH: i8 = 4;
-
     pub fn new(encoded_cbor: &mut Vec<u8>) -> Writer {
         Writer { encoded_cbor }
     }
 
-    fn encode_cbor(&mut self, value: Value, remaining_depth: i8) -> bool {
-        if remaining_depth < 0 {
-            return false;
+    fn encode_cbor(
+        &mut self,
+        value: Value,
+        remaining_depth: Option<i8>,
+    ) -> Result<(), EncoderError> {
+        if remaining_depth.map_or(false, |d| d < 0) {
+            return Err(EncoderError::TooMuchNesting);
         }
         let type_label = value.type_label();
         match value {
@@ -54,9 +74,7 @@ impl<'a> Writer<'a> {
             Value::Array(array) => {
                 self.start_item(type_label, array.len() as u64);
                 for el in array {
-                    if !self.encode_cbor(el, remaining_depth - 1) {
-                        return false;
-                    }
+                    self.encode_cbor(el, remaining_depth.map(|d| d - 1))?;
                 }
             }
             Value::Map(mut map) => {
@@ -64,27 +82,21 @@ impl<'a> Writer<'a> {
                 let map_len = map.len();
                 map.dedup_by(|a, b| a.0.eq(&b.0));
                 if map_len != map.len() {
-                    return false;
+                    return Err(EncoderError::DuplicateMapKey);
                 }
                 self.start_item(type_label, map_len as u64);
                 for (k, v) in map {
-                    if !self.encode_cbor(k, remaining_depth - 1) {
-                        return false;
-                    }
-                    if !self.encode_cbor(v, remaining_depth - 1) {
-                        return false;
-                    }
+                    self.encode_cbor(k, remaining_depth.map(|d| d - 1))?;
+                    self.encode_cbor(v, remaining_depth.map(|d| d - 1))?;
                 }
             }
             Value::Tag(tag, inner_value) => {
                 self.start_item(type_label, tag);
-                if !self.encode_cbor(*inner_value, remaining_depth - 1) {
-                    return false;
-                }
+                self.encode_cbor(*inner_value, remaining_depth.map(|d| d - 1))?;
             }
             Value::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
         }
-        true
+        Ok(())
     }
 
     fn start_item(&mut self, type_label: u8, size: u64) {
@@ -115,7 +127,7 @@ mod test {
 
     fn write_return(value: Value) -> Option<Vec<u8>> {
         let mut encoded_cbor = Vec::new();
-        if write(value, &mut encoded_cbor) {
+        if write(value, &mut encoded_cbor).is_ok() {
             Some(encoded_cbor)
         } else {
             None
@@ -459,12 +471,12 @@ mod test {
         for (value, level) in positive_cases {
             let mut buf = Vec::new();
             let mut writer = Writer::new(&mut buf);
-            assert!(writer.encode_cbor(value, level));
+            assert!(writer.encode_cbor(value, Some(level)).is_ok());
         }
         for (value, level) in negative_cases {
             let mut buf = Vec::new();
             let mut writer = Writer::new(&mut buf);
-            assert!(!writer.encode_cbor(value, level));
+            assert!(!writer.encode_cbor(value, Some(level)).is_ok());
         }
     }
 
@@ -480,9 +492,10 @@ mod test {
 
         let mut buf = Vec::new();
         let mut writer = Writer::new(&mut buf);
-        assert!(writer.encode_cbor(cbor_map.clone(), 2));
+        assert!(writer.encode_cbor(cbor_map.clone(), Some(2)).is_ok());
+        assert!(writer.encode_cbor(cbor_map.clone(), None).is_ok());
         writer = Writer::new(&mut buf);
-        assert!(!writer.encode_cbor(cbor_map, 1));
+        assert!(writer.encode_cbor(cbor_map, Some(1)).is_err());
     }
 
     #[test]
@@ -502,9 +515,9 @@ mod test {
 
         let mut buf = Vec::new();
         let mut writer = Writer::new(&mut buf);
-        assert!(writer.encode_cbor(cbor_array.clone(), 3));
+        assert!(writer.encode_cbor(cbor_array.clone(), Some(3)).is_ok());
         writer = Writer::new(&mut buf);
-        assert!(!writer.encode_cbor(cbor_array, 2));
+        assert!(writer.encode_cbor(cbor_array, Some(2)).is_err());
     }
 
     #[test]
@@ -530,8 +543,9 @@ mod test {
 
         let mut buf = Vec::new();
         let mut writer = Writer::new(&mut buf);
-        assert!(writer.encode_cbor(cbor_map.clone(), 5));
+        assert!(writer.encode_cbor(cbor_map.clone(), Some(5)).is_ok());
+        assert!(writer.encode_cbor(cbor_map.clone(), None).is_ok());
         writer = Writer::new(&mut buf);
-        assert!(!writer.encode_cbor(cbor_map, 4));
+        assert!(writer.encode_cbor(cbor_map, Some(4)).is_err());
     }
 }

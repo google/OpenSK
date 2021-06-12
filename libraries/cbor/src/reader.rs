@@ -29,7 +29,7 @@ pub enum DecoderError {
     IncompleteCborData,
     TooMuchNesting,
     InvalidUtf8,
-    ExtranousData,
+    ExtraneousData,
     OutOfOrderKey,
     NonMinimalCborEncoding,
     UnsupportedSimpleValue,
@@ -43,7 +43,7 @@ pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
     let mut reader = Reader::new(encoded_cbor);
     let value = reader.decode_complete_data_item(Reader::MAX_NESTING_DEPTH)?;
     if !reader.remaining_cbor.is_empty() {
-        return Err(DecoderError::ExtranousData);
+        return Err(DecoderError::ExtraneousData);
     }
     Ok(value)
 }
@@ -252,7 +252,7 @@ mod test {
         for (unsigned, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_int!(unsigned)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -314,7 +314,7 @@ mod test {
         for (negative, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_int!(negative)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -330,7 +330,7 @@ mod test {
         for (byte_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_bytes!(byte_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -352,7 +352,7 @@ mod test {
         for (text_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_text!(text_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -390,7 +390,7 @@ mod test {
         for (text_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_text!(text_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -412,7 +412,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor.clone()), Ok(cbor_array_vec!(value_vec)));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -460,7 +460,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -481,7 +481,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -516,7 +516,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -533,7 +533,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -555,7 +555,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -583,7 +583,7 @@ mod test {
         for (value, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(value));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -610,7 +610,7 @@ mod test {
         for (simple, mut cbor) in cases {
             assert_eq!(read(&cbor.clone()), Ok(simple));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -779,7 +779,7 @@ mod test {
     }
 
     #[test]
-    fn test_read_extranous_cbor_data_error() {
+    fn test_read_extraneous_cbor_data_error() {
         let cases = vec![
             vec![0x19, 0x03, 0x05, 0x00],
             vec![0x44, 0x01, 0x02, 0x03, 0x04, 0x00],
@@ -788,7 +788,7 @@ mod test {
             vec![0xa1, 0x61, 0x63, 0x02, 0x61, 0x64, 0x03],
         ];
         for cbor in cases {
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 

@@ -67,19 +67,16 @@ impl<'a> Reader<'a> {
                 // Unsigned byte means logical shift, so only zeros get shifted in.
                 let major_type_value = first_byte >> Constants::MAJOR_TYPE_BIT_SHIFT;
                 let additional_info = first_byte & Constants::ADDITIONAL_INFORMATION_MASK;
-                let size_result = self.read_variadic_length_integer(additional_info);
-                match size_result {
-                    Ok(size_value) => match major_type_value {
-                        0 => self.decode_value_to_unsigned(size_value),
-                        1 => self.decode_value_to_negative(size_value),
-                        2 => self.read_byte_string_content(size_value),
-                        3 => self.read_text_string_content(size_value),
-                        4 => self.read_array_content(size_value, remaining_depth),
-                        5 => self.read_map_content(size_value, remaining_depth),
-                        7 => self.decode_to_simple_value(size_value, additional_info),
-                        _ => Err(DecoderError::UnsupportedMajorType),
-                    },
-                    Err(decode_error) => Err(decode_error),
+                let size_value = self.read_variadic_length_integer(additional_info)?;
+                match major_type_value {
+                    0 => self.decode_value_to_unsigned(size_value),
+                    1 => self.decode_value_to_negative(size_value),
+                    2 => self.read_byte_string_content(size_value),
+                    3 => self.read_text_string_content(size_value),
+                    4 => self.read_array_content(size_value, remaining_depth),
+                    5 => self.read_map_content(size_value, remaining_depth),
+                    7 => self.decode_to_simple_value(size_value, additional_info),
+                    _ => Err(DecoderError::UnsupportedMajorType),
                 }
             }
             _ => Err(DecoderError::IncompleteCborData),
@@ -172,16 +169,14 @@ impl<'a> Reader<'a> {
         size_value: u64,
         remaining_depth: i8,
     ) -> Result<Value, DecoderError> {
-        let mut value_map = Vec::new();
-        let mut last_key_option = None;
+        let mut value_map = Vec::<(Value, Value)>::new();
         for _ in 0..size_value {
             let key = self.decode_complete_data_item(remaining_depth - 1)?;
-            if let Some(last_key) = last_key_option {
-                if last_key >= key {
+            if let Some(last_item) = value_map.last() {
+                if last_item.0 >= key {
                     return Err(DecoderError::OutOfOrderKey);
                 }
             }
-            last_key_option = Some(key.clone());
             value_map.push((key, self.decode_complete_data_item(remaining_depth - 1)?));
         }
         Ok(cbor_map_collection!(value_map))

@@ -9,6 +9,6 @@ edition = "2018"
 arrayref = "0.3.6"
 libtock_drivers = { path = "../../third_party/libtock-drivers" }
 crypto = { path = "../../libraries/crypto", features = ['std'] }
-cbor = { path = "../../libraries/cbor", features = ['std'] }
+cbor = { path = "../../libraries/cbor" }
 ctap2 = { path = "../..", features = ['std'] }
 lang_items = { path = "../../third_party/lang-items", features = ['std'] }

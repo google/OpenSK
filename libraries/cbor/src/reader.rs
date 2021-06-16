@@ -208,6 +208,7 @@ mod test {
         cbor_array, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null, cbor_true,
         cbor_undefined,
     };
+    use alloc::vec;
 
     #[test]
     fn test_read_unsigned() {
@@ -227,7 +228,7 @@ mod test {
                 vec![0x1B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
             ),
             (
-                std::i64::MAX,
+                core::i64::MAX,
                 vec![0x1B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
@@ -289,7 +290,7 @@ mod test {
             (-1000000, vec![0x3A, 0x00, 0x0F, 0x42, 0x3F]),
             (-4294967296, vec![0x3A, 0xFF, 0xFF, 0xFF, 0xFF]),
             (
-                std::i64::MIN,
+                core::i64::MIN,
                 vec![0x3B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
@@ -326,7 +327,7 @@ mod test {
             ("\"\\", vec![0x62, 0x22, 0x5C]),
             ("ü", vec![0x62, 0xC3, 0xBC]),
             (
-                std::str::from_utf8(&unicode_3byte).unwrap(),
+                core::str::from_utf8(&unicode_3byte).unwrap(),
                 vec![0x63, 0xE6, 0xB0, 0xB4],
             ),
             ("𐅑", vec![0x64, 0xF0, 0x90, 0x85, 0x91]),

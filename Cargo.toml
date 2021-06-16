@@ -24,7 +24,7 @@ subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["cbor/std", "crypto/std", "lang_items/std", "persistent_store/std"]
+std = ["crypto/std", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]

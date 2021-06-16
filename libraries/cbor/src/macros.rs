@@ -352,6 +352,7 @@ macro_rules! cbor_bytes_lit {
 #[cfg(test)]
 mod test {
     use super::super::values::{SimpleValue, Value};
+    use alloc::{string::String, vec, vec::Vec};
 
     #[test]
     fn test_cbor_simple_values() {
@@ -373,8 +374,8 @@ mod test {
         assert_eq!(cbor_int!(1), Value::Unsigned(1));
         assert_eq!(cbor_int!(123456), Value::Unsigned(123456));
         assert_eq!(
-            cbor_int!(std::i64::MAX),
-            Value::Unsigned(std::i64::MAX as u64)
+            cbor_int!(core::i64::MAX),
+            Value::Unsigned(core::i64::MAX as u64)
         );
     }
 
@@ -382,34 +383,34 @@ mod test {
     fn test_cbor_int_negative() {
         assert_eq!(cbor_int!(-1), Value::Negative(-1));
         assert_eq!(cbor_int!(-123456), Value::Negative(-123456));
-        assert_eq!(cbor_int!(std::i64::MIN), Value::Negative(std::i64::MIN));
+        assert_eq!(cbor_int!(core::i64::MIN), Value::Negative(core::i64::MIN));
     }
 
     #[test]
     fn test_cbor_int_literals() {
         let a = cbor_array![
-            std::i64::MIN,
-            std::i32::MIN,
+            core::i64::MIN,
+            core::i32::MIN,
             -123456,
             -1,
             0,
             1,
             123456,
-            std::i32::MAX,
-            std::i64::MAX,
-            std::u64::MAX,
+            core::i32::MAX,
+            core::i64::MAX,
+            core::u64::MAX,
         ];
         let b = Value::Array(vec![
-            Value::Negative(std::i64::MIN),
-            Value::Negative(std::i32::MIN as i64),
+            Value::Negative(core::i64::MIN),
+            Value::Negative(core::i32::MIN as i64),
             Value::Negative(-123456),
             Value::Negative(-1),
             Value::Unsigned(0),
             Value::Unsigned(1),
             Value::Unsigned(123456),
-            Value::Unsigned(std::i32::MAX as u64),
-            Value::Unsigned(std::i64::MAX as u64),
-            Value::Unsigned(std::u64::MAX),
+            Value::Unsigned(core::i32::MAX as u64),
+            Value::Unsigned(core::i64::MAX as u64),
+            Value::Unsigned(core::u64::MAX),
         ]);
         assert_eq!(a, b);
     }

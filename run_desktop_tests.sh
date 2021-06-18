@@ -88,7 +88,7 @@ if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."
   cd libraries/cbor
-  cargo test --release --features std
+  cargo test --release
   cd ../..
   cd libraries/crypto
   RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std
@@ -100,7 +100,7 @@ then
 
   echo "Running unit tests on the desktop (debug mode)..."
   cd libraries/cbor
-  cargo test --features std
+  cargo test
   cd ../..
   cd libraries/crypto
   RUSTFLAGS='-C target-feature=+aes' cargo test --features std

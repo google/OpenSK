@@ -372,6 +372,10 @@ class OpenSKInstaller:
         "-D",
         "warnings",
         "--remap-path-prefix={}=".format(os.getcwd()),
+        "-C",
+        "link-arg=-icf=all",
+        "-C",
+        "force-frame-pointers=no",
     ]
     env = os.environ.copy()
     env["RUSTFLAGS"] = " ".join(rust_flags)

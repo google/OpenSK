@@ -37,11 +37,18 @@ pub enum DecoderError {
     OutOfRangeIntegerValue,
 }
 
-/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there
-/// is no additional data.
+/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.
+/// Supports arbitrarily nested CBOR (so the [`DecoderError::TooMuchNesting`] error is never emitted).
 pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
+    read_nested(encoded_cbor, None)
+}
+
+/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.  If
+/// `max_nest` is `Some(max)`, then nested structures are only supported up to the given limit (returning
+/// [`DecoderError::TooMuchNesting`] if the limit is hit).
+pub fn read_nested(encoded_cbor: &[u8], max_nest: Option<i8>) -> Result<Value, DecoderError> {
     let mut reader = Reader::new(encoded_cbor);
-    let value = reader.decode_complete_data_item(Reader::MAX_NESTING_DEPTH)?;
+    let value = reader.decode_complete_data_item(max_nest)?;
     if !reader.remaining_cbor.is_empty() {
         return Err(DecoderError::ExtraneousData);
     }
@@ -53,8 +60,6 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    const MAX_NESTING_DEPTH: i8 = 4;
-
     pub fn new(cbor: &'a [u8]) -> Reader<'a> {
         Reader {
             remaining_cbor: cbor,
@@ -63,9 +68,9 @@ impl<'a> Reader<'a> {
 
     pub fn decode_complete_data_item(
         &mut self,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
-        if remaining_depth < 0 {
+        if remaining_depth.map_or(false, |d| d < 0) {
             return Err(DecoderError::TooMuchNesting);
         }
 
@@ -162,12 +167,12 @@ impl<'a> Reader<'a> {
     fn read_array_content(
         &mut self,
         size_value: u64,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
         // Don't set the capacity already, it is an unsanitized input.
         let mut value_array = Vec::new();
         for _ in 0..size_value {
-            value_array.push(self.decode_complete_data_item(remaining_depth - 1)?);
+            value_array.push(self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?);
         }
         Ok(cbor_array_vec!(value_array))
     }
@@ -175,17 +180,20 @@ impl<'a> Reader<'a> {
     fn read_map_content(
         &mut self,
         size_value: u64,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
         let mut value_map = Vec::<(Value, Value)>::new();
         for _ in 0..size_value {
-            let key = self.decode_complete_data_item(remaining_depth - 1)?;
+            let key = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
             if let Some(last_item) = value_map.last() {
                 if last_item.0 >= key {
                     return Err(DecoderError::OutOfOrderKey);
                 }
             }
-            value_map.push((key, self.decode_complete_data_item(remaining_depth - 1)?));
+            value_map.push((
+                key,
+                self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?,
+            ));
         }
         Ok(cbor_map_collection!(value_map))
     }
@@ -193,9 +201,9 @@ impl<'a> Reader<'a> {
     fn read_tagged_content(
         &mut self,
         tag_value: u64,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
-        let inner_value = self.decode_complete_data_item(remaining_depth - 1)?;
+        let inner_value = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
         Ok(cbor_tagged!(tag_value, inner_value))
     }
 
@@ -679,7 +687,7 @@ mod test {
         ];
         for cbor in cases {
             let mut reader = Reader::new(&cbor);
-            assert!(reader.decode_complete_data_item(0).is_ok());
+            assert!(reader.decode_complete_data_item(Some(0)).is_ok());
         }
         let map_cbor = vec![
             0xa2, // map of 2 pairs
@@ -690,11 +698,11 @@ mod test {
         ];
         let mut reader = Reader::new(&map_cbor);
         assert_eq!(
-            reader.decode_complete_data_item(1),
+            reader.decode_complete_data_item(Some(1)),
             Err(DecoderError::TooMuchNesting)
         );
         reader = Reader::new(&map_cbor);
-        assert!(reader.decode_complete_data_item(2).is_ok());
+        assert!(reader.decode_complete_data_item(Some(2)).is_ok());
     }
 
     #[test]

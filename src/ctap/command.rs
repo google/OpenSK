@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::cbor_read;
 use super::customization::{MAX_CREDENTIAL_COUNT_IN_LIST, MAX_LARGE_BLOB_ARRAY_SIZE};
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
@@ -50,12 +51,6 @@ pub enum Command {
     AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
 }
 
-impl From<cbor::reader::DecoderError> for Ctap2StatusCode {
-    fn from(_: cbor::reader::DecoderError) -> Self {
-        Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR
-    }
-}
-
 impl Command {
     const AUTHENTICATOR_MAKE_CREDENTIAL: u8 = 0x01;
     const AUTHENTICATOR_GET_ASSERTION: u8 = 0x02;
@@ -82,13 +77,13 @@ impl Command {
         let command_value = bytes[0];
         match command_value {
             Command::AUTHENTICATOR_MAKE_CREDENTIAL => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorMakeCredential(
                     AuthenticatorMakeCredentialParameters::try_from(decoded_cbor)?,
                 ))
             }
             Command::AUTHENTICATOR_GET_ASSERTION => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorGetAssertion(
                     AuthenticatorGetAssertionParameters::try_from(decoded_cbor)?,
                 ))
@@ -98,7 +93,7 @@ impl Command {
                 Ok(Command::AuthenticatorGetInfo)
             }
             Command::AUTHENTICATOR_CLIENT_PIN => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorClientPin(
                     AuthenticatorClientPinParameters::try_from(decoded_cbor)?,
                 ))
@@ -112,7 +107,7 @@ impl Command {
                 Ok(Command::AuthenticatorGetNextAssertion)
             }
             Command::AUTHENTICATOR_CREDENTIAL_MANAGEMENT => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorCredentialManagement(
                     AuthenticatorCredentialManagementParameters::try_from(decoded_cbor)?,
                 ))
@@ -122,19 +117,19 @@ impl Command {
                 Ok(Command::AuthenticatorSelection)
             }
             Command::AUTHENTICATOR_LARGE_BLOBS => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorLargeBlobs(
                     AuthenticatorLargeBlobsParameters::try_from(decoded_cbor)?,
                 ))
             }
             Command::AUTHENTICATOR_CONFIG => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorConfig(
                     AuthenticatorConfigParameters::try_from(decoded_cbor)?,
                 ))
             }
             Command::AUTHENTICATOR_VENDOR_CONFIGURE => {
-                let decoded_cbor = cbor::read(&bytes[1..])?;
+                let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorVendorConfigure(
                     AuthenticatorVendorConfigureParameters::try_from(decoded_cbor)?,
                 ))

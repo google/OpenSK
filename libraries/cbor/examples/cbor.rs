@@ -58,10 +58,10 @@ fn main() {
 
     // Serialize to bytes.
     let mut manual_data = vec![];
-    sk_cbor::writer::write(manual_object, &mut manual_data);
+    sk_cbor::writer::write(manual_object, &mut manual_data).unwrap();
     let hex_manual_data = hexify(&manual_data);
     let mut macro_data = vec![];
-    sk_cbor::writer::write(macro_object, &mut macro_data);
+    sk_cbor::writer::write(macro_object, &mut macro_data).unwrap();
     let hex_macro_data = hexify(&macro_data);
 
     assert_eq!(hex_manual_data, hex_macro_data);

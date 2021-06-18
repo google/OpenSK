@@ -36,7 +36,6 @@ use core::cmp;
 use core::convert::TryInto;
 use crypto::rng256::Rng256;
 use persistent_store::{fragment, StoreUpdate};
-use sk_cbor as cbor;
 use sk_cbor::cbor_array_vec;
 
 /// Wrapper for master keys.
@@ -721,23 +720,20 @@ impl<'a> Iterator for IterCredentials<'a> {
 
 /// Deserializes a credential from storage representation.
 fn deserialize_credential(data: &[u8]) -> Option<PublicKeyCredentialSource> {
-    let cbor = cbor::read(data).ok()?;
+    let cbor = super::cbor_read(data).ok()?;
     cbor.try_into().ok()
 }
 
 /// Serializes a credential to storage representation.
 fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
-    if cbor::write(credential.into(), &mut data) {
-        Ok(data)
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-    }
+    super::cbor_write(credential.into(), &mut data)?;
+    Ok(data)
 }
 
 /// Deserializes a list of RP IDs from storage representation.
 fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
-    let cbor = cbor::read(data).ok()?;
+    let cbor = super::cbor_read(data).ok()?;
     extract_array(cbor)
         .ok()?
         .into_iter()
@@ -749,11 +745,8 @@ fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
 /// Serializes a list of RP IDs to storage representation.
 fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
-    if cbor::write(cbor_array_vec!(rp_ids), &mut data) {
-        Ok(data)
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-    }
+    super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;
+    Ok(data)
 }
 
 #[cfg(test)]

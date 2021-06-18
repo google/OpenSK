@@ -288,9 +288,7 @@ pub fn process_credential_management(
                 pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
             let mut management_data = vec![sub_command as u8];
             if let Some(sub_command_params) = sub_command_params.clone() {
-                if super::cbor_write(sub_command_params.into(), &mut management_data).is_err() {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-                }
+                super::cbor_write(sub_command_params.into(), &mut management_data)?;
             }
             client_pin.verify_pin_uv_auth_token(
                 &management_data,

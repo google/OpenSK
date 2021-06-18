@@ -99,9 +99,7 @@ pub fn process_config(
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
         if let Some(sub_command_params) = sub_command_params.clone() {
-            if super::cbor_write(sub_command_params.into(), &mut config_data).is_err() {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
+            super::cbor_write(sub_command_params.into(), &mut config_data)?;
         }
         client_pin.verify_pin_uv_auth_token(
             &config_data,

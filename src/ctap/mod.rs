@@ -122,14 +122,14 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 };
 
 // Helpers to perform CBOR read/write while respecting CTAP2 nesting limits.
-fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, cbor::reader::DecoderError> {
+fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
     cbor::reader::read_nested(encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
+        .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
 }
-fn cbor_write(
-    value: cbor::Value,
-    mut encoded_cbor: &mut Vec<u8>,
-) -> Result<(), cbor::writer::EncoderError> {
+
+fn cbor_write(value: cbor::Value, mut encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
     cbor::writer::write_nested(value, &mut encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
+        .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
@@ -704,9 +704,7 @@ where
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        if cbor_write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data).is_err() {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
+        cbor_write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
                 Some(true)
@@ -725,9 +723,7 @@ where
                 "hmac-secret" => hmac_secret_output,
                 "minPinLength" => min_pin_length_output,
             };
-            if cbor_write(extensions_output, &mut auth_data).is_err() {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
+            cbor_write(extensions_output, &mut auth_data)?;
         }
 
         let mut signature_data = auth_data.clone();
@@ -822,9 +818,7 @@ where
                 "credBlob" => cred_blob,
                 "hmac-secret" => encrypted_output,
             };
-            if cbor_write(extensions_output, &mut auth_data).is_err() {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
+            cbor_write(extensions_output, &mut auth_data)?;
         }
         let large_blob_key = match extensions.large_blob_key {
             Some(true) => credential.large_blob_key,

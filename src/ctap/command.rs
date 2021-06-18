@@ -51,12 +51,6 @@ pub enum Command {
     AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
 }
 
-impl From<cbor::reader::DecoderError> for Ctap2StatusCode {
-    fn from(_: cbor::reader::DecoderError) -> Self {
-        Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR
-    }
-}
-
 impl Command {
     const AUTHENTICATOR_MAKE_CREDENTIAL: u8 = 0x01;
     const AUTHENTICATOR_GET_ASSERTION: u8 = 0x02;

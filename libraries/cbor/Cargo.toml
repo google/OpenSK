@@ -1,6 +1,6 @@
 [package]
 name = "sk-cbor"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
@@ -14,5 +14,9 @@ homepage = "https://github.com/google/OpenSK"
 repository = "https://github.com/google/OpenSK"
 keywords = ["cbor", "serialization", "no_std"]
 categories = ["encoding"]
+readme = "README.md"
+
+[badges]
+maintenance = { status = "passively-maintained" }
 
 [dependencies]

@@ -1,5 +1,11 @@
 # CBOR Parsing Library
 
+[![crates.io](https://img.shields.io/crates/d/sk-cbor.svg)](https://crates.io/crates/sk-cbor)
+[![crates.io](https://img.shields.io/crates/v/sk-cbor.svg)](https://crates.io/crates/sk-cbor)
+[![docs.rs](https://docs.rs/sk-cbor/badge.svg)](https://docs.rs/sk-cbor)
+[![License](https://img.shields.io/crates/l/sk-cbor.svg)](https://crates.io/crates/sk-cbor)
+[![Maintenance](https://img.shields.io/maintenance/yes/2021)](https://crates.io/crates/sk-cbor)
+
 This crate implements Concise Binary Object Representation (CBOR) from [RFC
 8949](https://datatracker.ietf.org/doc/html/rfc8949).
 

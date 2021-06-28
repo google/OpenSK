@@ -1,5 +1,5 @@
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 6bb6c86..3bb8b5a 100644
+index 6bb6c86b7..3bb8b5a7d 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
 @@ -1,38 +1,45 @@
@@ -97,4 +97,3 @@ index 6bb6c86..3bb8b5a 100644
      /// Setting of pins dedicated to NFC functionality: NFC antenna or GPIO
      NfcPins [
          /// Setting pins dedicated to NFC functionality
-

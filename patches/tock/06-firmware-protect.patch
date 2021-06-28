@@ -1,6 +1,6 @@
 diff --git a/boards/components/src/firmware_protection.rs b/boards/components/src/firmware_protection.rs
 new file mode 100644
-index 0000000..58695af
+index 000000000..58695af81
 --- /dev/null
 +++ b/boards/components/src/firmware_protection.rs
 @@ -0,0 +1,70 @@
@@ -75,7 +75,7 @@ index 0000000..58695af
 +    }
 +}
 diff --git a/boards/components/src/lib.rs b/boards/components/src/lib.rs
-index 917497a..520408f 100644
+index 917497af4..520408fcb 100644
 --- a/boards/components/src/lib.rs
 +++ b/boards/components/src/lib.rs
 @@ -9,6 +9,7 @@ pub mod console;
@@ -86,11 +86,11 @@ index 917497a..520408f 100644
  pub mod ft6x06;
  pub mod gpio;
  pub mod hd44780;
-diff --git a/boards/nordic/nrf52840_dongle/src/main.rs b/boards/nordic/nrf52840_dongle/src/main.rs
-index 118ea6d..76436f3 100644
---- a/boards/nordic/nrf52840_dongle/src/main.rs
-+++ b/boards/nordic/nrf52840_dongle/src/main.rs
-@@ -112,6 +112,7 @@ pub struct Platform {
+diff --git a/boards/nordic/nrf52840_dongle_opensk/src/main.rs b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
+index f5d29d025..051943867 100644
+--- a/boards/nordic/nrf52840_dongle_opensk/src/main.rs
++++ b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
+@@ -100,6 +100,7 @@ pub struct Platform {
          'static,
          nrf52840::usbd::Usbd<'static>,
      >,
@@ -98,7 +98,7 @@ index 118ea6d..76436f3 100644
  }
  
  impl kernel::Platform for Platform {
-@@ -132,6 +133,7 @@ impl kernel::Platform for Platform {
+@@ -117,6 +118,7 @@ impl kernel::Platform for Platform {
              capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
              nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
              capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
@@ -106,7 +106,7 @@ index 118ea6d..76436f3 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -355,6 +357,14 @@ pub unsafe fn reset_handler() {
+@@ -318,6 +320,14 @@ pub unsafe fn reset_handler() {
      )
      .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
  
@@ -121,7 +121,7 @@ index 118ea6d..76436f3 100644
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -371,6 +381,7 @@ pub unsafe fn reset_handler() {
+@@ -331,6 +341,7 @@ pub unsafe fn reset_handler() {
          analog_comparator,
          nvmc,
          usb,
@@ -129,11 +129,11 @@ index 118ea6d..76436f3 100644
          ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
      };
  
-diff --git a/boards/nordic/nrf52840dk/src/main.rs b/boards/nordic/nrf52840dk/src/main.rs
-index b1d0d3c..3cfb38d 100644
---- a/boards/nordic/nrf52840dk/src/main.rs
-+++ b/boards/nordic/nrf52840dk/src/main.rs
-@@ -180,6 +180,7 @@ pub struct Platform {
+diff --git a/boards/nordic/nrf52840dk_opensk/src/main.rs b/boards/nordic/nrf52840dk_opensk/src/main.rs
+index 6a2f8715b..7898562dd 100644
+--- a/boards/nordic/nrf52840dk_opensk/src/main.rs
++++ b/boards/nordic/nrf52840dk_opensk/src/main.rs
+@@ -163,6 +163,7 @@ pub struct Platform {
          'static,
          nrf52840::usbd::Usbd<'static>,
      >,
@@ -141,15 +141,15 @@ index b1d0d3c..3cfb38d 100644
  }
  
  impl kernel::Platform for Platform {
-@@ -201,6 +202,7 @@ impl kernel::Platform for Platform {
-             capsules::nonvolatile_storage_driver::DRIVER_NUM => f(Some(self.nonvolatile_storage)),
+@@ -180,6 +181,7 @@ impl kernel::Platform for Platform {
+             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
              nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
              capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
 +            capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -480,6 +482,14 @@ pub unsafe fn reset_handler() {
+@@ -403,6 +405,14 @@ pub unsafe fn reset_handler() {
      )
      .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
  
@@ -164,8 +164,8 @@ index b1d0d3c..3cfb38d 100644
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -497,6 +507,7 @@ pub unsafe fn reset_handler() {
-         nonvolatile_storage,
+@@ -416,6 +426,7 @@ pub unsafe fn reset_handler() {
+         analog_comparator,
          nvmc,
          usb,
 +        crp,
@@ -173,7 +173,7 @@ index b1d0d3c..3cfb38d 100644
      };
  
 diff --git a/capsules/src/driver.rs b/capsules/src/driver.rs
-index ae458b3..f536dad 100644
+index ae458b309..f536dad32 100644
 --- a/capsules/src/driver.rs
 +++ b/capsules/src/driver.rs
 @@ -16,6 +16,7 @@ pub enum NUM {
@@ -186,7 +186,7 @@ index ae458b3..f536dad 100644
      Ipc                   = 0x10000,
 diff --git a/capsules/src/firmware_protection.rs b/capsules/src/firmware_protection.rs
 new file mode 100644
-index 0000000..8cf63d6
+index 000000000..8cf63d6a4
 --- /dev/null
 +++ b/capsules/src/firmware_protection.rs
 @@ -0,0 +1,85 @@
@@ -276,7 +276,7 @@ index 0000000..8cf63d6
 +    }
 +}
 diff --git a/capsules/src/lib.rs b/capsules/src/lib.rs
-index e4423fe..7538aad 100644
+index e4423fe05..7538aad18 100644
 --- a/capsules/src/lib.rs
 +++ b/capsules/src/lib.rs
 @@ -22,6 +22,7 @@ pub mod crc;
@@ -288,7 +288,7 @@ index e4423fe..7538aad 100644
  pub mod ft6x06;
  pub mod fxos8700cq;
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 3bb8b5a..ea96cb2 100644
+index 3bb8b5a7d..ea96cb2ae 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
 @@ -1,13 +1,14 @@
@@ -359,7 +359,7 @@ index 3bb8b5a..ea96cb2 100644
 +}
 diff --git a/kernel/src/hil/firmware_protection.rs b/kernel/src/hil/firmware_protection.rs
 new file mode 100644
-index 0000000..de08246
+index 000000000..de0824646
 --- /dev/null
 +++ b/kernel/src/hil/firmware_protection.rs
 @@ -0,0 +1,48 @@
@@ -412,7 +412,7 @@ index 0000000..de08246
 +    fn set_protection(&self, level: ProtectionLevel) -> ReturnCode;
 +}
 diff --git a/kernel/src/hil/mod.rs b/kernel/src/hil/mod.rs
-index 4f42afa..83e7702 100644
+index 4f42afa02..83e7702ab 100644
 --- a/kernel/src/hil/mod.rs
 +++ b/kernel/src/hil/mod.rs
 @@ -8,6 +8,7 @@ pub mod dac;
@@ -423,4 +423,3 @@ index 4f42afa..83e7702 100644
  pub mod flash;
  pub mod gpio;
  pub mod gpio_async;
-

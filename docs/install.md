@@ -156,18 +156,18 @@ an OpenSK device with the correct certificate and private key.
     (_output may differ_):
 
     ```shell
-    $ ./deploy.py --board=nrf52840dk --opensk
+    $ ./deploy.py --board=nrf52840dk_opensk --opensk
         info: Updating rust toolchain to nightly-2020-02-03
         info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
         info: checking for self-updates
         info: component 'rust-std' for target 'thumbv7em-none-eabi' is up to date
         info: Rust toolchain up-to-date
-        info: Building Tock OS for board nrf52840dk
+        info: Building Tock OS for board nrf52840dk_opensk
             Compiling tock-registers v0.5.0 (./third_party/tock/libraries/tock-register-interface)
             Compiling tock-cells v0.1.0 (./third_party/tock/libraries/tock-cells)
             Compiling enum_primitive v0.1.0 (./third_party/tock/libraries/enum_primitive)
             Compiling tock_rt0 v0.1.0 (./third_party/tock/libraries/tock-rt0)
-            Compiling nrf52840dk v0.1.0 (./third_party/tock/boards/nordic/nrf52840dk)
+            Compiling nrf52840dk_opensk v0.1.0 (./third_party/tock/boards/nordic/nrf52840dk_opensk)
             Compiling kernel v0.1.0 (./third_party/tock/kernel)
             Compiling cortexm v0.1.0 (./third_party/tock/arch/cortex-m)
             Compiling nrf5x v0.1.0 (./third_party/tock/chips/nrf5x)
@@ -184,7 +184,7 @@ an OpenSK device with the correct certificate and private key.
         info: Generating Tock TAB file for application/example ctap2
         info: Erasing all installed applications
         All apps have been erased.
-        info: Flashing file third_party/tock/boards/nordic/nrf52840dk/target/thumbv7em-none-eabi/release/nrf52840dk.bin.
+        info: Flashing file third_party/tock/boards/nordic/nrf52840dk_opensk/target/thumbv7em-none-eabi/release/nrf52840dk_opensk.bin.
         info: Flashing padding application
         info: Installing Tock application ctap2
         info: You're all set!
@@ -270,7 +270,7 @@ our tool, `deploy.py` also supports other methods:
     left to the user.
 
 If your board is already flashed with Tock OS, you may skip installing it:
-`./deploy.py --board=nrf52840dk --opensk --no-tockos`
+`./deploy.py --board=nrf52840dk_opensk --opensk --no-tockos`
 
 For more options, we invite you to read the help of our `deploy.py` script by
 running `./deploy.py --help`.

@@ -64,9 +64,9 @@ For a more detailed guide, please refer to our
 
     ```shell
     # Nordic nRF52840-DK board
-    ./deploy.py --board=nrf52840dk --opensk
+    ./deploy.py --board=nrf52840dk_opensk --opensk
     # Nordic nRF52840-Dongle
-    ./deploy.py --board=nrf52840_dongle --opensk
+    ./deploy.py --board=nrf52840_dongle_opensk --opensk
     ```
 
 1.  Finally you need to inject the cryptographic material if you enabled
@@ -131,7 +131,7 @@ driver, before faulting the app, you can use the `--panic-console` flag of the
 
 ```shell
 # Example on Nordic nRF52840-DK board
-./deploy.py --board=nrf52840dk --opensk --panic-console
+./deploy.py --board=nrf52840dk_opensk --opensk --panic-console
 ```
 
 ### Debugging memory allocations

@@ -84,7 +84,7 @@ OpenSKBoard = collections.namedtuple(
     ])
 
 SUPPORTED_BOARDS = {
-    "nrf52840dk":
+    "nrf52840dk_opensk":
         OpenSKBoard(
             path="third_party/tock/boards/nordic/nrf52840dk_opensk",
             arch="thumbv7em-none-eabi",
@@ -103,7 +103,7 @@ SUPPORTED_BOARDS = {
             jlink_device="nrf52840_xxaa",
             nordic_dfu=False,
         ),
-    "nrf52840_dongle":
+    "nrf52840_dongle_opensk":
         OpenSKBoard(
             path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",
             arch="thumbv7em-none-eabi",

@@ -27,7 +27,7 @@ echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
 
 echo "Computing SHA-256 sums of the boards..."
-for board in nrf52840dk nrf52840_dongle nrf52840_dongle_dfu nrf52840_mdk_dfu
+for board in nrf52840dk_opensk nrf52840_dongle_opensk nrf52840_dongle_dfu nrf52840_mdk_dfu
 do
   BOARD=$board ./reproduce_board.sh
 done

@@ -84,9 +84,9 @@ OpenSKBoard = collections.namedtuple(
     ])
 
 SUPPORTED_BOARDS = {
-    "nrf52840dk":
+    "nrf52840dk_opensk":
         OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840dk",
+            path="third_party/tock/boards/nordic/nrf52840dk_opensk",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0,
@@ -103,9 +103,9 @@ SUPPORTED_BOARDS = {
             jlink_device="nrf52840_xxaa",
             nordic_dfu=False,
         ),
-    "nrf52840_dongle":
+    "nrf52840_dongle_opensk":
         OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840_dongle",
+            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0,

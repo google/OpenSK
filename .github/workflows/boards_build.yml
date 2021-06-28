@@ -29,10 +29,10 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
-      - name: Building board nrf52840dk
-        run: ./deploy.py --board=nrf52840dk --no-app --programmer=none
-      - name: Building board nrf52840_dongle
-        run: ./deploy.py --board=nrf52840_dongle --no-app --programmer=none
+      - name: Building board nrf52840dk_opensk
+        run: ./deploy.py --board=nrf52840dk_opensk --no-app --programmer=none
+      - name: Building board nrf52840_dongle_opensk
+        run: ./deploy.py --board=nrf52840_dongle_opensk --no-app --programmer=none
       - name: Building board nrf52840_dongle_dfu
         run: ./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
       - name: Building board nrf52840_mdk_dfu

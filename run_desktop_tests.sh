@@ -69,16 +69,16 @@ cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2
 
 echo "Checking that supported boards build properly..."
-make -C third_party/tock/boards/nordic/nrf52840dk
-make -C third_party/tock/boards/nordic/nrf52840_dongle
+make -C third_party/tock/boards/nordic/nrf52840dk_opensk
+make -C third_party/tock/boards/nordic/nrf52840_dongle_opensk
 
 echo "Checking that other boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840_dongle_dfu
 make -C third_party/tock/boards/nordic/nrf52840_mdk_dfu
 
 echo "Checking deployment of supported boards..."
-./deploy.py --board=nrf52840dk --no-app --programmer=none
-./deploy.py --board=nrf52840_dongle --no-app --programmer=none
+./deploy.py --board=nrf52840dk_opensk --no-app --programmer=none
+./deploy.py --board=nrf52840_dongle_opensk --no-app --programmer=none
 
 echo "Checking deployment of other boards..."
 ./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none

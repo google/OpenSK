@@ -38,6 +38,11 @@ mod memop_nr {
     pub const STORAGE_CNT: u32 = 12;
     pub const STORAGE_PTR: u32 = 13;
     pub const STORAGE_LEN: u32 = 14;
+    pub const STORAGE_TYPE: u32 = 15;
+}
+
+mod storage_type {
+    pub const STORE: usize = 1;
 }
 
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
@@ -91,6 +96,9 @@ impl SyscallStorage {
             return Err(StorageError::CustomError);
         }
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
+            if memop(memop_nr::STORAGE_TYPE, i)? != storage_type::STORE {
+                continue;
+            }
             let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
             let max_storage_len = memop(memop_nr::STORAGE_LEN, i)?;
             if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(max_storage_len) {

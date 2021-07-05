@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'src/**/*.rs'
+      - 'libraries/**/*.rs'
   pull_request:
     types: [opened, synchronize, reopened]
 

@@ -4,7 +4,7 @@
 ![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=develop)
 ![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=develop)
 ![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=develop)
-[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg)](https://coveralls.io/github/google/OpenSK)
+[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=develop)](https://coveralls.io/github/google/OpenSK?branch=develop)
 
 ## OpenSK
 

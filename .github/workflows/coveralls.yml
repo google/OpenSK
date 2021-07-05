@@ -1,0 +1,46 @@
+---
+name: OpenSK code coverage report
+on:
+  push:
+    paths:
+      - 'src/**/*.rs'
+      - 'libraries/**/*.rs'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  coveralls:
+    name: OpenSK code coverage
+    runs-on: ubuntu-18.04
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: "true"
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: thumbv7em-none-eabi
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Set up OpenSK
+        run: ./setup.sh
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features "with_ctap1,with_nfc,std" --no-fail-fast
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+      - uses: actions-rs/grcov@v0.1
+        id: coverage
+      - uses: coverallsapp/github-action@master
+        name: upload report to coveralls
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: ${{ steps.coverage.outputs.report }}
+

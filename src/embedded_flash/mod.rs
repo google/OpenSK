@@ -1,4 +1,4 @@
-// Copyright 2019-2020 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,13 +30,20 @@ mod prod {
 #[cfg(not(feature = "std"))]
 pub use self::prod::{new_storage, Storage};
 
-/// Storage definition for testing.
+/// Partition definition for production.
+#[cfg(not(feature = "std"))]
+pub use self::syscall::Partition;
+
+/// Definitions for testing.
 #[cfg(feature = "std")]
 mod test {
+    use persistent_store::{StorageError, StorageResult};
+
+    const PAGE_SIZE: usize = 0x1000;
+
     pub type Storage = persistent_store::BufferStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
-        const PAGE_SIZE: usize = 0x1000;
         let store = vec![0xff; num_pages * PAGE_SIZE].into_boxed_slice();
         let options = persistent_store::BufferOptions {
             word_size: 4,
@@ -47,6 +54,38 @@ mod test {
         };
         Storage::new(store, options)
     }
+
+    fn is_page_aligned(x: usize) -> bool {
+        x & (PAGE_SIZE - 1) == 0
+    }
+
+    /// Mock implementation of a partition, only tests page alignment.
+    pub struct Partition {}
+
+    impl Partition {
+        pub fn new() -> StorageResult<Partition> {
+            Ok(Partition {})
+        }
+
+        pub fn is_page_in_partition(&self, page_address: usize) -> bool {
+            is_page_aligned(page_address)
+        }
+
+        pub fn is_page_in_metadata(&self, page_address: usize) -> bool {
+            is_page_aligned(page_address)
+        }
+
+        #[allow(unused_mut)]
+        pub fn rewrite_page(&self, page_ptr: usize, value: &mut [u8]) -> StorageResult<()> {
+            if !is_page_aligned(page_ptr) || value.len() != PAGE_SIZE {
+                return Err(StorageError::NotAligned);
+            }
+            Ok(())
+        }
+    }
 }
 #[cfg(feature = "std")]
 pub use self::test::{new_storage, Storage};
+
+#[cfg(feature = "std")]
+pub use self::test::Partition;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(any(test, not(feature = "std")))]
+mod helper;
 #[cfg(not(feature = "std"))]
 mod syscall;
 
@@ -32,7 +34,7 @@ pub use self::prod::{new_storage, Storage};
 
 /// Partition definition for production.
 #[cfg(not(feature = "std"))]
-pub use self::syscall::Partition;
+pub use self::syscall::UpgradeLocations;
 
 /// Definitions for testing.
 #[cfg(feature = "std")]
@@ -60,11 +62,11 @@ mod test {
     }
 
     /// Mock implementation of a partition, only tests page alignment.
-    pub struct Partition {}
+    pub struct UpgradeLocations;
 
-    impl Partition {
-        pub fn new() -> StorageResult<Partition> {
-            Ok(Partition {})
+    impl UpgradeLocations {
+        pub fn new() -> StorageResult<UpgradeLocations> {
+            Ok(UpgradeLocations)
         }
 
         pub fn is_page_in_partition(&self, page_address: usize) -> bool {
@@ -75,8 +77,7 @@ mod test {
             is_page_aligned(page_address)
         }
 
-        #[allow(unused_mut)]
-        pub fn rewrite_page(&self, page_ptr: usize, value: &mut [u8]) -> StorageResult<()> {
+        pub fn rewrite_page(&self, page_ptr: usize, value: &[u8]) -> StorageResult<()> {
             if !is_page_aligned(page_ptr) || value.len() != PAGE_SIZE {
                 return Err(StorageError::NotAligned);
             }
@@ -88,4 +89,4 @@ mod test {
 pub use self::test::{new_storage, Storage};
 
 #[cfg(feature = "std")]
-pub use self::test::Partition;
+pub use self::test::UpgradeLocations;

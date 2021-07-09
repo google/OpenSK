@@ -188,3 +188,7 @@ cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fp
 ## Contributing
 
 See [Contributing.md](docs/contributing.md).
+
+## Reporting a Vulnerability
+
+See [SECURITY.md](SECURITY.md).

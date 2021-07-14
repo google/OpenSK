@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::ops::RangeInclusive;
 use persistent_store::{StorageError, StorageResult};
 
-/// Returns a slice from a list of slices that contains the interval [start, start+length).
+/// Reads a slice from a list of slices.
+///
+/// The returned slice contains the interval `[start, start+length)`.
+///
+/// # Preconditions
+///
+/// - The passed in slices must not overlap.
+/// - The requested slice must fit entirely within a single one of the slices.
 pub fn find_slice<'a>(
     slices: &'a [&'a [u8]],
     mut start: usize,
@@ -34,25 +40,52 @@ pub fn find_slice<'a>(
     Err(StorageError::OutOfBounds)
 }
 
-/// Checks whether the address is aligned with the block_size.
+/// Checks whether the address is aligned with the block size.
 ///
-/// Requires block_size to be a power of two.
+/// Requires `block_size` to be a power of two.
 pub fn is_aligned(block_size: usize, address: usize) -> bool {
+    debug_assert!(block_size.is_power_of_two());
     address & (block_size - 1) == 0
 }
 
-/// Returns a range object.
-///
-/// If the range contains indices outside of usize, it returns an empty range.
-#[allow(clippy::reversed_empty_ranges)]
-pub fn create_range(ptr: usize, len: usize) -> RangeInclusive<usize> {
-    if len == 0 {
-        return 1..=0;
+/// A range implementation using start and length.
+pub struct ModRange {
+    start: usize,
+    length: usize,
+}
+
+impl ModRange {
+    /// Returns a new range of given start and length.
+    ///
+    /// If the largest contained address would overflow the address space, return an empty range.
+    pub fn new(start: usize, length: usize) -> Self {
+        if start.checked_add(length - 1).is_none() {
+            return Self::new_empty();
+        }
+        ModRange { start, length }
     }
-    if let Some(end) = ptr.checked_add(len - 1) {
-        ptr..=end
-    } else {
-        1..=0
+
+    /// Create a new empty range.
+    pub fn new_empty() -> Self {
+        ModRange {
+            start: 0,
+            length: 0,
+        }
+    }
+
+    /// Returns whether this range contains any addresses.
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    /// Returns whether the given address is inside the range.
+    pub fn contains(&self, x: usize) -> bool {
+        // We want to check the 2 following inequalities:
+        // (1) `start <= x`
+        // (2) `x < start + length`
+        // However, the second one may overflow written as is. Using (1), we rewrite to:
+        // (3) `x - start <= length`
+        self.start <= x && x - self.start < self.length
     }
 }
 
@@ -97,22 +130,30 @@ mod tests {
     }
 
     #[test]
-    fn partition_slice_contains() {
-        let ptr = 0x200;
-        let len = 0x100;
-        let range = create_range(ptr, len);
-        assert!(!range.contains(&0x300));
-        for i in ptr..ptr + len {
-            assert!(range.contains(&i));
+    fn mod_range_is_empty() {
+        assert!(!ModRange::new(0x200, 0x100).is_empty());
+        assert!(ModRange::new(0x200, 0).is_empty());
+        assert!(ModRange::new_empty().is_empty());
+        assert!(ModRange::new(usize::MAX, 2).is_empty());
+    }
+
+    #[test]
+    fn mod_range_contains() {
+        let start = 0x200;
+        let length = 0x100;
+        let range = ModRange::new(start, length);
+        assert!(!range.contains(0x300));
+        for i in start..start + length {
+            assert!(range.contains(i));
         }
-        for i in ptr - len..ptr {
-            assert!(!range.contains(&i));
+        for i in start - length..start {
+            assert!(!range.contains(i));
         }
-        for i in ptr + len..ptr + 2 * len {
-            assert!(!range.contains(&i));
+        for i in start + length..start + 2 * length {
+            assert!(!range.contains(i));
         }
-        assert!(!create_range(0, 0).contains(&0));
-        assert!(create_range(usize::MAX, 1).contains(&usize::MAX));
-        assert!(!create_range(usize::MAX, 2).contains(&usize::MAX));
+        assert!(!ModRange::new_empty().contains(0));
+        assert!(ModRange::new(usize::MAX, 1).contains(usize::MAX));
+        assert!(!ModRange::new(usize::MAX, 2).contains(usize::MAX));
     }
 }

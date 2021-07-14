@@ -17,24 +17,20 @@ mod helper;
 #[cfg(not(feature = "std"))]
 mod syscall;
 
-#[cfg(not(feature = "std"))]
-pub use self::syscall::SyscallStorage;
-
-/// Storage definition for production.
+/// Definitions for production.
 #[cfg(not(feature = "std"))]
 mod prod {
-    pub type Storage = super::SyscallStorage;
+    use super::syscall::SyscallStorage;
+    pub use super::syscall::UpgradeLocations;
+
+    pub type Storage = SyscallStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
         Storage::new(num_pages).unwrap()
     }
 }
 #[cfg(not(feature = "std"))]
-pub use self::prod::{new_storage, Storage};
-
-/// Partition definition for production.
-#[cfg(not(feature = "std"))]
-pub use self::syscall::UpgradeLocations;
+pub use self::prod::{new_storage, Storage, UpgradeLocations};
 
 /// Definitions for testing.
 #[cfg(feature = "std")]
@@ -86,7 +82,4 @@ mod test {
     }
 }
 #[cfg(feature = "std")]
-pub use self::test::{new_storage, Storage};
-
-#[cfg(feature = "std")]
-pub use self::test::UpgradeLocations;
+pub use self::test::{new_storage, Storage, UpgradeLocations};

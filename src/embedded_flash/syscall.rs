@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::helper::{create_range, find_slice, is_aligned};
+use super::helper::{find_slice, is_aligned, ModRange};
 use alloc::vec::Vec;
-use core::ops::RangeInclusive;
 use libtock_core::syscalls;
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
@@ -63,7 +62,7 @@ fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
     }
 }
 
-fn write_slice_op(ptr: usize, value: &[u8]) -> StorageResult<()> {
+fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
     let code = unsafe {
         syscalls::raw::allow(
             DRIVER_NUMBER,
@@ -86,7 +85,7 @@ fn write_slice_op(ptr: usize, value: &[u8]) -> StorageResult<()> {
     Ok(())
 }
 
-fn erase_page_op(ptr: usize, page_length: usize) -> StorageResult<()> {
+fn erase_page(ptr: usize, page_length: usize) -> StorageResult<()> {
     let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, page_length);
     if code.is_err() {
         return Err(StorageError::CustomError);
@@ -192,21 +191,21 @@ impl Storage for SyscallStorage {
             return Err(StorageError::NotAligned);
         }
         let ptr = self.read_slice(index, value.len())?.as_ptr() as usize;
-        write_slice_op(ptr, value)
+        write_slice(ptr, value)
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
         let index = StorageIndex { page, byte: 0 };
         let length = self.page_size();
         let ptr = self.read_slice(index, length)?.as_ptr() as usize;
-        erase_page_op(ptr, length)
+        erase_page(ptr, length)
     }
 }
 
 pub struct UpgradeLocations {
     page_size: usize,
-    partitions: Vec<RangeInclusive<usize>>,
-    metadata: RangeInclusive<usize>,
+    partitions: Vec<ModRange>,
+    metadata: ModRange,
 }
 
 impl UpgradeLocations {
@@ -221,7 +220,7 @@ impl UpgradeLocations {
         let mut locations = UpgradeLocations {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
             partitions: Vec::new(),
-            metadata: 1..=0,
+            metadata: ModRange::new_empty(),
         };
         if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
@@ -237,13 +236,12 @@ impl UpgradeLocations {
             if !locations.is_page_aligned(storage_ptr) || !locations.is_page_aligned(storage_len) {
                 return Err(StorageError::CustomError);
             }
-            let range = create_range(storage_ptr, storage_len);
+            let range = ModRange::new(storage_ptr, storage_len);
             match storage_type {
                 storage_type::PARTITION => locations.partitions.push(range),
-                // We only expect one page of metadata.
+                // We only expect one range of metadata.
                 storage_type::METADATA => {
-                    // TODO replace with is_empty with stable Rust 1.47.0
-                    if locations.metadata.start() > locations.metadata.end() {
+                    if locations.metadata.is_empty() {
                         locations.metadata = range;
                     } else {
                         return Err(StorageError::CustomError);
@@ -262,18 +260,18 @@ impl UpgradeLocations {
     pub fn is_page_in_partition(&self, page_address: usize) -> bool {
         self.partitions
             .iter()
-            .any(|storage_location| storage_location.contains(&page_address))
+            .any(|storage_location| storage_location.contains(page_address))
     }
 
     pub fn is_page_in_metadata(&self, page_address: usize) -> bool {
-        self.metadata.contains(&page_address)
+        self.metadata.contains(page_address)
     }
 
     pub fn rewrite_page(&self, page_ptr: usize, value: &[u8]) -> StorageResult<()> {
         if !self.is_page_aligned(page_ptr) || !self.is_page_aligned(value.len()) {
             return Err(StorageError::NotAligned);
         }
-        erase_page_op(page_ptr, self.page_size)?;
-        write_slice_op(page_ptr, value)
+        erase_page(page_ptr, self.page_size)?;
+        write_slice(page_ptr, value)
     }
 }

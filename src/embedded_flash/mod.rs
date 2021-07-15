@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(any(test, not(feature = "std")))]
+#[cfg(feature = "std")]
+mod buffer_upgrade;
 mod helper;
 #[cfg(not(feature = "std"))]
 mod syscall;
+mod upgrade_storage;
+
+pub use upgrade_storage::UpgradeStorage;
 
 /// Definitions for production.
 #[cfg(not(feature = "std"))]
 mod prod {
-    use super::syscall::SyscallStorage;
-    pub use super::syscall::UpgradeLocations;
+    use super::syscall::{SyscallStorage, SyscallUpgradeStorage};
 
     pub type Storage = SyscallStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
         Storage::new(num_pages).unwrap()
     }
+
+    pub type UpgradeLocations = SyscallUpgradeStorage;
 }
 #[cfg(not(feature = "std"))]
 pub use self::prod::{new_storage, Storage, UpgradeLocations};
@@ -35,7 +40,7 @@ pub use self::prod::{new_storage, Storage, UpgradeLocations};
 /// Definitions for testing.
 #[cfg(feature = "std")]
 mod test {
-    use persistent_store::{StorageError, StorageResult};
+    use super::buffer_upgrade::BufferUpgradeStorage;
 
     const PAGE_SIZE: usize = 0x1000;
 
@@ -53,33 +58,7 @@ mod test {
         Storage::new(store, options)
     }
 
-    fn is_page_aligned(x: usize) -> bool {
-        x & (PAGE_SIZE - 1) == 0
-    }
-
-    /// Mock implementation of a partition, only tests page alignment.
-    pub struct UpgradeLocations;
-
-    impl UpgradeLocations {
-        pub fn new() -> StorageResult<UpgradeLocations> {
-            Ok(UpgradeLocations)
-        }
-
-        pub fn is_page_in_partition(&self, page_address: usize) -> bool {
-            is_page_aligned(page_address)
-        }
-
-        pub fn is_page_in_metadata(&self, page_address: usize) -> bool {
-            is_page_aligned(page_address)
-        }
-
-        pub fn rewrite_page(&self, page_ptr: usize, value: &[u8]) -> StorageResult<()> {
-            if !is_page_aligned(page_ptr) || value.len() != PAGE_SIZE {
-                return Err(StorageError::NotAligned);
-            }
-            Ok(())
-        }
-    }
+    pub type UpgradeLocations = BufferUpgradeStorage;
 }
 #[cfg(feature = "std")]
 pub use self::test::{new_storage, Storage, UpgradeLocations};

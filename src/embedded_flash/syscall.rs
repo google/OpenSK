@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::helper::{find_slice, is_aligned, ModRange};
+use super::upgrade_storage::UpgradeStorage;
 use alloc::vec::Vec;
 use libtock_core::syscalls;
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
@@ -202,13 +203,13 @@ impl Storage for SyscallStorage {
     }
 }
 
-pub struct UpgradeLocations {
+pub struct SyscallUpgradeStorage {
     page_size: usize,
-    partitions: Vec<ModRange>,
+    partition: ModRange,
     metadata: ModRange,
 }
 
-impl UpgradeLocations {
+impl SyscallUpgradeStorage {
     /// Provides access to the other upgrade partition and metadata if available.
     ///
     /// # Errors
@@ -216,10 +217,14 @@ impl UpgradeLocations {
     /// Returns `CustomError` if any of the following conditions do not hold:
     /// - The page size is a power of two.
     /// - The storage slices are page-aligned.
-    pub fn new() -> StorageResult<UpgradeLocations> {
-        let mut locations = UpgradeLocations {
+    /// - There are not partition or metadata slices.
+    /// Returns a `NotAligned` error if partitions or metadata ranges are
+    /// - not exclusive or,
+    /// - not consecutive.
+    pub fn new() -> StorageResult<SyscallUpgradeStorage> {
+        let mut locations = SyscallUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
-            partitions: Vec::new(),
+            partition: ModRange::new_empty(),
             metadata: ModRange::new_empty(),
         };
         if !locations.page_size.is_power_of_two() {
@@ -238,40 +243,76 @@ impl UpgradeLocations {
             }
             let range = ModRange::new(storage_ptr, storage_len);
             match storage_type {
-                storage_type::PARTITION => locations.partitions.push(range),
-                // We only expect one range of metadata.
+                storage_type::PARTITION => {
+                    locations.partition = locations
+                        .partition
+                        .append(range)
+                        .ok_or(StorageError::NotAligned)?
+                }
                 storage_type::METADATA => {
-                    if locations.metadata.is_empty() {
-                        locations.metadata = range;
-                    } else {
-                        return Err(StorageError::CustomError);
-                    }
+                    locations.metadata = locations
+                        .metadata
+                        .append(range)
+                        .ok_or(StorageError::NotAligned)?
                 }
                 _ => (),
             };
         }
-        Ok(locations)
+        if locations.partition.is_empty() || locations.metadata.is_empty() {
+            Err(StorageError::CustomError)
+        } else {
+            Ok(locations)
+        }
     }
 
     fn is_page_aligned(&self, x: usize) -> bool {
         is_aligned(self.page_size, x)
     }
+}
 
-    pub fn is_page_in_partition(&self, page_address: usize) -> bool {
-        self.partitions
-            .iter()
-            .any(|storage_location| storage_location.contains(page_address))
-    }
-
-    pub fn is_page_in_metadata(&self, page_address: usize) -> bool {
-        self.metadata.contains(page_address)
-    }
-
-    pub fn rewrite_page(&self, page_ptr: usize, value: &[u8]) -> StorageResult<()> {
-        if !self.is_page_aligned(page_ptr) || !self.is_page_aligned(value.len()) {
-            return Err(StorageError::NotAligned);
+impl UpgradeStorage for SyscallUpgradeStorage {
+    fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
+        if self
+            .partition
+            .contains_range(&ModRange::new(offset, length))
+        {
+            Ok(unsafe { core::slice::from_raw_parts(offset as *mut u8, length) })
+        } else {
+            Err(StorageError::OutOfBounds)
         }
-        erase_page(page_ptr, self.page_size)?;
-        write_slice(page_ptr, value)
+    }
+
+    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+        if self
+            .partition
+            .contains_range(&ModRange::new(offset, data.len()))
+        {
+            // Erases all pages that have their first byte in the writte range.
+            // Since we expect calls in order, we don't want to erase half-written pages.
+            for address in ModRange::new(offset, data.len()).aligned_iter(self.page_size) {
+                erase_page(address, self.page_size)?;
+            }
+            write_slice(offset, data)
+        } else {
+            Err(StorageError::OutOfBounds)
+        }
+    }
+
+    fn read_metadata(&self) -> StorageResult<&[u8]> {
+        Ok(unsafe {
+            core::slice::from_raw_parts(self.metadata.start() as *mut u8, self.metadata.length())
+        })
+    }
+
+    fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
+        // If less data is passed in than is reserved, assume the rest is 0xFF.
+        if data.len() <= self.metadata.length() {
+            for address in self.metadata.aligned_iter(self.page_size) {
+                erase_page(address, self.page_size)?;
+            }
+            write_slice(self.metadata.start(), data)
+        } else {
+            Err(StorageError::OutOfBounds)
+        }
     }
 }

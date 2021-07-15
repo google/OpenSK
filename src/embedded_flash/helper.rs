@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// For compiling with std outside of tests.
+#![cfg_attr(feature = "std", allow(dead_code))]
+
+use core::iter::Iterator;
 use persistent_store::{StorageError, StorageResult};
 
 /// Reads a slice from a list of slices.
@@ -49,6 +53,9 @@ pub fn is_aligned(block_size: usize, address: usize) -> bool {
 }
 
 /// A range implementation using start and length.
+///
+/// The range is treated as the interval `[start, start + length[`.
+/// All objects with length of 0, regardless of the start value, are considered empty.
 pub struct ModRange {
     start: usize,
     length: usize,
@@ -57,25 +64,54 @@ pub struct ModRange {
 impl ModRange {
     /// Returns a new range of given start and length.
     ///
-    /// If the largest contained address would overflow the address space, return an empty range.
-    pub fn new(start: usize, length: usize) -> Self {
-        if start.checked_add(length - 1).is_none() {
-            return Self::new_empty();
+    /// The stored length can be shorter than what is passed in, so that the range does not include
+    /// values bigger than `usize::MAX`.
+    pub fn new(start: usize, mut length: usize) -> ModRange {
+        if length > 0 {
+            length = start.saturating_add(length - 1) - start + 1;
         }
         ModRange { start, length }
     }
 
     /// Create a new empty range.
-    pub fn new_empty() -> Self {
-        ModRange {
-            start: 0,
-            length: 0,
-        }
+    pub fn new_empty() -> ModRange {
+        ModRange::new(0, 0)
+    }
+
+    /// Returns the start of the range.
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// Returns the length of the range.
+    pub fn length(&self) -> usize {
+        self.length
     }
 
     /// Returns whether this range contains any addresses.
     pub fn is_empty(&self) -> bool {
         self.length == 0
+    }
+
+    /// Returns the disjoint union with the other range, if is consecutive.
+    ///
+    /// Appending empty ranges is not possible.
+    /// Appending to the empty range returns the other range.
+    pub fn append(&self, other: ModRange) -> Option<ModRange> {
+        if self.is_empty() {
+            return Some(other);
+        }
+        if other.is_empty() {
+            return None;
+        }
+        if self.start >= other.start {
+            return None;
+        }
+        if self.length != other.start - self.start {
+            return None;
+        }
+        let new_length = self.length.checked_add(other.length);
+        new_length.map(|l| ModRange::new(self.start, l))
     }
 
     /// Returns whether the given address is inside the range.
@@ -86,6 +122,28 @@ impl ModRange {
         // However, the second one may overflow written as is. Using (1), we rewrite to:
         // (3) `x - start <= length`
         self.start <= x && x - self.start < self.length
+    }
+
+    /// Returns whether the given range is fully contained, i.e. their cut equals the parameter.
+    pub fn contains_range(&self, range: &ModRange) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        let end = range.start + (range.length - 1);
+        self.contains(range.start) && self.contains(end)
+    }
+
+    /// Returns an iterator for all contained numbers that are divisible by the modulus.
+    pub fn aligned_iter(&self, modulus: usize) -> impl Iterator<Item = usize> {
+        let remainder = self.start % modulus;
+        // Saturating first and limit in case they are usize::MAX.
+        let first = if remainder == 0 {
+            self.start
+        } else {
+            (self.start - remainder).saturating_add(modulus)
+        };
+        let limit = self.start.saturating_add(self.length);
+        (first..limit).step_by(modulus)
     }
 }
 
@@ -130,19 +188,49 @@ mod tests {
     }
 
     #[test]
+    fn mod_range_parameters() {
+        let range = ModRange::new(200, 100);
+        assert_eq!(range.start(), 200);
+        assert_eq!(range.length(), 100);
+        let range = ModRange::new(usize::MAX, 2);
+        assert_eq!(range.start(), usize::MAX);
+        assert_eq!(range.length(), 1);
+        let range = ModRange::new(usize::MAX - 3, 7);
+        assert_eq!(range.start(), usize::MAX - 3);
+        assert_eq!(range.length(), 4);
+        assert_eq!(ModRange::new_empty().length(), 0);
+    }
+
+    #[test]
     fn mod_range_is_empty() {
-        assert!(!ModRange::new(0x200, 0x100).is_empty());
-        assert!(ModRange::new(0x200, 0).is_empty());
+        assert!(!ModRange::new(200, 100).is_empty());
+        assert!(ModRange::new(200, 0).is_empty());
         assert!(ModRange::new_empty().is_empty());
-        assert!(ModRange::new(usize::MAX, 2).is_empty());
+        assert!(!ModRange::new(usize::MAX, 2).is_empty());
+    }
+
+    #[test]
+    fn mod_range_append() {
+        let range = ModRange::new(200, 100);
+        let new_range = range.append(ModRange::new(300, 400)).unwrap();
+        assert!(new_range.start() == 200);
+        assert!(new_range.length() == 500);
+        assert!(range.append(ModRange::new(299, 400)).is_none());
+        assert!(range.append(ModRange::new(301, 400)).is_none());
+        assert!(range.append(ModRange::new(200, 400)).is_none());
+        let empty_append = ModRange::new_empty()
+            .append(ModRange::new(200, 100))
+            .unwrap();
+        assert!(empty_append.start() == 200);
+        assert!(empty_append.length() == 100);
     }
 
     #[test]
     fn mod_range_contains() {
-        let start = 0x200;
-        let length = 0x100;
+        let start = 200;
+        let length = 100;
         let range = ModRange::new(start, length);
-        assert!(!range.contains(0x300));
+        assert!(!range.contains(300));
         for i in start..start + length {
             assert!(range.contains(i));
         }
@@ -154,6 +242,41 @@ mod tests {
         }
         assert!(!ModRange::new_empty().contains(0));
         assert!(ModRange::new(usize::MAX, 1).contains(usize::MAX));
-        assert!(!ModRange::new(usize::MAX, 2).contains(usize::MAX));
+        assert!(ModRange::new(usize::MAX, 2).contains(usize::MAX));
+    }
+
+    #[test]
+    fn mod_range_contains_range() {
+        let range = ModRange::new(200, 100);
+        assert!(!range.contains_range(&ModRange::new(199, 100)));
+        assert!(!range.contains_range(&ModRange::new(201, 100)));
+        assert!(!range.contains_range(&ModRange::new(199, 99)));
+        assert!(!range.contains_range(&ModRange::new(202, 99)));
+        assert!(!range.contains_range(&ModRange::new(200, 101)));
+        assert!(range.contains_range(&ModRange::new(200, 100)));
+        assert!(range.contains_range(&ModRange::new(200, 99)));
+        assert!(range.contains_range(&ModRange::new(201, 99)));
+        assert!(ModRange::new_empty().contains_range(&ModRange::new_empty()));
+        assert!(ModRange::new(usize::MAX, 1).contains_range(&ModRange::new(usize::MAX, 1)));
+        assert!(ModRange::new(usize::MAX, 2).contains_range(&ModRange::new(usize::MAX, 2)));
+    }
+
+    #[test]
+    fn mod_range_aligned_iter() {
+        let mut iter = ModRange::new(200, 100).aligned_iter(100);
+        assert_eq!(iter.next(), Some(200));
+        assert_eq!(iter.next(), None);
+        let mut iter = ModRange::new(200, 101).aligned_iter(100);
+        assert_eq!(iter.next(), Some(200));
+        assert_eq!(iter.next(), Some(300));
+        assert_eq!(iter.next(), None);
+        let mut iter = ModRange::new(199, 100).aligned_iter(100);
+        assert_eq!(iter.next(), Some(200));
+        assert_eq!(iter.next(), None);
+        let mut iter = ModRange::new(201, 99).aligned_iter(100);
+        assert_eq!(iter.next(), None);
+        let mut iter = ModRange::new(usize::MAX - 16, 20).aligned_iter(16);
+        assert_eq!(iter.next(), Some(0xf_fff_fff_fff_fff_ff0));
+        assert_eq!(iter.next(), None);
     }
 }

@@ -62,13 +62,7 @@ pub struct ModRange {
 
 impl ModRange {
     /// Returns a new range of given start and length.
-    ///
-    /// The stored length can be shorter than what is passed in, so that the range does not include
-    /// values bigger than `usize::MAX`.
-    pub fn new(start: usize, mut length: usize) -> ModRange {
-        if length > 0 {
-            length = start.saturating_add(length - 1) - start + 1;
-        }
+    pub fn new(start: usize, length: usize) -> ModRange {
         ModRange { start, length }
     }
 
@@ -113,16 +107,6 @@ impl ModRange {
         new_length.map(|l| ModRange::new(self.start, l))
     }
 
-    /// Returns whether the given value is inside the range.
-    pub fn contains(&self, x: usize) -> bool {
-        // We want to check the 2 following inequalities:
-        // (1) `start <= x`
-        // (2) `x < start + length`
-        // However, the second one may overflow written as is. Using (1), we rewrite to:
-        // (3) `x - start <= length`
-        self.start <= x && x - self.start < self.length
-    }
-
     /// Returns whether the given range is fully contained.
     ///
     /// Mathematically, we calculate whether: `self ∩ range = range`.
@@ -130,8 +114,10 @@ impl ModRange {
         if range.is_empty() {
             return true;
         }
-        let end = range.start + (range.length - 1);
-        self.contains(range.start) && self.contains(end)
+        range.is_empty()
+            || (self.start <= range.start
+                && range.length <= self.length
+                && range.start - self.start <= self.length - range.length)
     }
 
     /// Returns an iterator for all contained numbers that are divisible by the modulus.
@@ -196,12 +182,6 @@ mod tests {
         let range = ModRange::new(200, 100);
         assert_eq!(range.start(), 200);
         assert_eq!(range.length(), 100);
-        let range = ModRange::new(usize::MAX, 2);
-        assert_eq!(range.start(), usize::MAX);
-        assert_eq!(range.length(), 1);
-        let range = ModRange::new(usize::MAX - 3, 7);
-        assert_eq!(range.start(), usize::MAX - 3);
-        assert_eq!(range.length(), 4);
         assert_eq!(ModRange::new_empty().length(), 0);
     }
 
@@ -227,26 +207,6 @@ mod tests {
             .unwrap();
         assert!(empty_append.start() == 200);
         assert!(empty_append.length() == 100);
-    }
-
-    #[test]
-    fn mod_range_contains() {
-        let start = 200;
-        let length = 100;
-        let range = ModRange::new(start, length);
-        assert!(!range.contains(300));
-        for i in start..start + length {
-            assert!(range.contains(i));
-        }
-        for i in start - length..start {
-            assert!(!range.contains(i));
-        }
-        for i in start + length..start + 2 * length {
-            assert!(!range.contains(i));
-        }
-        assert!(!ModRange::new_empty().contains(0));
-        assert!(ModRange::new(usize::MAX, 1).contains(usize::MAX));
-        assert!(ModRange::new(usize::MAX, 2).contains(usize::MAX));
     }
 
     #[test]

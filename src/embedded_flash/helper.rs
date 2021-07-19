@@ -111,9 +111,6 @@ impl ModRange {
     ///
     /// Mathematically, we calculate whether: `self ∩ range = range`.
     pub fn contains_range(&self, range: &ModRange) -> bool {
-        if range.is_empty() {
-            return true;
-        }
         range.is_empty()
             || (self.start <= range.start
                 && range.length <= self.length

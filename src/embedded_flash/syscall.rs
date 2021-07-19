@@ -213,7 +213,7 @@ impl SyscallUpgradeStorage {
     /// Provides access to the other upgrade partition and metadata if available.
     ///
     /// The implementation assumes that storage locations returned by the kernel through
-    /// `memop_nr::STORAGE_*` calls are deterministic and in order.
+    /// `memop_nr::STORAGE_*` calls are in address space order.
     ///
     /// # Errors
     ///

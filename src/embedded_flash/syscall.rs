@@ -212,6 +212,9 @@ pub struct SyscallUpgradeStorage {
 impl SyscallUpgradeStorage {
     /// Provides access to the other upgrade partition and metadata if available.
     ///
+    /// The implementation assumes that storage locations returned by the kernel through
+    /// `memop_nr::STORAGE_*` calls are deterministic and in order.
+    ///
     /// # Errors
     ///
     /// Returns `CustomError` if any of the following conditions do not hold:
@@ -272,35 +275,41 @@ impl SyscallUpgradeStorage {
 
 impl UpgradeStorage for SyscallUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
+        let address = self.partition.start() + offset;
         if self
             .partition
-            .contains_range(&ModRange::new(offset, length))
+            .contains_range(&ModRange::new(address, length))
         {
-            Ok(unsafe { core::slice::from_raw_parts(offset as *mut u8, length) })
+            Ok(unsafe { core::slice::from_raw_parts(address as *const u8, length) })
         } else {
             Err(StorageError::OutOfBounds)
         }
     }
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+        let address = self.partition.start() + offset;
         if self
             .partition
-            .contains_range(&ModRange::new(offset, data.len()))
+            .contains_range(&ModRange::new(address, data.len()))
         {
-            // Erases all pages that have their first byte in the writte range.
+            // Erases all pages that have their first byte in the write range.
             // Since we expect calls in order, we don't want to erase half-written pages.
-            for address in ModRange::new(offset, data.len()).aligned_iter(self.page_size) {
+            for address in ModRange::new(address, data.len()).aligned_iter(self.page_size) {
                 erase_page(address, self.page_size)?;
             }
-            write_slice(offset, data)
+            write_slice(address, data)
         } else {
             Err(StorageError::OutOfBounds)
         }
     }
 
+    fn partition_length(&self) -> usize {
+        self.partition.length()
+    }
+
     fn read_metadata(&self) -> StorageResult<&[u8]> {
         Ok(unsafe {
-            core::slice::from_raw_parts(self.metadata.start() as *mut u8, self.metadata.length())
+            core::slice::from_raw_parts(self.metadata.start() as *const u8, self.metadata.length())
         })
     }
 

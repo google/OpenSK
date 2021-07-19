@@ -17,7 +17,6 @@ use super::upgrade_storage::UpgradeStorage;
 use alloc::boxed::Box;
 use persistent_store::{StorageError, StorageResult};
 
-const PARTITION_START: usize = 0x20000;
 const PARTITION_LENGTH: usize = 0x40000;
 const METADATA_LENGTH: usize = 0x1000;
 
@@ -40,22 +39,26 @@ impl BufferUpgradeStorage {
 
 impl UpgradeStorage for BufferUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
-        let partition_range = ModRange::new(PARTITION_START, self.partition.len());
+        let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, length)) {
-            Ok(&self.partition[offset - PARTITION_START..][..length])
+            Ok(&self.partition[offset..][..length])
         } else {
             Err(StorageError::OutOfBounds)
         }
     }
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
-        let partition_range = ModRange::new(PARTITION_START, self.partition.len());
+        let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, data.len())) {
-            self.partition[offset - PARTITION_START..][..data.len()].copy_from_slice(data);
+            self.partition[offset..][..data.len()].copy_from_slice(data);
             Ok(())
         } else {
             Err(StorageError::OutOfBounds)
         }
+    }
+
+    fn partition_length(&self) -> usize {
+        PARTITION_LENGTH
     }
 
     fn read_metadata(&self) -> StorageResult<&[u8]> {
@@ -68,7 +71,7 @@ impl UpgradeStorage for BufferUpgradeStorage {
             self.metadata[..data.len()].copy_from_slice(data);
             Ok(())
         } else {
-            Err(StorageError::NotAligned)
+            Err(StorageError::OutOfBounds)
         }
     }
 }

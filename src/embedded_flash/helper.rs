@@ -22,10 +22,9 @@ use persistent_store::{StorageError, StorageResult};
 ///
 /// The returned slice contains the interval `[start, start+length)`.
 ///
-/// # Preconditions
+/// # Errors
 ///
-/// - The passed in slices must not overlap.
-/// - The requested slice must fit entirely within a single one of the slices.
+/// Returns [`StorageError::OutOfBounds`] if the range is not within exactly one slice.
 pub fn find_slice<'a>(
     slices: &'a [&'a [u8]],
     mut start: usize,
@@ -54,7 +53,7 @@ pub fn is_aligned(block_size: usize, address: usize) -> bool {
 
 /// A range implementation using start and length.
 ///
-/// The range is treated as the interval `[start, start + length[`.
+/// The range is treated as the interval `[start, start + length)`.
 /// All objects with length of 0, regardless of the start value, are considered empty.
 pub struct ModRange {
     start: usize,
@@ -114,7 +113,7 @@ impl ModRange {
         new_length.map(|l| ModRange::new(self.start, l))
     }
 
-    /// Returns whether the given address is inside the range.
+    /// Returns whether the given value is inside the range.
     pub fn contains(&self, x: usize) -> bool {
         // We want to check the 2 following inequalities:
         // (1) `start <= x`
@@ -124,7 +123,9 @@ impl ModRange {
         self.start <= x && x - self.start < self.length
     }
 
-    /// Returns whether the given range is fully contained, i.e. their cut equals the parameter.
+    /// Returns whether the given range is fully contained.
+    ///
+    /// Mathematically, we calculate whether: `self ∩ range = range`.
     pub fn contains_range(&self, range: &ModRange) -> bool {
         if range.is_empty() {
             return true;
@@ -134,6 +135,9 @@ impl ModRange {
     }
 
     /// Returns an iterator for all contained numbers that are divisible by the modulus.
+    ///
+    /// Be aware that `usize::MAX` is a special case for simplicity. It is never in the returned
+    /// iterator, even when divisible by `modulus` and contained in the range.
     pub fn aligned_iter(&self, modulus: usize) -> impl Iterator<Item = usize> {
         let remainder = self.start % modulus;
         // Saturating first and limit in case they are usize::MAX.

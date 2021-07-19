@@ -42,11 +42,10 @@ pub use self::prod::{new_storage, Storage, UpgradeLocations};
 mod test {
     use super::buffer_upgrade::BufferUpgradeStorage;
 
-    const PAGE_SIZE: usize = 0x1000;
-
     pub type Storage = persistent_store::BufferStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
+        const PAGE_SIZE: usize = 0x1000;
         let store = vec![0xff; num_pages * PAGE_SIZE].into_boxed_slice();
         let options = persistent_store::BufferOptions {
             word_size: 4,

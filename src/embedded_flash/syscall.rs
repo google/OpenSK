@@ -1,4 +1,4 @@
-// Copyright 2019-2020 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::helper::{find_slice, is_aligned, ModRange};
+use super::upgrade_storage::UpgradeStorage;
 use alloc::vec::Vec;
 use libtock_core::syscalls;
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
@@ -43,6 +45,8 @@ mod memop_nr {
 
 mod storage_type {
     pub const STORE: usize = 1;
+    pub const PARTITION: usize = 2;
+    pub const METADATA: usize = 3;
 }
 
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
@@ -57,6 +61,37 @@ fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
     } else {
         Ok(code as usize)
     }
+}
+
+fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
+    let code = unsafe {
+        syscalls::raw::allow(
+            DRIVER_NUMBER,
+            allow_nr::WRITE_SLICE,
+            // We rely on the driver not writing to the slice. This should use read-only allow
+            // when available. See https://github.com/tock/tock/issues/1274.
+            value.as_ptr() as *mut u8,
+            value.len(),
+        )
+    };
+    if code < 0 {
+        return Err(StorageError::CustomError);
+    }
+
+    let code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len());
+    if code.is_err() {
+        return Err(StorageError::CustomError);
+    }
+
+    Ok(())
+}
+
+fn erase_page(ptr: usize, page_length: usize) -> StorageResult<()> {
+    let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, page_length);
+    if code.is_err() {
+        return Err(StorageError::CustomError);
+    }
+    Ok(())
 }
 
 pub struct SyscallStorage {
@@ -118,11 +153,11 @@ impl SyscallStorage {
     }
 
     fn is_word_aligned(&self, x: usize) -> bool {
-        x & (self.word_size - 1) == 0
+        is_aligned(self.word_size, x)
     }
 
     fn is_page_aligned(&self, x: usize) -> bool {
-        x & (self.page_size - 1) == 0
+        is_aligned(self.page_size, x)
     }
 }
 
@@ -157,83 +192,136 @@ impl Storage for SyscallStorage {
             return Err(StorageError::NotAligned);
         }
         let ptr = self.read_slice(index, value.len())?.as_ptr() as usize;
-
-        let code = unsafe {
-            syscalls::raw::allow(
-                DRIVER_NUMBER,
-                allow_nr::WRITE_SLICE,
-                // We rely on the driver not writing to the slice. This should use read-only allow
-                // when available. See https://github.com/tock/tock/issues/1274.
-                value.as_ptr() as *mut u8,
-                value.len(),
-            )
-        };
-        if code < 0 {
-            return Err(StorageError::CustomError);
-        }
-
-        let code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len());
-        if code.is_err() {
-            return Err(StorageError::CustomError);
-        }
-
-        Ok(())
+        write_slice(ptr, value)
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
         let index = StorageIndex { page, byte: 0 };
         let length = self.page_size();
         let ptr = self.read_slice(index, length)?.as_ptr() as usize;
-        let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, length);
-        if code.is_err() {
+        erase_page(ptr, length)
+    }
+}
+
+pub struct SyscallUpgradeStorage {
+    page_size: usize,
+    partition: ModRange,
+    metadata: ModRange,
+}
+
+impl SyscallUpgradeStorage {
+    /// Provides access to the other upgrade partition and metadata if available.
+    ///
+    /// The implementation assumes that storage locations returned by the kernel through
+    /// `memop_nr::STORAGE_*` calls are in address space order.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CustomError` if any of the following conditions do not hold:
+    /// - The page size is a power of two.
+    /// - The storage slices are page-aligned.
+    /// - There are not partition or metadata slices.
+    /// Returns a `NotAligned` error if partitions or metadata ranges are
+    /// - not exclusive or,
+    /// - not consecutive.
+    pub fn new() -> StorageResult<SyscallUpgradeStorage> {
+        let mut locations = SyscallUpgradeStorage {
+            page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
+            partition: ModRange::new_empty(),
+            metadata: ModRange::new_empty(),
+        };
+        if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
         }
-        Ok(())
+        for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
+            let storage_type = memop(memop_nr::STORAGE_TYPE, i)?;
+            match storage_type {
+                storage_type::PARTITION | storage_type::METADATA => (),
+                _ => continue,
+            };
+            let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
+            let storage_len = memop(memop_nr::STORAGE_LEN, i)?;
+            if !locations.is_page_aligned(storage_ptr) || !locations.is_page_aligned(storage_len) {
+                return Err(StorageError::CustomError);
+            }
+            let range = ModRange::new(storage_ptr, storage_len);
+            match storage_type {
+                storage_type::PARTITION => {
+                    locations.partition = locations
+                        .partition
+                        .append(range)
+                        .ok_or(StorageError::NotAligned)?
+                }
+                storage_type::METADATA => {
+                    locations.metadata = locations
+                        .metadata
+                        .append(range)
+                        .ok_or(StorageError::NotAligned)?
+                }
+                _ => (),
+            };
+        }
+        if locations.partition.is_empty() || locations.metadata.is_empty() {
+            Err(StorageError::CustomError)
+        } else {
+            Ok(locations)
+        }
+    }
+
+    fn is_page_aligned(&self, x: usize) -> bool {
+        is_aligned(self.page_size, x)
     }
 }
 
-fn find_slice<'a>(
-    slices: &'a [&'a [u8]],
-    mut start: usize,
-    length: usize,
-) -> StorageResult<&'a [u8]> {
-    for slice in slices {
-        if start >= slice.len() {
-            start -= slice.len();
-            continue;
+impl UpgradeStorage for SyscallUpgradeStorage {
+    fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
+        let address = self.partition.start() + offset;
+        if self
+            .partition
+            .contains_range(&ModRange::new(address, length))
+        {
+            Ok(unsafe { core::slice::from_raw_parts(address as *const u8, length) })
+        } else {
+            Err(StorageError::OutOfBounds)
         }
-        if start + length > slice.len() {
-            break;
-        }
-        return Ok(&slice[start..][..length]);
     }
-    Err(StorageError::OutOfBounds)
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+        let address = self.partition.start() + offset;
+        if self
+            .partition
+            .contains_range(&ModRange::new(address, data.len()))
+        {
+            // Erases all pages that have their first byte in the write range.
+            // Since we expect calls in order, we don't want to erase half-written pages.
+            for address in ModRange::new(address, data.len()).aligned_iter(self.page_size) {
+                erase_page(address, self.page_size)?;
+            }
+            write_slice(address, data)
+        } else {
+            Err(StorageError::OutOfBounds)
+        }
+    }
 
-    #[test]
-    fn find_slice_ok() {
-        assert_eq!(
-            find_slice(&[&[1, 2, 3, 4]], 0, 4).ok(),
-            Some(&[1u8, 2, 3, 4] as &[u8])
-        );
-        assert_eq!(
-            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 1, 2).ok(),
-            Some(&[2u8, 3] as &[u8])
-        );
-        assert_eq!(
-            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 4, 2).ok(),
-            Some(&[5u8, 6] as &[u8])
-        );
-        assert_eq!(
-            find_slice(&[&[1, 2, 3, 4], &[5, 6]], 4, 0).ok(),
-            Some(&[] as &[u8])
-        );
-        assert!(find_slice(&[], 0, 1).is_err());
-        assert!(find_slice(&[&[1, 2, 3, 4], &[5, 6]], 6, 0).is_err());
-        assert!(find_slice(&[&[1, 2, 3, 4], &[5, 6]], 3, 2).is_err());
+    fn partition_length(&self) -> usize {
+        self.partition.length()
+    }
+
+    fn read_metadata(&self) -> StorageResult<&[u8]> {
+        Ok(unsafe {
+            core::slice::from_raw_parts(self.metadata.start() as *const u8, self.metadata.length())
+        })
+    }
+
+    fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
+        // If less data is passed in than is reserved, assume the rest is 0xFF.
+        if data.len() <= self.metadata.length() {
+            for address in self.metadata.aligned_iter(self.page_size) {
+                erase_page(address, self.page_size)?;
+            }
+            write_slice(self.metadata.start(), data)
+        } else {
+            Err(StorageError::OutOfBounds)
+        }
     }
 }

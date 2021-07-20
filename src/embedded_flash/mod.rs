@@ -1,4 +1,4 @@
-// Copyright 2019-2020 Google LLC
+// Copyright 2019-2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "std")]
+mod buffer_upgrade;
+mod helper;
 #[cfg(not(feature = "std"))]
 mod syscall;
+mod upgrade_storage;
 
-#[cfg(not(feature = "std"))]
-pub use self::syscall::SyscallStorage;
+pub use upgrade_storage::UpgradeStorage;
 
-/// Storage definition for production.
+/// Definitions for production.
 #[cfg(not(feature = "std"))]
 mod prod {
-    pub type Storage = super::SyscallStorage;
+    use super::syscall::{SyscallStorage, SyscallUpgradeStorage};
+
+    pub type Storage = SyscallStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
         Storage::new(num_pages).unwrap()
     }
+
+    pub type UpgradeLocations = SyscallUpgradeStorage;
 }
 #[cfg(not(feature = "std"))]
-pub use self::prod::{new_storage, Storage};
+pub use self::prod::{new_storage, Storage, UpgradeLocations};
 
-/// Storage definition for testing.
+/// Definitions for testing.
 #[cfg(feature = "std")]
 mod test {
+    use super::buffer_upgrade::BufferUpgradeStorage;
+
     pub type Storage = persistent_store::BufferStorage;
 
     pub fn new_storage(num_pages: usize) -> Storage {
@@ -47,6 +56,8 @@ mod test {
         };
         Storage::new(store, options)
     }
+
+    pub type UpgradeLocations = BufferUpgradeStorage;
 }
 #[cfg(feature = "std")]
-pub use self::test::{new_storage, Storage};
+pub use self::test::{new_storage, Storage, UpgradeLocations};

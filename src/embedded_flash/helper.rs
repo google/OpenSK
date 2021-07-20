@@ -118,19 +118,13 @@ impl ModRange {
     }
 
     /// Returns an iterator for all contained numbers that are divisible by the modulus.
-    ///
-    /// Be aware that `usize::MAX` is a special case for simplicity. It is never in the returned
-    /// iterator, even when divisible by `modulus` and contained in the range.
     pub fn aligned_iter(&self, modulus: usize) -> impl Iterator<Item = usize> {
-        let remainder = self.start % modulus;
-        // Saturating first and limit in case they are usize::MAX.
-        let first = if remainder == 0 {
-            self.start
-        } else {
-            (self.start - remainder).saturating_add(modulus)
-        };
-        let limit = self.start.saturating_add(self.length);
-        (first..limit).step_by(modulus)
+        (self.start..=usize::MAX)
+            .take(self.length)
+            // Skip the minimum number of elements to align.
+            .skip((modulus - self.start % modulus) % modulus)
+            // Only return aligned elements.
+            .step_by(modulus)
     }
 }
 

@@ -338,3 +338,7 @@ $ ioreg -p IOUSB
   +-o AppleUSBXHCI Root Hub Simulation@14000000  <class AppleUSBRootHubDevice, id 0x100000a00, registered, matched, active, busy 0 (0 ms), retain 9>
     +-o OpenSK@14400000  <class AppleUSBDevice, id 0x100003c04, registered, matched, active, busy 0 (0 ms), retain 13>
 ```
+
+## Makerdiary & Feitian Additional Installation Guide
+*   [Makerdiary nRF52840-MDK USB dongle](https://github.com/epita-cs2/Implementation-OpenSK-on-Makerdiary-nrf52840-mdk-usb-dongle).
+*   [Feitian OpenSK dongle](https://github.com/epita-cs2/Implementation-OpenSK-on-Feitian-nrf52840-usb-dongle).

@@ -16,7 +16,7 @@ You will need one the following supported boards:
     scenarios as the JTAG probe is already on the board.
 *   [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
     to have a more practical form factor.
-*   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
+*   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/), [Makerdiary Installation Guide ](https://github.com/epita-cs2/Implementation-OpenSK-on-Makerdiary-nrf52840-mdk-usb-dongle).
 *   [Feitian OpenSK dongle](https://feitiantech.github.io/OpenSK_USB/).
 
 In the case of the Nordic USB dongle, you may also need the following extra

@@ -20,6 +20,12 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           target: thumbv7em-none-eabi
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: Install grcov
+        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo +nightly install grcov; fi
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -36,9 +42,9 @@ jobs:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
           RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-      - uses: actions-rs/grcov@v0.1
+      - uses: actions-rs/grcov@v0.1.5
         id: coverage
-      - uses: coverallsapp/github-action@master
+      - uses: coverallsapp/github-action@1.1.3
         name: upload report to coveralls
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

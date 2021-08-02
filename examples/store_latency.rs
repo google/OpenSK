@@ -131,8 +131,8 @@ fn main() {
     //
     // | Pages | Overwrite | Length    | Boot     | Compaction | Insert  | Remove |
     // | ----- | --------- | --------- | -------  | ---------- | ------  | ------ |
-    // | 3     | no        | 50 words  | 2.0 ms   | 132.8 ms   | 4.3 ms  | 1.2 ms |
-    // | 20    | no        | 50 words  | 7.8 ms   | 135.7 ms   | 9.9 ms  | 4.0 ms |
-    // | 3     | yes       | 1 word    | 19.6 ms  | 90.8 ms    | 4.7 ms  | 2.3 ms |
-    // | 20    | yes       | 1 word    | 183.3 ms | 90.9 ms    | 4.8 ms  | 2.3 ms |
+    // | 3     | no        | 50 words  | 4.5 ms   | 135.3 ms   | 6.7 ms  | 2.5 ms |
+    // | 20    | no        | 50 words  | 16.1 ms  | 141.1 ms   | 18.1 ms | 8.2 ms |
+    // | 3     | yes       | 1 word    | 32.3 ms  | 97.2 ms    | 9.2 ms  | 4.5 ms |
+    // | 20    | yes       | 1 word    | 288.2 ms | 97.3 ms    | 9.3 ms  | 4.6 ms |
 }

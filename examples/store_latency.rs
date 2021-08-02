@@ -17,7 +17,9 @@
 extern crate alloc;
 extern crate lang_items;
 
-use alloc::vec;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::{format, vec};
 use core::fmt::Write;
 use ctap2::embedded_flash::{new_storage, Storage};
 use libtock_drivers::console::Console;
@@ -47,7 +49,28 @@ unsafe fn boot_store(num_pages: usize, erase: bool) -> Store<Storage> {
     Store::new(storage).ok().unwrap()
 }
 
-fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_length: usize) {
+#[derive(Default)]
+struct Stat {
+    num_pages: usize,
+    key_increment: usize,
+    entry_length: usize, // words
+    boot_ms: f64,
+    compaction_ms: f64,
+    insert_ms: f64,
+    remove_ms: f64,
+}
+
+fn compute_latency(
+    timer: &Timer,
+    num_pages: usize,
+    key_increment: usize,
+    word_length: usize,
+) -> Stat {
+    let mut stat = Stat::default();
+    stat.num_pages = num_pages;
+    stat.key_increment = key_increment;
+    stat.entry_length = word_length;
+
     let mut console = Console::new();
     writeln!(
         console,
@@ -87,6 +110,7 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
         store.insert(key, &vec![0; 4 * word_length]).unwrap()
     });
     writeln!(console, "Insert: {:.1}ms.", time.ms()).unwrap();
+    stat.insert_ms = time.ms();
     assert_eq!(
         store.lifetime().unwrap().used(),
         num_pages + (1 + count) * (1 + word_length)
@@ -95,10 +119,12 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
     // Measure latency of boot.
     let (mut store, time) = measure(&timer, || unsafe { boot_store(num_pages, false) });
     writeln!(console, "Boot: {:.1}ms.", time.ms()).unwrap();
+    stat.boot_ms = time.ms();
 
     // Measure latency of remove.
     let ((), time) = measure(&timer, || store.remove(key).unwrap());
     writeln!(console, "Remove: {:.1}ms.", time.ms()).unwrap();
+    stat.remove_ms = time.ms();
 
     // Measure latency of compaction.
     let length = total_capacity + num_pages - store.lifetime().unwrap().used();
@@ -111,28 +137,80 @@ fn compute_latency(timer: &Timer, num_pages: usize, key_increment: usize, word_l
     assert_eq!(store.lifetime().unwrap().used(), num_pages + total_capacity);
     let ((), time) = measure(timer, || store.prepare(1).unwrap());
     writeln!(console, "Compaction: {:.1}ms.", time.ms()).unwrap();
+    stat.compaction_ms = time.ms();
     assert!(store.lifetime().unwrap().used() > total_capacity + num_pages);
+
+    stat
 }
 
 fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().ok().unwrap();
+    let mut stats = Vec::new();
 
     writeln!(Console::new(), "\nRunning 4 tests...").unwrap();
     // Those non-overwritten 50 words entries simulate credentials.
-    compute_latency(&timer, 3, 1, 50);
-    compute_latency(&timer, 20, 1, 50);
+    stats.push(compute_latency(&timer, 3, 1, 50));
+    stats.push(compute_latency(&timer, 20, 1, 50));
     // Those overwritten 1 word entries simulate counters.
-    compute_latency(&timer, 3, 0, 1);
-    compute_latency(&timer, 20, 0, 1);
-    writeln!(Console::new(), "\nDone.").unwrap();
+    stats.push(compute_latency(&timer, 3, 0, 1));
+    stats.push(compute_latency(&timer, 20, 0, 1));
+    writeln!(Console::new(), "\nDone.\n").unwrap();
 
-    // Results on nrf52840dk:
-    //
-    // | Pages | Overwrite | Length    | Boot     | Compaction | Insert  | Remove |
-    // | ----- | --------- | --------- | -------  | ---------- | ------  | ------ |
-    // | 3     | no        | 50 words  | 4.5 ms   | 135.3 ms   | 6.7 ms  | 2.5 ms |
-    // | 20    | no        | 50 words  | 16.1 ms  | 141.1 ms   | 18.1 ms | 8.2 ms |
-    // | 3     | yes       | 1 word    | 32.3 ms  | 97.2 ms    | 9.2 ms  | 4.5 ms |
-    // | 20    | yes       | 1 word    | 288.2 ms | 97.3 ms    | 9.3 ms  | 4.6 ms |
+    const HEADERS: &[&str] = &[
+        "Pages",
+        "Overwrite",
+        "Length",
+        "Boot",
+        "Compaction",
+        "Insert",
+        "Remove",
+    ];
+    let mut matrix = vec![HEADERS.iter().map(|x| x.to_string()).collect()];
+    for stat in stats {
+        matrix.push(vec![
+            format!("{}", stat.num_pages),
+            if stat.key_increment == 0 { "yes" } else { "no" }.to_string(),
+            format!("{} words", stat.entry_length),
+            format!("{:.1} ms", stat.boot_ms),
+            format!("{:.1} ms", stat.compaction_ms),
+            format!("{:.1} ms", stat.insert_ms),
+            format!("{:.1} ms", stat.remove_ms),
+        ]);
+    }
+    write_matrix(matrix);
+
+    // Results on nrf52840dk_opensk:
+    // Pages  Overwrite    Length      Boot  Compaction   Insert  Remove
+    //     3         no  50 words    4.7 ms    135.5 ms   6.9 ms  2.7 ms
+    //    20         no  50 words   16.7 ms    141.7 ms  18.6 ms  8.5 ms
+    //     3        yes   1 words   33.7 ms     97.7 ms   9.5 ms  4.8 ms
+    //    20        yes   1 words  338.3 ms     97.7 ms   9.7 ms  4.8 ms
+}
+
+fn align(x: &str, n: usize) {
+    for _ in 0..n.saturating_sub(x.len()) {
+        write!(Console::new(), " ").unwrap();
+    }
+    write!(Console::new(), "{}", x).unwrap();
+}
+
+fn write_matrix(mut m: Vec<Vec<String>>) {
+    if m.is_empty() {
+        return;
+    }
+    let num_cols = m.iter().map(|r| r.len()).max().unwrap();
+    let mut col_len = vec![0; num_cols];
+    for row in &mut m {
+        row.resize(num_cols, String::new());
+        for col in 0..num_cols {
+            col_len[col] = core::cmp::max(col_len[col], row[col].len());
+        }
+    }
+    for row in m {
+        for col in 0..num_cols {
+            align(&row[col], col_len[col] + 2 * (col > 0) as usize);
+        }
+        writeln!(Console::new()).unwrap();
+    }
 }

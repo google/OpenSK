@@ -21,11 +21,9 @@ use super::rng256::Rng256;
 use super::{Hash256, HashBlockSize64Bytes};
 use alloc::vec;
 use alloc::vec::Vec;
-#[cfg(test)]
-use arrayref::array_mut_ref;
 #[cfg(feature = "std")]
-use arrayref::array_ref;
-use arrayref::mut_array_refs;
+use arrayref::array_mut_ref;
+use arrayref::{array_ref, mut_array_refs};
 use core::marker::PhantomData;
 
 pub const NBYTES: usize = int256::NBYTES;
@@ -166,6 +164,8 @@ impl SecKey {
 }
 
 impl Signature {
+    pub const BYTES_LENGTH: usize = 2 * int256::NBYTES;
+
     pub fn to_asn1_der(&self) -> Vec<u8> {
         const DER_INTEGER_TYPE: u8 = 0x02;
         const DER_DEF_LENGTH_SEQUENCE: u8 = 0x30;
@@ -193,34 +193,39 @@ impl Signature {
         encoding
     }
 
-    #[cfg(feature = "std")]
-    pub fn from_bytes(bytes: &[u8]) -> Option<Signature> {
-        if bytes.len() != 64 {
-            None
-        } else {
-            let r =
-                NonZeroExponentP256::from_int_checked(Int256::from_bin(array_ref![bytes, 0, 32]));
-            let s =
-                NonZeroExponentP256::from_int_checked(Int256::from_bin(array_ref![bytes, 32, 32]));
-            if bool::from(r.is_none()) || bool::from(s.is_none()) {
-                return None;
-            }
-            let r = r.unwrap();
-            let s = s.unwrap();
-            Some(Signature { r, s })
+    pub fn from_bytes(bytes: &[u8; Signature::BYTES_LENGTH]) -> Option<Signature> {
+        let r_bytes_ref = array_ref![bytes, 0, int256::NBYTES];
+        let r = NonZeroExponentP256::from_int_checked(Int256::from_bin(r_bytes_ref));
+        let s_bytes_ref = array_ref![bytes, int256::NBYTES, int256::NBYTES];
+        let s = NonZeroExponentP256::from_int_checked(Int256::from_bin(s_bytes_ref));
+        if bool::from(r.is_none()) || bool::from(s.is_none()) {
+            return None;
         }
+        let r = r.unwrap();
+        let s = s.unwrap();
+        Some(Signature { r, s })
     }
 
-    #[cfg(test)]
-    fn to_bytes(&self, bytes: &mut [u8; 64]) {
-        self.r.to_int().to_bin(array_mut_ref![bytes, 0, 32]);
-        self.s.to_int().to_bin(array_mut_ref![bytes, 32, 32]);
+    #[cfg(feature = "std")]
+    pub fn to_bytes(&self, bytes: &mut [u8; Signature::BYTES_LENGTH]) {
+        self.r
+            .to_int()
+            .to_bin(array_mut_ref![bytes, 0, int256::NBYTES]);
+        self.s
+            .to_int()
+            .to_bin(array_mut_ref![bytes, int256::NBYTES, int256::NBYTES]);
     }
 }
 
 impl PubKey {
     #[cfg(feature = "with_ctap1")]
     const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
+
+    /// Creates a new PubKey from its coordinates on the elliptic curve.
+    pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
+        PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
+            .map(|p| PubKey { p })
+    }
 
     #[cfg(feature = "std")]
     pub fn from_bytes_uncompressed(bytes: &[u8]) -> Option<PubKey> {
@@ -252,12 +257,8 @@ impl PubKey {
         self.p.gety().to_int().to_bin(y);
     }
 
-    #[cfg(feature = "std")]
-    pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
-    where
-        H: Hash256,
-    {
-        let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
+    pub fn verify_hash_vartime(&self, hash: &[u8; NBYTES], sign: &Signature) -> bool {
+        let m = ExponentP256::modn(Int256::from_bin(hash));
 
         let v = sign.s.inv();
         let u = &m * v.as_exponent();
@@ -266,6 +267,14 @@ impl PubKey {
         let u = self.p.points_mul(&u, v.as_exponent()).getx();
 
         ExponentP256::modn(u.to_int()) == *sign.r.as_exponent()
+    }
+
+    #[cfg(feature = "std")]
+    pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
+    where
+        H: Hash256,
+    {
+        self.verify_hash_vartime(&H::hash(msg), sign)
     }
 }
 
@@ -442,6 +451,21 @@ mod test {
         test_rfc6979(msg, k, r, s);
     }
 
+    /** Tests that sign and verify hashes are consistent **/
+    // Test that signed message hashes are correctly verified.
+    #[test]
+    fn test_sign_rfc6979_verify_hash_random() {
+        let mut rng = ThreadRng256 {};
+
+        for _ in 0..ITERATIONS {
+            let msg = rng.gen_uniform_u8x32();
+            let sk = SecKey::gensk(&mut rng);
+            let pk = sk.genpk();
+            let sign = sk.sign_rfc6979::<Sha256>(&msg);
+            assert!(pk.verify_hash_vartime(&Sha256::hash(&msg), &sign));
+        }
+    }
+
     /** Tests that sign and verify are consistent **/
     // Test that signed messages are correctly verified.
     #[test]
@@ -537,7 +561,8 @@ mod test {
             let sig_bytes = sig.as_ref();
 
             let pk = PubKey::from_bytes_uncompressed(public_key_bytes).unwrap();
-            let sign = Signature::from_bytes(sig_bytes).unwrap();
+            let sign =
+                Signature::from_bytes(array_ref![sig_bytes, 0, Signature::BYTES_LENGTH]).unwrap();
             assert!(pk.verify_vartime::<Sha256>(&msg_bytes, &sign));
         }
     }

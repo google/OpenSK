@@ -264,7 +264,7 @@ impl PubKey {
     /// Verifies if the data's hash matches its signature.
     ///
     /// This function is not a constant time implementation, and does not resist side channel
-    /// attacks. Only use if all data invovled is public knowledge.
+    /// attacks. Only use if all data involved is public knowledge.
     pub fn verify_hash_vartime(&self, hash: &[u8; NBYTES], sign: &Signature) -> bool {
         let m = ExponentP256::modn(Int256::from_bin(hash));
 

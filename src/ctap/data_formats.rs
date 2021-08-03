@@ -878,7 +878,7 @@ impl TryFrom<cbor::Value> for CoseSignature {
 
         let algorithm = SignatureAlgorithm::try_from(ok_or_missing(algorithm)?)?;
         let bytes = extract_byte_string(ok_or_missing(bytes)?)?;
-        if bytes.len() != 64 {
+        if bytes.len() != ecdsa::Signature::BYTES_LENGTH {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 

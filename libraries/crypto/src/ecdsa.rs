@@ -148,6 +148,7 @@ impl SecKey {
         }
     }
 
+    /// Creates a private key from the exponent's bytes, or None if checks fail.
     pub fn from_bytes(bytes: &[u8; 32]) -> Option<SecKey> {
         let k = NonZeroExponentP256::from_int_checked(Int256::from_bin(bytes));
         // The branching here is fine because all this reveals is whether the key was invalid.
@@ -158,6 +159,7 @@ impl SecKey {
         Some(SecKey { k })
     }
 
+    /// Writes a private key's exponent's bytes to the passed in array.
     pub fn to_bytes(&self, bytes: &mut [u8; 32]) {
         self.k.to_int().to_bin(bytes);
     }
@@ -166,6 +168,7 @@ impl SecKey {
 impl Signature {
     pub const BYTES_LENGTH: usize = 2 * int256::NBYTES;
 
+    /// Converts a signature to its ASN1 DER representation.
     pub fn to_asn1_der(&self) -> Vec<u8> {
         const DER_INTEGER_TYPE: u8 = 0x02;
         const DER_DEF_LENGTH_SEQUENCE: u8 = 0x30;
@@ -193,6 +196,7 @@ impl Signature {
         encoding
     }
 
+    /// Creates a signature from the exponents' bytes, or None if checks fail.
     pub fn from_bytes(bytes: &[u8; Signature::BYTES_LENGTH]) -> Option<Signature> {
         let r_bytes_ref = array_ref![bytes, 0, int256::NBYTES];
         let r = NonZeroExponentP256::from_int_checked(Int256::from_bin(r_bytes_ref));
@@ -257,6 +261,10 @@ impl PubKey {
         self.p.gety().to_int().to_bin(y);
     }
 
+    /// Verifies if the data's hash matches its signature.
+    ///
+    /// This function is not a constant time implementation, and does not resist side channel
+    /// attacks. Only use if all data invovled is public knowledge.
     pub fn verify_hash_vartime(&self, hash: &[u8; NBYTES], sign: &Signature) -> bool {
         let m = ExponentP256::modn(Int256::from_bin(hash));
 

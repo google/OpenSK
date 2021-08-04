@@ -21,8 +21,8 @@ use crate::ctap::customization::{
     NUM_PAGES,
 };
 use crate::ctap::data_formats::{
-    extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
-    PublicKeyCredentialUserEntity,
+    extract_array, extract_text_string, CoseKey, CredentialProtectionPolicy,
+    PublicKeyCredentialSource, PublicKeyCredentialUserEntity, UpgradeIdentifier,
 };
 use crate::ctap::key_material;
 use crate::ctap::status_code::Ctap2StatusCode;
@@ -570,6 +570,42 @@ impl PersistentStore {
         Ok(self.store.insert(key::AAGUID, aaguid)?)
     }
 
+    /// Returns the upgrade public key if defined for the identifier.
+    // TODO remove allow
+    #[allow(dead_code)]
+    pub fn upgrade_public_key(
+        &self,
+        identifier: UpgradeIdentifier,
+    ) -> Result<Option<CoseKey>, Ctap2StatusCode> {
+        let value = match identifier {
+            UpgradeIdentifier::A => self.store.find(key::UPGRADE_PUBLIC_KEY_A)?,
+            UpgradeIdentifier::B => self.store.find(key::UPGRADE_PUBLIC_KEY_B)?,
+        };
+        value
+            .map(|k| {
+                deserialize_cose_key(&k).ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+            })
+            .transpose()
+    }
+
+    /// Sets an upgrade public key.
+    ///
+    /// Overwrites an existing key for the given identifier.
+    // TODO remove allow
+    #[allow(dead_code)]
+    pub fn set_upgrade_public_key(
+        &mut self,
+        identifier: UpgradeIdentifier,
+        public_key: CoseKey,
+    ) -> Result<(), Ctap2StatusCode> {
+        let storage_key = match identifier {
+            UpgradeIdentifier::A => key::UPGRADE_PUBLIC_KEY_A,
+            UpgradeIdentifier::B => key::UPGRADE_PUBLIC_KEY_B,
+        };
+        let serialized_key = serialize_cose_key(public_key)?;
+        Ok(self.store.insert(storage_key, &serialized_key)?)
+    }
+
     /// Resets the store as for a CTAP reset.
     ///
     /// In particular persistent entries are not reset.
@@ -746,6 +782,19 @@ fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
 fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;
+    Ok(data)
+}
+
+/// Deserializes a COSE key from storage representation.
+fn deserialize_cose_key(data: &[u8]) -> Option<CoseKey> {
+    let cbor = super::cbor_read(data).ok()?;
+    cbor.try_into().ok()
+}
+
+/// Serializes a COSE key to storage representation.
+fn serialize_cose_key(cose_key: CoseKey) -> Result<Vec<u8>, Ctap2StatusCode> {
+    let mut data = Vec::new();
+    super::cbor_write(cose_key.into(), &mut data)?;
     Ok(data)
 }
 
@@ -1130,7 +1179,7 @@ mod test {
         let mut rng = ThreadRng256 {};
         let mut persistent_store = PersistentStore::new(&mut rng);
 
-        // Make sure the attestation are absent. There is no batch attestation in tests.
+        // Make sure the attestation and upgrade are absent. There is no batch attestation in tests.
         assert!(persistent_store
             .attestation_private_key()
             .unwrap()
@@ -1139,15 +1188,29 @@ mod test {
             .attestation_certificate()
             .unwrap()
             .is_none());
+        assert!(persistent_store
+            .upgrade_public_key(UpgradeIdentifier::A)
+            .unwrap()
+            .is_none());
+        assert!(persistent_store
+            .upgrade_public_key(UpgradeIdentifier::B)
+            .unwrap()
+            .is_none());
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         let dummy_cert = [0xddu8; 20];
+        let dummy_identifier = UpgradeIdentifier::A;
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let dummy_upgrade_key = CoseKey::from(private_key.genpk());
         persistent_store
             .set_attestation_private_key(&dummy_key)
             .unwrap();
         persistent_store
             .set_attestation_certificate(&dummy_cert)
+            .unwrap();
+        persistent_store
+            .set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
             .unwrap();
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
@@ -1161,7 +1224,54 @@ mod test {
             persistent_store.attestation_certificate().unwrap().unwrap(),
             &dummy_cert
         );
+        assert_eq!(
+            persistent_store
+                .upgrade_public_key(dummy_identifier)
+                .unwrap()
+                .unwrap(),
+            dummy_upgrade_key
+        );
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
+    }
+
+    #[test]
+    fn test_upgrade_keys() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+
+        let dummy_identifier = UpgradeIdentifier::A;
+        let old_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let old_upgrade_key = CoseKey::from(old_private_key.genpk());
+        persistent_store
+            .set_upgrade_public_key(dummy_identifier, old_upgrade_key)
+            .unwrap();
+        let other_identifier = UpgradeIdentifier::B;
+        let other_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let other_upgrade_key = CoseKey::from(other_private_key.genpk());
+        persistent_store
+            .set_upgrade_public_key(other_identifier, other_upgrade_key.clone())
+            .unwrap();
+
+        let dummy_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let dummy_upgrade_key = CoseKey::from(dummy_private_key.genpk());
+        persistent_store
+            .set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
+            .unwrap();
+
+        assert_eq!(
+            &persistent_store
+                .upgrade_public_key(dummy_identifier)
+                .unwrap()
+                .unwrap(),
+            &dummy_upgrade_key
+        );
+        assert_eq!(
+            &persistent_store
+                .upgrade_public_key(other_identifier)
+                .unwrap()
+                .unwrap(),
+            &other_upgrade_key
+        );
     }
 
     #[test]

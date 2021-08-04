@@ -48,4 +48,9 @@ pub trait UpgradeStorage {
     ///
     /// Returns [`StorageError::OutOfBounds`] if the data is too long to fit the metadata storage.
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()>;
+
+    /// Returns an identifier for these upgrade locations.
+    ///
+    /// We currently use the offset of the partition.
+    fn identifier(&self) -> usize;
 }

@@ -19,6 +19,9 @@ mod helper;
 mod syscall;
 mod upgrade_storage;
 
+pub const PARTITION_A_IDENTIFIER: u32 = 0x20000;
+pub const PARTITION_B_IDENTIFIER: u32 = 0x60000;
+
 pub use upgrade_storage::UpgradeStorage;
 
 /// Definitions for production.

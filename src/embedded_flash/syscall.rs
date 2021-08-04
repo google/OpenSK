@@ -324,4 +324,8 @@ impl UpgradeStorage for SyscallUpgradeStorage {
             Err(StorageError::OutOfBounds)
         }
     }
+
+    fn identifier(&self) -> usize {
+        self.partition.start()
+    }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
+use crate::embedded_flash;
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -1159,6 +1160,28 @@ impl From<CredentialManagementSubCommandParameters> for cbor::Value {
     }
 }
 
+/// Translates a the partition identifier for an upgrade to A or B.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+#[repr(u32)]
+pub enum UpgradeIdentifier {
+    A = embedded_flash::PARTITION_A_IDENTIFIER,
+    B = embedded_flash::PARTITION_B_IDENTIFIER,
+}
+
+impl TryFrom<cbor::Value> for UpgradeIdentifier {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        let identifier = extract_unsigned(cbor_value)?;
+        match identifier as u32 {
+            embedded_flash::PARTITION_A_IDENTIFIER => Ok(UpgradeIdentifier::A),
+            embedded_flash::PARTITION_B_IDENTIFIER => Ok(UpgradeIdentifier::B),
+            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        }
+    }
+}
+
 pub(super) fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Unsigned(unsigned) => Ok(unsigned),
@@ -2197,5 +2220,26 @@ mod test {
         assert!(PublicKeyCredentialSource::try_from(cbor_false!()).is_err());
         assert!(PublicKeyCredentialSource::try_from(cbor_array!(false)).is_err());
         assert!(PublicKeyCredentialSource::try_from(cbor_array!(b"foo".to_vec())).is_err());
+    }
+
+    #[test]
+    fn test_from_into_upgrade_identifier() {
+        let cbor_upgrade_identifier: cbor::Value =
+            cbor_int!(embedded_flash::PARTITION_A_IDENTIFIER as i64);
+        assert_eq!(
+            UpgradeIdentifier::try_from(cbor_upgrade_identifier),
+            Ok(UpgradeIdentifier::A)
+        );
+        let cbor_upgrade_identifier: cbor::Value =
+            cbor_int!(embedded_flash::PARTITION_B_IDENTIFIER as i64);
+        assert_eq!(
+            UpgradeIdentifier::try_from(cbor_upgrade_identifier),
+            Ok(UpgradeIdentifier::B)
+        );
+        let cbor_upgrade_identifier: cbor::Value = cbor_int!(0x12345678);
+        assert_eq!(
+            UpgradeIdentifier::try_from(cbor_upgrade_identifier),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 }

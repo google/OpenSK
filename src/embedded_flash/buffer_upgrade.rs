@@ -74,4 +74,8 @@ impl UpgradeStorage for BufferUpgradeStorage {
             Err(StorageError::OutOfBounds)
         }
     }
+
+    fn identifier(&self) -> usize {
+        0x60000
+    }
 }

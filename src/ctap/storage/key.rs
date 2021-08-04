@@ -70,6 +70,12 @@ make_partition! {
     /// The aaguid.
     AAGUID = 3;
 
+    /// The upgrade public key for partition A.
+    UPGRADE_PUBLIC_KEY_A = 4;
+
+    /// The upgrade public key for partition B.
+    UPGRADE_PUBLIC_KEY_B = 5;
+
     // This is the persistent key limit:
     // - When adding a (persistent) key above this message, make sure its value is smaller than
     //   NUM_PERSISTENT_KEYS.

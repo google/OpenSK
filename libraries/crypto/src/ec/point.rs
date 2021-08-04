@@ -120,7 +120,6 @@ impl PointP256 {
     }
 
     // Computes n1*G + n2*self
-    #[cfg(feature = "std")]
     pub fn points_mul(&self, n1: &ExponentP256, n2: &ExponentP256) -> PointP256 {
         let p = self.to_affine();
         let p1 = PointProjective::scalar_base_mul(n1);

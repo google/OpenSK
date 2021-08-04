@@ -1941,6 +1941,14 @@ mod test {
     fn test_cose_signature_wrong_signature_length() {
         let cbor_value = cbor_map! {
             "alg" => ES256_ALGORITHM,
+            "signature" => [0; ecdsa::Signature::BYTES_LENGTH - 1],
+        };
+        assert_eq!(
+            CoseSignature::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        let cbor_value = cbor_map! {
+            "alg" => ES256_ALGORITHM,
             "signature" => [0; ecdsa::Signature::BYTES_LENGTH + 1],
         };
         assert_eq!(

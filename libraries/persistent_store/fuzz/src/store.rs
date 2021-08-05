@@ -33,7 +33,14 @@ use std::convert::TryInto;
 ///
 /// The entropy to generate the sequence of manipulation should be provided in `data`. Debugging
 /// information is printed if `debug` is set. Statistics are gathered if `stats` is set.
-pub fn fuzz(data: &[u8], debug: bool, stats: Option<&mut Stats>) {
+pub fn fuzz(mut data: &[u8], debug: bool, stats: Option<&mut Stats>) {
+    // We limit the input size to avoid timeouts in oss-fuzz because they use inputs of arbitrary
+    // length and timeout after 1 minute. By default, libFuzzer has a maximum length of 4096 bytes.
+    // So we just use some number above 4096 bytes and below 1 minute (might need adjustments).
+    const MAX_DATA_LEN: usize = 10000;
+    if data.len() > MAX_DATA_LEN {
+        data = &data[..MAX_DATA_LEN];
+    }
     let mut fuzzer = Fuzzer::new(data, debug, stats);
     let mut driver = fuzzer.init();
     let store = loop {

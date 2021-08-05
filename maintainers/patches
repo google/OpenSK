@@ -1,0 +1,82 @@
+#!/bin/zsh
+
+PROGRAM=$0
+
+success() {
+  echo "\e[1;32mDone:\e[m $1"
+  exit 0
+}
+
+fail() {
+  echo "\e[1;31mError:\e[m $1"
+  exit 1
+}
+
+help() {
+  cat <<EOF
+Usage: $PROGRAM {apply|save}
+
+  apply       Applies the patches to the Tock submodule.
+  save        Saves the Tock submodule to the patches.
+EOF
+  exit 0
+}
+
+commit() {
+  local message=$1
+  git add .
+  git commit -qm$message
+}
+
+get_root() {
+  git ls-tree HEAD:third_party | sed -n 's/^.* \([^ ]\+\)\ttock$/\1/p'
+}
+
+get_head() {
+  git rev-parse HEAD
+}
+
+apply() {
+  git submodule -q update third_party/tock
+  ( cd third_party/tock
+    git reset -q --hard
+    git clean -qfxd
+    rsync -a ../../boards .
+    commit '00-boards'
+    for file in ../../patches/tock/*; do
+      patch -sp1 < $file
+      commit "${${file#../../patches/tock/}%.patch}"
+    done
+  )
+  success 'Applied the patches to the Tock submodule.'
+}
+
+save() {
+  local root=$(get_root)
+  ( cd third_party/tock
+    [[ -z "$(git status -s)" ]] || fail 'The Tock submodule is not clean.'
+    rm ../../patches/tock/*.patch
+    for file in $(git format-patch $root); do
+      sed -n '/^diff/,$p' $file | head -n-3 > ../../patches/tock/${file#*-}
+    done
+    git clean -qfxd
+    top=$(get_head)
+    git checkout -q $root
+    rm -r boards
+    patch -sp1 < ../../patches/tock/00-boards.patch
+    rm ../../patches/tock/00-boards.patch
+    rsync -a --delete boards ../..
+    git reset -q --hard
+    git clean -qfxd
+    git checkout -q $top
+  ) || exit
+  success 'Saved the Tock submodule to the patches.'
+}
+
+[[ $(basename $PWD) == OpenSK ]] || fail 'Not running from OpenSK directory.'
+[[ $# -eq 1 ]] || help
+case $1 in
+  apply) apply ;;
+  save) save ;;
+  *) fail 'Unexpected argument. Run without argument for help.' ;;
+esac

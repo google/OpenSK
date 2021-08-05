@@ -17,7 +17,13 @@ help() {
 Usage: $PROGRAM {apply|save}
 
   apply       Applies the patches to the Tock submodule.
+              This resets Tock and can always be called.
+
   save        Saves the Tock submodule to the patches.
+              Should only be called after apply and when all changes have been
+              added to a commit. After saving, you can run ./setup.sh to return
+              to normal state. Otherwise you can continue editing Tock and
+              calling save.
 EOF
   exit 0
 }

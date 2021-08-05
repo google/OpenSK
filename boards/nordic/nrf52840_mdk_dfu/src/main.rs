@@ -268,7 +268,13 @@ pub unsafe fn reset_handler() {
         nrf52840::nvmc::SyscallDriver::new(
             &nrf52840::nvmc::NVMC,
             board_kernel.create_grant(&memory_allocation_capability),
+            dynamic_deferred_caller,
         )
+    );
+    nvmc.set_deferred_handle(
+        dynamic_deferred_caller
+            .register(nvmc)
+            .expect("no deferred call slot available for nvmc"),
     );
 
     // Configure USB controller

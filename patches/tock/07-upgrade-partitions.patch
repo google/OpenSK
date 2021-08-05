@@ -1,5 +1,5 @@
 diff --git a/boards/nordic/nrf52840_dongle_opensk/src/main.rs b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
-index 051943867..e38898c3b 100644
+index 3e35f7e90..b624e19a2 100644
 --- a/boards/nordic/nrf52840_dongle_opensk/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
 @@ -64,6 +64,7 @@ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROC
@@ -11,7 +11,7 @@ index 051943867..e38898c3b 100644
  
  // Static reference to chip for panic dumps
 diff --git a/boards/nordic/nrf52840_mdk_dfu/src/main.rs b/boards/nordic/nrf52840_mdk_dfu/src/main.rs
-index daaeaedc7..c4b0afee9 100644
+index 25bd61460..84c7cff70 100644
 --- a/boards/nordic/nrf52840_mdk_dfu/src/main.rs
 +++ b/boards/nordic/nrf52840_mdk_dfu/src/main.rs
 @@ -59,6 +59,7 @@ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROC

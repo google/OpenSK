@@ -30,7 +30,7 @@ jobs:
       - name: Use sample cryptographic material
         run: rm -R crypto_data/ && cp -r reproducible/sample_crypto_data crypto_data
       - name: Computing cryptographic hashes
-        run: ./reproduce_hashes.sh
+        run: ./maintainers/reproduce_hashes.sh
 
       - name: Upload reproduced binaries
         uses: actions/upload-artifact@v1

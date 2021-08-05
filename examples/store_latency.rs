@@ -182,10 +182,10 @@ fn main() {
 
     // Results on nrf52840dk_opensk:
     // Pages  Overwrite    Length      Boot  Compaction   Insert  Remove
-    //     3         no  50 words    4.7 ms    135.5 ms   6.9 ms  2.7 ms
-    //    20         no  50 words   16.7 ms    141.7 ms  18.6 ms  8.5 ms
-    //     3        yes   1 words   33.7 ms     97.7 ms   9.5 ms  4.8 ms
-    //    20        yes   1 words  338.3 ms     97.7 ms   9.7 ms  4.8 ms
+    //     3         no  50 words    5.3 ms    141.9 ms   8.0 ms  3.3 ms
+    //    20         no  50 words   18.7 ms    148.6 ms   21.0 ms 9.8 ms
+    //     3        yes   1 words   37.8 ms    100.2 ms   11.3 ms 5.5 ms
+    //    20        yes   1 words  336.5 ms    100.3 ms   11.5 ms 5.6 ms
 }
 
 fn align(x: &str, n: usize) {

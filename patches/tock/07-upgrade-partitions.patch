@@ -23,7 +23,7 @@ index daaeaedc7..c4b0afee9 100644
  
  // Static reference to chip for panic dumps
 diff --git a/boards/nordic/nrf52840dk_opensk/src/main.rs b/boards/nordic/nrf52840dk_opensk/src/main.rs
-index 7898562dd..2443cae8a 100644
+index 05e19b821..47b27bf0a 100644
 --- a/boards/nordic/nrf52840dk_opensk/src/main.rs
 +++ b/boards/nordic/nrf52840dk_opensk/src/main.rs
 @@ -128,6 +128,7 @@ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROC

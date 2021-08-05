@@ -15,10 +15,15 @@
 use super::helper::{find_slice, is_aligned, ModRange};
 use super::upgrade_storage::UpgradeStorage;
 use alloc::vec::Vec;
-use libtock_core::syscalls;
+use core::cell::Cell;
+use libtock_core::{callback, syscalls};
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const DRIVER_NUMBER: usize = 0x50003;
+
+mod subscribe_nr {
+    pub const DONE: usize = 0;
+}
 
 mod command_nr {
     pub const GET_INFO: usize = 1;
@@ -63,6 +68,31 @@ fn memop(nr: u32, arg: usize) -> StorageResult<usize> {
     }
 }
 
+fn block_command(driver: usize, cmd: usize, arg1: usize, arg2: usize) -> StorageResult<()> {
+    let done = Cell::new(None);
+    let mut alarm = |status| done.set(Some(status));
+    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+        DRIVER_NUMBER,
+        subscribe_nr::DONE,
+        &mut alarm,
+    );
+    if subscription.is_err() {
+        return Err(StorageError::CustomError);
+    }
+
+    let code = syscalls::command(driver, cmd, arg1, arg2);
+    if code.is_err() {
+        return Err(StorageError::CustomError);
+    }
+
+    libtock_drivers::util::yieldk_for(|| done.get().is_some());
+    if done.get().unwrap() == 0 {
+        Ok(())
+    } else {
+        Err(StorageError::CustomError)
+    }
+}
+
 fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
     let code = unsafe {
         syscalls::raw::allow(
@@ -78,20 +108,11 @@ fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
         return Err(StorageError::CustomError);
     }
 
-    let code = syscalls::command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len());
-    if code.is_err() {
-        return Err(StorageError::CustomError);
-    }
-
-    Ok(())
+    block_command(DRIVER_NUMBER, command_nr::WRITE_SLICE, ptr, value.len())
 }
 
 fn erase_page(ptr: usize, page_length: usize) -> StorageResult<()> {
-    let code = syscalls::command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, page_length);
-    if code.is_err() {
-        return Err(StorageError::CustomError);
-    }
-    Ok(())
+    block_command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, page_length)
 }
 
 pub struct SyscallStorage {

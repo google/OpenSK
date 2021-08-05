@@ -19,8 +19,11 @@ mod helper;
 mod syscall;
 mod upgrade_storage;
 
-pub const PARTITION_A_IDENTIFIER: u32 = 0x20000;
-pub const PARTITION_B_IDENTIFIER: u32 = 0x60000;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UpgradeIdentifier {
+    A = 0,
+    B = 1,
+}
 
 pub use upgrade_storage::UpgradeStorage;
 

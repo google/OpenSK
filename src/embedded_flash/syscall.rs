@@ -14,6 +14,7 @@
 
 use super::helper::{find_slice, is_aligned, ModRange};
 use super::upgrade_storage::UpgradeStorage;
+use super::UpgradeIdentifier;
 use alloc::vec::Vec;
 use libtock_core::syscalls;
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
@@ -37,6 +38,7 @@ mod allow_nr {
 }
 
 mod memop_nr {
+    pub const FLASH_START: u32 = 4;
     pub const STORAGE_CNT: u32 = 12;
     pub const STORAGE_PTR: u32 = 13;
     pub const STORAGE_LEN: u32 = 14;
@@ -205,6 +207,7 @@ impl Storage for SyscallStorage {
 
 pub struct SyscallUpgradeStorage {
     page_size: usize,
+    identifier: UpgradeIdentifier,
     partition: ModRange,
     metadata: ModRange,
 }
@@ -227,6 +230,7 @@ impl SyscallUpgradeStorage {
     pub fn new() -> StorageResult<SyscallUpgradeStorage> {
         let mut locations = SyscallUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
+            identifier: UpgradeIdentifier::A,
             partition: ModRange::new_empty(),
             metadata: ModRange::new_empty(),
         };
@@ -262,10 +266,13 @@ impl SyscallUpgradeStorage {
             };
         }
         if locations.partition.is_empty() || locations.metadata.is_empty() {
-            Err(StorageError::CustomError)
-        } else {
-            Ok(locations)
+            return Err(StorageError::CustomError);
         }
+        let own_address = memop(memop_nr::FLASH_START, 0)?;
+        if own_address < locations.partition.start() {
+            locations.identifier = UpgradeIdentifier::B;
+        }
+        Ok(locations)
     }
 
     fn is_page_aligned(&self, x: usize) -> bool {
@@ -303,6 +310,10 @@ impl UpgradeStorage for SyscallUpgradeStorage {
         }
     }
 
+    fn partition_address(&self) -> usize {
+        self.partition.start()
+    }
+
     fn partition_length(&self) -> usize {
         self.partition.length()
     }
@@ -325,7 +336,7 @@ impl UpgradeStorage for SyscallUpgradeStorage {
         }
     }
 
-    fn identifier(&self) -> usize {
-        self.partition.start()
+    fn identifier(&self) -> UpgradeIdentifier {
+        self.identifier
     }
 }

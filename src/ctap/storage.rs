@@ -22,12 +22,12 @@ use crate::ctap::customization::{
 };
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CoseKey, CredentialProtectionPolicy,
-    PublicKeyCredentialSource, PublicKeyCredentialUserEntity, UpgradeIdentifier,
+    PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
 use crate::ctap::key_material;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
-use crate::embedded_flash::{new_storage, Storage};
+use crate::embedded_flash::{new_storage, Storage, UpgradeIdentifier};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -571,19 +571,17 @@ impl PersistentStore {
     }
 
     /// Returns the upgrade public key if defined for the identifier.
-    // TODO remove allow
-    #[allow(dead_code)]
-    pub fn upgrade_public_key(
+    pub fn _upgrade_public_key(
         &self,
         identifier: UpgradeIdentifier,
     ) -> Result<Option<CoseKey>, Ctap2StatusCode> {
         let value = match identifier {
-            UpgradeIdentifier::A => self.store.find(key::UPGRADE_PUBLIC_KEY_A)?,
-            UpgradeIdentifier::B => self.store.find(key::UPGRADE_PUBLIC_KEY_B)?,
+            UpgradeIdentifier::A => self.store.find(key::_UPGRADE_PUBLIC_KEY_A)?,
+            UpgradeIdentifier::B => self.store.find(key::_UPGRADE_PUBLIC_KEY_B)?,
         };
         value
             .map(|k| {
-                deserialize_cose_key(&k).ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+                _deserialize_cose_key(&k).ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
             })
             .transpose()
     }
@@ -591,18 +589,16 @@ impl PersistentStore {
     /// Sets an upgrade public key.
     ///
     /// Overwrites an existing key for the given identifier.
-    // TODO remove allow
-    #[allow(dead_code)]
-    pub fn set_upgrade_public_key(
+    pub fn _set_upgrade_public_key(
         &mut self,
         identifier: UpgradeIdentifier,
         public_key: CoseKey,
     ) -> Result<(), Ctap2StatusCode> {
         let storage_key = match identifier {
-            UpgradeIdentifier::A => key::UPGRADE_PUBLIC_KEY_A,
-            UpgradeIdentifier::B => key::UPGRADE_PUBLIC_KEY_B,
+            UpgradeIdentifier::A => key::_UPGRADE_PUBLIC_KEY_A,
+            UpgradeIdentifier::B => key::_UPGRADE_PUBLIC_KEY_B,
         };
-        let serialized_key = serialize_cose_key(public_key)?;
+        let serialized_key = _serialize_cose_key(public_key)?;
         Ok(self.store.insert(storage_key, &serialized_key)?)
     }
 
@@ -786,13 +782,13 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 }
 
 /// Deserializes a COSE key from storage representation.
-fn deserialize_cose_key(data: &[u8]) -> Option<CoseKey> {
+fn _deserialize_cose_key(data: &[u8]) -> Option<CoseKey> {
     let cbor = super::cbor_read(data).ok()?;
     cbor.try_into().ok()
 }
 
 /// Serializes a COSE key to storage representation.
-fn serialize_cose_key(cose_key: CoseKey) -> Result<Vec<u8>, Ctap2StatusCode> {
+fn _serialize_cose_key(cose_key: CoseKey) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     super::cbor_write(cose_key.into(), &mut data)?;
     Ok(data)
@@ -1189,11 +1185,11 @@ mod test {
             .unwrap()
             .is_none());
         assert!(persistent_store
-            .upgrade_public_key(UpgradeIdentifier::A)
+            ._upgrade_public_key(UpgradeIdentifier::A)
             .unwrap()
             .is_none());
         assert!(persistent_store
-            .upgrade_public_key(UpgradeIdentifier::B)
+            ._upgrade_public_key(UpgradeIdentifier::B)
             .unwrap()
             .is_none());
 
@@ -1210,7 +1206,7 @@ mod test {
             .set_attestation_certificate(&dummy_cert)
             .unwrap();
         persistent_store
-            .set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
+            ._set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
             .unwrap();
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
@@ -1226,7 +1222,7 @@ mod test {
         );
         assert_eq!(
             persistent_store
-                .upgrade_public_key(dummy_identifier)
+                ._upgrade_public_key(dummy_identifier)
                 .unwrap()
                 .unwrap(),
             dummy_upgrade_key
@@ -1243,31 +1239,31 @@ mod test {
         let old_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let old_upgrade_key = CoseKey::from(old_private_key.genpk());
         persistent_store
-            .set_upgrade_public_key(dummy_identifier, old_upgrade_key)
+            ._set_upgrade_public_key(dummy_identifier, old_upgrade_key)
             .unwrap();
         let other_identifier = UpgradeIdentifier::B;
         let other_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let other_upgrade_key = CoseKey::from(other_private_key.genpk());
         persistent_store
-            .set_upgrade_public_key(other_identifier, other_upgrade_key.clone())
+            ._set_upgrade_public_key(other_identifier, other_upgrade_key.clone())
             .unwrap();
 
         let dummy_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let dummy_upgrade_key = CoseKey::from(dummy_private_key.genpk());
         persistent_store
-            .set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
+            ._set_upgrade_public_key(dummy_identifier, dummy_upgrade_key.clone())
             .unwrap();
 
         assert_eq!(
             &persistent_store
-                .upgrade_public_key(dummy_identifier)
+                ._upgrade_public_key(dummy_identifier)
                 .unwrap()
                 .unwrap(),
             &dummy_upgrade_key
         );
         assert_eq!(
             &persistent_store
-                .upgrade_public_key(other_identifier)
+                ._upgrade_public_key(other_identifier)
                 .unwrap()
                 .unwrap(),
             &other_upgrade_key
@@ -1493,5 +1489,16 @@ mod test {
         let serialized = serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
         let reconstructed = deserialize_min_pin_length_rp_ids(&serialized).unwrap();
         assert_eq!(rp_ids, reconstructed);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_cose_key() {
+        let mut rng = ThreadRng256 {};
+        let private_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let public_key = private_key.genpk();
+        let cose_key = CoseKey::from(public_key);
+        let serialized = _serialize_cose_key(cose_key.clone()).unwrap();
+        let reconstructed = _deserialize_cose_key(&serialized).unwrap();
+        assert_eq!(cose_key, reconstructed);
     }
 }

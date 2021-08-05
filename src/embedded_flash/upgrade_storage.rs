@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::UpgradeIdentifier;
 use persistent_store::StorageResult;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
@@ -34,6 +35,9 @@ pub trait UpgradeStorage {
     /// Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()>;
 
+    /// Returns the address of the partition.
+    fn partition_address(&self) -> usize;
+
     /// Returns the length of the partition.
     fn partition_length(&self) -> usize;
 
@@ -49,8 +53,6 @@ pub trait UpgradeStorage {
     /// Returns [`StorageError::OutOfBounds`] if the data is too long to fit the metadata storage.
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()>;
 
-    /// Returns an identifier for these upgrade locations.
-    ///
-    /// We currently use the offset of the partition.
-    fn identifier(&self) -> usize;
+    /// Returns the identifier for these upgrade locations.
+    fn identifier(&self) -> UpgradeIdentifier;
 }

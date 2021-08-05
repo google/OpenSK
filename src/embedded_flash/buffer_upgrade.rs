@@ -14,6 +14,7 @@
 
 use super::helper::ModRange;
 use super::upgrade_storage::UpgradeStorage;
+use super::UpgradeIdentifier;
 use alloc::boxed::Box;
 use persistent_store::{StorageError, StorageResult};
 
@@ -57,6 +58,10 @@ impl UpgradeStorage for BufferUpgradeStorage {
         }
     }
 
+    fn partition_address(&self) -> usize {
+        0x60000
+    }
+
     fn partition_length(&self) -> usize {
         PARTITION_LENGTH
     }
@@ -75,7 +80,7 @@ impl UpgradeStorage for BufferUpgradeStorage {
         }
     }
 
-    fn identifier(&self) -> usize {
-        0x60000
+    fn identifier(&self) -> UpgradeIdentifier {
+        UpgradeIdentifier::B
     }
 }

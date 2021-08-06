@@ -42,6 +42,11 @@ Usage: ${PROGRAM} {apply|save}
               return to normal state. Otherwise you can continue editing Tock
               and calling save.
 
+  restore     Restores the Tock submodule to its normal state regardless of its
+              state. As a consequence this can always be called to get to a
+              clean state but may result in data loss if there are unsaved
+              changes.
+
 Example:
 
   1. Enter the edit state from the normal state:
@@ -71,7 +76,7 @@ Example:
 
   6. Either continue repeating steps 2 to 5, or return to the normal state:
 
-    ./setup.sh
+    ${PROGRAM} restore
 EOF
   exit 0
 }
@@ -90,7 +95,6 @@ apply() {
       commit "$(basename "${file}" .patch)"
     done
   )
-  success 'Applied the patches to the Tock submodule.'
 }
 
 save() {
@@ -115,14 +119,25 @@ save() {
     git clean -qfxd
     git checkout -q "${top}"
   )
-  success 'Saved the Tock submodule to the patches.'
 }
 
 grep -q third_party/tock .gitmodules 2>/dev/null \
   || fail 'Not running from OpenSK directory.'
 [[ $# -eq 1 ]] || help
 case $1 in
-  apply) apply ;;
-  save) save ;;
+  apply)
+    apply
+    success 'Applied the patches to the Tock submodule.'
+    ;;
+  save)
+    save
+    success 'Saved the Tock submodule to the patches.'
+    ;;
+  restore)
+    # Ovewrite the commit function to do nothing.
+    commit() { true; }
+    apply
+    success 'Restored the Tock submodule.'
+    ;;
   *) fail 'Unexpected argument. Run without argument for help.' ;;
 esac

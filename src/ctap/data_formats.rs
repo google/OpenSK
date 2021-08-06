@@ -17,6 +17,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::TryFrom;
+use core::fmt;
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
@@ -722,12 +723,18 @@ impl TryFrom<cbor::Value> for CoseKey {
             } = extract_map(cbor_value)?;
         }
 
+        let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
+        let nbytes = match algorithm {
+            CoseKey::ECDH_ALGORITHM => ecdh::NBYTES,
+            ES256_ALGORITHM => ecdsa::NBYTES,
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+        };
         let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
-        if x_bytes.len() != ecdh::NBYTES {
+        if x_bytes.len() != nbytes {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let y_bytes = extract_byte_string(ok_or_missing(y_bytes)?)?;
-        if y_bytes.len() != ecdh::NBYTES {
+        if y_bytes.len() != nbytes {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let curve = extract_integer(ok_or_missing(curve)?)?;
@@ -736,10 +743,6 @@ impl TryFrom<cbor::Value> for CoseKey {
         }
         let key_type = extract_integer(ok_or_missing(key_type)?)?;
         if key_type != CoseKey::EC2_KEY_TYPE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
-        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
 
@@ -814,6 +817,87 @@ impl TryFrom<CoseKey> for ecdh::PubKey {
         }
         ecdh::PubKey::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+    }
+}
+
+impl TryFrom<CoseKey> for ecdsa::PubKey {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
+        let CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm,
+        } = cose_key;
+
+        if algorithm != ES256_ALGORITHM {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        ecdsa::PubKey::from_coordinates(&x_bytes, &y_bytes)
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+    }
+}
+
+/// Data structure for receiving a signature.
+///
+/// See https://datatracker.ietf.org/doc/html/rfc8152#appendix-C.1.1 for reference.
+///
+/// TODO derive Debug and PartialEq with compiler version 1.47
+#[derive(Clone)]
+pub struct CoseSignature {
+    pub algorithm: SignatureAlgorithm,
+    pub bytes: [u8; ecdsa::Signature::BYTES_LENGTH],
+}
+
+impl fmt::Debug for CoseSignature {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter
+            .debug_struct("CoseSignature")
+            .field("algorithm", &self.algorithm)
+            .field("bytes", &self.bytes.to_vec())
+            .finish()
+    }
+}
+
+impl PartialEq for CoseSignature {
+    fn eq(&self, other: &CoseSignature) -> bool {
+        self.algorithm == other.algorithm && self.bytes[..] == other.bytes[..]
+    }
+}
+
+impl TryFrom<cbor::Value> for CoseSignature {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                "alg" => algorithm,
+                "signature" => bytes,
+            } = extract_map(cbor_value)?;
+        }
+
+        let algorithm = SignatureAlgorithm::try_from(ok_or_missing(algorithm)?)?;
+        let bytes = extract_byte_string(ok_or_missing(bytes)?)?;
+        if bytes.len() != ecdsa::Signature::BYTES_LENGTH {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+
+        Ok(CoseSignature {
+            algorithm,
+            bytes: *array_ref![bytes.as_slice(), 0, ecdsa::Signature::BYTES_LENGTH],
+        })
+    }
+}
+
+impl TryFrom<CoseSignature> for ecdsa::Signature {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cose_signature: CoseSignature) -> Result<Self, Ctap2StatusCode> {
+        match cose_signature.algorithm {
+            SignatureAlgorithm::ES256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
+                .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+            SignatureAlgorithm::Unknown => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+        }
     }
 }
 
@@ -1147,6 +1231,7 @@ mod test {
         cbor_text, cbor_unsigned,
     };
     use crypto::rng256::{Rng256, ThreadRng256};
+    use crypto::sha256::Sha256;
 
     #[test]
     fn test_extract_unsigned() {
@@ -1812,6 +1897,64 @@ mod test {
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
+    }
+
+    #[test]
+    fn test_from_into_cose_signature() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
+        let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        dummy_signature.to_bytes(&mut bytes);
+        let cbor_value = cbor_map! {
+            "alg" => ES256_ALGORITHM,
+            "signature" => bytes,
+        };
+        let cose_signature = CoseSignature::try_from(cbor_value).unwrap();
+        let created_signature = crypto::ecdsa::Signature::try_from(cose_signature).unwrap();
+        let mut created_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        created_signature.to_bytes(&mut created_bytes);
+        assert_eq!(bytes[..], created_bytes[..]);
+    }
+
+    #[test]
+    fn test_cose_signature_wrong_algorithm() {
+        let mut rng = ThreadRng256 {};
+        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
+        let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        dummy_signature.to_bytes(&mut bytes);
+        let cbor_value = cbor_map! {
+            "alg" => -1, // unused algorithm
+            "signature" => bytes,
+        };
+        let cose_signature = CoseSignature::try_from(cbor_value).unwrap();
+        let created_signature = crypto::ecdsa::Signature::try_from(cose_signature);
+        // Can not compare directly, since ecdsa::Signature does not implement Debug.
+        assert_eq!(
+            created_signature.err(),
+            Some(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+    }
+
+    #[test]
+    fn test_cose_signature_wrong_signature_length() {
+        let cbor_value = cbor_map! {
+            "alg" => ES256_ALGORITHM,
+            "signature" => [0; ecdsa::Signature::BYTES_LENGTH - 1],
+        };
+        assert_eq!(
+            CoseSignature::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        let cbor_value = cbor_map! {
+            "alg" => ES256_ALGORITHM,
+            "signature" => [0; ecdsa::Signature::BYTES_LENGTH + 1],
+        };
+        assert_eq!(
+            CoseSignature::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 
     #[test]

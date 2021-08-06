@@ -741,14 +741,11 @@ where
                 .attestation_certificate()?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             (
-                attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
+                attestation_key.sign_rfc6979::<Sha256>(&signature_data),
                 Some(vec![attestation_certificate]),
             )
         } else {
-            (
-                sk.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data),
-                None,
-            )
+            (sk.sign_rfc6979::<Sha256>(&signature_data), None)
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,
@@ -829,7 +826,7 @@ where
         signature_data.extend(client_data_hash);
         let signature = credential
             .private_key
-            .sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+            .sign_rfc6979::<Sha256>(&signature_data);
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,

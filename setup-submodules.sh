@@ -43,7 +43,7 @@ echo $done_text
 # Apply patches to kernel. Do that in a sub-shell.
 (
   cd third_party/tock/ && \
-  for p in ../../patches/tock/[0-9][0-9]-*.patch
+  for p in ../../patches/tock/*.patch
   do
     echo -n '[-] Applying patch "'$(basename $p)'"... '
     if git apply "$p"
@@ -61,7 +61,7 @@ echo $done_text
 # that case.
 #(
 #  cd third_party/libtock-rs/ && \
-#  for p in ../../patches/libtock-rs/[0-9][0-9]-*.patch
+#  for p in ../../patches/libtock-rs/*.patch
 #  do
 #    echo -n '[-] Applying patch "'$(basename $p)'"... '
 #    if git apply "$p"

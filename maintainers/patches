@@ -1,37 +1,22 @@
-#!/bin/zsh
+#!/bin/bash
+set -e
 
-PROGRAM=$0
+PROGRAM="$0"
 
 success() {
-  echo "\e[1;32mDone:\e[m $1"
+  echo -e "\e[1;32mDone:\e[m $1"
   exit 0
 }
 
 fail() {
-  echo "\e[1;31mError:\e[m $1"
+  echo -e "\e[1;31mError:\e[m $1"
   exit 1
 }
 
-help() {
-  cat <<EOF
-Usage: $PROGRAM {apply|save}
-
-  apply       Applies the patches to the Tock submodule.
-              This resets Tock and can always be called.
-
-  save        Saves the Tock submodule to the patches.
-              Should only be called after apply and when all changes have been
-              added to a commit. After saving, you can run ./setup.sh to return
-              to normal state. Otherwise you can continue editing Tock and
-              calling save.
-EOF
-  exit 0
-}
-
 commit() {
-  local message=$1
+  local message="$1"
   git add .
-  git commit -qm$message
+  git commit -qm"${message}"
 }
 
 get_root() {
@@ -42,44 +27,99 @@ get_head() {
   git rev-parse HEAD
 }
 
+help() {
+  local root="$(get_root)"
+  cat <<EOF
+Usage: ${PROGRAM} {apply|save}
+
+  apply       Applies the patches to the Tock submodule regardless of its state.
+              As a consequence this can always be called to get to a clean state
+              but may result in data loss if there are unsaved changes.
+
+  save        Saves the Tock submodule to the patches.
+              This should only be called after apply and when all changes have
+              been added to a commit. After saving, you can run ./setup.sh to
+              return to normal state. Otherwise you can continue editing Tock
+              and calling save.
+
+Example:
+
+  1. Enter the edit state from the normal state:
+
+    ${PROGRAM} apply
+
+  2. Edit files in the Tock submodule:
+
+    cd third_party/tock
+    edit <files>
+
+  3. Create a fix commit per affected patch by repeating the following commands
+  until there are no more files to add:
+
+    git add -p
+    git commit -m'fix <patch#>'
+
+  4. Merge the fixes into their patches by moving their line below their patch
+  and changing their "edit" into "fixup":
+
+    git rebase -i ${root}
+
+  5. Save the changes:
+
+    cd ../..
+    ${PROGRAM} save
+
+  6. Either continue repeating steps 2 to 5, or return to the normal state:
+
+    ./setup.sh
+EOF
+  exit 0
+}
+
 apply() {
-  git submodule -q update third_party/tock
-  ( cd third_party/tock
+  local root="$(get_root)"
+  ( set -e
+    cd third_party/tock
     git reset -q --hard
     git clean -qfxd
-    rsync -a ../../boards .
+    git checkout -q "${root}"
+    cp -a ../../boards .
     commit '00-boards'
     for file in ../../patches/tock/*; do
-      patch -sp1 < $file
-      commit "${${file#../../patches/tock/}%.patch}"
+      git apply "${file}"
+      commit "$(basename "${file}" .patch)"
     done
   )
   success 'Applied the patches to the Tock submodule.'
 }
 
 save() {
-  local root=$(get_root)
-  ( cd third_party/tock
+  local root="$(get_root)"
+  ( set -e
+    cd third_party/tock
     [[ -z "$(git status -s)" ]] || fail 'The Tock submodule is not clean.'
     rm ../../patches/tock/*.patch
-    for file in $(git format-patch $root); do
-      sed -n '/^diff/,$p' $file | head -n-3 > ../../patches/tock/${file#*-}
+    for file in $(git format-patch "${root}"); do
+      sed -n '/^diff/,$p' "${file}" \
+        | head -n-3 > "../../patches/tock/${file#*-}"
     done
     git clean -qfxd
-    top=$(get_head)
-    git checkout -q $root
+    top="$(get_head)"
+    git checkout -q "${root}"
     rm -r boards
-    patch -sp1 < ../../patches/tock/00-boards.patch
+    git apply --whitespace=nowarn ../../patches/tock/00-boards.patch
     rm ../../patches/tock/00-boards.patch
-    rsync -a --delete boards ../..
+    rm -r ../../boards
+    cp -a boards ../..
     git reset -q --hard
     git clean -qfxd
-    git checkout -q $top
-  ) || exit
+    git checkout -q "${top}"
+  )
   success 'Saved the Tock submodule to the patches.'
 }
 
-[[ $(basename $PWD) == OpenSK ]] || fail 'Not running from OpenSK directory.'
+grep -q third_party/tock .gitmodules 2>/dev/null \
+  || fail 'Not running from OpenSK directory.'
 [[ $# -eq 1 ]] || help
 case $1 in
   apply) apply ;;

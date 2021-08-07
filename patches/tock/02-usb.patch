@@ -102,7 +102,7 @@ index 000000000..69e95c3c7
 +    }
 +}
 diff --git a/boards/nordic/nrf52840_dongle_opensk/src/main.rs b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
-index b485a0997..f5d29d025 100644
+index f9c104251..115e17280 100644
 --- a/boards/nordic/nrf52840_dongle_opensk/src/main.rs
 +++ b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
 @@ -40,6 +40,17 @@ const _SPI_CLK: Pin = Pin::P1_04;
@@ -143,8 +143,8 @@ index b485a0997..f5d29d025 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -286,6 +303,21 @@ pub unsafe fn reset_handler() {
-         )
+@@ -292,6 +309,21 @@ pub unsafe fn reset_handler() {
+             .expect("no deferred call slot available for nvmc"),
      );
  
 +    // Enable power events to be sent to USB controller
@@ -165,7 +165,7 @@ index b485a0997..f5d29d025 100644
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -298,6 +330,7 @@ pub unsafe fn reset_handler() {
+@@ -304,6 +336,7 @@ pub unsafe fn reset_handler() {
          alarm,
          analog_comparator,
          nvmc,
@@ -174,7 +174,7 @@ index b485a0997..f5d29d025 100644
      };
  
 diff --git a/boards/nordic/nrf52840dk_opensk/src/main.rs b/boards/nordic/nrf52840dk_opensk/src/main.rs
-index ebee8704b..6a2f8715b 100644
+index c80732f8d..41047a390 100644
 --- a/boards/nordic/nrf52840dk_opensk/src/main.rs
 +++ b/boards/nordic/nrf52840dk_opensk/src/main.rs
 @@ -104,6 +104,17 @@ pub mod io;
@@ -215,8 +215,8 @@ index ebee8704b..6a2f8715b 100644
              kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
              _ => f(None),
          }
-@@ -371,6 +388,21 @@ pub unsafe fn reset_handler() {
-         )
+@@ -377,6 +394,21 @@ pub unsafe fn reset_handler() {
+             .expect("no deferred call slot available for nvmc"),
      );
  
 +    // Enable power events to be sent to USB controller
@@ -237,7 +237,7 @@ index ebee8704b..6a2f8715b 100644
      nrf52_components::NrfClockComponent::new().finalize(());
  
      let platform = Platform {
-@@ -383,6 +415,7 @@ pub unsafe fn reset_handler() {
+@@ -389,6 +421,7 @@ pub unsafe fn reset_handler() {
          alarm,
          analog_comparator,
          nvmc,

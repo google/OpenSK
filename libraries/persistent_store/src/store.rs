@@ -270,7 +270,9 @@ impl<S: Storage> Store<S> {
         self.reserve(self.format.transaction_capacity(updates))?;
         // Write the marker entry.
         let marker = self.tail()?;
-        let entry = self.format.build_internal(InternalEntry::Marker { count });
+        let entry = self
+            .format
+            .build_internal(InternalEntry::Marker { count })?;
         self.write_slice(marker, &entry)?;
         self.init_page(marker, marker)?;
         // Write the updates.
@@ -278,7 +280,7 @@ impl<S: Storage> Store<S> {
         for update in updates {
             let length = match *update {
                 StoreUpdate::Insert { key, ref value } => {
-                    let entry = self.format.build_user(usize_to_nat(key), value);
+                    let entry = self.format.build_user(usize_to_nat(key), value)?;
                     let word_size = self.format.word_size();
                     let footer = usize_to_nat(entry.len()) / word_size - 1;
                     self.write_slice(tail, &entry[..(footer * word_size) as usize])?;
@@ -287,7 +289,7 @@ impl<S: Storage> Store<S> {
                 }
                 StoreUpdate::Remove { key } => {
                     let key = usize_to_nat(key);
-                    let remove = self.format.build_internal(InternalEntry::Remove { key });
+                    let remove = self.format.build_internal(InternalEntry::Remove { key })?;
                     self.write_slice(tail, &remove)?;
                     0
                 }
@@ -307,7 +309,9 @@ impl<S: Storage> Store<S> {
         if min_key > self.format.max_key() {
             return Err(StoreError::InvalidArgument);
         }
-        let clear = self.format.build_internal(InternalEntry::Clear { min_key });
+        let clear = self
+            .format
+            .build_internal(InternalEntry::Clear { min_key })?;
         // We always have one word available. We can't use `reserve` because this is internal
         // capacity, not user capacity.
         while self.immediate_capacity()? < 1 {
@@ -373,7 +377,7 @@ impl<S: Storage> Store<S> {
         if key > self.format.max_key() || value_len > self.format.max_value_len() {
             return Err(StoreError::InvalidArgument);
         }
-        let entry = self.format.build_user(key, value);
+        let entry = self.format.build_user(key, value)?;
         let entry_len = usize_to_nat(entry.len());
         self.reserve(entry_len / self.format.word_size())?;
         let tail = self.tail()?;
@@ -437,7 +441,7 @@ impl<S: Storage> Store<S> {
         let init_info = self.format.build_init(InitInfo {
             cycle: 0,
             prefix: 0,
-        });
+        })?;
         self.storage_write_slice(index, &init_info)
     }
 
@@ -646,7 +650,9 @@ impl<S: Storage> Store<S> {
         }
         let tail = max(self.tail()?, head.next_page(&self.format));
         let index = self.format.index_compact(head.page(&self.format));
-        let compact_info = self.format.build_compact(CompactInfo { tail: tail - head });
+        let compact_info = self
+            .format
+            .build_compact(CompactInfo { tail: tail - head })?;
         self.storage_write_slice(index, &compact_info)?;
         self.compact_copy()
     }
@@ -680,7 +686,7 @@ impl<S: Storage> Store<S> {
             self.init_page(tail, tail + (length - 1))?;
             tail += length;
         }
-        let erase = self.format.build_internal(InternalEntry::Erase { page });
+        let erase = self.format.build_internal(InternalEntry::Erase { page })?;
         self.write_slice(tail, &erase)?;
         self.init_page(tail, tail)?;
         self.compact_erase(tail)
@@ -792,7 +798,7 @@ impl<S: Storage> Store<S> {
         let init_info = self.format.build_init(InitInfo {
             cycle: new_first.cycle(&self.format),
             prefix: new_first.word(&self.format),
-        });
+        })?;
         self.storage_write_slice(index, &init_info)?;
         Ok(())
     }
@@ -800,7 +806,7 @@ impl<S: Storage> Store<S> {
     /// Sets the padding bit of a user header.
     fn set_padding(&mut self, pos: Position) -> StoreResult<()> {
         let mut word = Word::from_slice(self.read_word(pos));
-        self.format.set_padding(&mut word);
+        self.format.set_padding(&mut word)?;
         self.write_slice(pos, &word.as_slice())?;
         Ok(())
     }
@@ -1110,10 +1116,12 @@ impl Store<BufferStorage> {
         let format = Format::new(storage).unwrap();
         // Write the init info of the first page.
         let mut index = format.index_init(0);
-        let init_info = format.build_init(InitInfo {
-            cycle: usize_to_nat(cycle),
-            prefix: 0,
-        });
+        let init_info = format
+            .build_init(InitInfo {
+                cycle: usize_to_nat(cycle),
+                prefix: 0,
+            })
+            .unwrap();
         storage.write_slice(index, &init_info).unwrap();
         // Pad the first word of the page. This makes the store looks used, otherwise we may confuse
         // it with a partially initialized store.

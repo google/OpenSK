@@ -42,15 +42,20 @@ impl Field {
 
     /// Sets the value of a bit field.
     ///
-    /// # Preconditions
+    /// # Errors
     ///
     /// - The value must fit in the bit field: `num_bits(value) < self.len`.
     /// - The value must only change bits from 1 to 0: `self.get(*word) & value == value`.
-    pub fn set(&self, word: &mut Word, value: Nat) {
-        debug_assert_eq!(value & self.mask(), value);
+    pub fn set(&self, word: &mut Word, value: Nat) -> StoreResult<()> {
+        if value & self.mask() != value {
+            return Err(StoreError::InvalidStorage);
+        }
         let mask = !(self.mask() << self.pos);
         word.0 &= mask | (value << self.pos);
-        debug_assert_eq!(self.get(*word), value);
+        if self.get(*word) != value {
+            return Err(StoreError::InvalidStorage);
+        }
+        Ok(())
     }
 
     /// Returns a bit mask the length of the bit field.
@@ -82,8 +87,8 @@ impl ConstField {
     }
 
     /// Sets the bit field to its value.
-    pub fn set(&self, word: &mut Word) {
-        self.field.set(word, self.value);
+    pub fn set(&self, word: &mut Word) -> StoreResult<()> {
+        self.field.set(word, self.value)
     }
 }
 
@@ -135,15 +140,15 @@ impl Checksum {
 
     /// Sets the checksum to the external increment value.
     ///
-    /// # Preconditions
+    /// # Errors
     ///
     /// - The bits of the checksum bit field should be set to one: `self.field.get(*word) ==
     ///   self.field.mask()`.
     /// - The checksum value should fit in the checksum bit field: `num_bits(word.count_zeros() +
     ///   value) < self.field.len`.
-    pub fn set(&self, word: &mut Word, value: Nat) {
+    pub fn set(&self, word: &mut Word, value: Nat) -> StoreResult<()> {
         debug_assert_eq!(self.field.get(*word), self.field.mask());
-        self.field.set(word, word.0.count_zeros() + value);
+        self.field.set(word, word.0.count_zeros() + value)
     }
 }
 
@@ -290,7 +295,7 @@ mod tests {
         assert_eq!(field.get(Word(0x000000f8)), 0x1f);
         assert_eq!(field.get(Word(0x0000ff37)), 6);
         let mut word = Word(0xffffffff);
-        field.set(&mut word, 3);
+        field.set(&mut word, 3).unwrap();
         assert_eq!(word, Word(0xffffff1f));
     }
 
@@ -305,7 +310,7 @@ mod tests {
         assert!(field.check(Word(0x00000048)));
         assert!(field.check(Word(0x0000ff4f)));
         let mut word = Word(0xffffffff);
-        field.set(&mut word);
+        field.set(&mut word).unwrap();
         assert_eq!(word, Word(0xffffff4f));
     }
 
@@ -333,7 +338,7 @@ mod tests {
         assert_eq!(field.get(Word(0x00ffff67)), Ok(4));
         assert_eq!(field.get(Word(0x7fffff07)), Err(StoreError::InvalidStorage));
         let mut word = Word(0x0fffffff);
-        field.set(&mut word, 4);
+        field.set(&mut word, 4).unwrap();
         assert_eq!(word, Word(0x0fffff47));
     }
 

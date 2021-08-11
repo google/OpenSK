@@ -122,7 +122,7 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 };
 
 // Helpers to perform CBOR read/write while respecting CTAP2 nesting limits.
-fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
+pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
     cbor::reader::read_nested(encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
 }

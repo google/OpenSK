@@ -27,9 +27,8 @@ use ctap2::ctap::hid::receive::MessageAssembler;
 use ctap2::ctap::hid::send::HidPacketIterator;
 use ctap2::ctap::hid::{ChannelID, CtapHid, HidPacket, Message};
 use ctap2::ctap::status_code::Ctap2StatusCode;
-use ctap2::ctap::CtapState;
+use ctap2::ctap::{cbor_read, CtapState};
 use libtock_drivers::timer::{ClockValue, Timestamp};
-use sk_cbor as cbor;
 
 const COMMAND_INIT: u8 = 0x06;
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
@@ -102,7 +101,7 @@ fn is_type(data: &[u8], input_type: InputType) -> bool {
     if input_type == InputType::Ctap1 {
         return true;
     }
-    match cbor::read(data) {
+    match cbor_read(data) {
         Err(_) => false,
         Ok(decoded_cbor) => match input_type {
             InputType::CborMakeCredentialParameter => {

@@ -62,7 +62,7 @@ impl LargeBlobs {
         const MAX_FRAGMENT_LENGTH: usize = MAX_MSG_SIZE - 64;
 
         if let Some(get) = get {
-            if get > MAX_FRAGMENT_LENGTH {
+            if get > MAX_FRAGMENT_LENGTH || offset.checked_add(get).is_none() {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
             let config = persistent_store.get_large_blob_array(offset, get)?;
@@ -325,6 +325,30 @@ mod test {
         assert_eq!(
             large_blobs_response,
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        );
+    }
+
+    #[test]
+    fn test_process_command_commit_end_offset_overflow() {
+        let mut rng = ThreadRng256 {};
+        let mut persistent_store = PersistentStore::new(&mut rng);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut large_blobs = LargeBlobs::new();
+
+        let large_blobs_params = AuthenticatorLargeBlobsParameters {
+            get: Some(1),
+            set: None,
+            offset: usize::MAX,
+            length: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        assert_eq!(
+            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH),
         );
     }
 

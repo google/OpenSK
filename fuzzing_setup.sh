@@ -20,4 +20,4 @@ done_text="$(tput bold)DONE.$(tput sgr0)"
 set -e
 
 # Install cargo-fuzz library.
-cargo install cargo-fuzz
+cargo +stable install cargo-fuzz

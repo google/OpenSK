@@ -28,8 +28,8 @@ mod prod {
 
     pub type Storage = SyscallStorage;
 
-    pub fn new_storage(num_pages: usize) -> Storage {
-        Storage::new(num_pages).unwrap()
+    pub fn new_storage() -> persistent_store::StorageResult<Storage> {
+        Storage::new()
     }
 
     pub type UpgradeLocations = SyscallUpgradeStorage;
@@ -44,9 +44,11 @@ mod test {
 
     pub type Storage = persistent_store::BufferStorage;
 
-    pub fn new_storage(num_pages: usize) -> Storage {
+    pub fn new_storage() -> persistent_store::StorageResult<Storage> {
+        // Use the Nordic configuration.
         const PAGE_SIZE: usize = 0x1000;
-        let store = vec![0xff; num_pages * PAGE_SIZE].into_boxed_slice();
+        const NUM_PAGES: usize = 20;
+        let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
         let options = persistent_store::BufferOptions {
             word_size: 4,
             page_size: PAGE_SIZE,
@@ -54,7 +56,7 @@ mod test {
             max_page_erases: 10000,
             strict_mode: true,
         };
-        Storage::new(store, options)
+        Ok(Storage::new(store, options))
     }
 
     pub type UpgradeLocations = BufferUpgradeStorage;

@@ -219,23 +219,10 @@ pub const MAX_RP_IDS_LENGTH: usize = 8;
 ///
 /// - The storage key CREDENTIALS must fit at least this number of credentials.
 ///
-/// This value has implications on the flash lifetime, please see the
-/// documentation for NUM_PAGES below.
-pub const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
-
-/// Sets the number of pages used for persistent storage.
-///
-/// The number of pages should be at least 3 and at most what the flash can
-/// hold. There should be no reason to put a small number here, except that the
-/// latency of flash operations is linear in the number of pages. This may
-/// improve in the future. Currently, using 20 pages gives between 20ms and
-/// 240ms per operation. The rule of thumb is between 1ms and 12ms per
-/// additional page.
-///
 /// Limiting the number of resident keys permits to ensure a minimum number of
 /// counter increments.
 /// Let:
-/// - P the number of pages (NUM_PAGES)
+/// - P the number of pages (NUM_PAGES in the board definition)
 /// - K the maximum number of resident keys (MAX_SUPPORTED_RESIDENT_KEYS)
 /// - S the maximum size of a resident key (about 500)
 /// - C the number of erase cycles (10000)
@@ -245,7 +232,7 @@ pub const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
 ///
 /// With P=20 and K=150, we have I=2M which is enough for 500 increments per day
 /// for 10 years.
-pub const NUM_PAGES: usize = 20;
+pub const MAX_SUPPORTED_RESIDENT_KEYS: usize = 150;
 
 #[cfg(test)]
 mod test {

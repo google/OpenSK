@@ -37,10 +37,10 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
 
 fn main() {
     led::get(1).flex_unwrap().on().flex_unwrap(); // red on dongle
-    const NUM_PAGES: usize = 20; // should be at least ctap::storage::NUM_PAGES
-    let mut storage = new_storage(NUM_PAGES);
-    writeln!(Console::new(), "Erase {} pages of storage:", NUM_PAGES).unwrap();
-    for page in 0..NUM_PAGES {
+    let mut storage = new_storage().unwrap();
+    let num_pages = storage.num_pages();
+    writeln!(Console::new(), "Erase {} pages of storage:", num_pages).unwrap();
+    for page in 0..num_pages {
         write!(Console::new(), "- Page {} ", page).unwrap();
         if is_page_erased(&storage, page) {
             writeln!(Console::new(), "skipped (was already erased).").unwrap();

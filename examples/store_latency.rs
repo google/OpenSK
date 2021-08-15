@@ -26,7 +26,7 @@ use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
 
-libtock_core::stack_size! {0x800}
+libtock_core::stack_size! {0x2000}
 
 fn timestamp(timer: &Timer) -> Timestamp<f64> {
     Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
@@ -40,20 +40,35 @@ fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>
 }
 
 // Only use one store at a time.
-unsafe fn boot_store(num_pages: usize, erase: bool) -> Store<Storage> {
-    let mut storage = new_storage(num_pages);
+unsafe fn boot_store(erase: bool) -> Store<Storage> {
+    use persistent_store::Storage;
+    let mut storage = new_storage().unwrap();
+    let num_pages = storage.num_pages();
     if erase {
         for page in 0..num_pages {
-            use persistent_store::Storage;
             storage.erase_page(page).unwrap();
         }
     }
     Store::new(storage).ok().unwrap()
 }
 
+#[derive(Debug)]
+struct StorageConfig {
+    page_size: usize,
+    num_pages: usize,
+}
+
+fn storage_config() -> StorageConfig {
+    use persistent_store::Storage;
+    let storage = new_storage().unwrap();
+    StorageConfig {
+        page_size: storage.page_size(),
+        num_pages: storage.num_pages(),
+    }
+}
+
 #[derive(Default)]
 struct Stat {
-    num_pages: usize,
     key_increment: usize,
     entry_length: usize, // words
     boot_ms: f64,
@@ -69,7 +84,6 @@ fn compute_latency(
     word_length: usize,
 ) -> Stat {
     let mut stat = Stat {
-        num_pages,
         key_increment,
         entry_length: word_length,
         ..Default::default()
@@ -78,12 +92,12 @@ fn compute_latency(
     let mut console = Console::new();
     writeln!(
         console,
-        "\nLatency for num_pages={} key_increment={} word_length={}.",
-        num_pages, key_increment, word_length
+        "\nLatency for key_increment={} word_length={}.",
+        key_increment, word_length
     )
     .unwrap();
 
-    let mut store = unsafe { boot_store(num_pages, true) };
+    let mut store = unsafe { boot_store(true) };
     let total_capacity = store.capacity().unwrap().total();
     assert_eq!(store.capacity().unwrap().used(), 0);
     assert_eq!(store.lifetime().unwrap().used(), 0);
@@ -121,7 +135,7 @@ fn compute_latency(
     );
 
     // Measure latency of boot.
-    let (mut store, time) = measure(&timer, || unsafe { boot_store(num_pages, false) });
+    let (mut store, time) = measure(&timer, || unsafe { boot_store(false) });
     writeln!(console, "Boot: {:.1}ms.", time.ms()).unwrap();
     stat.boot_ms = time.ms();
 
@@ -150,19 +164,17 @@ fn compute_latency(
 fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().ok().unwrap();
+    let config = storage_config();
     let mut stats = Vec::new();
 
-    writeln!(Console::new(), "\nRunning 4 tests...").unwrap();
-    // Those non-overwritten 50 words entries simulate credentials.
-    stats.push(compute_latency(&timer, 3, 1, 50));
-    stats.push(compute_latency(&timer, 20, 1, 50));
-    // Those overwritten 1 word entries simulate counters.
-    stats.push(compute_latency(&timer, 3, 0, 1));
-    stats.push(compute_latency(&timer, 20, 0, 1));
+    writeln!(Console::new(), "\nRunning 2 tests...").unwrap();
+    // Simulate a store full of credentials (of 50 words).
+    stats.push(compute_latency(&timer, config.num_pages, 1, 50));
+    // Simulate a store full of increments of a single counter.
+    stats.push(compute_latency(&timer, config.num_pages, 0, 1));
     writeln!(Console::new(), "\nDone.\n").unwrap();
 
     const HEADERS: &[&str] = &[
-        "Pages",
         "Overwrite",
         "Length",
         "Boot",
@@ -173,7 +185,6 @@ fn main() {
     let mut matrix = vec![HEADERS.iter().map(|x| x.to_string()).collect()];
     for stat in stats {
         matrix.push(vec![
-            format!("{}", stat.num_pages),
             if stat.key_increment == 0 { "yes" } else { "no" }.to_string(),
             format!("{} words", stat.entry_length),
             format!("{:.1} ms", stat.boot_ms),
@@ -182,14 +193,15 @@ fn main() {
             format!("{:.1} ms", stat.remove_ms),
         ]);
     }
+    writeln!(Console::new(), "Copy to examples/store_latency.rs:\n").unwrap();
+    writeln!(Console::new(), "{:?}", config).unwrap();
     write_matrix(matrix);
 
-    // Results on nrf52840dk_opensk:
-    // Pages  Overwrite    Length      Boot  Compaction   Insert  Remove
-    //     3         no  50 words    5.3 ms    141.9 ms   8.0 ms  3.3 ms
-    //    20         no  50 words   18.7 ms    148.6 ms   21.0 ms 9.8 ms
-    //     3        yes   1 words   37.8 ms    100.2 ms   11.3 ms 5.5 ms
-    //    20        yes   1 words  336.5 ms    100.3 ms   11.5 ms 5.6 ms
+    // Results for nrf52840dk_opensk:
+    // StorageConfig { page_size: 4096, num_pages: 20 }
+    // Overwrite    Length      Boot  Compaction   Insert  Remove
+    //        no  50 words   16.2 ms    143.8 ms  18.3 ms  8.4 ms
+    //       yes   1 words  303.8 ms     97.9 ms   9.7 ms  4.7 ms
 }
 
 fn align(x: &str, n: usize) {

@@ -31,10 +31,10 @@ index 5465c95f4..e596648f7 100644
      }
  }
 diff --git a/kernel/src/sched.rs b/kernel/src/sched.rs
-index 031159500..0cbfea929 100644
+index 61401b04a..e9a58c018 100644
 --- a/kernel/src/sched.rs
 +++ b/kernel/src/sched.rs
-@@ -118,10 +118,19 @@ pub enum SchedulingDecision {
+@@ -118,11 +118,20 @@ pub enum SchedulingDecision {
      TrySleep,
  }
  
@@ -50,6 +50,7 @@ index 031159500..0cbfea929 100644
  pub struct StorageLocation {
      pub address: usize,
      pub size: usize,
+     pub unallocated_size: usize,
 +    pub storage_type: StorageType,
  }
  

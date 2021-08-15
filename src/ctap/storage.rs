@@ -18,7 +18,6 @@ use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::customization::{
     DEFAULT_MIN_PIN_LENGTH, DEFAULT_MIN_PIN_LENGTH_RP_IDS, ENFORCE_ALWAYS_UV,
     MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_RP_IDS_LENGTH, MAX_SUPPORTED_RESIDENT_KEYS,
-    NUM_PAGES,
 };
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
@@ -68,7 +67,7 @@ impl PersistentStore {
     ///
     /// This should be at most one instance of persistent store per program lifetime.
     pub fn new(rng: &mut impl Rng256) -> PersistentStore {
-        let storage = new_storage(NUM_PAGES);
+        let storage = new_storage().ok().unwrap();
         let mut store = PersistentStore {
             store: persistent_store::Store::new(storage).ok().unwrap(),
         };

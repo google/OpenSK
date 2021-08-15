@@ -134,13 +134,11 @@ impl SyscallStorage {
     /// - The page size is a power of two.
     /// - The page size is a multiple of the word size.
     /// - The storage is page-aligned.
-    ///
-    /// Returns `OutOfBounds` the number of pages does not fit in the storage.
-    pub fn new(mut num_pages: usize) -> StorageResult<SyscallStorage> {
+    pub fn new() -> StorageResult<SyscallStorage> {
         let mut syscall = SyscallStorage {
             word_size: get_info(command_nr::get_info_nr::WORD_SIZE, 0)?,
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
-            num_pages,
+            num_pages: 0,
             max_word_writes: get_info(command_nr::get_info_nr::MAX_WORD_WRITES, 0)?,
             max_page_erases: get_info(command_nr::get_info_nr::MAX_PAGE_ERASES, 0)?,
             storage_locations: Vec::new(),
@@ -156,19 +154,14 @@ impl SyscallStorage {
                 continue;
             }
             let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
-            let max_storage_len = memop(memop_nr::STORAGE_LEN, i)?;
-            if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(max_storage_len) {
+            let storage_len = memop(memop_nr::STORAGE_LEN, i)?;
+            if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(storage_len) {
                 return Err(StorageError::CustomError);
             }
-            let storage_len = core::cmp::min(num_pages * syscall.page_size, max_storage_len);
-            num_pages -= storage_len / syscall.page_size;
+            syscall.num_pages += storage_len / syscall.page_size;
             syscall
                 .storage_locations
                 .push(unsafe { core::slice::from_raw_parts(storage_ptr as *mut u8, storage_len) });
-        }
-        if num_pages > 0 {
-            // The storage locations don't have enough pages.
-            return Err(StorageError::OutOfBounds);
         }
         Ok(syscall)
     }

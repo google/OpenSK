@@ -38,9 +38,10 @@ pub enum DecoderError {
 }
 
 /// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.
-/// Supports arbitrarily nested CBOR (so the [`DecoderError::TooMuchNesting`] error is never emitted).
+/// Maximum level of nesting supported is 127; more deeply nested structures will fail with
+/// [`DecoderError::TooMuchNesting`].
 pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
-    read_nested(encoded_cbor, None)
+    read_nested(encoded_cbor, Some(i8::MAX))
 }
 
 /// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.  If

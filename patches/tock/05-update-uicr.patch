@@ -1,13 +1,38 @@
+diff --git a/boards/nordic/nrf52_components/src/startup.rs b/boards/nordic/nrf52_components/src/startup.rs
+index e6cf3ff56..7b3ea5a59 100644
+--- a/boards/nordic/nrf52_components/src/startup.rs
++++ b/boards/nordic/nrf52_components/src/startup.rs
+@@ -53,6 +53,9 @@ impl<'a> Component for NrfStartupComponent<'a> {
+             erase_uicr |= !uicr.is_nfc_pins_protection_enabled();
+         }
+ 
++        // Avoid killing the DFU bootloader if present
++        let (dfu_start_addr, dfu_settings_addr) = uicr.get_dfu_params();
++
+         if erase_uicr {
+             self.nvmc.erase_uicr();
+         }
+@@ -62,6 +65,11 @@ impl<'a> Component for NrfStartupComponent<'a> {
+ 
+         let mut needs_soft_reset: bool = false;
+ 
++        // Restore DFU bootloader settings if we erased
++        if erase_uicr {
++            uicr.set_dfu_params(dfu_start_addr, dfu_settings_addr);
++        }
++
+         // Configure reset pins
+         if uicr
+             .get_psel0_reset_pin()
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 6bb6c86b7..3bb8b5a7d 100644
+index 4924bbd44..788533210 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
-@@ -1,38 +1,45 @@
+@@ -1,38 +1,44 @@
  //! User information configuration registers
 -//!
 -//! Minimal implementation to support activation of the reset button on
 -//! nRF52-DK.
-+
  
  use enum_primitive::cast::FromPrimitive;
 -use kernel::common::registers::{register_bitfields, ReadWrite};
@@ -75,7 +100,7 @@ index 6bb6c86b7..3bb8b5a7d 100644
  }
  
  register_bitfields! [u32,
-@@ -58,6 +65,21 @@ register_bitfields! [u32,
+@@ -58,6 +64,21 @@ register_bitfields! [u32,
              DISABLED = 0xff
          ]
      ],
@@ -97,3 +122,22 @@ index 6bb6c86b7..3bb8b5a7d 100644
      /// Setting of pins dedicated to NFC functionality: NFC antenna or GPIO
      NfcPins [
          /// Setting pins dedicated to NFC functionality
+@@ -172,6 +193,18 @@ impl Uicr {
+         self.registers.nfcpins.matches_all(NfcPins::PROTECT::NFC)
+     }
+ 
++    pub fn get_dfu_params(&self) -> (u32, u32) {
++        (
++            self.registers.nrffw[0].get(), // DFU start address
++            self.registers.nrffw[1].get(), // DFU settings address
++        )
++    }
++
++    pub fn set_dfu_params(&self, dfu_start_addr: u32, dfu_settings_addr: u32) {
++        self.registers.nrffw[0].set(dfu_start_addr);
++        self.registers.nrffw[1].set(dfu_settings_addr);
++    }
++
+     pub fn is_ap_protect_enabled(&self) -> bool {
+         // Here we compare to DISABLED value because any other value should enable the protection.
+         !self

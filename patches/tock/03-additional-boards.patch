@@ -1,10 +1,10 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 83c48558e..75b1abacc 100644
+index 06acc26d2..e5db0740b 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -12,7 +12,11 @@ members = [
-     "boards/imix",
+@@ -20,7 +20,11 @@ members = [
      "boards/msp_exp432p401r",
+     "boards/microbit_v2",
      "boards/nordic/nrf52840dk",
 +    "boards/nordic/nrf52840dk_opensk",
      "boards/nordic/nrf52840_dongle",

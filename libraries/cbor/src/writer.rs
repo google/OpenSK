@@ -25,9 +25,10 @@ pub enum EncoderError {
 }
 
 /// Convert a [`Value`] to serialized CBOR data, consuming it along the way and appending to the provided vector.
-/// Supports arbitrarily nested CBOR (so the [`EncoderError::TooMuchNesting`] error is never emitted).
+/// Maximum level of nesting supported is 127; more deeply nested structures will fail with
+/// [`EncoderError::TooMuchNesting`].
 pub fn write(value: Value, encoded_cbor: &mut Vec<u8>) -> Result<(), EncoderError> {
-    write_nested(value, encoded_cbor, None)
+    write_nested(value, encoded_cbor, Some(i8::MAX))
 }
 
 /// Convert a [`Value`] to serialized CBOR data, consuming it along the way and appending to the provided vector.  If

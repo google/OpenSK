@@ -14,7 +14,6 @@
  *         FLASH (rx) : ORIGIN = 0x10030, LENGTH = 0x0FFD0
  *         SRAM (RWX) : ORIGIN = 0x20000, LENGTH = 0x10000
  *     }
- *     STACK_SIZE = 2048;
  *     MPU_MIN_ALIGN = 8K;
  *     INCLUDE ../libtock-rs/layout.ld
  */
@@ -25,9 +24,15 @@ SECTIONS {
     /* Section for just the app crt0 header.
      * This must be first so that the app can find it.
      */
-    .crt0_header :
+    /* Runtime setup logic. The crt0_header symbol is used by the entry point
+     * assembly. We have to include start here rather than .text because
+     * otherwise elf2tab fails to recognize that the process binary's flash
+     * region should start at the beginning of .start.
+     */
+    .start :
     {
         _beginning = .; /* Start of the app in flash. */
+        crt0_header = .;
         /**
          * Populate the header expected by `crt0`:
          *
@@ -64,11 +69,13 @@ SECTIONS {
          * .rel.data section */
         LONG(LOADADDR(.endflash) - _beginning);
         /* The size of the stack requested by this application */
-        LONG(STACK_SIZE);
+        LONG(_stack_top_aligned - _sstack);
         /* Pad the header out to a multiple of 32 bytes so there is not a gap
          * between the header and subsequent .data section. It's unclear why,
          * but LLD is aligning sections to a multiple of 32 bytes. */
         . = ALIGN(32);
+
+        *(.start)
     } > FLASH =0xFF
 
     /* Text section, Code! */
@@ -76,7 +83,6 @@ SECTIONS {
     {
         . = ALIGN(4);
         _text = .;
-        KEEP (*(.start))
         *(.text*)
         *(.rodata*)
         KEEP (*(.syscalls))
@@ -86,13 +92,21 @@ SECTIONS {
     } > FLASH =0xFF
 
     /* Application stack */
-    .stack :
+    .stack (NOLOAD) :
     {
-        . = . + STACK_SIZE;
-
-	_stack_top_unaligned = .;
+        /* elf2tab requires that the `_sram_origin` symbol be present to
+         * mark the first address in the SRAM memory. Since ELF files do
+         * not really need to specify this address as they only care about
+         * loading into flash, we need to manually mark this address for
+         * elf2tab. elf2tab will use it to add a fixed address header in the
+         * TBF header if needed.
+         */
+        _sram_origin = .;
+        _sstack = .;
+        KEEP(*(.stack_buffer))
+        _stack_top_unaligned = .;
         . = ALIGN(8);
-	_stack_top_aligned = .;
+        _stack_top_aligned = .;
     } > SRAM
 
     /* Data section, static initialized variables
@@ -104,6 +118,7 @@ SECTIONS {
         . = ALIGN(4); /* Make sure we're word-aligned here */
         _data = .;
         KEEP(*(.data*))
+        *(.sdata*) /* RISC-V small-pointer data section */
         . = ALIGN(4); /* Make sure we're word-aligned at the end of flash */
     } > SRAM
 
@@ -122,7 +137,7 @@ SECTIONS {
     {
         . = ALIGN(4); /* Make sure we're word-aligned here */
         _bss = .;
-        KEEP(*(.bss*))
+        KEEP(*(.bss* .sbss*))
         *(COMMON)
         . = ALIGN(4);
     } > SRAM
@@ -132,26 +147,11 @@ SECTIONS {
     {
     } > FLASH
 
-    /* ARM Exception support
-     *
-     * This contains compiler-generated support for unwinding the stack,
-     * consisting of key-value pairs of function addresses and information on
-     * how to unwind stack frames.
-     * https://wiki.linaro.org/KenWerner/Sandbox/libunwind?action=AttachFile&do=get&target=libunwind-LDS.pdf
-     *
-     * .ARM.exidx is sorted, so has to go in its own output section.
-     *
-     * __NOTE__: It's at the end because we currently don't actually serialize
-     * it to the binary in elf2tbf. If it was before the RAM sections, it would
-     * through off our calculations of the header.
-     */
-    PROVIDE_HIDDEN (__exidx_start = .);
-    .ARM.exidx :
+    /* Sections we do not need. */
+    /DISCARD/ :
     {
-      /* (C++) Index entries for section unwinding */
-      *(.ARM.exidx* .gnu.linkonce.armexidx.*)
-    } > FLASH
-    PROVIDE_HIDDEN (__exidx_end = .);
+      *(.ARM.exidx .eh_frame)
+    }
 }
 
 ASSERT((_stack_top_aligned - _stack_top_unaligned) == 0, "

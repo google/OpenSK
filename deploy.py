@@ -309,7 +309,16 @@ class OpenSKInstaller:
   def update_rustc_if_needed(self):
     target_toolchain_fullstring = "stable"
     with open("rust-toolchain", "r") as f:
-      target_toolchain_fullstring = f.readline().strip()
+      content = f.readlines()
+      if len(content) == 1:
+        # Old format, only the build is stored
+        target_toolchain_fullstring = f.readline().strip()
+      else:
+        # New format
+        for line in content:
+          if line.startswith("channel"):
+            channel = line.strip().split("=", maxsplit=1)[1].strip()
+            target_toolchain_fullstring = channel.strip('"')
     target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
     if len(target_toolchain) == 1:
       # If we target the stable version of rust, we won't have a date

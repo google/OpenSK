@@ -31,6 +31,7 @@ mod example {
     use libtock_drivers::timer::Timestamp;
 
     #[derive(Copy, Clone, Debug, PartialEq)]
+    #[allow(clippy::upper_case_acronyms)]
     enum ReturnCode {
         /// Operation completed successfully
         SUCCESS,

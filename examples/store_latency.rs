@@ -66,10 +66,12 @@ fn compute_latency(
     key_increment: usize,
     word_length: usize,
 ) -> Stat {
-    let mut stat = Stat::default();
-    stat.num_pages = num_pages;
-    stat.key_increment = key_increment;
-    stat.entry_length = word_length;
+    let mut stat = Stat {
+        num_pages,
+        key_increment,
+        entry_length: word_length,
+        ..Default::default()
+    };
 
     let mut console = Console::new();
     writeln!(

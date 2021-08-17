@@ -37,9 +37,8 @@ check_command pip3
 source tools/gen_key_materials.sh
 generate_crypto_materials N
 
-rustup install $(head -n 1 rust-toolchain)
+rustup show
 pip3 install --user --upgrade 'tockloader==1.5' six intelhex
-rustup target add thumbv7em-none-eabi
 
 # Install dependency to create applications.
 mkdir -p elf2tab

@@ -17,15 +17,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: "true"
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-      - name: Install grcov
-        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo +nightly install grcov; fi
+      - name: Install Rust toolchain
+        run: rustup show
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -34,6 +27,8 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
+      - name: Install grcov
+        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo +stable install grcov; fi
       - uses: actions-rs/cargo@v1
         with:
           command: test

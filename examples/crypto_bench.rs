@@ -29,6 +29,8 @@ use libtock_drivers::timer;
 use libtock_drivers::timer::Timer;
 use libtock_drivers::timer::Timestamp;
 
+libtock_core::stack_size! {0x800}
+
 fn main() {
     let mut console = Console::new();
     // Setup the timer with a dummy callback (we only care about reading the current time, but the

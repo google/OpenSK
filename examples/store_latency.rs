@@ -26,6 +26,8 @@ use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
 
+libtock_core::stack_size! {0x800}
+
 fn timestamp(timer: &Timer) -> Timestamp<f64> {
     Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
 }

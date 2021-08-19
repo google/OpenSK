@@ -7,6 +7,8 @@ extern crate libtock_drivers;
 use core::fmt::Write;
 use libtock_drivers::console::Console;
 
+libtock_core::stack_size! {0x4000}
+
 #[cfg(not(feature = "with_nfc"))]
 mod example {
     use super::Console;

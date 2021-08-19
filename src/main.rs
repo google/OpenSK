@@ -47,6 +47,8 @@ use libtock_drivers::timer::Timer;
 use libtock_drivers::timer::Timestamp;
 use libtock_drivers::usb_ctap_hid;
 
+libtock_core::stack_size! {0x4000}
+
 const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);

@@ -162,11 +162,6 @@ SUPPORTED_BOARDS = {
         ),
 }
 
-# The STACK_SIZE value below must match the one used in the linker script
-# used by the board.
-# e.g. for Nordic nRF52840 boards the file is `nrf52840_layout.ld`.
-STACK_SIZE = 0x4000
-
 # The following value must match the one used in the file
 # `src/entry_point.rs`
 APP_HEAP_SIZE = 90000
@@ -441,14 +436,23 @@ class OpenSKInstaller:
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
+    stack_sizes = []
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
       elf2tab_args.append(dest_file)
+      # extract required stack size directly from binary
+      nm = self.checked_command_output(
+          ["nm", "--print-size", "--radix=x", app_file])
+      for line in nm.splitlines():
+        if "STACK_MEMORY" in line:
+          required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
+          stack_sizes.append(required_stack_size)
 
     elf2tab_args.extend([
-        "--stack={}".format(STACK_SIZE), "--app-heap={}".format(APP_HEAP_SIZE),
-        "--kernel-heap=1024", "--protected-region-size=64"
+        "--stack={}".format(max(stack_sizes)),
+        "--app-heap={}".format(APP_HEAP_SIZE), "--kernel-heap=1024",
+        "--protected-region-size=64"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)

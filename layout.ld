@@ -76,7 +76,7 @@ SECTIONS {
         . = ALIGN(32);
 
         *(.start)
-    } > FLASH =0xFF
+    } > FLASH =0xFFFFFFFF
 
     /* Text section, Code! */
     .text :
@@ -89,7 +89,7 @@ SECTIONS {
         *(.ARM.extab*)
         . = ALIGN(4); /* Make sure we're word-aligned here */
         _etext = .;
-    } > FLASH =0xFF
+    } > FLASH =0xFFFFFFFF
 
     /* Application stack */
     .stack (NOLOAD) :

@@ -29,7 +29,7 @@ def make_corpus(corpus_dir, corpus_json):
 
   if os.path.isfile(corpus_json) and \
     os.path.splitext(corpus_json)[-1] == ".json":
-    with open(corpus_json) as corpus_file:
+    with open(corpus_json, encoding="utf-8") as corpus_file:
       corpus = json.load(corpus_file)
   else:
     raise TypeError

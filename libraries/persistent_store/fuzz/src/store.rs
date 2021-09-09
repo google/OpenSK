@@ -38,7 +38,7 @@ pub fn fuzz(mut data: &[u8], debug: bool, stats: Option<&mut Stats>) {
     // length and timeout after 1 minute. By default, libFuzzer has a maximum length of 4096 bytes.
     // We use a number between 4096 bytes and 1 minute, ideally such that the proportion of inputs
     // timing out in oss-fuzz is around 1%.
-    const MAX_DATA_LEN: usize = 50_000;
+    const MAX_DATA_LEN: usize = 20_000;
     if data.len() > MAX_DATA_LEN {
         data = &data[..MAX_DATA_LEN];
     }

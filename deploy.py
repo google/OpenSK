@@ -447,7 +447,7 @@ class OpenSKInstaller:
       for line in nm.splitlines():
         if "STACK_MEMORY" in line:
           required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
-          if required_stack_size in stack_sizes:
+          if stack_sizes and required_stack_size not in stack_sizes:
               error("Detected different stack sizes across tab files.")
           stack_sizes.add(required_stack_size)
 

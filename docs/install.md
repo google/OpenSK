@@ -265,7 +265,7 @@ our tool, `deploy.py` also supports other methods:
     --programmer=openocd`
 *   pyOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk
     --programmer=pyocd`
-*   Nordic DFU: `./deploy.py --board=nrf52840_dongle_opensk --opensk
+*   Nordic DFU: `./deploy.py --board=nrf52840_dongle_dfu --opensk
     --programmer=nordicdfu`
 *   Custom: `./deploy.py --board=nrf52840_dongle_opensk --opensk
     --programmer=none`. In this case, an IntelHex file will be created and how

@@ -307,7 +307,7 @@ class OpenSKInstaller:
       content = f.readlines()
       if len(content) == 1:
         # Old format, only the build is stored
-        target_toolchain_fullstring = f.readline().strip()
+        target_toolchain_fullstring = content[0].strip()
       else:
         # New format
         for line in content:
@@ -447,12 +447,12 @@ class OpenSKInstaller:
       for line in nm.splitlines():
         if "STACK_MEMORY" in line:
           required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
-          if stack_sizes and required_stack_size not in stack_sizes:
-            error("Detected different stack sizes across tab files.")
           stack_sizes.add(required_stack_size)
+    if len(stack_sizes) != 1:
+      error("Detected different stack sizes across tab files.")
 
     elf2tab_args.extend([
-        "--stack={}".format(max(stack_sizes)),
+        "--stack={}".format(stack_sizes.pop()),
         "--app-heap={}".format(APP_HEAP_SIZE), "--kernel-heap=1024",
         "--protected-region-size=64"
     ])

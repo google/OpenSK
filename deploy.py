@@ -448,7 +448,7 @@ class OpenSKInstaller:
         if "STACK_MEMORY" in line:
           required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
           if stack_sizes and required_stack_size not in stack_sizes:
-              error("Detected different stack sizes across tab files.")
+            error("Detected different stack sizes across tab files.")
           stack_sizes.add(required_stack_size)
 
     elf2tab_args.extend([

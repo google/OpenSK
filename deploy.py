@@ -436,7 +436,7 @@ class OpenSKInstaller:
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
-    stack_sizes = []
+    stack_sizes = set()
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
@@ -447,7 +447,9 @@ class OpenSKInstaller:
       for line in nm.splitlines():
         if "STACK_MEMORY" in line:
           required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
-          stack_sizes.append(required_stack_size)
+          if required_stack_size in stack_sizes:
+              error("Detected different stack sizes across tab files.")
+          stack_sizes.add(required_stack_size)
 
     elf2tab_args.extend([
         "--stack={}".format(max(stack_sizes)),

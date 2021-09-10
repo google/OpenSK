@@ -308,7 +308,7 @@ class OpenSKInstaller:
 
   def update_rustc_if_needed(self):
     target_toolchain_fullstring = "stable"
-    with open("rust-toolchain", "r") as f:
+    with open("rust-toolchain", "r", encoding="utf-8") as f:
       target_toolchain_fullstring = f.readline().strip()
     target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
     if len(target_toolchain) == 1:

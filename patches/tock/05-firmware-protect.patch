@@ -75,105 +75,19 @@ index 000000000..58695af81
 +    }
 +}
 diff --git a/boards/components/src/lib.rs b/boards/components/src/lib.rs
-index 917497af4..520408fcb 100644
+index a3bbe724b..95625f91f 100644
 --- a/boards/components/src/lib.rs
 +++ b/boards/components/src/lib.rs
-@@ -9,6 +9,7 @@ pub mod console;
- pub mod crc;
+@@ -13,6 +13,7 @@ pub mod crc;
+ pub mod ctap;
  pub mod debug_queue;
  pub mod debug_writer;
 +pub mod firmware_protection;
  pub mod ft6x06;
+ pub mod fxos8700;
  pub mod gpio;
- pub mod hd44780;
-diff --git a/boards/nordic/nrf52840_dongle_opensk/src/main.rs b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
-index 115e17280..3e35f7e90 100644
---- a/boards/nordic/nrf52840_dongle_opensk/src/main.rs
-+++ b/boards/nordic/nrf52840_dongle_opensk/src/main.rs
-@@ -100,6 +100,7 @@ pub struct Platform {
-         'static,
-         nrf52840::usbd::Usbd<'static>,
-     >,
-+    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
- }
- 
- impl kernel::Platform for Platform {
-@@ -117,6 +118,7 @@ impl kernel::Platform for Platform {
-             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
-             nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
-             capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
-+            capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
-             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
-             _ => f(None),
-         }
-@@ -324,6 +326,14 @@ pub unsafe fn reset_handler() {
-     )
-     .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
- 
-+    let crp = components::firmware_protection::FirmwareProtectionComponent::new(
-+        board_kernel,
-+        nrf52840::uicr::Uicr::new(),
-+    )
-+    .finalize(components::firmware_protection_component_helper!(
-+        nrf52840::uicr::Uicr
-+    ));
-+
-     nrf52_components::NrfClockComponent::new().finalize(());
- 
-     let platform = Platform {
-@@ -337,6 +347,7 @@ pub unsafe fn reset_handler() {
-         analog_comparator,
-         nvmc,
-         usb,
-+        crp,
-         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
-     };
- 
-diff --git a/boards/nordic/nrf52840dk_opensk/src/main.rs b/boards/nordic/nrf52840dk_opensk/src/main.rs
-index 41047a390..05e19b821 100644
---- a/boards/nordic/nrf52840dk_opensk/src/main.rs
-+++ b/boards/nordic/nrf52840dk_opensk/src/main.rs
-@@ -163,6 +163,7 @@ pub struct Platform {
-         'static,
-         nrf52840::usbd::Usbd<'static>,
-     >,
-+    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
- }
- 
- impl kernel::Platform for Platform {
-@@ -180,6 +181,7 @@ impl kernel::Platform for Platform {
-             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
-             nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
-             capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
-+            capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
-             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
-             _ => f(None),
-         }
-@@ -409,6 +411,14 @@ pub unsafe fn reset_handler() {
-     )
-     .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
- 
-+    let crp = components::firmware_protection::FirmwareProtectionComponent::new(
-+        board_kernel,
-+        nrf52840::uicr::Uicr::new(),
-+    )
-+    .finalize(components::firmware_protection_component_helper!(
-+        nrf52840::uicr::Uicr
-+    ));
-+
-     nrf52_components::NrfClockComponent::new().finalize(());
- 
-     let platform = Platform {
-@@ -422,6 +432,7 @@ pub unsafe fn reset_handler() {
-         analog_comparator,
-         nvmc,
-         usb,
-+        crp,
-         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
-     };
- 
 diff --git a/capsules/src/driver.rs b/capsules/src/driver.rs
-index ae458b309..f536dad32 100644
+index b6124c4c0..90a18ea47 100644
 --- a/capsules/src/driver.rs
 +++ b/capsules/src/driver.rs
 @@ -16,6 +16,7 @@ pub enum NUM {
@@ -276,10 +190,10 @@ index 000000000..8cf63d6a4
 +    }
 +}
 diff --git a/capsules/src/lib.rs b/capsules/src/lib.rs
-index e4423fe05..7538aad18 100644
+index 925b4ba41..919638c5d 100644
 --- a/capsules/src/lib.rs
 +++ b/capsules/src/lib.rs
-@@ -22,6 +22,7 @@ pub mod crc;
+@@ -25,6 +25,7 @@ pub mod ctap;
  pub mod dac;
  pub mod debug_process_restart;
  pub mod driver;
@@ -288,13 +202,12 @@ index e4423fe05..7538aad18 100644
  pub mod ft6x06;
  pub mod fxos8700cq;
 diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
-index 3bb8b5a7d..ea96cb2ae 100644
+index 788533210..655a98d5b 100644
 --- a/chips/nrf52/src/uicr.rs
 +++ b/chips/nrf52/src/uicr.rs
-@@ -1,13 +1,14 @@
+@@ -1,12 +1,14 @@
  //! User information configuration registers
  
--
  use enum_primitive::cast::FromPrimitive;
 +use hil::firmware_protection::ProtectionLevel;
  use kernel::common::registers::{register_bitfields, register_structs, ReadWrite};
@@ -303,11 +216,11 @@ index 3bb8b5a7d..ea96cb2ae 100644
  use kernel::ReturnCode;
  
  use crate::gpio::Pin;
-+use crate::nvmc::NVMC;
++use crate::nvmc;
  
  const UICR_BASE: StaticRef<UicrRegisters> =
      unsafe { StaticRef::new(0x10001000 as *const UicrRegisters) };
-@@ -210,3 +211,49 @@ impl Uicr {
+@@ -217,3 +219,49 @@ impl Uicr {
          self.registers.approtect.write(ApProtect::PALL::ENABLED);
      }
  }
@@ -335,7 +248,7 @@ index 3bb8b5a7d..ea96cb2ae 100644
 +            return ReturnCode::EALREADY;
 +        }
 +
-+        unsafe { NVMC.configure_writeable() };
++        nvmc::Nvmc::new().configure_writeable();
 +        if level >= ProtectionLevel::JtagDisabled {
 +            self.set_ap_protect();
 +        }
@@ -348,7 +261,7 @@ index 3bb8b5a7d..ea96cb2ae 100644
 +                .write(DebugControl::CPUNIDEN::DISABLED + DebugControl::CPUFPBEN::DISABLED);
 +            // TODO(jmichel): prevent returning into bootloader if present
 +        }
-+        unsafe { NVMC.configure_readonly() };
++        nvmc::Nvmc::new().configure_readonly();
 +
 +        if self.get_protection() == level {
 +            ReturnCode::SUCCESS
@@ -412,10 +325,10 @@ index 000000000..de0824646
 +    fn set_protection(&self, level: ProtectionLevel) -> ReturnCode;
 +}
 diff --git a/kernel/src/hil/mod.rs b/kernel/src/hil/mod.rs
-index 4f42afa02..83e7702ab 100644
+index f2d3629a9..d6eb39d2d 100644
 --- a/kernel/src/hil/mod.rs
 +++ b/kernel/src/hil/mod.rs
-@@ -8,6 +8,7 @@ pub mod dac;
+@@ -9,6 +9,7 @@ pub mod dac;
  pub mod digest;
  pub mod eic;
  pub mod entropy;

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::apdu::{ApduStatusCode, APDU};
+use super::apdu::{Apdu, ApduStatusCode};
 use super::hid::ChannelID;
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
@@ -81,7 +81,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
-        let apdu: APDU = match APDU::try_from(message) {
+        let apdu: Apdu = match Apdu::try_from(message) {
             Ok(apdu) => apdu,
             Err(apdu_status_code) => {
                 return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())

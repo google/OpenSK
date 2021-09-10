@@ -26,6 +26,8 @@ use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
 
+libtock_core::stack_size! {0x800}
+
 fn timestamp(timer: &Timer) -> Timestamp<f64> {
     Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
 }
@@ -66,10 +68,12 @@ fn compute_latency(
     key_increment: usize,
     word_length: usize,
 ) -> Stat {
-    let mut stat = Stat::default();
-    stat.num_pages = num_pages;
-    stat.key_increment = key_increment;
-    stat.entry_length = word_length;
+    let mut stat = Stat {
+        num_pages,
+        key_increment,
+        entry_length: word_length,
+        ..Default::default()
+    };
 
     let mut console = Console::new();
     writeln!(

@@ -231,7 +231,7 @@ mod tests {
         let mut iter = ModRange::new(201, 99).aligned_iter(100);
         assert_eq!(iter.next(), None);
         let mut iter = ModRange::new(usize::MAX - 16, 20).aligned_iter(16);
-        assert_eq!(iter.next(), Some(0xf_fff_fff_fff_fff_ff0));
+        assert_eq!(iter.next(), Some(0xffff_ffff_ffff_fff0));
         assert_eq!(iter.next(), None);
     }
 }

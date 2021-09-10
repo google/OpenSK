@@ -93,7 +93,7 @@ pub enum ApduType {
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-pub struct APDU {
+pub struct Apdu {
     pub header: ApduHeader,
     pub lc: u16,
     pub data: Vec<u8>,
@@ -101,7 +101,7 @@ pub struct APDU {
     pub case_type: ApduType,
 }
 
-impl TryFrom<&[u8]> for APDU {
+impl TryFrom<&[u8]> for Apdu {
     type Error = ApduStatusCode;
 
     fn try_from(frame: &[u8]) -> Result<Self, ApduStatusCode> {
@@ -115,7 +115,7 @@ impl TryFrom<&[u8]> for APDU {
 
         if payload.is_empty() {
             // Lc is zero-bytes in length
-            return Ok(APDU {
+            return Ok(Apdu {
                 header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
                 lc: 0x00,
                 data: Vec::new(),
@@ -128,7 +128,7 @@ impl TryFrom<&[u8]> for APDU {
         if payload.len() == 1 {
             // There is only one byte in the payload, that byte cannot be Lc because that would
             // entail at *least* one another byte in the payload (for the command data)
-            return Ok(APDU {
+            return Ok(Apdu {
                 header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
                 lc: 0x00,
                 data: Vec::new(),
@@ -144,7 +144,7 @@ impl TryFrom<&[u8]> for APDU {
         if payload.len() == 1 + (byte_0 as usize) && byte_0 != 0 {
             // Lc is one-byte long and since the size specified by Lc covers the rest of the
             // payload there's no Le at the end
-            return Ok(APDU {
+            return Ok(Apdu {
                 header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
                 lc: byte_0.into(),
                 data: payload[1..].to_vec(),
@@ -156,7 +156,7 @@ impl TryFrom<&[u8]> for APDU {
             // Lc is one-byte long and since the size specified by Lc covers the rest of the
             // payload with ONE additional byte that byte must be Le
             let last_byte: u32 = (*payload.last().unwrap()).into();
-            return Ok(APDU {
+            return Ok(Apdu {
                 header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
                 lc: byte_0.into(),
                 data: payload[1..(payload.len() - 1)].to_vec(),
@@ -184,7 +184,7 @@ impl TryFrom<&[u8]> for APDU {
                 // length that covers the rest of the block (plus few additional bytes for Le), we
                 // have an extended-length APDU
                 let last_byte: u32 = (*payload.last().unwrap()).into();
-                return Ok(APDU {
+                return Ok(Apdu {
                     header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
                     lc: extended_apdu_lc as u16,
                     data: payload[3..(payload.len() - extended_apdu_le_len)].to_vec(),
@@ -239,8 +239,8 @@ impl TryFrom<&[u8]> for APDU {
 mod test {
     use super::*;
 
-    fn pass_frame(frame: &[u8]) -> Result<APDU, ApduStatusCode> {
-        APDU::try_from(frame)
+    fn pass_frame(frame: &[u8]) -> Result<Apdu, ApduStatusCode> {
+        Apdu::try_from(frame)
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod test {
         let frame: [u8; 4] = [0x00, 0x12, 0x00, 0x80];
         let response = pass_frame(&frame);
         assert!(response.is_ok());
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0x12,
@@ -267,7 +267,7 @@ mod test {
     fn test_case_type_2_short() {
         let frame: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x0f];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0xb0,
@@ -286,7 +286,7 @@ mod test {
     fn test_case_type_2_short_le() {
         let frame: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x00];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0xb0,
@@ -306,7 +306,7 @@ mod test {
         let frame: [u8; 7] = [0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04];
         let payload = [0xe1, 0x04];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0xa4,
@@ -328,7 +328,7 @@ mod test {
         ];
         let payload = [0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0xa4,
@@ -350,7 +350,7 @@ mod test {
         ];
         let payload = [0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0xa4,
@@ -392,7 +392,7 @@ mod test {
         ];
         let payload: &[u8] = &frame[7..frame.len() - 2];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0x02,
@@ -419,7 +419,7 @@ mod test {
         ];
         let payload: &[u8] = &frame[7..frame.len() - 2];
         let response = pass_frame(&frame);
-        let expected = APDU {
+        let expected = Apdu {
             header: ApduHeader {
                 cla: 0x00,
                 ins: 0x01,

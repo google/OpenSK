@@ -86,10 +86,8 @@ pub fn process_config(
         pin_uv_auth_protocol,
     } = params;
 
-    let enforce_uv = match sub_command {
-        ConfigSubCommand::ToggleAlwaysUv => false,
-        _ => true,
-    } && persistent_store.has_always_uv()?;
+    let enforce_uv = !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv)
+        && persistent_store.has_always_uv()?;
     if persistent_store.pin_hash()?.is_some() || enforce_uv {
         let pin_uv_auth_param =
             pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;

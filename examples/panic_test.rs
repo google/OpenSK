@@ -16,6 +16,8 @@
 
 extern crate lang_items;
 
+libtock_core::stack_size! {0x800}
+
 fn main() {
     panic!("Bye world!")
 }

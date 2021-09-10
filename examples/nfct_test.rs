@@ -7,6 +7,8 @@ extern crate libtock_drivers;
 use core::fmt::Write;
 use libtock_drivers::console::Console;
 
+libtock_core::stack_size! {0x4000}
+
 #[cfg(not(feature = "with_nfc"))]
 mod example {
     use super::Console;
@@ -31,6 +33,7 @@ mod example {
     use libtock_drivers::timer::Timestamp;
 
     #[derive(Copy, Clone, Debug, PartialEq)]
+    #[allow(clippy::upper_case_acronyms)]
     enum ReturnCode {
         /// Operation completed successfully
         SUCCESS,

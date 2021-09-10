@@ -23,6 +23,8 @@ use libtock_drivers::led;
 use libtock_drivers::result::FlexUnwrap;
 use persistent_store::{Storage, StorageIndex};
 
+libtock_core::stack_size! {0x800}
+
 fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
     let index = StorageIndex { page, byte: 0 };
     let length = storage.page_size();

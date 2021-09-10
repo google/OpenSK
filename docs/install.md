@@ -220,7 +220,7 @@ the board in order to see your OpenSK device on your system.
     (_output may differ_):
 
     ```shell
-    $ ./deploy.py os --board=nrf52840_dongle --programmer=jlink
+    $ ./deploy.py os --board=nrf52840_dongle_opensk --programmer=jlink
     info: Updating rust toolchain to nightly-2020-02-03
     info: syncing channel updates for 'nightly-2020-02-03-x86_64-unknown-linux-gnu'
     info: checking for self-updates
@@ -261,13 +261,15 @@ the board in order to see your OpenSK device on your system.
 Although flashing using a Segger JLink probe is the officially supported way,
 our tool, `deploy.py` also supports other methods:
 
-*   OpenOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=openocd`
-*   pyOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=pyocd`
-*   Nordic DFU: `./deploy.py --board=nrf52840_dongle --opensk
+*   OpenOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk
+    --programmer=openocd`
+*   pyOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk
+    --programmer=pyocd`
+*   Nordic DFU: `./deploy.py --board=nrf52840_dongle_dfu --opensk
     --programmer=nordicdfu`
-*   Custom: `./deploy.py --board=nrf52840_dongle --opensk --programmer=none`. In
-    this case, an IntelHex file will be created and how to program a board is
-    left to the user.
+*   Custom: `./deploy.py --board=nrf52840_dongle_opensk --opensk
+    --programmer=none`. In this case, an IntelHex file will be created and how
+    to program a board is left to the user.
 
 If your board is already flashed with Tock OS, you may skip installing it:
 `./deploy.py --board=nrf52840dk_opensk --opensk --no-tockos`

@@ -162,11 +162,6 @@ SUPPORTED_BOARDS = {
         ),
 }
 
-# The STACK_SIZE value below must match the one used in the linker script
-# used by the board.
-# e.g. for Nordic nRF52840 boards the file is `nrf52840_layout.ld`.
-STACK_SIZE = 0x4000
-
 # The following value must match the one used in the file
 # `src/entry_point.rs`
 APP_HEAP_SIZE = 90000
@@ -309,7 +304,16 @@ class OpenSKInstaller:
   def update_rustc_if_needed(self):
     target_toolchain_fullstring = "stable"
     with open("rust-toolchain", "r", encoding="utf-8") as f:
-      target_toolchain_fullstring = f.readline().strip()
+      content = f.readlines()
+      if len(content) == 1:
+        # Old format, only the build is stored
+        target_toolchain_fullstring = content[0].strip()
+      else:
+        # New format
+        for line in content:
+          if line.startswith("channel"):
+            channel = line.strip().split("=", maxsplit=1)[1].strip()
+            target_toolchain_fullstring = channel.strip('"')
     target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
     if len(target_toolchain) == 1:
       # If we target the stable version of rust, we won't have a date
@@ -419,10 +423,10 @@ class OpenSKInstaller:
     elf2tab_ver = self.checked_command_output(
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.6.0":
+    if elf2tab_ver != "elf2tab 0.7.0":
       error(
           ("Detected unsupported elf2tab version {!a}. The following "
-           "commands may fail. Please use 0.6.0 instead.").format(elf2tab_ver))
+           "commands may fail. Please use 0.7.0 instead.").format(elf2tab_ver))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
@@ -432,14 +436,25 @@ class OpenSKInstaller:
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
+    stack_sizes = set()
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
       elf2tab_args.append(dest_file)
+      # extract required stack size directly from binary
+      nm = self.checked_command_output(
+          ["nm", "--print-size", "--radix=x", app_file])
+      for line in nm.splitlines():
+        if "STACK_MEMORY" in line:
+          required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
+          stack_sizes.add(required_stack_size)
+    if len(stack_sizes) != 1:
+      error("Detected different stack sizes across tab files.")
 
     elf2tab_args.extend([
-        "--stack={}".format(STACK_SIZE), "--app-heap={}".format(APP_HEAP_SIZE),
-        "--kernel-heap=1024", "--protected-region-size=64"
+        "--stack={}".format(stack_sizes.pop()),
+        "--app-heap={}".format(APP_HEAP_SIZE), "--kernel-heap=1024",
+        "--protected-region-size=64"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)

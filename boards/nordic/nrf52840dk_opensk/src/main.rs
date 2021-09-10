@@ -69,9 +69,12 @@
 
 use kernel::common::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::component::Component;
+use kernel::hil::led::LedLow;
+use kernel::hil::time::Counter;
 #[allow(unused_imports)]
 use kernel::{capabilities, create_capability, debug, debug_gpio, debug_verbose, static_init};
 use nrf52840::gpio::Pin;
+use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel, UartPins};
 
 // The nRF52840DK LEDs (see back of board)
@@ -104,6 +107,17 @@ pub mod io;
 // - Set to true to use Segger RTT over USB.
 const USB_DEBUGGING: bool = true;
 
+const VENDOR_ID: u16 = 0x1915; // Nordic Semiconductor
+const PRODUCT_ID: u16 = 0x521f; // nRF52840 Dongle (PCA10059)
+static STRINGS: &'static [&'static str] = &[
+    // Manufacturer
+    "Nordic Semiconductor ASA",
+    // Product
+    "OpenSK",
+    // Serial number
+    "v1.0",
+];
+
 // State for loading and holding applications.
 // How should the kernel respond when a process faults.
 const FAULT_RESPONSE: kernel::procs::FaultResponse = kernel::procs::FaultResponse::Panic;
@@ -117,9 +131,10 @@ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROC
 static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
     address: 0xC0000,
     size: 0x40000,
+    storage_type: kernel::StorageType::STORE,
 }];
 
-static mut CHIP: Option<&'static nrf52840::chip::Chip> = None;
+static mut CHIP: Option<&'static nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>> = None;
 
 /// Dummy buffer that causes the linker to reserve enough space for the stack.
 #[no_mangle]
@@ -135,9 +150,12 @@ pub struct Platform {
     >,
     console: &'static capsules::console::Console<'static>,
     gpio: &'static capsules::gpio::GPIO<'static, nrf52840::gpio::GPIOPin<'static>>,
-    led: &'static capsules::led::LED<'static, nrf52840::gpio::GPIOPin<'static>>,
+    led: &'static capsules::led::LedDriver<
+        'static,
+        kernel::hil::led::LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
+    >,
     rng: &'static capsules::rng::RngDriver<'static>,
-    ipc: kernel::ipc::IPC,
+    ipc: kernel::ipc::IPC<NUM_PROCS>,
     analog_comparator: &'static capsules::analog_comparator::AnalogComparator<
         'static,
         nrf52840::acomp::Comparator<'static>,
@@ -147,6 +165,12 @@ pub struct Platform {
         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
     >,
     nvmc: &'static nrf52840::nvmc::SyscallDriver,
+    usb: &'static capsules::usb::usb_ctap::CtapUsbSyscallDriver<
+        'static,
+        'static,
+        nrf52840::usbd::Usbd<'static>,
+    >,
+    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
 }
 
 impl kernel::Platform for Platform {
@@ -163,6 +187,8 @@ impl kernel::Platform for Platform {
             capsules::rng::DRIVER_NUM => f(Some(self.rng)),
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
+            capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
+            capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
@@ -193,6 +219,16 @@ impl kernel::Platform for Platform {
 pub unsafe fn reset_handler() {
     // Loads relocations and clears BSS
     nrf52840::init();
+    let ppi = static_init!(nrf52840::ppi::Ppi, nrf52840::ppi::Ppi::new());
+    // Initialize chip peripheral drivers
+    let nrf52840_peripherals = static_init!(
+        Nrf52840DefaultPeripherals,
+        Nrf52840DefaultPeripherals::new(ppi)
+    );
+
+    // set up circular peripheral dependencies
+    nrf52840_peripherals.init();
+    let base_peripherals = &nrf52840_peripherals.nrf52;
 
     let uart_channel = if USB_DEBUGGING {
         // Initialize early so any panic beyond this point can use the RTT memory object.
@@ -218,22 +254,22 @@ pub unsafe fn reset_handler() {
         board_kernel,
         components::gpio_component_helper!(
             nrf52840::gpio::GPIOPin,
-            0 => &nrf52840::gpio::PORT[Pin::P1_01],
-            1 => &nrf52840::gpio::PORT[Pin::P1_02],
-            2 => &nrf52840::gpio::PORT[Pin::P1_03],
-            3 => &nrf52840::gpio::PORT[Pin::P1_04],
-            4 => &nrf52840::gpio::PORT[Pin::P1_05],
-            5 => &nrf52840::gpio::PORT[Pin::P1_06],
-            6 => &nrf52840::gpio::PORT[Pin::P1_07],
-            7 => &nrf52840::gpio::PORT[Pin::P1_08],
-            8 => &nrf52840::gpio::PORT[Pin::P1_10],
-            9 => &nrf52840::gpio::PORT[Pin::P1_11],
-            10 => &nrf52840::gpio::PORT[Pin::P1_12],
-            11 => &nrf52840::gpio::PORT[Pin::P1_13],
-            12 => &nrf52840::gpio::PORT[Pin::P1_14],
-            13 => &nrf52840::gpio::PORT[Pin::P1_15],
-            14 => &nrf52840::gpio::PORT[Pin::P0_26],
-            15 => &nrf52840::gpio::PORT[Pin::P0_27]
+            0 => &nrf52840_peripherals.gpio_port[Pin::P1_01],
+            1 => &nrf52840_peripherals.gpio_port[Pin::P1_02],
+            2 => &nrf52840_peripherals.gpio_port[Pin::P1_03],
+            3 => &nrf52840_peripherals.gpio_port[Pin::P1_04],
+            4 => &nrf52840_peripherals.gpio_port[Pin::P1_05],
+            5 => &nrf52840_peripherals.gpio_port[Pin::P1_06],
+            6 => &nrf52840_peripherals.gpio_port[Pin::P1_07],
+            7 => &nrf52840_peripherals.gpio_port[Pin::P1_08],
+            8 => &nrf52840_peripherals.gpio_port[Pin::P1_10],
+            9 => &nrf52840_peripherals.gpio_port[Pin::P1_11],
+            10 => &nrf52840_peripherals.gpio_port[Pin::P1_12],
+            11 => &nrf52840_peripherals.gpio_port[Pin::P1_13],
+            12 => &nrf52840_peripherals.gpio_port[Pin::P1_14],
+            13 => &nrf52840_peripherals.gpio_port[Pin::P1_15],
+            14 => &nrf52840_peripherals.gpio_port[Pin::P0_26],
+            15 => &nrf52840_peripherals.gpio_port[Pin::P0_27]
         ),
     )
     .finalize(components::gpio_component_buf!(nrf52840::gpio::GPIOPin));
@@ -243,22 +279,22 @@ pub unsafe fn reset_handler() {
         components::button_component_helper!(
             nrf52840::gpio::GPIOPin,
             (
-                &nrf52840::gpio::PORT[BUTTON1_PIN],
+                &nrf52840_peripherals.gpio_port[BUTTON1_PIN],
                 kernel::hil::gpio::ActivationMode::ActiveLow,
                 kernel::hil::gpio::FloatingState::PullUp
             ), //13
             (
-                &nrf52840::gpio::PORT[BUTTON2_PIN],
+                &nrf52840_peripherals.gpio_port[BUTTON2_PIN],
                 kernel::hil::gpio::ActivationMode::ActiveLow,
                 kernel::hil::gpio::FloatingState::PullUp
             ), //14
             (
-                &nrf52840::gpio::PORT[BUTTON3_PIN],
+                &nrf52840_peripherals.gpio_port[BUTTON3_PIN],
                 kernel::hil::gpio::ActivationMode::ActiveLow,
                 kernel::hil::gpio::FloatingState::PullUp
             ), //15
             (
-                &nrf52840::gpio::PORT[BUTTON4_PIN],
+                &nrf52840_peripherals.gpio_port[BUTTON4_PIN],
                 kernel::hil::gpio::ActivationMode::ActiveLow,
                 kernel::hil::gpio::FloatingState::PullUp
             ) //16
@@ -267,33 +303,27 @@ pub unsafe fn reset_handler() {
     .finalize(components::button_component_buf!(nrf52840::gpio::GPIOPin));
 
     let led = components::led::LedsComponent::new(components::led_component_helper!(
-        nrf52840::gpio::GPIOPin,
-        (
-            &nrf52840::gpio::PORT[LED1_PIN],
-            kernel::hil::gpio::ActivationMode::ActiveLow
-        ),
-        (
-            &nrf52840::gpio::PORT[LED2_PIN],
-            kernel::hil::gpio::ActivationMode::ActiveLow
-        ),
-        (
-            &nrf52840::gpio::PORT[LED3_PIN],
-            kernel::hil::gpio::ActivationMode::ActiveLow
-        ),
-        (
-            &nrf52840::gpio::PORT[LED4_PIN],
-            kernel::hil::gpio::ActivationMode::ActiveLow
-        )
+        LedLow<'static, nrf52840::gpio::GPIOPin>,
+        LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
+        LedLow::new(&nrf52840_peripherals.gpio_port[LED2_PIN]),
+        LedLow::new(&nrf52840_peripherals.gpio_port[LED3_PIN]),
+        LedLow::new(&nrf52840_peripherals.gpio_port[LED4_PIN]),
     ))
-    .finalize(components::led_component_buf!(nrf52840::gpio::GPIOPin));
+    .finalize(components::led_component_buf!(
+        LedLow<'static, nrf52840::gpio::GPIOPin>
+    ));
 
-    let chip = static_init!(nrf52840::chip::Chip, nrf52840::chip::new());
+    let chip = static_init!(
+        nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>,
+        nrf52840::chip::NRF52::new(nrf52840_peripherals)
+    );
     CHIP = Some(chip);
 
     nrf52_components::startup::NrfStartupComponent::new(
         false,
         BUTTON_RST_PIN,
         nrf52840::uicr::Regulator0Output::DEFAULT,
+        &base_peripherals.nvmc,
     )
     .finalize(());
 
@@ -303,7 +333,7 @@ pub unsafe fn reset_handler() {
         create_capability!(capabilities::ProcessManagementCapability);
     let main_loop_capability = create_capability!(capabilities::MainLoopCapability);
     let memory_allocation_capability = create_capability!(capabilities::MemoryAllocationCapability);
-    let gpio_port = &nrf52840::gpio::PORT;
+    let gpio_port = &nrf52840_peripherals.gpio_port;
     // Configure kernel debug gpios as early as possible
     kernel::debug::assign_gpios(
         Some(&gpio_port[LED1_PIN]),
@@ -311,17 +341,22 @@ pub unsafe fn reset_handler() {
         Some(&gpio_port[LED3_PIN]),
     );
 
-    let rtc = &nrf52840::rtc::RTC;
+    let rtc = &base_peripherals.rtc;
     rtc.start();
     let mux_alarm = components::alarm::AlarmMuxComponent::new(rtc)
         .finalize(components::alarm_mux_component_helper!(nrf52840::rtc::Rtc));
     let alarm = components::alarm::AlarmDriverComponent::new(board_kernel, mux_alarm)
         .finalize(components::alarm_component_helper!(nrf52840::rtc::Rtc));
 
-    let channel = nrf52_components::UartChannelComponent::new(uart_channel, mux_alarm).finalize(());
+    let channel = nrf52_components::UartChannelComponent::new(
+        uart_channel,
+        mux_alarm,
+        &base_peripherals.uarte0,
+    )
+    .finalize(());
 
     let dynamic_deferred_call_clients =
-        static_init!([DynamicDeferredCallClientState; 2], Default::default());
+        static_init!([DynamicDeferredCallClientState; 3], Default::default());
     let dynamic_deferred_caller = static_init!(
         DynamicDeferredCall,
         DynamicDeferredCall::new(dynamic_deferred_call_clients)
@@ -342,9 +377,9 @@ pub unsafe fn reset_handler() {
     // Create the debugger object that handles calls to `debug!()`.
     components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
-    let rng = components::rng::RngComponent::new(board_kernel, &nrf52840::trng::TRNG).finalize(());
+    let rng = components::rng::RngComponent::new(board_kernel, &base_peripherals.trng).finalize(());
 
-    nrf52840::spi::SPIM0.configure(
+    base_peripherals.spim0.configure(
         nrf52840::pinmux::Pinmux::new(SPI_MOSI as u32),
         nrf52840::pinmux::Pinmux::new(SPI_MISO as u32),
         nrf52840::pinmux::Pinmux::new(SPI_CLK as u32),
@@ -353,7 +388,7 @@ pub unsafe fn reset_handler() {
     // Initialize AC using AIN5 (P0.29) as VIN+ and VIN- as AIN0 (P0.02)
     // These are hardcoded pin assignments specified in the driver
     let analog_comparator = components::analog_comparator::AcComponent::new(
-        &nrf52840::acomp::ACOMP,
+        &base_peripherals.acomp,
         components::acomp_component_helper!(
             nrf52840::acomp::Channel,
             &nrf52840::acomp::CHANNEL_AC0
@@ -366,7 +401,7 @@ pub unsafe fn reset_handler() {
     let nvmc = static_init!(
         nrf52840::nvmc::SyscallDriver,
         nrf52840::nvmc::SyscallDriver::new(
-            &nrf52840::nvmc::NVMC,
+            &base_peripherals.nvmc,
             board_kernel.create_grant(&memory_allocation_capability),
             dynamic_deferred_caller,
         )
@@ -377,7 +412,26 @@ pub unsafe fn reset_handler() {
             .expect("no deferred call slot available for nvmc"),
     );
 
-    nrf52_components::NrfClockComponent::new().finalize(());
+    // Configure USB controller
+    let usb = components::usb_ctap::UsbCtapComponent::new(
+        board_kernel,
+        &nrf52840_peripherals.usbd,
+        capsules::usb::usbc_client::MAX_CTRL_PACKET_SIZE_NRF52840,
+        VENDOR_ID,
+        PRODUCT_ID,
+        STRINGS,
+    )
+    .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
+
+    let crp = components::firmware_protection::FirmwareProtectionComponent::new(
+        board_kernel,
+        nrf52840::uicr::Uicr::new(),
+    )
+    .finalize(components::firmware_protection_component_helper!(
+        nrf52840::uicr::Uicr
+    ));
+
+    nrf52_components::NrfClockComponent::new(&base_peripherals.clock).finalize(());
 
     let platform = Platform {
         button,
@@ -389,6 +443,8 @@ pub unsafe fn reset_handler() {
         alarm,
         analog_comparator,
         nvmc,
+        usb,
+        crp,
         ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
     };
 

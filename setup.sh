@@ -37,6 +37,10 @@ check_command pip3
 source tools/gen_key_materials.sh
 generate_crypto_materials N
 
+# Install python dependencies (testresources) required by "launchpadlib",
+# which is used by one of the tockloader dependencies.
+pip3 install --user testresources
+
 rustup install $(head -n 1 rust-toolchain)
 pip3 install --user --upgrade 'tockloader==1.5' six intelhex
 rustup target add thumbv7em-none-eabi

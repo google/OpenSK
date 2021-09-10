@@ -31,7 +31,6 @@ with_ctap2_1 = []
 with_nfc = ["libtock_drivers/with_nfc"]
 
 [dev-dependencies]
-elf2tab = "0.6.0"
 enum-iterator = "0.6.0"
 
 [build-dependencies]

@@ -308,7 +308,7 @@ class OpenSKInstaller:
 
   def update_rustc_if_needed(self):
     target_toolchain_fullstring = "stable"
-    with open("rust-toolchain", "r") as f:
+    with open("rust-toolchain", "r", encoding="utf-8") as f:
       target_toolchain_fullstring = f.readline().strip()
     target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
     if len(target_toolchain) == 1:
@@ -951,7 +951,16 @@ if __name__ == "__main__":
       dest="application",
       action="store_const",
       const="store_latency",
-      help=("Compiles and installs the store_latency example."))
+      help=("Compiles and installs the store_latency example which print "
+            "latency statistics of the persistent store library."))
+  apps_group.add_argument(
+      "--erase_storage",
+      dest="application",
+      action="store_const",
+      const="erase_storage",
+      help=("Compiles and installs the erase_storage example which erases "
+            "the storage. During operation the dongle red light is on. Once "
+            "the operation is completed the dongle green light is on."))
   apps_group.add_argument(
       "--panic_test",
       dest="application",

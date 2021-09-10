@@ -1,9 +1,10 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=master)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=master)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=master)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=master)
+![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=stable)
+![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=stable)
+![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=stable)
+![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=stable)
+[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=stable)](https://coveralls.io/github/google/OpenSK?branch=stable)
 
 ## OpenSK
 
@@ -201,3 +202,7 @@ cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fp
 ## Contributing
 
 See [Contributing.md](docs/contributing.md).
+
+## Reporting a Vulnerability
+
+See [SECURITY.md](SECURITY.md).

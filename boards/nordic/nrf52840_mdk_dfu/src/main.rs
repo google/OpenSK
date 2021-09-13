@@ -61,7 +61,6 @@ static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROC
 static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
     address: 0xC0000,
     size: 0x14000, // NUM_PAGES = 20
-    unallocated_size: 0x40000, // MPU limitation
     storage_type: kernel::StorageType::STORE,
 }];
 

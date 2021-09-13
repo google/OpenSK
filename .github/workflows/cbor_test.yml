@@ -14,9 +14,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: "true"
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
+      - name: Install Rust toolchain
+        run: rustup show
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -29,10 +28,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/cbor/Cargo.toml --release --features std
+          args: --manifest-path libraries/cbor/Cargo.toml --release
 
       - name: Unit testing of CBOR library (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/cbor/Cargo.toml --features std
+          args: --manifest-path libraries/cbor/Cargo.toml

@@ -17,6 +17,8 @@
 extern crate alloc;
 extern crate lang_items;
 
+libtock_core::stack_size! {0x800}
+
 use alloc::vec::Vec;
 use core::fmt::Write;
 use libtock_drivers::console::Console;

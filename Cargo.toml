@@ -1,6 +1,6 @@
 [package]
 name = "ctap2"
-version = "0.1.0"
+version = "1.0.0"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
@@ -13,28 +13,26 @@ edition = "2018"
 libtock_core = { path = "third_party/libtock-rs/core" }
 libtock_drivers = { path = "third_party/libtock-drivers" }
 lang_items = { path = "third_party/lang-items" }
-cbor = { path = "libraries/cbor" }
+sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
+persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]
-debug_ctap = ["crypto/derive_debug", "libtock_drivers/debug_ctap"]
+debug_ctap = ["libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["cbor/std", "crypto/std", "crypto/derive_debug", "lang_items/std"]
-ram_storage = []
+std = ["crypto/std", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
-with_ctap2_1 = []
+with_nfc = ["libtock_drivers/with_nfc"]
 
 [dev-dependencies]
-elf2tab = "0.6.0"
 enum-iterator = "0.6.0"
 
 [build-dependencies]
-openssl = "0.10"
 uuid = { version = "0.8", features = ["v4"] }
 
 [profile.dev]
@@ -44,3 +42,5 @@ lto = true # Link Time Optimization usually reduces size of binaries and static 
 [profile.release]
 panic = "abort"
 lto = true # Link Time Optimization usually reduces size of binaries and static libraries
+opt-level = "z"
+codegen-units = 1

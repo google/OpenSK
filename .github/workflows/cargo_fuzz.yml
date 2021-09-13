@@ -12,9 +12,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: "true"
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
+      - name: Install Rust toolchain
+        run: rustup show
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -29,3 +28,5 @@ jobs:
         run: cargo fuzz build
       - name: Cargo fuzz build (libraries/cbor)
         run: cd libraries/cbor && cargo fuzz build && cd ../..
+      - name: Cargo fuzz build (libraries/persistent_store)
+        run: cd libraries/persistent_store && cargo fuzz build && cd ../..

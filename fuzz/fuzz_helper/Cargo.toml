@@ -1,0 +1,14 @@
+[package]
+name = "fuzz_helper"
+version = "0.1.0"
+authors = ["Mingxiao Guo <mingxguo@google.com>"]
+license = "Apache-2.0"
+edition = "2018"
+
+[dependencies]
+arrayref = "0.3.6"
+libtock_drivers = { path = "../../third_party/libtock-drivers" }
+crypto = { path = "../../libraries/crypto", features = ['std'] }
+sk-cbor = { path = "../../libraries/cbor" }
+ctap2 = { path = "../..", features = ['std'] }
+lang_items = { path = "../../third_party/lang-items", features = ['std'] }

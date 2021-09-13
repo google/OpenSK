@@ -1,6 +1,6 @@
 
 [package]
-name = "cbor-fuzz"
+name = "sk-cbor-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
@@ -12,7 +12,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.3"
 
-[dependencies.cbor]
+[dependencies.sk-cbor]
 path = ".."
 
 # Prevent this from interfering with workspaces

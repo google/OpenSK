@@ -6,7 +6,7 @@ build = "build.rs"
 edition = "2018"
 
 [[bin]]
-path = "../nrf52840_dongle/src/main.rs"
+path = "../nrf52840_dongle_opensk/src/main.rs"
 name = "nrf52840_dongle_dfu"
 
 [dependencies]

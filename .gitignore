@@ -11,3 +11,4 @@ Cargo.lock
 /reproducible/binaries.sha256sum
 /reproducible/elf2tab.txt
 /reproducible/reproduced.tar
+__pycache__

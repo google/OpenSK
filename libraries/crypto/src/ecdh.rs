@@ -17,8 +17,6 @@ use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
 use super::rng256::Rng256;
-use super::sha256::Sha256;
-use super::Hash256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -26,7 +24,7 @@ pub struct SecKey {
     a: NonZeroExponentP256,
 }
 
-#[cfg_attr(feature = "derive_debug", derive(Clone, PartialEq, Debug))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -62,13 +60,15 @@ impl SecKey {
         // - https://www.secg.org/sec1-v2.pdf
     }
 
-    // DH key agreement method defined in the FIDO2 specification, Section 5.5.4. "Getting
-    // sharedSecret from Authenticator"
-    pub fn exchange_x_sha256(&self, other: &PubKey) -> [u8; 32] {
+    /// Performs the handshake using the Diffie Hellman key agreement.
+    ///
+    /// This function generates the Z in the PIN protocol v1 specification.
+    /// https://drafts.fidoalliance.org/fido-2/stable-links-to-latest/fido-client-to-authenticator-protocol.html#pinProto1
+    pub fn exchange_x(&self, other: &PubKey) -> [u8; 32] {
         let p = self.exchange_raw(other);
         let mut x: [u8; 32] = [Default::default(); 32];
         p.getx().to_int().to_bin(&mut x);
-        Sha256::hash(&x)
+        x
     }
 }
 
@@ -83,11 +83,13 @@ impl PubKey {
         self.p.to_bytes_uncompressed(bytes);
     }
 
+    /// Creates a new PubKey from its coordinates on the elliptic curve.
     pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
         PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
             .map(|p| PubKey { p })
     }
 
+    /// Writes the coordinates into the passed in arrays.
     pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
         self.p.getx().to_int().to_bin(x);
         self.p.gety().to_int().to_bin(y);
@@ -119,7 +121,7 @@ mod test {
 
     /** Test that the exchanged key is the same on both sides **/
     #[test]
-    fn test_exchange_x_sha256_is_symmetric() {
+    fn test_exchange_x_is_symmetric() {
         let mut rng = ThreadRng256 {};
 
         for _ in 0..ITERATIONS {
@@ -127,12 +129,12 @@ mod test {
             let pk_a = sk_a.genpk();
             let sk_b = SecKey::gensk(&mut rng);
             let pk_b = sk_b.genpk();
-            assert_eq!(sk_a.exchange_x_sha256(&pk_b), sk_b.exchange_x_sha256(&pk_a));
+            assert_eq!(sk_a.exchange_x(&pk_b), sk_b.exchange_x(&pk_a));
         }
     }
 
     #[test]
-    fn test_exchange_x_sha256_bytes_is_symmetric() {
+    fn test_exchange_x_bytes_is_symmetric() {
         let mut rng = ThreadRng256 {};
 
         for _ in 0..ITERATIONS {
@@ -146,7 +148,7 @@ mod test {
 
             let pk_a = PubKey::from_bytes_uncompressed(&pk_bytes_a).unwrap();
             let pk_b = PubKey::from_bytes_uncompressed(&pk_bytes_b).unwrap();
-            assert_eq!(sk_a.exchange_x_sha256(&pk_b), sk_b.exchange_x_sha256(&pk_a));
+            assert_eq!(sk_a.exchange_x(&pk_b), sk_b.exchange_x(&pk_a));
         }
     }
 

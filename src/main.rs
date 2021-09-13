@@ -18,6 +18,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate core;
 extern crate lang_items;
+#[macro_use]
+extern crate arrayref;
+extern crate byteorder;
 
 mod ctap;
 pub mod embedded_flash;
@@ -37,10 +40,14 @@ use libtock_drivers::console::Console;
 use libtock_drivers::led;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer;
+use libtock_drivers::timer::Duration;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::timer::Timer;
-use libtock_drivers::timer::{Duration, Timestamp};
+#[cfg(feature = "debug_ctap")]
+use libtock_drivers::timer::Timestamp;
 use libtock_drivers::usb_ctap_hid;
+
+libtock_core::stack_size! {0x4000}
 
 const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
@@ -57,12 +64,13 @@ fn main() {
         panic!("Cannot setup USB driver");
     }
 
+    let boot_time = timer.get_current_clock().flex_unwrap();
     let mut rng = TockRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, check_user_presence);
+    let mut ctap_state = CtapState::new(&mut rng, check_user_presence, boot_time);
     let mut ctap_hid = CtapHid::new();
 
     let mut led_counter = 0;
-    let mut last_led_increment = timer.get_current_clock().flex_unwrap();
+    let mut last_led_increment = boot_time;
 
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
@@ -114,8 +122,8 @@ fn main() {
         }
 
         // These calls are making sure that even for long inactivity, wrapping clock values
-        // never randomly wink or grant user presence for U2F.
-        ctap_state.check_disable_reset(Timestamp::<isize>::from_clock_value(now));
+        // don't cause problems with timers.
+        ctap_state.update_timeouts(now);
         ctap_hid.wink_permission = ctap_hid.wink_permission.check_expiration(now);
 
         if has_packet {

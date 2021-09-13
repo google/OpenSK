@@ -16,9 +16,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: "true"
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
+      - name: Install Rust toolchain
+        run: rustup show
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -27,16 +26,16 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
 
-      - run: echo "::set-env name=RUSTFLAGS::-C target-feature=+aes"
+      - run: echo "RUSTFLAGS=-C target-feature=+aes" >> $GITHUB_ENV
 
       - name: Unit testing of crypto library (release mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/crypto/Cargo.toml --release --features std,derive_debug
+          args: --manifest-path libraries/crypto/Cargo.toml --release --features std
 
       - name: Unit testing of crypto library (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/crypto/Cargo.toml --features std,derive_debug
+          args: --manifest-path libraries/crypto/Cargo.toml --features std

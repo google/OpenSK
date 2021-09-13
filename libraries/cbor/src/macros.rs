@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::values::{KeyType, Value};
-use alloc::collections::btree_map;
+//! Convenience macros for working with CBOR values.
+
+use crate::values::Value;
+use alloc::vec;
 use core::cmp::Ordering;
 use core::iter::Peekable;
 
-/// This macro generates code to extract multiple values from a `BTreeMap<KeyType, Value>` at once
-/// in an optimized manner, consuming the input map.
+/// This macro generates code to extract multiple values from a `Vec<(Value, Value)>` at once
+/// in an optimized manner, consuming the input vector.
 ///
-/// It takes as input a `BTreeMap` as well as a list of identifiers and keys, and generates code
+/// It takes as input a `Vec` as well as a list of identifiers and keys, and generates code
 /// that assigns the corresponding values to new variables using the given identifiers. Each of
 /// these variables has type `Option<Value>`, to account for the case where keys aren't found.
 ///
@@ -32,33 +34,20 @@ use core::iter::Peekable;
 /// the keys are indeed sorted. This macro is therefore **not suitable for dynamic keys** that can
 /// change at runtime.
 ///
-/// Semantically, provided that the keys are sorted as specified above, the following two snippets
-/// of code are equivalent, but the `destructure_cbor_map!` version is more optimized, as it doesn't
-/// re-balance the `BTreeMap` for each key, contrary to the `BTreeMap::remove` operations.
+/// Example usage:
 ///
 /// ```rust
 /// # extern crate alloc;
-/// # use cbor::destructure_cbor_map;
+/// # use sk_cbor::destructure_cbor_map;
 /// #
 /// # fn main() {
-/// #     let map = alloc::collections::BTreeMap::new();
+/// #     let map = alloc::vec::Vec::new();
 /// destructure_cbor_map! {
 ///     let {
 ///         1 => x,
 ///         "key" => y,
 ///     } = map;
 /// }
-/// # }
-/// ```
-///
-/// ```rust
-/// # extern crate alloc;
-/// #
-/// # fn main() {
-/// #     let mut map = alloc::collections::BTreeMap::<cbor::KeyType, _>::new();
-/// use cbor::values::IntoCborKey;
-/// let x: Option<cbor::Value> = map.remove(&1.into_cbor_key());
-/// let y: Option<cbor::Value> = map.remove(&"key".into_cbor_key());
 /// # }
 /// ```
 #[macro_export]
@@ -70,7 +59,7 @@ macro_rules! destructure_cbor_map {
         #[cfg(test)]
         $crate::assert_sorted_keys!($( $key, )+);
 
-        use $crate::values::{IntoCborKey, Value};
+        use $crate::values::{IntoCborValue, Value};
         use $crate::macros::destructure_cbor_map_peek_value;
 
         // This algorithm first converts the map into a peekable iterator - whose items are sorted
@@ -83,7 +72,7 @@ macro_rules! destructure_cbor_map {
         // to come in the same order (i.e. sorted).
         let mut it = $map.into_iter().peekable();
         $(
-        let $variable: Option<Value> = destructure_cbor_map_peek_value(&mut it, $key.into_cbor_key());
+        let $variable: Option<Value> = destructure_cbor_map_peek_value(&mut it, $key.into_cbor_value());
         )+
     };
 }
@@ -100,14 +89,14 @@ macro_rules! destructure_cbor_map {
 /// would be inlined for every use case. As of June 2020, this saves ~40KB of binary size for the
 /// CTAP2 application of OpenSK.
 pub fn destructure_cbor_map_peek_value(
-    it: &mut Peekable<btree_map::IntoIter<KeyType, Value>>,
-    needle: KeyType,
+    it: &mut Peekable<vec::IntoIter<(Value, Value)>>,
+    needle: Value,
 ) -> Option<Value> {
     loop {
         match it.peek() {
             None => return None,
             Some(item) => {
-                let key: &KeyType = &item.0;
+                let key: &Value = &item.0;
                 match key.cmp(&needle) {
                     Ordering::Less => {
                         it.next();
@@ -123,6 +112,7 @@ pub fn destructure_cbor_map_peek_value(
     }
 }
 
+/// Assert that the keys in a vector of key-value pairs are in canonical order.
 #[macro_export]
 macro_rules! assert_sorted_keys {
     // Last key
@@ -131,9 +121,9 @@ macro_rules! assert_sorted_keys {
 
     ( $key1:expr, $key2:expr, $( $keys:expr, )* ) => {
         {
-            use $crate::values::{IntoCborKey, KeyType};
-            let k1: KeyType = $key1.into_cbor_key();
-            let k2: KeyType = $key2.into_cbor_key();
+            use $crate::values::{IntoCborValue, Value};
+            let k1: Value = $key1.into_cbor_value();
+            let k2: Value = $key2.into_cbor_value();
             assert!(
                 k1 < k2,
                 "{:?} < {:?} failed. The destructure_cbor_map! macro requires keys in sorted order.",
@@ -145,6 +135,23 @@ macro_rules! assert_sorted_keys {
     };
 }
 
+/// Creates a CBOR Value of type Map with the specified key-value pairs.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Values.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use sk_cbor::cbor_map;
+/// let map = cbor_map! {
+///   0x01 => false,
+///   "02" => -3,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map {
     // trailing comma case
@@ -156,16 +163,36 @@ macro_rules! cbor_map {
         {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
-            use $crate::values::{IntoCborKey, IntoCborValue};
-            let mut _map = ::alloc::collections::BTreeMap::new();
+            use $crate::values::IntoCborValue;
+            let mut _map = ::alloc::vec::Vec::new();
             $(
-                _map.insert($key.into_cbor_key(), $value.into_cbor_value());
+                _map.push(($key.into_cbor_value(), $value.into_cbor_value()));
             )*
             $crate::values::Value::Map(_map)
         }
     };
 }
 
+/// Creates a CBOR Value of type Map with key-value pairs where values can be Options.
+///
+/// Keys and values are expressions and converted into CBOR Keys and Value Options.
+/// The map entry is included iff the Value is not an Option or Option is Some.
+/// The syntax for these pairs is `key_expression => value_expression,`.
+/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
+/// Keys do not have to be sorted.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use sk_cbor::cbor_map_options;
+/// let missing_value: Option<bool> = None;
+/// let map = cbor_map_options! {
+///   0x01 => Some(false),
+///   "02" => -3,
+///   "not in map" => missing_value,
+/// };
+/// ```
 #[macro_export]
 macro_rules! cbor_map_options {
     // trailing comma case
@@ -177,13 +204,13 @@ macro_rules! cbor_map_options {
         {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
-            use $crate::values::{IntoCborKey, IntoCborValueOption};
-            let mut _map = ::alloc::collections::BTreeMap::<_, $crate::values::Value>::new();
+            use $crate::values::{IntoCborValue, IntoCborValueOption};
+            let mut _map = ::alloc::vec::Vec::<(_, $crate::values::Value)>::new();
             $(
             {
                 let opt: Option<$crate::values::Value> = $value.into_cbor_value_option();
                 if let Some(val) = opt {
-                    _map.insert($key.into_cbor_key(), val);
+                    _map.push(($key.into_cbor_value(), val));
                 }
             }
             )*
@@ -192,13 +219,25 @@ macro_rules! cbor_map_options {
     };
 }
 
+/// Creates a CBOR Value of type Map from a Vec<(Value, Value)>.
 #[macro_export]
-macro_rules! cbor_map_btree {
-    ( $tree:expr ) => {
-        $crate::values::Value::Map($tree)
-    };
+macro_rules! cbor_map_collection {
+    ( $tree:expr ) => {{
+        $crate::values::Value::from($tree)
+    }};
 }
 
+/// Creates a CBOR Value of type Array with the given elements.
+///
+/// Elements are expressions and converted into CBOR Values. Elements are comma-separated.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use sk_cbor::cbor_array;
+/// let array = cbor_array![1, "2"];
+/// ```
 #[macro_export]
 macro_rules! cbor_array {
     // trailing comma case
@@ -216,6 +255,7 @@ macro_rules! cbor_array {
     };
 }
 
+/// Creates a CBOR Value of type Array from a Vec<Value>.
 #[macro_export]
 macro_rules! cbor_array_vec {
     ( $vec:expr ) => {{
@@ -224,6 +264,7 @@ macro_rules! cbor_array_vec {
     }};
 }
 
+/// Creates a CBOR Value of type Simple with value true.
 #[macro_export]
 macro_rules! cbor_true {
     ( ) => {
@@ -231,6 +272,7 @@ macro_rules! cbor_true {
     };
 }
 
+/// Creates a CBOR Value of type Simple with value false.
 #[macro_export]
 macro_rules! cbor_false {
     ( ) => {
@@ -238,6 +280,7 @@ macro_rules! cbor_false {
     };
 }
 
+/// Creates a CBOR Value of type Simple with value null.
 #[macro_export]
 macro_rules! cbor_null {
     ( ) => {
@@ -245,6 +288,7 @@ macro_rules! cbor_null {
     };
 }
 
+/// Creates a CBOR Value of type Simple with the undefined value.
 #[macro_export]
 macro_rules! cbor_undefined {
     ( ) => {
@@ -252,6 +296,7 @@ macro_rules! cbor_undefined {
     };
 }
 
+/// Creates a CBOR Value of type Simple with the given bool value.
 #[macro_export]
 macro_rules! cbor_bool {
     ( $x:expr ) => {
@@ -259,37 +304,55 @@ macro_rules! cbor_bool {
     };
 }
 
-// For key types, we construct a KeyType and call .into(), which will automatically convert it to a
-// KeyType or a Value depending on the context.
+/// Creates a CBOR Value of type Unsigned with the given numeric value.
 #[macro_export]
 macro_rules! cbor_unsigned {
     ( $x:expr ) => {
-        $crate::cbor_key_unsigned!($x).into()
+        $crate::values::Value::Unsigned($x)
     };
 }
 
+/// Creates a CBOR Value of type Unsigned or Negative with the given numeric value.
 #[macro_export]
 macro_rules! cbor_int {
     ( $x:expr ) => {
-        $crate::cbor_key_int!($x).into()
+        $crate::values::Value::integer($x)
     };
 }
 
+/// Creates a CBOR Value of type Text String with the given string.
 #[macro_export]
 macro_rules! cbor_text {
     ( $x:expr ) => {
-        $crate::cbor_key_text!($x).into()
+        $crate::values::Value::TextString($x.into())
     };
 }
 
+/// Creates a CBOR Value of type Byte String with the given slice or vector.
 #[macro_export]
 macro_rules! cbor_bytes {
     ( $x:expr ) => {
-        $crate::cbor_key_bytes!($x).into()
+        $crate::values::Value::ByteString($x)
     };
 }
 
-// Macro to use with a literal, e.g. cbor_bytes_lit!(b"foo")
+/// Creates a CBOR Value of type Tag with the given tag and object.
+#[macro_export]
+macro_rules! cbor_tagged {
+    ( $t:expr, $x: expr ) => {
+        $crate::values::Value::Tag($t, ::alloc::boxed::Box::new($x))
+    };
+}
+
+/// Creates a CBOR Value of type Byte String with the given byte string literal.
+///
+/// Example usage:
+///
+/// ```rust
+/// # extern crate alloc;
+/// # use sk_cbor::cbor_bytes_lit;
+/// let byte_array = cbor_bytes_lit!(b"foo");
+/// ```
 #[macro_export]
 macro_rules! cbor_bytes_lit {
     ( $x:expr ) => {
@@ -297,39 +360,10 @@ macro_rules! cbor_bytes_lit {
     };
 }
 
-// Some explicit macros are also available for contexts where the type is not explicit.
-#[macro_export]
-macro_rules! cbor_key_unsigned {
-    ( $x:expr ) => {
-        $crate::values::KeyType::Unsigned($x)
-    };
-}
-
-#[macro_export]
-macro_rules! cbor_key_int {
-    ( $x:expr ) => {
-        $crate::values::KeyType::integer($x)
-    };
-}
-
-#[macro_export]
-macro_rules! cbor_key_text {
-    ( $x:expr ) => {
-        $crate::values::KeyType::TextString($x.into())
-    };
-}
-
-#[macro_export]
-macro_rules! cbor_key_bytes {
-    ( $x:expr ) => {
-        $crate::values::KeyType::ByteString($x)
-    };
-}
-
 #[cfg(test)]
 mod test {
-    use super::super::values::{KeyType, SimpleValue, Value};
-    use alloc::collections::BTreeMap;
+    use super::super::values::{SimpleValue, Value};
+    use alloc::{string::String, vec, vec::Vec};
 
     #[test]
     fn test_cbor_simple_values() {
@@ -347,50 +381,47 @@ mod test {
 
     #[test]
     fn test_cbor_int_unsigned() {
-        assert_eq!(cbor_key_int!(0), KeyType::Unsigned(0));
-        assert_eq!(cbor_key_int!(1), KeyType::Unsigned(1));
-        assert_eq!(cbor_key_int!(123456), KeyType::Unsigned(123456));
+        assert_eq!(cbor_int!(0), Value::Unsigned(0));
+        assert_eq!(cbor_int!(1), Value::Unsigned(1));
+        assert_eq!(cbor_int!(123456), Value::Unsigned(123456));
         assert_eq!(
-            cbor_key_int!(std::i64::MAX),
-            KeyType::Unsigned(std::i64::MAX as u64)
+            cbor_int!(core::i64::MAX),
+            Value::Unsigned(core::i64::MAX as u64)
         );
     }
 
     #[test]
     fn test_cbor_int_negative() {
-        assert_eq!(cbor_key_int!(-1), KeyType::Negative(-1));
-        assert_eq!(cbor_key_int!(-123456), KeyType::Negative(-123456));
-        assert_eq!(
-            cbor_key_int!(std::i64::MIN),
-            KeyType::Negative(std::i64::MIN)
-        );
+        assert_eq!(cbor_int!(-1), Value::Negative(-1));
+        assert_eq!(cbor_int!(-123456), Value::Negative(-123456));
+        assert_eq!(cbor_int!(core::i64::MIN), Value::Negative(core::i64::MIN));
     }
 
     #[test]
     fn test_cbor_int_literals() {
         let a = cbor_array![
-            std::i64::MIN,
-            std::i32::MIN,
+            core::i64::MIN,
+            core::i32::MIN,
             -123456,
             -1,
             0,
             1,
             123456,
-            std::i32::MAX,
-            std::i64::MAX,
-            std::u64::MAX,
+            core::i32::MAX,
+            core::i64::MAX,
+            core::u64::MAX,
         ];
         let b = Value::Array(vec![
-            Value::KeyValue(KeyType::Negative(std::i64::MIN)),
-            Value::KeyValue(KeyType::Negative(std::i32::MIN as i64)),
-            Value::KeyValue(KeyType::Negative(-123456)),
-            Value::KeyValue(KeyType::Negative(-1)),
-            Value::KeyValue(KeyType::Unsigned(0)),
-            Value::KeyValue(KeyType::Unsigned(1)),
-            Value::KeyValue(KeyType::Unsigned(123456)),
-            Value::KeyValue(KeyType::Unsigned(std::i32::MAX as u64)),
-            Value::KeyValue(KeyType::Unsigned(std::i64::MAX as u64)),
-            Value::KeyValue(KeyType::Unsigned(std::u64::MAX)),
+            Value::Negative(core::i64::MIN),
+            Value::Negative(core::i32::MIN as i64),
+            Value::Negative(-123456),
+            Value::Negative(-1),
+            Value::Unsigned(0),
+            Value::Unsigned(1),
+            Value::Unsigned(123456),
+            Value::Unsigned(core::i32::MAX as u64),
+            Value::Unsigned(core::i64::MAX as u64),
+            Value::Unsigned(core::u64::MAX),
         ]);
         assert_eq!(a, b);
     }
@@ -410,20 +441,17 @@ mod test {
             cbor_map! {2 => 3},
         ];
         let b = Value::Array(vec![
-            Value::KeyValue(KeyType::Negative(-123)),
-            Value::KeyValue(KeyType::Unsigned(456)),
+            Value::Negative(-123),
+            Value::Unsigned(456),
             Value::Simple(SimpleValue::TrueValue),
             Value::Simple(SimpleValue::NullValue),
-            Value::KeyValue(KeyType::TextString(String::from("foo"))),
-            Value::KeyValue(KeyType::ByteString(b"bar".to_vec())),
+            Value::TextString(String::from("foo")),
+            Value::ByteString(b"bar".to_vec()),
             Value::Array(Vec::new()),
-            Value::Array(vec![
-                Value::KeyValue(KeyType::Unsigned(0)),
-                Value::KeyValue(KeyType::Unsigned(1)),
-            ]),
-            Value::Map(BTreeMap::new()),
+            Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
+            Value::Map(Vec::new()),
             Value::Map(
-                [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
+                [(Value::Unsigned(2), Value::Unsigned(3))]
                     .iter()
                     .cloned()
                     .collect(),
@@ -443,10 +471,10 @@ mod test {
     fn test_cbor_array_vec_int() {
         let a = cbor_array_vec!(vec![1, 2, 3, 4]);
         let b = Value::Array(vec![
-            Value::KeyValue(KeyType::Unsigned(1)),
-            Value::KeyValue(KeyType::Unsigned(2)),
-            Value::KeyValue(KeyType::Unsigned(3)),
-            Value::KeyValue(KeyType::Unsigned(4)),
+            Value::Unsigned(1),
+            Value::Unsigned(2),
+            Value::Unsigned(3),
+            Value::Unsigned(4),
         ]);
         assert_eq!(a, b);
     }
@@ -455,9 +483,9 @@ mod test {
     fn test_cbor_array_vec_text() {
         let a = cbor_array_vec!(vec!["a", "b", "c"]);
         let b = Value::Array(vec![
-            Value::KeyValue(KeyType::TextString(String::from("a"))),
-            Value::KeyValue(KeyType::TextString(String::from("b"))),
-            Value::KeyValue(KeyType::TextString(String::from("c"))),
+            Value::TextString(String::from("a")),
+            Value::TextString(String::from("b")),
+            Value::TextString(String::from("c")),
         ]);
         assert_eq!(a, b);
     }
@@ -466,9 +494,9 @@ mod test {
     fn test_cbor_array_vec_bytes() {
         let a = cbor_array_vec!(vec![b"a", b"b", b"c"]);
         let b = Value::Array(vec![
-            Value::KeyValue(KeyType::ByteString(b"a".to_vec())),
-            Value::KeyValue(KeyType::ByteString(b"b".to_vec())),
-            Value::KeyValue(KeyType::ByteString(b"c".to_vec())),
+            Value::ByteString(b"a".to_vec()),
+            Value::ByteString(b"b".to_vec()),
+            Value::ByteString(b"c".to_vec()),
         ]);
         assert_eq!(a, b);
     }
@@ -489,40 +517,28 @@ mod test {
         };
         let b = Value::Map(
             [
+                (Value::Negative(-1), Value::Negative(-23)),
+                (Value::Unsigned(4), Value::Unsigned(56)),
                 (
-                    KeyType::Negative(-1),
-                    Value::KeyValue(KeyType::Negative(-23)),
-                ),
-                (KeyType::Unsigned(4), Value::KeyValue(KeyType::Unsigned(56))),
-                (
-                    KeyType::TextString(String::from("foo")),
+                    Value::TextString(String::from("foo")),
                     Value::Simple(SimpleValue::TrueValue),
                 ),
                 (
-                    KeyType::ByteString(b"bar".to_vec()),
+                    Value::ByteString(b"bar".to_vec()),
                     Value::Simple(SimpleValue::NullValue),
                 ),
+                (Value::Unsigned(5), Value::TextString(String::from("foo"))),
+                (Value::Unsigned(6), Value::ByteString(b"bar".to_vec())),
+                (Value::Unsigned(7), Value::Array(Vec::new())),
                 (
-                    KeyType::Unsigned(5),
-                    Value::KeyValue(KeyType::TextString(String::from("foo"))),
+                    Value::Unsigned(8),
+                    Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
                 ),
+                (Value::Unsigned(9), Value::Map(Vec::new())),
                 (
-                    KeyType::Unsigned(6),
-                    Value::KeyValue(KeyType::ByteString(b"bar".to_vec())),
-                ),
-                (KeyType::Unsigned(7), Value::Array(Vec::new())),
-                (
-                    KeyType::Unsigned(8),
-                    Value::Array(vec![
-                        Value::KeyValue(KeyType::Unsigned(0)),
-                        Value::KeyValue(KeyType::Unsigned(1)),
-                    ]),
-                ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
-                (
-                    KeyType::Unsigned(10),
+                    Value::Unsigned(10),
                     Value::Map(
-                        [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
+                        [(Value::Unsigned(2), Value::Unsigned(3))]
                             .iter()
                             .cloned()
                             .collect(),
@@ -560,40 +576,28 @@ mod test {
         };
         let b = Value::Map(
             [
+                (Value::Negative(-1), Value::Negative(-23)),
+                (Value::Unsigned(4), Value::Unsigned(56)),
                 (
-                    KeyType::Negative(-1),
-                    Value::KeyValue(KeyType::Negative(-23)),
-                ),
-                (KeyType::Unsigned(4), Value::KeyValue(KeyType::Unsigned(56))),
-                (
-                    KeyType::TextString(String::from("foo")),
+                    Value::TextString(String::from("foo")),
                     Value::Simple(SimpleValue::TrueValue),
                 ),
                 (
-                    KeyType::ByteString(b"bar".to_vec()),
+                    Value::ByteString(b"bar".to_vec()),
                     Value::Simple(SimpleValue::NullValue),
                 ),
+                (Value::Unsigned(5), Value::TextString(String::from("foo"))),
+                (Value::Unsigned(6), Value::ByteString(b"bar".to_vec())),
+                (Value::Unsigned(7), Value::Array(Vec::new())),
                 (
-                    KeyType::Unsigned(5),
-                    Value::KeyValue(KeyType::TextString(String::from("foo"))),
+                    Value::Unsigned(8),
+                    Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
                 ),
+                (Value::Unsigned(9), Value::Map(Vec::new())),
                 (
-                    KeyType::Unsigned(6),
-                    Value::KeyValue(KeyType::ByteString(b"bar".to_vec())),
-                ),
-                (KeyType::Unsigned(7), Value::Array(Vec::new())),
-                (
-                    KeyType::Unsigned(8),
-                    Value::Array(vec![
-                        Value::KeyValue(KeyType::Unsigned(0)),
-                        Value::KeyValue(KeyType::Unsigned(1)),
-                    ]),
-                ),
-                (KeyType::Unsigned(9), Value::Map(BTreeMap::new())),
-                (
-                    KeyType::Unsigned(10),
+                    Value::Unsigned(10),
                     Value::Map(
-                        [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
+                        [(Value::Unsigned(2), Value::Unsigned(3))]
                             .iter()
                             .cloned()
                             .collect(),
@@ -608,30 +612,20 @@ mod test {
     }
 
     #[test]
-    fn test_cbor_map_btree_empty() {
-        let a = cbor_map_btree!(BTreeMap::new());
-        let b = Value::Map(BTreeMap::new());
+    fn test_cbor_map_collection_empty() {
+        let a = cbor_map_collection!(Vec::<(_, _)>::new());
+        let b = Value::Map(Vec::new());
         assert_eq!(a, b);
     }
 
     #[test]
-    fn test_cbor_map_btree_foo() {
-        let a = cbor_map_btree!(
-            [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
-                .iter()
-                .cloned()
-                .collect()
-        );
-        let b = Value::Map(
-            [(KeyType::Unsigned(2), Value::KeyValue(KeyType::Unsigned(3)))]
-                .iter()
-                .cloned()
-                .collect(),
-        );
+    fn test_cbor_map_collection_foo() {
+        let a = cbor_map_collection!(vec![(Value::Unsigned(2), Value::Unsigned(3))]);
+        let b = Value::Map(vec![(Value::Unsigned(2), Value::Unsigned(3))]);
         assert_eq!(a, b);
     }
 
-    fn extract_map(cbor_value: Value) -> BTreeMap<KeyType, Value> {
+    fn extract_map(cbor_value: Value) -> Vec<(Value, Value)> {
         match cbor_value {
             Value::Map(map) => map,
             _ => panic!("Expected CBOR map."),

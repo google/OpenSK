@@ -13,14 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Install Rust toolchain
+        run: rustup show
+
       - name: Unit testing of Persistent store library (release mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/persistent_store/Cargo.toml --release --features std
+          args: --manifest-path libraries/persistent_store/Cargo.toml --release --features=std
 
       - name: Unit testing of Persistent store library (debug mode)
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --manifest-path libraries/persistent_store/Cargo.toml --features std
+          args: --manifest-path libraries/persistent_store/Cargo.toml --features=std

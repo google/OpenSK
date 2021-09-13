@@ -1,10 +1,10 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-[![Build Status](https://travis-ci.org/google/OpenSK.svg?branch=master)](https://travis-ci.org/google/OpenSK)
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=master)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=master)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=master)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=master)
+![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=develop)
+![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=develop)
+![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=develop)
+![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=develop)
+[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=develop)](https://coveralls.io/github/google/OpenSK?branch=develop)
 
 ## OpenSK
 
@@ -25,14 +25,16 @@ few limitations:
 
 ### FIDO2
 
-Although we tested and implemented our firmware based on the published
-[CTAP2.0 specifications](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html),
-our implementation was not reviewed nor officially tested and doesn't claim to
-be FIDO Certified.
-We started adding features of the upcoming next version of the
-[CTAP2.1 specifications](https://fidoalliance.org/specs/fido2/fido-client-to-authenticator-protocol-v2.1-rd-20191217.html).
-The development is currently between 2.0 and 2.1, with updates hidden behind a feature flag.
-Please add the flag `--ctap2.1` to the deploy command to include them.
+The stable branch implements the published
+[CTAP2.0 specifications](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html)
+and is FIDO certified.
+
+<img alt="FIDO2 certified L1" src="docs/img/FIDO2_Certified_L1.png" width="200px">
+
+It already contains some preview features of 2.1, that you can try by adding the
+flag `--ctap2.1` to the deploy command. The full
+[CTAP2.1 specification](https://fidoalliance.org/specs/fido-v2.1-rd-20201208/fido-client-to-authenticator-protocol-v2.1-rd-20201208.html)
+is work in progress in the develop branch and is tested less thoroughly.
 
 ### Cryptography
 
@@ -58,17 +60,27 @@ For a more detailed guide, please refer to our
     ./setup.sh
     ```
 
-2.  Next step is to install Tock OS as well as the OpenSK application on your
-    board (**Warning**: it will erase the locally stored credentials). Run:
+1.  Next step is to install Tock OS as well as the OpenSK application on your
+    board. Run:
 
     ```shell
     # Nordic nRF52840-DK board
-    ./deploy.py --board=nrf52840dk --opensk
+    ./deploy.py --board=nrf52840dk_opensk --opensk
     # Nordic nRF52840-Dongle
-    ./deploy.py --board=nrf52840_dongle --opensk
+    ./deploy.py --board=nrf52840_dongle_opensk --opensk
     ```
 
-3.  On Linux, you may want to avoid the need for `root` privileges to interact
+1.  Finally you need to inject the cryptographic material if you enabled
+    batch attestation or CTAP1/U2F compatibility (which is the case by
+    default):
+
+    ```shell
+    ./tools/configure.py \
+        --certificate=crypto_data/opensk_cert.pem \
+        --private-key=crypto_data/opensk.key
+    ```
+
+1.  On Linux, you may want to avoid the need for `root` privileges to interact
     with the key. For that purpose we provide a udev rule file that can be
     installed with the following command:
 
@@ -83,33 +95,19 @@ If you build your own security key, depending on the hardware you use, there are
 a few things you can personalize:
 
 1.  If you have multiple buttons, choose the buttons responsible for user
-    presence in `main.rs`.
-2.  Decide whether you want to use batch attestation. There is a boolean flag in
-    `ctap/mod.rs`. It is mandatory for U2F, and you can create your own
-    self-signed certificate. The flag is used for FIDO2 and has some privacy
-    implications. Please check
-    [WebAuthn](https://www.w3.org/TR/webauthn/#attestation) for more
-    information.
-3.  Decide whether you want to use signature counters. Currently, only global
-    signature counters are implemented, as they are the default option for U2F.
-    The flag in `ctap/mod.rs` only turns them off for FIDO2. The most privacy
-    preserving solution is individual or no signature counters. Again, please
-    check [WebAuthn](https://www.w3.org/TR/webauthn/#signature-counter) for
-    documentation.
-4.  Depending on your available flash storage, choose an appropriate maximum
-    number of supported residential keys and number of pages in
-    `ctap/storage.rs`.
-5.  Change the default level for the credProtect extension in `ctap/mod.rs`.
-    When changing the default, resident credentials become undiscoverable without
-    user verification. This helps privacy, but can make usage less comfortable
-    for credentials that need less protection.
-6.  Increase the default minimum length for PINs in `ctap/storage.rs`.
-    The current minimum is 4. Values from 4 to 63 are allowed. Requiring longer
-    PINs can help establish trust between users and relying parties. It makes
-    user verification harder to break, but less convenient.
-    NIST recommends at least 6-digit PINs in section 5.1.9.1:
-    https://pages.nist.gov/800-63-3/sp800-63b.html
-    You can add relying parties to the list of readers of the minimum PIN length.
+    presence in `src/main.rs`.
+1.  If you have colored LEDs, like different blinking patterns and want to play
+    around with the code in `src/main.rs` more, take a look at e.g. `wink_leds`.
+1.  You find more options and documentation in `src/ctap/customization.rs`,
+    including:
+    - The default level for the credProtect extension.
+    - The default minimum PIN length, and what relying parties can set it.
+    - Whether you want to enforce alwaysUv.
+    - Settings for enterprise attestation.
+    - The maximum PIN retries.
+    - Whether you want to use batch attestation.
+    - Whether you want to use signature counters.
+    - Various constants to adapt to different hardware.
 
 ### 3D printed enclosure
 
@@ -134,7 +132,7 @@ driver, before faulting the app, you can use the `--panic-console` flag of the
 
 ```shell
 # Example on Nordic nRF52840-DK board
-./deploy.py --board=nrf52840dk --opensk --panic-console
+./deploy.py --board=nrf52840dk_opensk --opensk --panic-console
 ```
 
 ### Debugging memory allocations
@@ -148,7 +146,7 @@ operation.
 
 The additional output looks like the following.
 
-```
+```text
 # Allocation of 256 byte(s), aligned on 1 byte(s). The allocated address is
 # 0x2002401c. After this operation, 2 pointers have been allocated, totalling
 # 384 bytes (the total heap usage may be larger, due to alignment and
@@ -163,12 +161,12 @@ A tool is provided to analyze such reports, in `tools/heapviz`. This tool
 parses the console output, identifies the lines corresponding to (de)allocation
 operations, and first computes some statistics:
 
-- Address range used by the heap over this run of the program,
-- Peak heap usage (how many useful bytes are allocated),
-- Peak heap consumption (how many bytes are used by the heap, including
-  unavailable bytes between allocated blocks, due to alignment constraints and
-  memory fragmentation),
-- Fragmentation overhead (difference between heap consumption and usage).
+*   Address range used by the heap over this run of the program,
+*   Peak heap usage (how many useful bytes are allocated),
+*   Peak heap consumption (how many bytes are used by the heap, including
+    unavailable bytes between allocated blocks, due to alignment constraints and
+    memory fragmentation),
+*   Fragmentation overhead (difference between heap consumption and usage).
 
 Then, the `heapviz` tool displays an animated "movie" of the allocated bytes in
 heap memory. Each frame in this "movie" shows bytes that are currently
@@ -177,10 +175,11 @@ allocated. A new frame is generated for each (de)allocation operation. This tool
 uses the `ncurses` library, that you may have to install beforehand.
 
 You can control the tool with the following parameters:
-- `--logfile` (required) to provide the file which contains the console output
-  to parse,
-- `--fps` (optional) to customize the number of frames per second in the movie
-  animation.
+
+*   `--logfile` (required) to provide the file which contains the console output
+    to parse,
+*   `--fps` (optional) to customize the number of frames per second in the movie
+    animation.
 
 ```shell
 cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fps 50
@@ -189,3 +188,7 @@ cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fp
 ## Contributing
 
 See [Contributing.md](docs/contributing.md).
+
+## Reporting a Vulnerability
+
+See [SECURITY.md](SECURITY.md).

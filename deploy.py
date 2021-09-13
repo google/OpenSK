@@ -84,9 +84,9 @@ OpenSKBoard = collections.namedtuple(
     ])
 
 SUPPORTED_BOARDS = {
-    "nrf52840dk":
+    "nrf52840dk_opensk":
         OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840dk",
+            path="third_party/tock/boards/nordic/nrf52840dk_opensk",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0,
@@ -103,9 +103,9 @@ SUPPORTED_BOARDS = {
             jlink_device="nrf52840_xxaa",
             nordic_dfu=False,
         ),
-    "nrf52840_dongle":
+    "nrf52840_dongle_opensk":
         OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840_dongle",
+            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",
             arch="thumbv7em-none-eabi",
             page_size=4096,
             kernel_address=0,
@@ -161,11 +161,6 @@ SUPPORTED_BOARDS = {
             nordic_dfu=True,
         ),
 }
-
-# The STACK_SIZE value below must match the one used in the linker script
-# used by the board.
-# e.g. for Nordic nRF52840 boards the file is `nrf52840_layout.ld`.
-STACK_SIZE = 0x4000
 
 # The following value must match the one used in the file
 # `src/entry_point.rs`
@@ -243,6 +238,8 @@ class RemoveConstAction(argparse.Action):
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L138-L147
     # https://github.com/python/cpython/blob/master/Lib/argparse.py#L1028-L1052
     items = getattr(namespace, self.dest, [])
+    if items is None:
+      items = []
     if isinstance(items, list):
       items = items[:]
     else:
@@ -306,8 +303,17 @@ class OpenSKInstaller:
 
   def update_rustc_if_needed(self):
     target_toolchain_fullstring = "stable"
-    with open("rust-toolchain", "r") as f:
-      target_toolchain_fullstring = f.readline().strip()
+    with open("rust-toolchain", "r", encoding="utf-8") as f:
+      content = f.readlines()
+      if len(content) == 1:
+        # Old format, only the build is stored
+        target_toolchain_fullstring = content[0].strip()
+      else:
+        # New format
+        for line in content:
+          if line.startswith("channel"):
+            channel = line.strip().split("=", maxsplit=1)[1].strip()
+            target_toolchain_fullstring = channel.strip('"')
     target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
     if len(target_toolchain) == 1:
       # If we target the stable version of rust, we won't have a date
@@ -352,6 +358,7 @@ class OpenSKInstaller:
 
   def build_opensk(self):
     info("Building OpenSK application")
+    self._check_invariants()
     self._build_app_or_example(is_example=False)
 
   def _build_app_or_example(self, is_example):
@@ -369,6 +376,10 @@ class OpenSKInstaller:
         "-D",
         "warnings",
         "--remap-path-prefix={}=".format(os.getcwd()),
+        "-C",
+        "link-arg=-icf=all",
+        "-C",
+        "force-frame-pointers=no",
     ]
     env = os.environ.copy()
     env["RUSTFLAGS"] = " ".join(rust_flags)
@@ -390,6 +401,11 @@ class OpenSKInstaller:
     # Create a TAB file
     self.create_tab_file({props.arch: app_path})
 
+  def _check_invariants(self):
+    print("Testing invariants in customization.rs...")
+    self.checked_command_output(
+        ["cargo", "test", "--features=std", "--lib", "customization"])
+
   def generate_crypto_materials(self, force_regenerate):
     has_error = subprocess.call([
         os.path.join("tools", "gen_key_materials.sh"),
@@ -407,10 +423,10 @@ class OpenSKInstaller:
     elf2tab_ver = self.checked_command_output(
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.6.0":
+    if elf2tab_ver != "elf2tab 0.7.0":
       error(
           ("Detected unsupported elf2tab version {!a}. The following "
-           "commands may fail. Please use 0.6.0 instead.").format(elf2tab_ver))
+           "commands may fail. Please use 0.7.0 instead.").format(elf2tab_ver))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder,
                                 "{}.tab".format(self.args.application))
@@ -420,14 +436,25 @@ class OpenSKInstaller:
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
+    stack_sizes = set()
     for arch, app_file in binaries.items():
       dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
       shutil.copyfile(app_file, dest_file)
       elf2tab_args.append(dest_file)
+      # extract required stack size directly from binary
+      nm = self.checked_command_output(
+          ["nm", "--print-size", "--radix=x", app_file])
+      for line in nm.splitlines():
+        if "STACK_MEMORY" in line:
+          required_stack_size = int(line.split(" ", maxsplit=2)[1], 16)
+          stack_sizes.add(required_stack_size)
+    if len(stack_sizes) != 1:
+      error("Detected different stack sizes across tab files.")
 
     elf2tab_args.extend([
-        "--stack={}".format(STACK_SIZE), "--app-heap={}".format(APP_HEAP_SIZE),
-        "--kernel-heap=1024", "--protected-region-size=64"
+        "--stack={}".format(stack_sizes.pop()),
+        "--app-heap={}".format(APP_HEAP_SIZE), "--kernel-heap=1024",
+        "--protected-region-size=64"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
@@ -710,6 +737,22 @@ class OpenSKInstaller:
             check=False,
             timeout=None,
         ).returncode
+
+    # Configure OpenSK through vendor specific command if needed
+    if any([
+        self.args.lock_device,
+        self.args.config_cert,
+        self.args.config_pkey,
+    ]):
+      # pylint: disable=g-import-not-at-top,import-outside-toplevel
+      import tools.configure
+      tools.configure.main(
+          argparse.Namespace(
+              batch=False,
+              certificate=self.args.config_cert,
+              priv_key=self.args.config_pkey,
+              lock=self.args.lock_device,
+          ))
     return 0
 
 
@@ -769,6 +812,33 @@ if __name__ == "__main__":
       dest="clear_storage",
       help=("Erases the persistent storage when installing an application. "
             "All stored data will be permanently lost."),
+  )
+  main_parser.add_argument(
+      "--lock-device",
+      action="store_true",
+      default=False,
+      dest="lock_device",
+      help=("Try to disable JTAG at the end of the operations. This "
+            "operation may fail if the device is already locked or if "
+            "the certificate/private key are not programmed."),
+  )
+  main_parser.add_argument(
+      "--inject-certificate",
+      default=None,
+      metavar="PEM_FILE",
+      type=argparse.FileType("rb"),
+      dest="config_cert",
+      help=("If this option is set, the corresponding certificate "
+            "will be programmed into the key as the last operation."),
+  )
+  main_parser.add_argument(
+      "--inject-private-key",
+      default=None,
+      metavar="PEM_FILE",
+      type=argparse.FileType("rb"),
+      dest="config_pkey",
+      help=("If this option is set, the corresponding private key "
+            "will be programmed into the key as the last operation."),
   )
   main_parser.add_argument(
       "--programmer",
@@ -839,12 +909,11 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
-      "--ctap2.1",
+      "--nfc",
       action="append_const",
-      const="with_ctap2_1",
+      const="with_nfc",
       dest="features",
-      help=("Compiles the OpenSK application with backward compatible "
-            "support for CTAP2.1 protocol."),
+      help=("Compiles the OpenSK application with support for nfc."),
   )
   main_parser.add_argument(
       "--regen-keys",
@@ -856,14 +925,6 @@ if __name__ == "__main__":
             "This is useful to allow flashing multiple OpenSK authenticators "
             "in a row without them being considered clones."),
   )
-  main_parser.add_argument(
-      "--no-persistent-storage",
-      action="append_const",
-      const="ram_storage",
-      dest="features",
-      help=("Compiles and installs the OpenSK application without persistent "
-            "storage (i.e. unplugging the key will reset the key)."),
-  )
 
   main_parser.add_argument(
       "--elf2tab-output",
@@ -873,6 +934,8 @@ if __name__ == "__main__":
       default=None,
       help=("When set, the output of elf2tab is appended to this file."),
   )
+
+  main_parser.set_defaults(features=["with_ctap1"])
 
   # Start parsing to know if we're going to list things or not.
   partial_args, _ = main_parser.parse_known_args()
@@ -901,6 +964,21 @@ if __name__ == "__main__":
       help=("Compiles and installs the crypto_bench example that benchmarks "
             "the performance of the cryptographic algorithms on the board."))
   apps_group.add_argument(
+      "--store_latency",
+      dest="application",
+      action="store_const",
+      const="store_latency",
+      help=("Compiles and installs the store_latency example which prints "
+            "latency statistics of the persistent store library."))
+  apps_group.add_argument(
+      "--erase_storage",
+      dest="application",
+      action="store_const",
+      const="erase_storage",
+      help=("Compiles and installs the erase_storage example which erases "
+            "the storage. During operation the dongle red light is on. Once "
+            "the operation is completed the dongle green light is on."))
+  apps_group.add_argument(
       "--panic_test",
       dest="application",
       action="store_const",
@@ -921,7 +999,12 @@ if __name__ == "__main__":
       const="console_test",
       help=("Compiles and installs the console_test example that tests the "
             "console driver with messages of various lengths."))
-
-  main_parser.set_defaults(features=["with_ctap1"])
+  apps_group.add_argument(
+      "--nfct_test",
+      dest="application",
+      action="store_const",
+      const="nfct_test",
+      help=("Compiles and installs the nfct_test example that tests the "
+            "NFC driver."))
 
   main(main_parser.parse_args())

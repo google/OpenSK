@@ -18,6 +18,8 @@ extern crate lang_items;
 
 use libtock_drivers::console::{Console, BUFFER_SIZE};
 
+libtock_core::stack_size! {0x800}
+
 fn main() {
     // Write messages of length up to the console driver's buffer size.
     let mut buf = [0; BUFFER_SIZE];

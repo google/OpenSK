@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::values::{Constants, KeyType, SimpleValue, Value};
-use crate::{cbor_array_vec, cbor_bytes_lit, cbor_map_btree, cbor_text, cbor_unsigned};
-use alloc::collections::BTreeMap;
+//! Functionality for deserializing CBOR data into values.
+
+use super::values::{Constants, SimpleValue, Value};
+use crate::{
+    cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_tagged, cbor_text, cbor_unsigned,
+};
 use alloc::str;
 use alloc::vec::Vec;
 
+/// Possible errors from a deserialization operation.
 #[derive(Debug, PartialEq)]
 pub enum DecoderError {
     UnsupportedMajorType,
     UnknownAdditionalInfo,
     IncompleteCborData,
-    IncorrectMapKeyType,
     TooMuchNesting,
     InvalidUtf8,
-    ExtranousData,
+    ExtraneousData,
     OutOfOrderKey,
     NonMinimalCborEncoding,
     UnsupportedSimpleValue,
@@ -34,11 +37,21 @@ pub enum DecoderError {
     OutOfRangeIntegerValue,
 }
 
+/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.
+/// Maximum level of nesting supported is 127; more deeply nested structures will fail with
+/// [`DecoderError::TooMuchNesting`].
 pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
+    read_nested(encoded_cbor, Some(i8::MAX))
+}
+
+/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.  If
+/// `max_nest` is `Some(max)`, then nested structures are only supported up to the given limit (returning
+/// [`DecoderError::TooMuchNesting`] if the limit is hit).
+pub fn read_nested(encoded_cbor: &[u8], max_nest: Option<i8>) -> Result<Value, DecoderError> {
     let mut reader = Reader::new(encoded_cbor);
-    let value = reader.decode_complete_data_item(Reader::MAX_NESTING_DEPTH)?;
+    let value = reader.decode_complete_data_item(max_nest)?;
     if !reader.remaining_cbor.is_empty() {
-        return Err(DecoderError::ExtranousData);
+        return Err(DecoderError::ExtraneousData);
     }
     Ok(value)
 }
@@ -48,8 +61,6 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    const MAX_NESTING_DEPTH: i8 = 4;
-
     pub fn new(cbor: &'a [u8]) -> Reader<'a> {
         Reader {
             remaining_cbor: cbor,
@@ -58,9 +69,9 @@ impl<'a> Reader<'a> {
 
     pub fn decode_complete_data_item(
         &mut self,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
-        if remaining_depth < 0 {
+        if remaining_depth.map_or(false, |d| d < 0) {
             return Err(DecoderError::TooMuchNesting);
         }
 
@@ -69,19 +80,17 @@ impl<'a> Reader<'a> {
                 // Unsigned byte means logical shift, so only zeros get shifted in.
                 let major_type_value = first_byte >> Constants::MAJOR_TYPE_BIT_SHIFT;
                 let additional_info = first_byte & Constants::ADDITIONAL_INFORMATION_MASK;
-                let size_result = self.read_variadic_length_integer(additional_info);
-                match size_result {
-                    Ok(size_value) => match major_type_value {
-                        0 => self.decode_value_to_unsigned(size_value),
-                        1 => self.decode_value_to_negative(size_value),
-                        2 => self.read_byte_string_content(size_value),
-                        3 => self.read_text_string_content(size_value),
-                        4 => self.read_array_content(size_value, remaining_depth),
-                        5 => self.read_map_content(size_value, remaining_depth),
-                        7 => self.decode_to_simple_value(size_value, additional_info),
-                        _ => Err(DecoderError::UnsupportedMajorType),
-                    },
-                    Err(decode_error) => Err(decode_error),
+                let size_value = self.read_variadic_length_integer(additional_info)?;
+                match major_type_value {
+                    0 => self.decode_value_to_unsigned(size_value),
+                    1 => self.decode_value_to_negative(size_value),
+                    2 => self.read_byte_string_content(size_value),
+                    3 => self.read_text_string_content(size_value),
+                    4 => self.read_array_content(size_value, remaining_depth),
+                    5 => self.read_map_content(size_value, remaining_depth),
+                    6 => self.read_tagged_content(size_value, remaining_depth),
+                    7 => self.decode_to_simple_value(size_value, additional_info),
+                    _ => Err(DecoderError::UnsupportedMajorType),
                 }
             }
             _ => Err(DecoderError::IncompleteCborData),
@@ -135,7 +144,7 @@ impl<'a> Reader<'a> {
         if signed_size < 0 {
             Err(DecoderError::OutOfRangeIntegerValue)
         } else {
-            Ok(Value::KeyValue(KeyType::Negative(-(size_value as i64) - 1)))
+            Ok(Value::Negative(-(size_value as i64) - 1))
         }
     }
 
@@ -159,12 +168,12 @@ impl<'a> Reader<'a> {
     fn read_array_content(
         &mut self,
         size_value: u64,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
         // Don't set the capacity already, it is an unsanitized input.
         let mut value_array = Vec::new();
         for _ in 0..size_value {
-            value_array.push(self.decode_complete_data_item(remaining_depth - 1)?);
+            value_array.push(self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?);
         }
         Ok(cbor_array_vec!(value_array))
     }
@@ -172,25 +181,31 @@ impl<'a> Reader<'a> {
     fn read_map_content(
         &mut self,
         size_value: u64,
-        remaining_depth: i8,
+        remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
-        let mut value_map = BTreeMap::new();
-        let mut last_key_option = None;
+        let mut value_map = Vec::<(Value, Value)>::new();
         for _ in 0..size_value {
-            let key_value = self.decode_complete_data_item(remaining_depth - 1)?;
-            if let Value::KeyValue(key) = key_value {
-                if let Some(last_key) = last_key_option {
-                    if last_key >= key {
-                        return Err(DecoderError::OutOfOrderKey);
-                    }
+            let key = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
+            if let Some(last_item) = value_map.last() {
+                if last_item.0 >= key {
+                    return Err(DecoderError::OutOfOrderKey);
                 }
-                last_key_option = Some(key.clone());
-                value_map.insert(key, self.decode_complete_data_item(remaining_depth - 1)?);
-            } else {
-                return Err(DecoderError::IncorrectMapKeyType);
             }
+            value_map.push((
+                key,
+                self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?,
+            ));
         }
-        Ok(cbor_map_btree!(value_map))
+        Ok(cbor_map_collection!(value_map))
+    }
+
+    fn read_tagged_content(
+        &mut self,
+        tag_value: u64,
+        remaining_depth: Option<i8>,
+    ) -> Result<Value, DecoderError> {
+        let inner_value = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
+        Ok(cbor_tagged!(tag_value, inner_value))
     }
 
     fn decode_to_simple_value(
@@ -219,6 +234,7 @@ mod test {
         cbor_array, cbor_bytes, cbor_false, cbor_int, cbor_map, cbor_null, cbor_true,
         cbor_undefined,
     };
+    use alloc::vec;
 
     #[test]
     fn test_read_unsigned() {
@@ -238,14 +254,14 @@ mod test {
                 vec![0x1B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
             ),
             (
-                std::i64::MAX,
+                core::i64::MAX,
                 vec![0x1B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
         for (unsigned, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_int!(unsigned)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -300,14 +316,14 @@ mod test {
             (-1000000, vec![0x3A, 0x00, 0x0F, 0x42, 0x3F]),
             (-4294967296, vec![0x3A, 0xFF, 0xFF, 0xFF, 0xFF]),
             (
-                std::i64::MIN,
+                core::i64::MIN,
                 vec![0x3B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
         for (negative, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_int!(negative)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -323,7 +339,7 @@ mod test {
         for (byte_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_bytes!(byte_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -337,7 +353,7 @@ mod test {
             ("\"\\", vec![0x62, 0x22, 0x5C]),
             ("ü", vec![0x62, 0xC3, 0xBC]),
             (
-                std::str::from_utf8(&unicode_3byte).unwrap(),
+                core::str::from_utf8(&unicode_3byte).unwrap(),
                 vec![0x63, 0xE6, 0xB0, 0xB4],
             ),
             ("𐅑", vec![0x64, 0xF0, 0x90, 0x85, 0x91]),
@@ -345,7 +361,7 @@ mod test {
         for (text_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_text!(text_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -383,7 +399,7 @@ mod test {
         for (text_string, mut cbor) in cases {
             assert_eq!(read(&cbor), Ok(cbor_text!(text_string)));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -405,7 +421,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor.clone()), Ok(cbor_array_vec!(value_vec)));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -429,7 +445,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -453,7 +469,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -474,7 +490,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -492,7 +508,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -509,7 +525,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -526,7 +542,7 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
     }
 
     #[test]
@@ -548,7 +564,36 @@ mod test {
         ];
         assert_eq!(read(&test_cbor), Ok(value_map));
         test_cbor.push(0x01);
-        assert_eq!(read(&test_cbor), Err(DecoderError::ExtranousData));
+        assert_eq!(read(&test_cbor), Err(DecoderError::ExtraneousData));
+    }
+
+    #[test]
+    fn test_read_tagged() {
+        let cases = vec![
+            (cbor_tagged!(6, cbor_int!(0x42)), vec![0xc6, 0x18, 0x42]),
+            (cbor_tagged!(1, cbor_true!()), vec![0xc1, 0xf5]),
+            (
+                cbor_tagged!(
+                    1000,
+                    cbor_map! {
+                        "a" => 1,
+                        "b" => cbor_array![2, 3],
+                    }
+                ),
+                vec![
+                    0xd9, 0x03, 0xe8, 0xa2, // map of 2 pairs
+                    0x61, 0x61, // "a"
+                    0x01, 0x61, 0x62, // "b"
+                    0x82, // array with 2 elements
+                    0x02, 0x03,
+                ],
+            ),
+        ];
+        for (value, mut cbor) in cases {
+            assert_eq!(read(&cbor), Ok(value));
+            cbor.push(0x01);
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
+        }
     }
 
     #[test]
@@ -574,7 +619,7 @@ mod test {
         for (simple, mut cbor) in cases {
             assert_eq!(read(&cbor.clone()), Ok(simple));
             cbor.push(0x01);
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -616,19 +661,6 @@ mod test {
     }
 
     #[test]
-    fn test_read_unsupported_map_key_format_error() {
-        // While CBOR can handle all types as map keys, we only support a subset.
-        let bad_map_cbor = vec![
-            0xa2, // map of 2 pairs
-            0x82, 0x01, 0x02, // invalid key : [1, 2]
-            0x02, // value : 2
-            0x61, 0x64, // key : "d"
-            0x03, // value : 3
-        ];
-        assert_eq!(read(&bad_map_cbor), Err(DecoderError::IncorrectMapKeyType));
-    }
-
-    #[test]
     fn test_read_unknown_additional_info_error() {
         let cases = vec![
             vec![0x7C, 0x49, 0x45, 0x54, 0x46],
@@ -656,7 +688,7 @@ mod test {
         ];
         for cbor in cases {
             let mut reader = Reader::new(&cbor);
-            assert!(reader.decode_complete_data_item(0).is_ok());
+            assert!(reader.decode_complete_data_item(Some(0)).is_ok());
         }
         let map_cbor = vec![
             0xa2, // map of 2 pairs
@@ -667,11 +699,11 @@ mod test {
         ];
         let mut reader = Reader::new(&map_cbor);
         assert_eq!(
-            reader.decode_complete_data_item(1),
+            reader.decode_complete_data_item(Some(1)),
             Err(DecoderError::TooMuchNesting)
         );
         reader = Reader::new(&map_cbor);
-        assert!(reader.decode_complete_data_item(2).is_ok());
+        assert!(reader.decode_complete_data_item(Some(2)).is_ok());
     }
 
     #[test]
@@ -756,7 +788,7 @@ mod test {
     }
 
     #[test]
-    fn test_read_extranous_cbor_data_error() {
+    fn test_read_extraneous_cbor_data_error() {
         let cases = vec![
             vec![0x19, 0x03, 0x05, 0x00],
             vec![0x44, 0x01, 0x02, 0x03, 0x04, 0x00],
@@ -765,7 +797,7 @@ mod test {
             vec![0xa1, 0x61, 0x63, 0x02, 0x61, 0x64, 0x03],
         ];
         for cbor in cases {
-            assert_eq!(read(&cbor), Err(DecoderError::ExtranousData));
+            assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
     }
 
@@ -795,22 +827,6 @@ mod test {
         ];
         for cbor in cases {
             assert_eq!(read(&cbor), Err(DecoderError::IncompleteCborData));
-        }
-    }
-
-    #[test]
-    fn test_read_unsupported_major_type() {
-        let cases = vec![
-            vec![0xC0],
-            vec![0xD8, 0xFF],
-            // multi-dimensional array example using tags
-            vec![
-                0x82, 0x82, 0x02, 0x03, 0xd8, 0x41, 0x4a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00,
-                0x03, 0x00, 0x04, 0x00, 0x05,
-            ],
-        ];
-        for cbor in cases {
-            assert_eq!(read(&cbor), Err(DecoderError::UnsupportedMajorType));
         }
     }
 }

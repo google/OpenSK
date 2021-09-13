@@ -22,13 +22,13 @@ use super::{Hash256, HashBlockSize64Bytes};
 use alloc::vec;
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
-use arrayref::array_ref;
-use arrayref::{array_mut_ref, mut_array_refs};
-use cbor::{cbor_bytes, cbor_map_options};
+use arrayref::array_mut_ref;
+use arrayref::{array_ref, mut_array_refs};
 use core::marker::PhantomData;
 
-#[derive(Clone, PartialEq)]
-#[cfg_attr(feature = "derive_debug", derive(Debug))]
+pub const NBYTES: usize = int256::NBYTES;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
@@ -38,6 +38,7 @@ pub struct Signature {
     s: NonZeroExponentP256,
 }
 
+#[derive(Clone)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -58,10 +59,11 @@ impl SecKey {
         }
     }
 
-    // ECDSA signature based on a RNG to generate a suitable randomization parameter.
-    // Under the hood, rejection sampling is used to make sure that the randomization parameter is
-    // uniformly distributed.
-    // The provided RNG must be cryptographically secure; otherwise this method is insecure.
+    /// Creates an ECDSA signature based on a RNG.
+    ///
+    /// Under the hood, rejection sampling is used to make sure that the
+    /// randomization parameter is uniformly distributed. The provided RNG must
+    /// be cryptographically secure; otherwise this method is insecure.
     pub fn sign_rng<H, R>(&self, msg: &[u8], rng: &mut R) -> Signature
     where
         H: Hash256,
@@ -77,8 +79,7 @@ impl SecKey {
         }
     }
 
-    // Deterministic ECDSA signature based on RFC 6979 to generate a suitable randomization
-    // parameter.
+    /// Creates a deterministic ECDSA signature based on RFC 6979.
     pub fn sign_rfc6979<H>(&self, msg: &[u8]) -> Signature
     where
         H: Hash256 + HashBlockSize64Bytes,
@@ -101,8 +102,10 @@ impl SecKey {
         }
     }
 
-    // Try signing a curve element given a randomization parameter k. If no signature can be
-    // obtained from this k, None is returned and the caller should try again with another value.
+    /// Try signing a curve element given a randomization parameter k.
+    ///
+    /// If no signature can be obtained from this k, None is returned and the
+    /// caller should try again with another value.
     fn try_sign(&self, k: &NonZeroExponentP256, msg: &ExponentP256) -> Option<Signature> {
         let r = ExponentP256::modn(PointP256::base_point_mul(k.as_exponent()).getx().to_int());
         // The branching here is fine because all this reveals is that k generated an unsuitable r.
@@ -145,6 +148,7 @@ impl SecKey {
         }
     }
 
+    /// Creates a private key from the exponent's bytes, or None if checks fail.
     pub fn from_bytes(bytes: &[u8; 32]) -> Option<SecKey> {
         let k = NonZeroExponentP256::from_int_checked(Int256::from_bin(bytes));
         // The branching here is fine because all this reveals is whether the key was invalid.
@@ -155,12 +159,16 @@ impl SecKey {
         Some(SecKey { k })
     }
 
+    /// Writes a private key's exponent's bytes to the passed in array.
     pub fn to_bytes(&self, bytes: &mut [u8; 32]) {
         self.k.to_int().to_bin(bytes);
     }
 }
 
 impl Signature {
+    pub const BYTES_LENGTH: usize = 2 * int256::NBYTES;
+
+    /// Converts a signature to its ASN1 DER representation.
     pub fn to_asn1_der(&self) -> Vec<u8> {
         const DER_INTEGER_TYPE: u8 = 0x02;
         const DER_DEF_LENGTH_SEQUENCE: u8 = 0x30;
@@ -188,35 +196,40 @@ impl Signature {
         encoding
     }
 
-    #[cfg(feature = "std")]
-    pub fn from_bytes(bytes: &[u8]) -> Option<Signature> {
-        if bytes.len() != 64 {
-            None
-        } else {
-            let r =
-                NonZeroExponentP256::from_int_checked(Int256::from_bin(array_ref![bytes, 0, 32]));
-            let s =
-                NonZeroExponentP256::from_int_checked(Int256::from_bin(array_ref![bytes, 32, 32]));
-            if bool::from(r.is_none()) || bool::from(s.is_none()) {
-                return None;
-            }
-            let r = r.unwrap();
-            let s = s.unwrap();
-            Some(Signature { r, s })
+    /// Creates a signature from the exponents' bytes, or None if checks fail.
+    pub fn from_bytes(bytes: &[u8; Signature::BYTES_LENGTH]) -> Option<Signature> {
+        let r_bytes_ref = array_ref![bytes, 0, int256::NBYTES];
+        let r = NonZeroExponentP256::from_int_checked(Int256::from_bin(r_bytes_ref));
+        let s_bytes_ref = array_ref![bytes, int256::NBYTES, int256::NBYTES];
+        let s = NonZeroExponentP256::from_int_checked(Int256::from_bin(s_bytes_ref));
+        if bool::from(r.is_none()) || bool::from(s.is_none()) {
+            return None;
         }
+        let r = r.unwrap();
+        let s = s.unwrap();
+        Some(Signature { r, s })
     }
 
-    #[cfg(test)]
-    fn to_bytes(&self, bytes: &mut [u8; 64]) {
-        self.r.to_int().to_bin(array_mut_ref![bytes, 0, 32]);
-        self.s.to_int().to_bin(array_mut_ref![bytes, 32, 32]);
+    #[cfg(feature = "std")]
+    pub fn to_bytes(&self, bytes: &mut [u8; Signature::BYTES_LENGTH]) {
+        self.r
+            .to_int()
+            .to_bin(array_mut_ref![bytes, 0, int256::NBYTES]);
+        self.s
+            .to_int()
+            .to_bin(array_mut_ref![bytes, int256::NBYTES, int256::NBYTES]);
     }
 }
 
 impl PubKey {
-    pub const ES256_ALGORITHM: i64 = -7;
     #[cfg(feature = "with_ctap1")]
     const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
+
+    /// Creates a new PubKey from its coordinates on the elliptic curve.
+    pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
+        PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
+            .map(|p| PubKey { p })
+    }
 
     #[cfg(feature = "std")]
     pub fn from_bytes_uncompressed(bytes: &[u8]) -> Option<PubKey> {
@@ -242,43 +255,18 @@ impl PubKey {
         representation
     }
 
-    // Encodes the key according to CBOR Object Signing and Encryption, defined in RFC 8152.
-    pub fn to_cose_key(&self) -> Option<Vec<u8>> {
-        const EC2_KEY_TYPE: i64 = 2;
-        const P_256_CURVE: i64 = 1;
-        let mut x_bytes = vec![0; int256::NBYTES];
-        self.p
-            .getx()
-            .to_int()
-            .to_bin(array_mut_ref![x_bytes.as_mut_slice(), 0, int256::NBYTES]);
-        let x_byte_cbor: cbor::Value = cbor_bytes!(x_bytes);
-        let mut y_bytes = vec![0; int256::NBYTES];
-        self.p
-            .gety()
-            .to_int()
-            .to_bin(array_mut_ref![y_bytes.as_mut_slice(), 0, int256::NBYTES]);
-        let y_byte_cbor: cbor::Value = cbor_bytes!(y_bytes);
-        let cbor_value = cbor_map_options! {
-            1 => EC2_KEY_TYPE,
-            3 => PubKey::ES256_ALGORITHM,
-            -1 => P_256_CURVE,
-            -2 => x_byte_cbor,
-            -3 => y_byte_cbor,
-        };
-        let mut encoded_key = Vec::new();
-        if cbor::write(cbor_value, &mut encoded_key) {
-            Some(encoded_key)
-        } else {
-            None
-        }
+    /// Writes the coordinates into the passed in arrays.
+    pub fn to_coordinates(&self, x: &mut [u8; NBYTES], y: &mut [u8; NBYTES]) {
+        self.p.getx().to_int().to_bin(x);
+        self.p.gety().to_int().to_bin(y);
     }
 
-    #[cfg(feature = "std")]
-    pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
-    where
-        H: Hash256,
-    {
-        let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
+    /// Verifies if the data's hash matches its signature.
+    ///
+    /// This function is not a constant time implementation, and does not resist side channel
+    /// attacks. Only use if all data involved is public knowledge.
+    pub fn verify_hash_vartime(&self, hash: &[u8; NBYTES], sign: &Signature) -> bool {
+        let m = ExponentP256::modn(Int256::from_bin(hash));
 
         let v = sign.s.inv();
         let u = &m * v.as_exponent();
@@ -287,6 +275,14 @@ impl PubKey {
         let u = self.p.points_mul(&u, v.as_exponent()).getx();
 
         ExponentP256::modn(u.to_int()) == *sign.r.as_exponent()
+    }
+
+    #[cfg(feature = "std")]
+    pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
+    where
+        H: Hash256,
+    {
+        self.verify_hash_vartime(&H::hash(msg), sign)
     }
 }
 
@@ -463,6 +459,21 @@ mod test {
         test_rfc6979(msg, k, r, s);
     }
 
+    /** Tests that sign and verify hashes are consistent **/
+    // Test that signed message hashes are correctly verified.
+    #[test]
+    fn test_sign_rfc6979_verify_hash_random() {
+        let mut rng = ThreadRng256 {};
+
+        for _ in 0..ITERATIONS {
+            let msg = rng.gen_uniform_u8x32();
+            let sk = SecKey::gensk(&mut rng);
+            let pk = sk.genpk();
+            let sign = sk.sign_rfc6979::<Sha256>(&msg);
+            assert!(pk.verify_hash_vartime(&Sha256::hash(&msg), &sign));
+        }
+    }
+
     /** Tests that sign and verify are consistent **/
     // Test that signed messages are correctly verified.
     #[test]
@@ -558,7 +569,8 @@ mod test {
             let sig_bytes = sig.as_ref();
 
             let pk = PubKey::from_bytes_uncompressed(public_key_bytes).unwrap();
-            let sign = Signature::from_bytes(sig_bytes).unwrap();
+            let sign =
+                Signature::from_bytes(array_ref![sig_bytes, 0, Signature::BYTES_LENGTH]).unwrap();
             assert!(pk.verify_vartime::<Sha256>(&msg_bytes, &sign));
         }
     }

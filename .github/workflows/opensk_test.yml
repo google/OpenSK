@@ -16,9 +16,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: "true"
-      - uses: actions-rs/toolchain@v1
-        with:
-          target: thumbv7em-none-eabi
+      - name: Install Rust toolchain
+        run: rustup show
       - uses: actions/setup-python@v1
         with:
           python-version: 3.7
@@ -50,28 +49,4 @@ jobs:
         with:
           command: test
           args: --features std,with_ctap1
-
-      - name: Unit testing of CTAP2 (release mode + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --features std,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (debug mode + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (release mode + CTAP1 + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --features std,with_ctap1,with_ctap2_1
-
-      - name: Unit testing of CTAP2 (debug mode + CTAP1 + CTAP2.1)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features std,with_ctap1,with_ctap2_1
 

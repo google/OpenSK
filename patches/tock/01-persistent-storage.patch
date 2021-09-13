@@ -349,7 +349,7 @@ index 348c746a5..5465c95f4 100644
      }
  }
 diff --git a/kernel/src/process.rs b/kernel/src/process.rs
-index c52754be3..26a7c47d3 100644
+index c52754be3..f5c833ea7 100644
 --- a/kernel/src/process.rs
 +++ b/kernel/src/process.rs
 @@ -359,6 +359,15 @@ pub trait ProcessType {
@@ -404,33 +404,37 @@ index c52754be3..26a7c47d3 100644
      fn update_stack_start_pointer(&self, stack_pointer: *const u8) {
          if stack_pointer >= self.mem_start() && stack_pointer < self.mem_end() {
              self.debug.map(|debug| {
-@@ -1751,6 +1789,33 @@ impl<C: 'static + Chip> Process<'_, C> {
+@@ -1751,6 +1789,37 @@ impl<C: 'static + Chip> Process<'_, C> {
              return Err(ProcessLoadError::MpuInvalidFlashLength);
          }
  
 +        // Allocate MPU region for the storage locations. The storage locations are currently
 +        // readable by all processes due to lack of stable app id.
-+        for storage_location in kernel.storage_locations() {
-+            if chip
-+                .mpu()
-+                .allocate_region(
-+                    storage_location.address as *const u8,
-+                    storage_location.unallocated_size,
-+                    storage_location.size,
-+                    mpu::Permissions::ReadOnly,
-+                    &mut mpu_config,
-+                )
-+                .is_some()
-+            {
-+                continue;
-+            }
-+            if config::CONFIG.debug_load_processes {
-+                debug!(
-+                    "[!] flash=[{:#010X}:{:#010X}] process={:?} - couldn't allocate flash region",
-+                    storage_location.address,
-+                    storage_location.address + storage_location.size,
-+                    process_name
-+                );
++        'storage_location: for storage_location in kernel.storage_locations() {
++            // We work around MPU limitations on Nordic by also trying unallocated_size = 0x40000.
++            // Note that just using the next power of 2 doesn't work.
++            for &unallocated_size in &[storage_location.size, 0x40000] {
++                if chip
++                    .mpu()
++                    .allocate_region(
++                        storage_location.address as *const u8,
++                        unallocated_size,
++                        storage_location.size,
++                        mpu::Permissions::ReadOnly,
++                        &mut mpu_config,
++                    )
++                    .is_some()
++                {
++                    continue 'storage_location;
++                }
++                if config::CONFIG.debug_load_processes {
++                    debug!(
++                        "[!] flash=[{:#010X}:{:#010X}] process={:?} - couldn't allocate flash region",
++                        storage_location.address,
++                        storage_location.address + unallocated_size,
++                        process_name
++                    );
++                }
 +            }
 +            return Ok((None, remaining_memory));
 +        }
@@ -439,10 +443,10 @@ index c52754be3..26a7c47d3 100644
          // memory space just for kernel and grant state. We need to make
          // sure we allocate enough memory just for that.
 diff --git a/kernel/src/sched.rs b/kernel/src/sched.rs
-index 10626a2e1..61401b04a 100644
+index 10626a2e1..8844bc6c3 100644
 --- a/kernel/src/sched.rs
 +++ b/kernel/src/sched.rs
-@@ -118,6 +118,13 @@ pub enum SchedulingDecision {
+@@ -118,6 +118,12 @@ pub enum SchedulingDecision {
      TrySleep,
  }
  
@@ -450,13 +454,12 @@ index 10626a2e1..61401b04a 100644
 +pub struct StorageLocation {
 +    pub address: usize,
 +    pub size: usize,
-+    pub unallocated_size: usize,
 +}
 +
  /// Main object for the kernel. Each board will need to create one.
  pub struct Kernel {
      /// How many "to-do" items exist at any given time. These include
-@@ -127,6 +134,9 @@ pub struct Kernel {
+@@ -127,6 +133,9 @@ pub struct Kernel {
      /// This holds a pointer to the static array of Process pointers.
      processes: &'static [Option<&'static dyn process::ProcessType>],
  
@@ -466,7 +469,7 @@ index 10626a2e1..61401b04a 100644
      /// A counter which keeps track of how many process identifiers have been
      /// created. This is used to create new unique identifiers for processes.
      process_identifier_max: Cell<usize>,
-@@ -170,9 +180,17 @@ pub enum StoppedExecutingReason {
+@@ -170,9 +179,17 @@ pub enum StoppedExecutingReason {
  
  impl Kernel {
      pub fn new(processes: &'static [Option<&'static dyn process::ProcessType>]) -> Kernel {
@@ -484,7 +487,7 @@ index 10626a2e1..61401b04a 100644
              process_identifier_max: Cell::new(0),
              grant_counter: Cell::new(0),
              grants_finalized: Cell::new(false),
-@@ -900,4 +918,8 @@ impl Kernel {
+@@ -900,4 +917,8 @@ impl Kernel {
  
          (return_reason, time_executed_us)
      }

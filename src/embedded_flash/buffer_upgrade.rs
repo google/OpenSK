@@ -57,6 +57,10 @@ impl UpgradeStorage for BufferUpgradeStorage {
         }
     }
 
+    fn partition_address(&self) -> usize {
+        0x60000
+    }
+
     fn partition_length(&self) -> usize {
         PARTITION_LENGTH
     }

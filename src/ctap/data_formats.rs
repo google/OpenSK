@@ -17,7 +17,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::TryFrom;
-use core::fmt;
 use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
@@ -841,28 +840,10 @@ impl TryFrom<CoseKey> for ecdsa::PubKey {
 /// Data structure for receiving a signature.
 ///
 /// See https://datatracker.ietf.org/doc/html/rfc8152#appendix-C.1.1 for reference.
-///
-/// TODO derive Debug and PartialEq with compiler version 1.47
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CoseSignature {
     pub algorithm: SignatureAlgorithm,
     pub bytes: [u8; ecdsa::Signature::BYTES_LENGTH],
-}
-
-impl fmt::Debug for CoseSignature {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter
-            .debug_struct("CoseSignature")
-            .field("algorithm", &self.algorithm)
-            .field("bytes", &self.bytes.to_vec())
-            .finish()
-    }
-}
-
-impl PartialEq for CoseSignature {
-    fn eq(&self, other: &CoseSignature) -> bool {
-        self.algorithm == other.algorithm && self.bytes[..] == other.bytes[..]
-    }
 }
 
 impl TryFrom<cbor::Value> for CoseSignature {

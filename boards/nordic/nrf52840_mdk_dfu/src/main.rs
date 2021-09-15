@@ -58,11 +58,19 @@ const NUM_PROCS: usize = 8;
 static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
     [None; NUM_PROCS];
 
-static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
-    address: 0xC0000,
-    size: 0x14000, // NUM_PAGES = 20
-    storage_type: kernel::StorageType::STORE,
-}];
+static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 2] = [
+    // We implement NUM_PAGES = 20 as 16 + 4 to satisfy the MPU.
+    kernel::StorageLocation {
+        address: 0xC0000,
+        size: 0x10000, // 16 pages
+        storage_type: kernel::StorageType::STORE,
+    },
+    kernel::StorageLocation {
+        address: 0xD0000,
+        size: 0x4000, // 4 pages
+        storage_type: kernel::StorageType::STORE,
+    },
+];
 
 // Static reference to chip for panic dumps
 static mut CHIP: Option<&'static nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>> = None;

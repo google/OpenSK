@@ -33,7 +33,9 @@ with_nfc = ["libtock_drivers/with_nfc"]
 enum-iterator = "0.6.0"
 
 [build-dependencies]
+sk-cbor = { path = "libraries/cbor" }
 uuid = { version = "0.8", features = ["v4"] }
+x509-parser = "0.10.0"
 
 [profile.dev]
 panic = "abort"

@@ -34,6 +34,9 @@ pub trait UpgradeStorage {
     /// Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()>;
 
+    /// Returns the address of the partition.
+    fn partition_address(&self) -> usize;
+
     /// Returns the length of the partition.
     fn partition_length(&self) -> usize;
 

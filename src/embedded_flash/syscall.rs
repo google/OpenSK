@@ -317,6 +317,10 @@ impl UpgradeStorage for SyscallUpgradeStorage {
         }
     }
 
+    fn partition_address(&self) -> usize {
+        self.partition.start()
+    }
+
     fn partition_length(&self) -> usize {
         self.partition.length()
     }

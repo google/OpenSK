@@ -14,18 +14,22 @@
 
 extern crate alloc;
 
+use openssl::bn;
+use openssl::ec;
+use openssl::nid;
 use sk_cbor::cbor_map;
 use std::env;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use uuid::Uuid;
-use x509_parser::pem::Pem;
 
 fn main() {
+    const UPGRADE_FILE: &str = "crypto_data/opensk_upgrade_pub.pem";
     println!("cargo:rerun-if-changed=crypto_data/aaguid.txt");
-    println!("cargo:rerun-if-changed=crypto_data/opensk_upgrade_pub.pem");
+    println!("cargo:rerun-if-changed={}", UPGRADE_FILE);
     println!("cargo:rerun-if-changed=layout.ld");
     println!("cargo:rerun-if-changed=nrf52840_layout.ld");
 
@@ -41,14 +45,21 @@ fn main() {
     aaguid_bin_file.write_all(aaguid.as_bytes()).unwrap();
 
     // COSE encoding the public key, then write it out.
-    let file = File::open("crypto_data/opensk_upgrade_pub.pem").unwrap();
-    let (pem, _bytes_read) = Pem::read(std::io::BufReader::new(file)).unwrap();
-    // Check if the contents are uncompressed.
-    assert_eq!(pem.contents[pem.contents.len() - 65], 0x04);
-    let x_index = pem.contents.len() - 64;
-    let y_index = pem.contents.len() - 32;
-    let x_bytes = &pem.contents[x_index..][..32];
-    let y_bytes = &pem.contents[y_index..][..32];
+    let pem_bytes = fs::read(UPGRADE_FILE).unwrap();
+    let ec_key = ec::EcKey::public_key_from_pem(&pem_bytes).ok().unwrap();
+    let group = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1).unwrap();
+    let conversion_form = ec::PointConversionForm::UNCOMPRESSED;
+    let mut ctx = bn::BigNumContext::new().unwrap();
+    let raw_bytes = ec_key
+        .public_key()
+        .to_bytes(&group, conversion_form, &mut ctx)
+        .unwrap();
+    const POINT_LEN: usize = 32;
+    assert_eq!(raw_bytes.len(), 1 + 2 * POINT_LEN);
+    assert_eq!(raw_bytes[0], 0x04);
+    let x_bytes = &raw_bytes[1..][..POINT_LEN];
+    let y_bytes = &raw_bytes[1 + POINT_LEN..][..POINT_LEN];
+
     const EC2_KEY_TYPE: i64 = 2;
     const P_256_CURVE: i64 = 1;
     const ES256_ALGORITHM: i64 = -7;

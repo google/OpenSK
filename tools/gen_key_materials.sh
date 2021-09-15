@@ -93,13 +93,13 @@ generate_crypto_materials () {
       -sha256
   fi
 
-  if [ ! -f "${opensk_upgrade}" ]
+  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade}" ]
   then
     "${openssl}" ecparam -genkey -name prime256v1 -out "${opensk_upgrade}"
     rm -f "${opensk_upgrade_pub}"
   fi
 
-  if [ ! -f "${opensk_upgrade_pub}" ]
+  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade_pub}" ]
   then
     "${openssl}" ec -in "${opensk_upgrade}" -pubout -out "${opensk_upgrade_pub}"
   fi

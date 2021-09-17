@@ -153,14 +153,18 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 /// Parses the metadata of an upgrade, and checks its correctness.
 ///
 /// Returns the hash over the upgrade, including partition and some metadata.
-/// The metadata layout is:
-/// | -- 32B upgrade hash (SHA256) -- | 8B other |
+/// The metadata consists of:
+/// - 32B upgrade hash (SHA256)
+/// -  4B timestamp (little endian encoding)
+/// -  4B partition address (little endian encoding)
+/// The upgrade hash is computed over the firmware image and all metadata,
+/// except the hash itself.
 fn parse_metadata(
     upgrade_locations: &UpgradeLocations,
     metadata: &[u8],
 ) -> Result<[u8; 32], Ctap2StatusCode> {
     const METADATA_LEN: usize = 40;
-    if metadata.len() < METADATA_LEN {
+    if metadata.len() != METADATA_LEN {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
     // The hash implementation handles this in chunks, so no memory issues.
@@ -1281,9 +1285,9 @@ where
             upgrade_locations
                 .write_metadata(&data)
                 .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-            upgrade_locations
+            &upgrade_locations
                 .read_metadata()
-                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?
+                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?[..data.len()]
         };
         let written_hash = Sha256::hash(written_slice);
         if hash != written_hash {
@@ -3162,7 +3166,7 @@ mod test {
             .to_vec();
         signed_over_data.extend(&[0xFF; 8]);
         let signed_hash = Sha256::hash(&signed_over_data);
-        let mut metadata = data.clone();
+        let mut metadata = vec![0xFF; 40];
         metadata[..32].copy_from_slice(&signed_hash);
         let metadata_hash = Sha256::hash(&metadata).to_vec();
 
@@ -3181,10 +3185,10 @@ mod test {
             hash: hash.clone(),
             signature: None,
         });
+        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
 
         // We can't inject a public key for our known private key, so the last upgrade step fails.
         // verify_signature is separately tested for that reason.
-        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
         let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
             address: None,
             data: metadata.clone(),
@@ -3193,14 +3197,14 @@ mod test {
         });
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
 
-        // Write metadata partly, expecting it to be filled with 0xFF. Fails like above.
+        // Write metadata of a wrong size.
         let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
             address: None,
-            data: metadata[..0x800].to_vec(),
+            data: metadata[..39].to_vec(),
             hash: metadata_hash,
             signature: Some(cose_signature),
         });
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         // Write outside of the partition.
         let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {

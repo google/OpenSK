@@ -17,10 +17,11 @@ use super::customization::{MAX_CREDENTIAL_COUNT_IN_LIST, MAX_LARGE_BLOB_ARRAY_SI
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
-    CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
-    GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
-    PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
-    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
+    CoseKey, CoseSignature, CredentialManagementSubCommand,
+    CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
+    MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
 use super::key_material;
 use super::status_code::Ctap2StatusCode;
@@ -49,6 +50,8 @@ pub enum Command {
     AuthenticatorConfig(AuthenticatorConfigParameters),
     // Vendor specific commands
     AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
+    AuthenticatorVendorUpgrade(AuthenticatorVendorUpgradeParameters),
+    AuthenticatorVendorUpgradeInfo,
 }
 
 impl Command {
@@ -66,6 +69,8 @@ impl Command {
     const AUTHENTICATOR_CONFIG: u8 = 0x0D;
     const _AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
     const AUTHENTICATOR_VENDOR_CONFIGURE: u8 = 0x40;
+    const AUTHENTICATOR_VENDOR_UPGRADE: u8 = 0x41;
+    const AUTHENTICATOR_VENDOR_UPGRADE_INFO: u8 = 0x42;
     const _AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
     pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
@@ -133,6 +138,16 @@ impl Command {
                 Ok(Command::AuthenticatorVendorConfigure(
                     AuthenticatorVendorConfigureParameters::try_from(decoded_cbor)?,
                 ))
+            }
+            Command::AUTHENTICATOR_VENDOR_UPGRADE => {
+                let decoded_cbor = cbor_read(&bytes[1..])?;
+                Ok(Command::AuthenticatorVendorUpgrade(
+                    AuthenticatorVendorUpgradeParameters::try_from(decoded_cbor)?,
+                ))
+            }
+            Command::AUTHENTICATOR_VENDOR_UPGRADE_INFO => {
+                // Parameters are ignored.
+                Ok(Command::AuthenticatorVendorUpgradeInfo)
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
@@ -573,11 +588,47 @@ impl TryFrom<cbor::Value> for AuthenticatorVendorConfigureParameters {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct AuthenticatorVendorUpgradeParameters {
+    pub address: Option<usize>,
+    pub data: Vec<u8>,
+    pub hash: Vec<u8>,
+    pub signature: Option<CoseSignature>,
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+        destructure_cbor_map! {
+            let {
+                0x01 => address,
+                0x02 => data,
+                0x03 => hash,
+                0x04 => signature,
+            } = extract_map(cbor_value)?;
+        }
+        let address = address
+            .map(extract_unsigned)
+            .transpose()?
+            .map(|u| u as usize);
+        let data = extract_byte_string(ok_or_missing(data)?)?;
+        let hash = extract_byte_string(ok_or_missing(hash)?)?;
+        let signature = signature.map(CoseSignature::try_from).transpose()?;
+        Ok(AuthenticatorVendorUpgradeParameters {
+            address,
+            data,
+            hash,
+            signature,
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::data_formats::{
         AuthenticatorTransport, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
-        PublicKeyCredentialUserEntity,
+        PublicKeyCredentialUserEntity, SignatureAlgorithm,
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
@@ -997,7 +1048,7 @@ mod test {
             0x02 => cbor_map! {
                 0x01 => dummy_cert,
                 0x02 => dummy_pkey
-            }
+            },
         };
         assert_eq!(
             AuthenticatorVendorConfigureParameters::try_from(cbor_value),
@@ -1006,8 +1057,81 @@ mod test {
                 attestation_material: Some(AuthenticatorAttestationMaterial {
                     certificate: dummy_cert.to_vec(),
                     private_key: dummy_pkey
-                })
+                }),
             })
         );
+    }
+
+    #[test]
+    fn test_vendor_upgrade() {
+        // Incomplete command
+        let cbor_bytes = vec![Command::AUTHENTICATOR_VENDOR_UPGRADE];
+        let command = Command::deserialize(&cbor_bytes);
+        assert_eq!(command, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR));
+
+        // Missing data
+        let cbor_value = cbor_map! {
+            0x01 => 0x1000,
+            0x03 => [0x44; 32],
+        };
+        assert_eq!(
+            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+
+        // Missing hash
+        let cbor_value = cbor_map! {
+            0x01 => 0x1000,
+            0x02 => [0xFF; 0x100],
+        };
+        assert_eq!(
+            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+
+        // Valid without address
+        let cbor_value = cbor_map! {
+            0x02 => [0xFF; 0x100],
+            0x03 => [0x44; 32],
+            0x04 => cbor_map! {
+                "alg" => -7,
+                "signature" => [0x55; 64],
+            },
+        };
+        assert_eq!(
+            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
+            Ok(AuthenticatorVendorUpgradeParameters {
+                address: None,
+                data: vec![0xFF; 0x100],
+                hash: vec![0x44; 32],
+                signature: Some(CoseSignature {
+                    algorithm: SignatureAlgorithm::ES256,
+                    bytes: [0x55; 64],
+                }),
+            })
+        );
+
+        // Valid without signature
+        let cbor_value = cbor_map! {
+            0x01 => 0x1000,
+            0x02 => [0xFF; 0x100],
+            0x03 => [0x44; 32],
+        };
+        assert_eq!(
+            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
+            Ok(AuthenticatorVendorUpgradeParameters {
+                address: Some(0x1000),
+                data: vec![0xFF; 0x100],
+                hash: vec![0x44; 32],
+                signature: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_deserialize_vendor_upgrade_info() {
+        let cbor_bytes = [Command::AUTHENTICATOR_VENDOR_UPGRADE_INFO];
+        let command = Command::deserialize(&cbor_bytes);
+        assert_eq!(command, Ok(Command::AuthenticatorVendorUpgradeInfo));
     }
 }

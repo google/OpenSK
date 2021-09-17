@@ -35,9 +35,10 @@ pub enum ResponseData {
     AuthenticatorCredentialManagement(Option<AuthenticatorCredentialManagementResponse>),
     AuthenticatorSelection,
     AuthenticatorLargeBlobs(Option<AuthenticatorLargeBlobsResponse>),
-    // TODO(kaczmarczyck) dummy, extend
     AuthenticatorConfig,
-    AuthenticatorVendor(AuthenticatorVendorResponse),
+    AuthenticatorVendorConfigure(AuthenticatorVendorConfigureResponse),
+    AuthenticatorVendorUpgrade,
+    AuthenticatorVendorUpgradeInfo(AuthenticatorVendorUpgradeInfoResponse),
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -53,7 +54,9 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorSelection => None,
             ResponseData::AuthenticatorLargeBlobs(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorConfig => None,
-            ResponseData::AuthenticatorVendor(data) => Some(data.into()),
+            ResponseData::AuthenticatorVendorConfigure(data) => Some(data.into()),
+            ResponseData::AuthenticatorVendorUpgrade => None,
+            ResponseData::AuthenticatorVendorUpgradeInfo(data) => Some(data.into()),
         }
     }
 }
@@ -300,14 +303,14 @@ impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct AuthenticatorVendorResponse {
+pub struct AuthenticatorVendorConfigureResponse {
     pub cert_programmed: bool,
     pub pkey_programmed: bool,
 }
 
-impl From<AuthenticatorVendorResponse> for cbor::Value {
-    fn from(vendor_response: AuthenticatorVendorResponse) -> Self {
-        let AuthenticatorVendorResponse {
+impl From<AuthenticatorVendorConfigureResponse> for cbor::Value {
+    fn from(vendor_response: AuthenticatorVendorConfigureResponse) -> Self {
+        let AuthenticatorVendorConfigureResponse {
             cert_programmed,
             pkey_programmed,
         } = vendor_response;
@@ -315,6 +318,21 @@ impl From<AuthenticatorVendorResponse> for cbor::Value {
         cbor_map_options! {
             0x01 => cert_programmed,
             0x02 => pkey_programmed,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AuthenticatorVendorUpgradeInfoResponse {
+    pub info: u32,
+}
+
+impl From<AuthenticatorVendorUpgradeInfoResponse> for cbor::Value {
+    fn from(vendor_upgrade_info_response: AuthenticatorVendorUpgradeInfoResponse) -> Self {
+        let AuthenticatorVendorUpgradeInfoResponse { info } = vendor_upgrade_info_response;
+
+        cbor_map_options! {
+            0x01 => info as u64,
         }
     }
 }
@@ -622,7 +640,7 @@ mod test {
     #[test]
     fn test_vendor_response_into_cbor() {
         let response_cbor: Option<cbor::Value> =
-            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+            ResponseData::AuthenticatorVendorConfigure(AuthenticatorVendorConfigureResponse {
                 cert_programmed: true,
                 pkey_programmed: false,
             })
@@ -635,7 +653,7 @@ mod test {
             })
         );
         let response_cbor: Option<cbor::Value> =
-            ResponseData::AuthenticatorVendor(AuthenticatorVendorResponse {
+            ResponseData::AuthenticatorVendorConfigure(AuthenticatorVendorConfigureResponse {
                 cert_programmed: false,
                 pkey_programmed: true,
             })
@@ -647,5 +665,23 @@ mod test {
                 0x02 => true,
             })
         );
+    }
+
+    #[test]
+    fn test_vendor_upgrade_into_cbor() {
+        let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorVendorUpgrade.into();
+        assert_eq!(response_cbor, None);
+    }
+
+    #[test]
+    fn test_vendor_upgrade_info_into_cbor() {
+        let vendor_upgrade_info_response =
+            AuthenticatorVendorUpgradeInfoResponse { info: 0x00060000 };
+        let response_cbor: Option<cbor::Value> =
+            ResponseData::AuthenticatorVendorUpgradeInfo(vendor_upgrade_info_response).into();
+        let expected_cbor = cbor_map! {
+            0x01 => 0x00060000,
+        };
+        assert_eq!(response_cbor, Some(expected_cbor));
     }
 }

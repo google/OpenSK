@@ -35,7 +35,7 @@ mod token_state;
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
     AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters,
-    AuthenticatorVendorConfigureParameters, Command,
+    AuthenticatorVendorConfigureParameters, AuthenticatorVendorUpgradeParameters, Command,
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
@@ -46,22 +46,25 @@ use self::customization::{
     MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
 };
 use self::data_formats::{
-    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, EnterpriseAttestationMode,
-    GetAssertionExtensions, PackedAttestationStatement, PinUvAuthProtocol,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
+    EnterpriseAttestationMode, GetAssertionExtensions, PackedAttestationStatement,
+    PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+    SignatureAlgorithm,
 };
 use self::hid::ChannelID;
 use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
-    AuthenticatorMakeCredentialResponse, AuthenticatorVendorResponse, ResponseData,
+    AuthenticatorMakeCredentialResponse, AuthenticatorVendorConfigureResponse,
+    AuthenticatorVendorUpgradeInfoResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
 use self::storage::PersistentStore;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -71,6 +74,7 @@ use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+use crypto::ecdsa;
 use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
@@ -144,6 +148,56 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
         }
         &s[..max]
     }
+}
+
+/// Parses the metadata of an upgrade, and checks its correctness.
+///
+/// Returns the hash over the upgrade, including partition and some metadata.
+/// The metadata consists of:
+/// - 32B upgrade hash (SHA256)
+/// -  4B timestamp (little endian encoding)
+/// -  4B partition address (little endian encoding)
+/// The upgrade hash is computed over the firmware image and all metadata,
+/// except the hash itself.
+fn parse_metadata(
+    upgrade_locations: &UpgradeLocations,
+    metadata: &[u8],
+) -> Result<[u8; 32], Ctap2StatusCode> {
+    const METADATA_LEN: usize = 40;
+    if metadata.len() != METADATA_LEN {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    // The hash implementation handles this in chunks, so no memory issues.
+    let partition_slice = upgrade_locations
+        .read_partition(0, upgrade_locations.partition_length())
+        .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+    let mut hasher = Sha256::new();
+    hasher.update(partition_slice);
+    hasher.update(&metadata[32..METADATA_LEN]);
+    let computed_hash = hasher.finalize();
+    if &computed_hash != array_ref!(metadata, 0, 32) {
+        return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
+    }
+    Ok(computed_hash)
+}
+
+/// Verifies the signature over the given hash.
+///
+/// The public key is COSE encoded, and the hash is a SHA256.
+fn verify_signature(
+    signature: Option<CoseSignature>,
+    public_key_bytes: &[u8],
+    signed_hash: &[u8; 32],
+) -> Result<(), Ctap2StatusCode> {
+    let signature =
+        ecdsa::Signature::try_from(signature.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?)?;
+    let cbor_public_key = cbor_read(public_key_bytes)?;
+    let cose_key = CoseKey::try_from(cbor_public_key)?;
+    let public_key = ecdsa::PubKey::try_from(cose_key)?;
+    if !public_key.verify_hash_vartime(signed_hash, &signature) {
+        return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
+    }
+    Ok(())
 }
 
 /// Holds data necessary to sign an assertion for a credential.
@@ -288,6 +342,7 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission,
     large_blobs: LargeBlobs,
+    upgrade_locations: Option<UpgradeLocations>,
 }
 
 impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
@@ -314,6 +369,7 @@ where
             ),
             stateful_command_permission: StatefulPermission::new_reset(now),
             large_blobs: LargeBlobs::new(),
+            upgrade_locations: UpgradeLocations::new().ok(),
         }
     }
 
@@ -481,6 +537,10 @@ where
                     Command::AuthenticatorVendorConfigure(params) => {
                         self.process_vendor_configure(params, cid)
                     }
+                    Command::AuthenticatorVendorUpgrade(params) => {
+                        self.process_vendor_upgrade(params)
+                    }
+                    Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(),
                 };
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
@@ -1140,13 +1200,13 @@ where
 
         let response = match params.attestation_material {
             // Only reading values.
-            None => AuthenticatorVendorResponse {
+            None => AuthenticatorVendorConfigureResponse {
                 cert_programmed: current_cert.is_some(),
                 pkey_programmed: current_priv_key.is_some(),
             },
             // Device is already fully programmed. We don't leak information.
             Some(_) if current_cert.is_some() && current_priv_key.is_some() => {
-                AuthenticatorVendorResponse {
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
                 }
@@ -1171,7 +1231,7 @@ where
                     self.persistent_store
                         .set_attestation_private_key(&data.private_key)?;
                 }
-                AuthenticatorVendorResponse {
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
                 }
@@ -1192,7 +1252,60 @@ where
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
         }
-        Ok(ResponseData::AuthenticatorVendor(response))
+        Ok(ResponseData::AuthenticatorVendorConfigure(response))
+    }
+
+    fn process_vendor_upgrade(
+        &mut self,
+        params: AuthenticatorVendorUpgradeParameters,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        let AuthenticatorVendorUpgradeParameters {
+            address,
+            data,
+            hash,
+            signature,
+        } = params;
+        let upgrade_locations = self
+            .upgrade_locations
+            .as_mut()
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
+        let written_slice = if let Some(address) = address {
+            upgrade_locations
+                .write_partition(address, &data)
+                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+            upgrade_locations
+                .read_partition(address, data.len())
+                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?
+        } else {
+            // Compares the hash inside the metadata to the actual hash.
+            let upgrade_hash = parse_metadata(upgrade_locations, &data)?;
+            // Only signed firmware images may be fully written.
+            verify_signature(signature, key_material::UPGRADE_PUBLIC_KEY, &upgrade_hash)?;
+            // Write the metadata page after verifying that its hash is signed.
+            upgrade_locations
+                .write_metadata(&data)
+                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+            &upgrade_locations
+                .read_metadata()
+                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?[..data.len()]
+        };
+        let written_hash = Sha256::hash(written_slice);
+        if hash != written_hash {
+            return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
+        }
+        Ok(ResponseData::AuthenticatorVendorUpgrade)
+    }
+
+    fn process_vendor_upgrade_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
+        let upgrade_locations = self
+            .upgrade_locations
+            .as_ref()
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
+        Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
+            AuthenticatorVendorUpgradeInfoResponse {
+                info: upgrade_locations.partition_address() as u32,
+            },
+        ))
     }
 
     pub fn generate_auth_data(
@@ -2833,8 +2946,8 @@ mod test {
         );
         assert_eq!(
             response,
-            Ok(ResponseData::AuthenticatorVendor(
-                AuthenticatorVendorResponse {
+            Ok(ResponseData::AuthenticatorVendorConfigure(
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: false,
                     pkey_programmed: false,
                 }
@@ -2856,8 +2969,8 @@ mod test {
         );
         assert_eq!(
             response,
-            Ok(ResponseData::AuthenticatorVendor(
-                AuthenticatorVendorResponse {
+            Ok(ResponseData::AuthenticatorVendorConfigure(
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
                 }
@@ -2894,8 +3007,8 @@ mod test {
         );
         assert_eq!(
             response,
-            Ok(ResponseData::AuthenticatorVendor(
-                AuthenticatorVendorResponse {
+            Ok(ResponseData::AuthenticatorVendorConfigure(
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
                 }
@@ -2928,10 +3041,226 @@ mod test {
         );
         assert_eq!(
             response,
-            Ok(ResponseData::AuthenticatorVendor(
-                AuthenticatorVendorResponse {
+            Ok(ResponseData::AuthenticatorVendorConfigure(
+                AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
                     pkey_programmed: true,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_metadata() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        // The test buffer starts fully erased with 0xFF bytes.
+        // The compiler issues an incorrect warning.
+        #[allow(unused_mut)]
+        let mut upgrade_locations = ctap_state.upgrade_locations.as_mut().unwrap();
+
+        // Partition of 0x40000 bytes and 8 bytes metadata are hashed.
+        let hashed_data = vec![0xFF; 0x40000 + 8];
+        let expected_hash = Sha256::hash(&hashed_data);
+        let mut metadata = vec![0xFF; 40];
+        metadata[..32].copy_from_slice(&expected_hash);
+        assert_eq!(
+            parse_metadata(upgrade_locations, &metadata),
+            Ok(expected_hash)
+        );
+
+        // Any manipulation of data fails.
+        metadata[32] = 0x88;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &metadata),
+            Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
+        );
+        metadata[32] = 0xFF;
+        metadata[0] ^= 0x01;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &metadata),
+            Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
+        );
+        metadata[0] ^= 0x01;
+        upgrade_locations.write_partition(0, &[0x88; 1]).unwrap();
+        assert_eq!(
+            parse_metadata(upgrade_locations, &metadata),
+            Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
+        );
+    }
+
+    #[test]
+    fn test_verify_signature() {
+        let mut rng = ThreadRng256 {};
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let message = [0x44; 64];
+        let signed_hash = Sha256::hash(&message);
+        let signature = private_key.sign_rfc6979::<Sha256>(&message);
+
+        let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        signature.to_bytes(&mut signature_bytes);
+        let cose_signature = CoseSignature {
+            algorithm: SignatureAlgorithm::ES256,
+            bytes: signature_bytes,
+        };
+
+        let public_key = private_key.genpk();
+        let mut public_key_bytes = vec![];
+        cbor_write(
+            cbor::Value::from(CoseKey::from(public_key)),
+            &mut public_key_bytes,
+        )
+        .unwrap();
+
+        assert_eq!(
+            verify_signature(
+                Some(cose_signature.clone()),
+                &public_key_bytes,
+                &signed_hash
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            verify_signature(Some(cose_signature.clone()), &public_key_bytes, &[0x55; 32]),
+            Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
+        );
+        public_key_bytes[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(Some(cose_signature), &public_key_bytes, &signed_hash),
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
+        );
+        public_key_bytes[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(None, &public_key_bytes, &signed_hash),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+        signature_bytes[0] ^= 0x01;
+        let cose_signature = CoseSignature {
+            algorithm: SignatureAlgorithm::ES256,
+            bytes: signature_bytes,
+        };
+        assert_eq!(
+            verify_signature(Some(cose_signature), &public_key_bytes, &signed_hash),
+            Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
+        );
+    }
+
+    #[test]
+    fn test_vendor_upgrade() {
+        // The test partition storage has size 0x40000.
+        // The test metadata storage has size 0x1000.
+        // The test identifier matches partition B.
+        let mut rng = ThreadRng256 {};
+        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        const METADATA_LEN: usize = 40;
+
+        let data = vec![0xFF; 0x1000];
+        let hash = Sha256::hash(&data).to_vec();
+        let upgrade_locations = ctap_state.upgrade_locations.as_ref().unwrap();
+        let partition_length = upgrade_locations.partition_length();
+        let mut signed_over_data = upgrade_locations
+            .read_partition(0, partition_length)
+            .unwrap()
+            .to_vec();
+        signed_over_data.extend(&[0xFF; METADATA_LEN - 32]);
+        let signed_hash = Sha256::hash(&signed_over_data);
+        let mut metadata = vec![0xFF; METADATA_LEN];
+        metadata[..32].copy_from_slice(&signed_hash);
+        let metadata_hash = Sha256::hash(&metadata).to_vec();
+
+        let signature = private_key.sign_rfc6979::<Sha256>(&signed_over_data);
+        let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        signature.to_bytes(&mut signature_bytes);
+        let cose_signature = CoseSignature {
+            algorithm: SignatureAlgorithm::ES256,
+            bytes: signature_bytes,
+        };
+
+        // Write to partition and metadata.
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: Some(0x20000),
+            data: data.clone(),
+            hash: hash.clone(),
+            signature: None,
+        });
+        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
+
+        // We can't inject a public key for our known private key, so the last upgrade step fails.
+        // verify_signature is separately tested for that reason.
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: None,
+            data: metadata.clone(),
+            hash: metadata_hash.clone(),
+            signature: Some(cose_signature.clone()),
+        });
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
+
+        // Write metadata of a wrong size.
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: None,
+            data: metadata[..METADATA_LEN - 1].to_vec(),
+            hash: metadata_hash,
+            signature: Some(cose_signature),
+        });
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
+
+        // Write outside of the partition.
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: Some(0x40000),
+            data: data.clone(),
+            hash,
+            signature: None,
+        });
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
+
+        // Write a bad hash.
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: Some(0x20000),
+            data,
+            hash: [0xEE; 32].to_vec(),
+            signature: None,
+        });
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
+    }
+
+    #[test]
+    fn test_vendor_upgrade_no_second_partition() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        ctap_state.upgrade_locations = None;
+
+        let data = vec![0xFF; 0x1000];
+        let hash = Sha256::hash(&data).to_vec();
+        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
+            address: Some(0),
+            data,
+            hash,
+            signature: None,
+        });
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
+    }
+
+    #[test]
+    fn test_vendor_upgrade_info() {
+        let mut rng = ThreadRng256 {};
+        let user_immediately_present = |_| Ok(());
+        let ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let partition_address = ctap_state
+            .upgrade_locations
+            .as_ref()
+            .unwrap()
+            .partition_address();
+
+        let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info();
+        assert_eq!(
+            upgrade_info_reponse,
+            Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
+                AuthenticatorVendorUpgradeInfoResponse {
+                    info: partition_address as u32,
                 }
             ))
         );

@@ -40,25 +40,18 @@ OPENSK_VENDOR_CONFIGURE = 0x40
 
 
 def fatal(msg):
-  tqdm.write("{style_begin}fatal:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
+             f"{colorama.Style.RESET_ALL} {msg}")
   sys.exit(1)
 
 
 def error(msg):
-  tqdm.write("{style_begin}error:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
 
 
 def info(msg):
-  tqdm.write("{style_begin}info:{style_end} {message}".format(
-      style_begin=colorama.Fore.GREEN + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
+             f"{colorama.Style.RESET_ALL} {msg}")
 
 
 def get_opensk_devices(batch_mode):
@@ -137,16 +130,15 @@ def main(args):
     if authenticator.device.capabilities & hid.CAPABILITY.WINK:
       authenticator.device.wink()
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
-    info("Programming OpenSK device AAGUID {} ({}).".format(
-        aaguid, authenticator.device))
+    info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
     info("Please touch the device to confirm...")
     try:
       result = authenticator.send_cbor(
           OPENSK_VENDOR_CONFIGURE,
           data=cbor_data,
       )
-      info("Certificate: {}".format("Present" if result[1] else "Missing"))
-      info("Private Key: {}".format("Present" if result[2] else "Missing"))
+      info(f"Certificate: {'Present' if result[1] else 'Missing'}")
+      info(f"Private Key: {'Present' if result[2] else 'Missing'}")
       if args.lock:
         info("Device is now locked down!")
     except ctap.CtapError as ex:
@@ -160,7 +152,7 @@ def main(args):
             ("Failed to configure OpenSK (device is partially programmed but "
              "the given cert/key don't match the ones currently programmed)."))
       else:
-        error("Failed to configure OpenSK (unknown error: {}".format(ex))
+        error(f"Failed to configure OpenSK (unknown error: {ex}")
 
 
 if __name__ == "__main__":

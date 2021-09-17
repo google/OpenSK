@@ -3155,6 +3155,7 @@ mod test {
         let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
         let user_immediately_present = |_| Ok(());
         let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        const METADATA_LEN: usize = 40;
 
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
@@ -3164,9 +3165,9 @@ mod test {
             .read_partition(0, partition_length)
             .unwrap()
             .to_vec();
-        signed_over_data.extend(&[0xFF; 8]);
+        signed_over_data.extend(&[0xFF; METADATA_LEN - 32]);
         let signed_hash = Sha256::hash(&signed_over_data);
-        let mut metadata = vec![0xFF; 40];
+        let mut metadata = vec![0xFF; METADATA_LEN];
         metadata[..32].copy_from_slice(&signed_hash);
         let metadata_hash = Sha256::hash(&metadata).to_vec();
 
@@ -3200,7 +3201,7 @@ mod test {
         // Write metadata of a wrong size.
         let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
             address: None,
-            data: metadata[..39].to_vec(),
+            data: metadata[..METADATA_LEN - 1].to_vec(),
             hash: metadata_hash,
             signature: Some(cose_signature),
         });

@@ -14,7 +14,6 @@
 
 //! Types for expressing CBOR values.
 
-use super::writer::write;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -124,16 +123,35 @@ impl Ord for Value {
             (ByteString(b1), ByteString(b2)) => b1.len().cmp(&b2.len()).then(b1.cmp(b2)),
             (TextString(t1), TextString(t2)) => t1.len().cmp(&t2.len()).then(t1.cmp(t2)),
             (Array(a1), Array(a2)) if a1.len() != a2.len() => a1.len().cmp(&a2.len()),
+            (Array(a1), Array(a2)) => {
+                // Arrays of same length.
+                let mut ordering = Ordering::Equal;
+                for (e1, e2) in a1.iter().zip(a2.iter()) {
+                    ordering = ordering.then(e1.cmp(e2));
+                    if !matches!(ordering, Ordering::Equal) {
+                        break;
+                    }
+                }
+                ordering
+            }
             (Map(m1), Map(m2)) if m1.len() != m2.len() => m1.len().cmp(&m2.len()),
+            (Map(m1), Map(m2)) => {
+                // Maps of same length.
+                let mut ordering = Ordering::Equal;
+                for ((k1, v1), (k2, v2)) in m1.iter().zip(m2.iter()) {
+                    ordering = ordering.then(k1.cmp(k2));
+                    ordering = ordering.then_with(|| v1.cmp(v2));
+                    if !matches!(ordering, Ordering::Equal) {
+                        break;
+                    }
+                }
+                ordering
+            }
             (Tag(t1, v1), Tag(t2, v2)) => t1.cmp(t2).then(v1.cmp(v2)),
             (Simple(s1), Simple(s2)) => s1.cmp(s2),
-            (v1, v2) => {
-                // This case could handle all of the above as well. Checking individually is faster.
-                let mut encoding1 = Vec::new();
-                let _ = write(v1.clone(), &mut encoding1);
-                let mut encoding2 = Vec::new();
-                let _ = write(v2.clone(), &mut encoding2);
-                encoding1.cmp(&encoding2)
+            (_, _) => {
+                // The case of different major types is caught above.
+                unreachable!();
             }
         }
     }

@@ -127,7 +127,7 @@ impl Ord for Value {
                 // Arrays of same length.
                 let mut ordering = Ordering::Equal;
                 for (e1, e2) in a1.iter().zip(a2.iter()) {
-                    ordering = ordering.then(e1.cmp(e2));
+                    ordering = e1.cmp(e2);
                     if !matches!(ordering, Ordering::Equal) {
                         break;
                     }
@@ -139,8 +139,7 @@ impl Ord for Value {
                 // Maps of same length.
                 let mut ordering = Ordering::Equal;
                 for ((k1, v1), (k2, v2)) in m1.iter().zip(m2.iter()) {
-                    ordering = ordering.then(k1.cmp(k2));
-                    ordering = ordering.then_with(|| v1.cmp(v2));
+                    ordering = k1.cmp(k2).then_with(|| v1.cmp(v2));
                     if !matches!(ordering, Ordering::Equal) {
                         break;
                     }

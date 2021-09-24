@@ -289,6 +289,9 @@ impl SyscallUpgradeStorage {
 
 impl UpgradeStorage for SyscallUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
+        if length == 0 {
+            return Err(StorageError::OutOfBounds);
+        }
         let address = self.partition.start() + offset;
         if self
             .partition
@@ -301,14 +304,15 @@ impl UpgradeStorage for SyscallUpgradeStorage {
     }
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+        if data.is_empty() {
+            return Err(StorageError::OutOfBounds);
+        }
         let address = self.partition.start() + offset;
-        if self
-            .partition
-            .contains_range(&ModRange::new(address, data.len()))
-        {
+        let write_range = ModRange::new(address, data.len());
+        if self.partition.contains_range(&write_range) {
             // Erases all pages that have their first byte in the write range.
             // Since we expect calls in order, we don't want to erase half-written pages.
-            for address in ModRange::new(address, data.len()).aligned_iter(self.page_size) {
+            for address in write_range.aligned_iter(self.page_size) {
                 erase_page(address, self.page_size)?;
             }
             write_slice(address, data)

@@ -39,6 +39,9 @@ impl BufferUpgradeStorage {
 
 impl UpgradeStorage for BufferUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
+        if length == 0 {
+            return Err(StorageError::OutOfBounds);
+        }
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, length)) {
             Ok(&self.partition[offset..][..length])
@@ -48,6 +51,9 @@ impl UpgradeStorage for BufferUpgradeStorage {
     }
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+        if data.is_empty() {
+            return Err(StorageError::OutOfBounds);
+        }
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, data.len())) {
             self.partition[offset..][..data.len()].copy_from_slice(data);
@@ -77,5 +83,66 @@ impl UpgradeStorage for BufferUpgradeStorage {
         } else {
             Err(StorageError::OutOfBounds)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_write_partition() {
+        let mut storage = BufferUpgradeStorage::new().unwrap();
+        assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0xFF]);
+        assert!(storage.write_partition(1, &[0x88, 0x88]).is_ok());
+        assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0x88]);
+        assert_eq!(
+            storage.write_partition(PARTITION_LENGTH - 1, &[0x88, 0x88]),
+            Err(StorageError::OutOfBounds)
+        );
+        assert_eq!(
+            storage.read_partition(PARTITION_LENGTH - 2, 2).unwrap(),
+            &[0xFF, 0xFF]
+        );
+        assert_eq!(
+            storage.read_partition(PARTITION_LENGTH - 1, 2),
+            Err(StorageError::OutOfBounds)
+        );
+        assert_eq!(
+            storage.write_partition(4, &[]),
+            Err(StorageError::OutOfBounds)
+        );
+        assert_eq!(
+            storage.write_partition(PARTITION_LENGTH + 4, &[]),
+            Err(StorageError::OutOfBounds)
+        );
+        assert_eq!(storage.read_partition(4, 0), Err(StorageError::OutOfBounds));
+        assert_eq!(
+            storage.read_partition(PARTITION_LENGTH + 4, 0),
+            Err(StorageError::OutOfBounds)
+        );
+    }
+
+    #[test]
+    fn partition_slice() {
+        let storage = BufferUpgradeStorage::new().unwrap();
+        assert_eq!(storage.partition_address(), 0x60000);
+        assert_eq!(storage.partition_length(), PARTITION_LENGTH);
+    }
+
+    #[test]
+    fn read_write_metadata() {
+        let mut storage = BufferUpgradeStorage::new().unwrap();
+        assert_eq!(storage.read_metadata().unwrap(), &[0xFF; METADATA_LENGTH]);
+        assert!(storage.write_metadata(&[0x88, 0x88]).is_ok());
+        assert_eq!(
+            storage.write_metadata(&[0x88; METADATA_LENGTH + 1]),
+            Err(StorageError::OutOfBounds)
+        );
+        let new_metadata = storage.read_metadata().unwrap();
+        assert_eq!(&new_metadata[0..2], &[0x88, 0x88]);
+        assert_eq!(&new_metadata[2..], &[0xFF; METADATA_LENGTH - 2]);
+        assert!(storage.write_metadata(&[]).is_ok());
+        assert_eq!(storage.read_metadata().unwrap(), &[0xFF; METADATA_LENGTH]);
     }
 }

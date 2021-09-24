@@ -40,7 +40,7 @@ impl BufferUpgradeStorage {
 impl UpgradeStorage for BufferUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
         if length == 0 {
-            return Ok(&[]);
+            return Err(StorageError::OutOfBounds);
         }
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, length)) {
@@ -52,7 +52,7 @@ impl UpgradeStorage for BufferUpgradeStorage {
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
         if data.is_empty() {
-            return Ok(());
+            return Err(StorageError::OutOfBounds);
         }
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, data.len())) {
@@ -109,11 +109,18 @@ mod tests {
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
-            storage.read_partition(PARTITION_LENGTH + 1, 0).unwrap(),
-            &[]
+            storage.write_partition(4, &[]),
+            Err(StorageError::OutOfBounds)
         );
-        assert!(storage.write_partition(4, &[]).is_ok());
-        assert!(storage.write_partition(PARTITION_LENGTH + 4, &[]).is_ok());
+        assert_eq!(
+            storage.write_partition(PARTITION_LENGTH + 4, &[]),
+            Err(StorageError::OutOfBounds)
+        );
+        assert_eq!(storage.read_partition(4, 0), Err(StorageError::OutOfBounds));
+        assert_eq!(
+            storage.read_partition(PARTITION_LENGTH + 4, 0),
+            Err(StorageError::OutOfBounds)
+        );
     }
 
     #[test]

@@ -290,7 +290,7 @@ impl SyscallUpgradeStorage {
 impl UpgradeStorage for SyscallUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
         if length == 0 {
-            return Ok(&[]);
+            return Err(StorageError::OutOfBounds);
         }
         let address = self.partition.start() + offset;
         if self
@@ -305,7 +305,7 @@ impl UpgradeStorage for SyscallUpgradeStorage {
 
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
         if data.is_empty() {
-            return Ok(());
+            return Err(StorageError::OutOfBounds);
         }
         let address = self.partition.start() + offset;
         let write_range = ModRange::new(address, data.len());

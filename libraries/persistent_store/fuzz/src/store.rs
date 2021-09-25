@@ -53,6 +53,7 @@ pub fn fuzz(mut data: &[u8], debug: bool, stats: Option<&mut Stats>) {
                 driver.check().unwrap();
             }
             if fuzzer.debug {
+                println!("{:?}", driver.model().content());
                 println!("----------------------------------------------------------------------");
             }
         }

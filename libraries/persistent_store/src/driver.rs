@@ -200,6 +200,14 @@ impl StoreDriver {
         }
     }
 
+    /// Provides read-only access to the model.
+    pub fn model(&self) -> &StoreModel {
+        match self {
+            StoreDriver::On(x) => x.model(),
+            StoreDriver::Off(x) => x.model(),
+        }
+    }
+
     /// Extracts the power-on version of the driver.
     pub fn on(self) -> Option<StoreDriverOn> {
         match self {

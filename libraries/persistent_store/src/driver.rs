@@ -17,7 +17,7 @@
 //! [`StoreDriver`] wraps a [`Store`] and compares its behavior with its associated [`StoreModel`].
 
 use crate::format::{Format, Position};
-#[cfg(test)]
+#[cfg(feature = "std")]
 use crate::StoreUpdate;
 use crate::{
     BufferCorruptFunction, BufferOptions, BufferStorage, Nat, Store, StoreError, StoreHandle,
@@ -431,7 +431,7 @@ impl StoreDriverOn {
     }
 
     /// Applies an insertion to the store and model without interruption.
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn insert(&mut self, key: usize, value: &[u8]) -> Result<(), StoreInvariant> {
         let value = value.to_vec();
         let updates = vec![StoreUpdate::Insert { key, value }];
@@ -439,7 +439,7 @@ impl StoreDriverOn {
     }
 
     /// Applies a deletion to the store and model without interruption.
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn remove(&mut self, key: usize) -> Result<(), StoreInvariant> {
         let updates = vec![StoreUpdate::Remove { key }];
         self.apply(StoreOperation::Transaction { updates })

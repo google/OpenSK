@@ -52,8 +52,8 @@ following:
 
 *   rustup (can be installed with [Rustup](https://rustup.rs/))
 *   python3 and pip (can be installed with the `python3-pip` package on Debian)
-*   the OpenSSL command line tool (can be installed with the `libssl-dev`
-    package on Debian)
+*   the OpenSSL command line tool (can be installed and configured with the
+    `libssl-dev` and `pkg-config` packages on Debian)
 
 The scripts provided in this project have been tested under Linux and OS X. We
 haven't tested them on Windows and other platforms.

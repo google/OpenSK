@@ -22,10 +22,13 @@ from __future__ import print_function
 import argparse
 import collections
 import copy
+import hashlib
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import time
 
 import colorama
 from six.moves import input
@@ -50,12 +53,18 @@ OpenSKBoard = collections.namedtuple(
         "page_size",
         # Flash address at which the kernel will be written
         "kernel_address",
-        # Set to None is padding is not required for the board.
+        # Set to None if padding is not required for the board.
         # This creates a fake Tock OS application that starts at the
         # address specified by this parameter (must match the `prog` value
         # specified on the board's `layout.ld` file) and will end at
         # `app_address`.
         "padding_address",
+        # If present, enforce that the firmware image equals this value.
+        "firmware_size",
+        # Set to None if metadata is not required for the board.
+        # Writes the metadata that is checked by the custom bootloader for
+        # upgradable board.
+        "metadata_address",
         # Linker script to produce a working app for this board
         "app_ldscript",
         # Flash address at which the app should be written
@@ -83,81 +92,63 @@ OpenSKBoard = collections.namedtuple(
         "nordic_dfu",
     ])
 
+nrf52840dk_opensk_board = OpenSKBoard(
+    path="third_party/tock/boards/nordic/nrf52840dk_opensk",
+    arch="thumbv7em-none-eabi",
+    page_size=4096,
+    kernel_address=0,
+    padding_address=0x30000,
+    firmware_size=None,
+    metadata_address=None,
+    app_ldscript="nrf52840_layout.ld",
+    app_address=0x40000,
+    storage_address=0xC0000,
+    storage_size=0x14000,
+    pyocd_target="nrf52840",
+    openocd_board="nordic_nrf52840_dongle.cfg",
+    openocd_options=[],
+    openocd_commands={},
+    jlink_if="swd",
+    jlink_device="nrf52840_xxaa",
+    nordic_dfu=False,
+)
+
 SUPPORTED_BOARDS = {
     "nrf52840dk_opensk":
-        OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840dk_opensk",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
-            kernel_address=0,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
+        nrf52840dk_opensk_board,
+    "nrf52840dk_opensk_a":
+        nrf52840dk_opensk_board._replace(
+            path=nrf52840dk_opensk_board.path + "_a",
+            kernel_address=0x20000,
+            padding_address=None,
+            firmware_size=0x40000,
+            metadata_address=0x4000,
+            app_ldscript="nrf52840_layout_a.ld",
             app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x14000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
-            nordic_dfu=False,
+        ),
+    "nrf52840dk_opensk_b":
+        nrf52840dk_opensk_board._replace(
+            path=nrf52840dk_opensk_board.path + "_b",
+            kernel_address=0x60000,
+            padding_address=None,
+            firmware_size=0x40000,
+            metadata_address=0x4000,
+            app_ldscript="nrf52840_layout_b.ld",
+            app_address=0x80000,
         ),
     "nrf52840_dongle_opensk":
-        OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
-            kernel_address=0,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x14000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
-            nordic_dfu=False,
-        ),
+        nrf52840dk_opensk_board._replace(
+            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",),
     "nrf52840_dongle_dfu":
-        OpenSKBoard(
+        nrf52840dk_opensk_board._replace(
             path="third_party/tock/boards/nordic/nrf52840_dongle_dfu",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
             kernel_address=0x1000,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x14000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
             nordic_dfu=True,
         ),
     "nrf52840_mdk_dfu":
-        OpenSKBoard(
+        nrf52840dk_opensk_board._replace(
             path="third_party/tock/boards/nordic/nrf52840_mdk_dfu",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
             kernel_address=0x1000,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x14000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
             nordic_dfu=True,
         ),
 }
@@ -205,6 +196,15 @@ def assert_python_library(module):
            f"Try to run: pip3 install {module}"))
 
 
+def create_metadata(firmware_image, partition_address):
+  timestamp = struct.pack("<I", int(time.time()))
+  partition_start = struct.pack("<I", partition_address)
+  sha256_hash = hashlib.sha256()
+  sha256_hash.update(firmware_image + timestamp + partition_start)
+  checksum = sha256_hash.digest()
+  return checksum + timestamp + partition_start
+
+
 class RemoveConstAction(argparse.Action):
 
   # pylint: disable=redefined-builtin
@@ -250,6 +250,7 @@ class OpenSKInstaller:
     self.tab_folder = os.path.join("target", "tab")
     board = SUPPORTED_BOARDS[self.args.board]
     self.tockloader_default_args = argparse.Namespace(
+        app_address=board.app_address,
         arch=board.arch,
         board=self.args.board,
         bundle_apps=False,
@@ -455,9 +456,7 @@ class OpenSKInstaller:
   def install_tab_file(self, tab_filename):
     assert self.args.application
     info(f"Installing Tock application {self.args.application}")
-    board_props = SUPPORTED_BOARDS[self.args.board]
     args = copy.copy(self.tockloader_default_args)
-    setattr(args, "app_address", board_props.app_address)
     setattr(args, "erase", self.args.clear_apps)
     setattr(args, "make", False)
     setattr(args, "no_replace", False)
@@ -476,40 +475,72 @@ class OpenSKInstaller:
         SUPPORTED_BOARDS[self.args.board].padding_address)
     return padding.get_binary()
 
-  def install_tock_os(self):
+  def write_binary(self, binary, address):
+    tock = loader.TockLoader(self.tockloader_default_args)
+    tock.open()
+    try:
+      tock.flash_binary(binary, address)
+    except TockLoaderException as e:
+      fatal(f"Couldn't write binary: {str(e)}")
+
+  def read_kernel(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
     kernel_file = os.path.join("third_party", "tock", "target",
                                board_props.arch, "release",
                                f"{self.args.board}.bin")
-    info(f"Flashing file {kernel_file}.")
-    with open(kernel_file, "rb") as f:
-      kernel = f.read()
-    args = copy.copy(self.tockloader_default_args)
-    setattr(args, "address", board_props.app_address)
-    tock = loader.TockLoader(args)
-    tock.open()
-    try:
-      tock.flash_binary(kernel, board_props.kernel_address)
-    except TockLoaderException as e:
-      fatal(f"Couldn't install Tock OS: {str(e)}")
+    if not os.path.exists(kernel_file):
+      fatal(f"File not found: {kernel_file}")
+    with open(kernel_file, "rb") as firmware:
+      kernel = firmware.read()
+    return kernel
+
+  def install_tock_os(self):
+    kernel = self.read_kernel()
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    self.write_binary(kernel, board_props.kernel_address)
 
   def install_padding(self):
-    padding = self.get_padding()
     board_props = SUPPORTED_BOARDS[self.args.board]
+    if board_props.padding_address is None:
+      return
     info("Flashing padding application")
-    args = copy.copy(self.tockloader_default_args)
-    setattr(args, "address", board_props.padding_address)
-    tock = loader.TockLoader(args)
-    tock.open()
-    try:
-      tock.flash_binary(padding, args.address)
-    except TockLoaderException as e:
-      fatal(f"Couldn't install padding: {str(e)}")
+    self.write_binary(self.get_padding(), board_props.padding_address)
+
+  def install_metadata(self):
+
+    def pad_to(binary, length):
+      if len(binary) > length:
+        fatal(f"Binary size {len(binary)} exceeds flash partition {length}.")
+      padding = bytes([0xFF] * (length - len(binary)))
+      return binary + padding
+
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    if board_props.metadata_address is None:
+      return
+
+    kernel = self.read_kernel()
+    app_tab_path = "target/tab/ctap2.tab"
+    if not os.path.exists(app_tab_path):
+      fatal(f"File not found: {app_tab_path}")
+    app_tab = tab.TAB(app_tab_path)
+    arch = board_props.arch
+    if arch not in app_tab.get_supported_architectures():
+      fatal(f"Architecture not found: {arch}")
+    app = app_tab.extract_app(arch).get_binary(board_props.app_address)
+
+    kernel_size = board_props.app_address - board_props.kernel_address
+    app_size = board_props.firmware_size - kernel_size
+    firmware_image = pad_to(kernel, kernel_size) + pad_to(app, app_size)
+
+    metadata = create_metadata(firmware_image, board_props.kernel_address)
+    if self.args.verbose_build:
+      info(f"Metadata bytes: {metadata}")
+
+    info("Flashing metadata application")
+    self.write_binary(metadata, board_props.metadata_address)
 
   def clear_apps(self):
     args = copy.copy(self.tockloader_default_args)
-    board_props = SUPPORTED_BOARDS[self.args.board]
-    setattr(args, "app_address", board_props.app_address)
     # Ensure we don't force erase all apps but only the apps starting
     # at `board.app_address`. This makes sure we don't erase the padding.
     setattr(args, "force", False)
@@ -530,12 +561,7 @@ class OpenSKInstaller:
     # Use tockloader if possible
     if self.args.programmer in ("jlink", "openocd"):
       storage = bytes([0xFF] * board_props.storage_size)
-      tock = loader.TockLoader(self.tockloader_default_args)
-      tock.open()
-      try:
-        tock.flash_binary(storage, board_props.storage_address)
-      except TockLoaderException as e:
-        fatal(f"Couldn't erase the persistent storage: {str(e)}")
+      self.write_binary(storage, board_props.storage_address)
       return 0
     if self.args.programmer == "pyocd":
       self.checked_command([
@@ -550,6 +576,8 @@ class OpenSKInstaller:
     if self.args.programmer not in ("jlink", "openocd"):
       return False
     args = copy.copy(self.tockloader_default_args)
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    setattr(args, "app_address", board_props.app_address)
     tock = loader.TockLoader(args)
     tock.open()
     app_found = False
@@ -568,13 +596,9 @@ class OpenSKInstaller:
 
     if self.args.tockos:
       # Process kernel
-      kernel_path = os.path.join("third_party", "tock", "target",
-                                 board_props.arch, "release",
-                                 f"{self.args.board}.bin")
-      with open(kernel_path, "rb") as kernel:
-        kern_hex = intelhex.IntelHex()
-        kern_hex.frombytes(kernel.read(), offset=board_props.kernel_address)
-        final_hex.merge(kern_hex, overlap="error")
+      kern_hex = intelhex.IntelHex()
+      kern_hex.frombytes(self.read_kernel(), offset=board_props.kernel_address)
+      final_hex.merge(kern_hex, overlap="error")
 
     if self.args.application:
       # Add padding
@@ -669,6 +693,7 @@ class OpenSKInstaller:
       if self.args.application:
         self.install_padding()
         self.install_tab_file(f"target/tab/{self.args.application}.tab")
+        self.install_metadata()
         if self.verify_flashed_app(self.args.application):
           info("You're all set!")
           return 0

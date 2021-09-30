@@ -67,13 +67,13 @@ const TITAN: Config = Config {
 #[test]
 fn nordic_capacity() {
     let driver = NORDIC.new_driver().power_on().unwrap();
-    assert_eq!(driver.model().capacity().total, 19141);
+    assert_eq!(driver.model().capacity().total, 19123);
 }
 
 #[test]
 fn titan_capacity() {
     let driver = TITAN.new_driver().power_on().unwrap();
-    assert_eq!(driver.model().capacity().total, 4323);
+    assert_eq!(driver.model().capacity().total, 4315);
 }
 
 #[test]

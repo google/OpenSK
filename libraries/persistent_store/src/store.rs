@@ -354,7 +354,7 @@ impl<S: Storage> Store<S> {
             .build_internal(InternalEntry::Clear { min_key })?;
         // We always have one word available. We can't use `reserve` because this is internal
         // capacity, not user capacity.
-        while self.immediate_capacity()?.unwrap_or(0) < 1 {
+        while self.immediate_capacity()? < 1 {
             self.compact()?;
         }
         let tail = self.tail()?;
@@ -370,9 +370,8 @@ impl<S: Storage> Store<S> {
         if self.capacity()?.remaining() < length {
             return Err(StoreError::NoCapacity);
         }
-        if self.immediate_capacity()?.unwrap_or(0) < usize_to_nat(length) {
+        if self.immediate_capacity()? < usize_to_nat(length) {
             self.compact()?;
-            self.finish_compaction()?;
         }
         Ok(())
     }
@@ -522,11 +521,10 @@ impl<S: Storage> Store<S> {
         self.head = Some(head);
         let head_page = head.page(&self.format);
         match self.parse_compact(head_page)? {
-            WordState::Erased => (),
-            WordState::Partial => self.compact()?,
-            WordState::Valid(_) => self.compact_copy()?,
+            WordState::Erased => Ok(()),
+            WordState::Partial => self.compact(),
+            WordState::Valid(_) => self.compact_copy(),
         }
-        self.finish_compaction()
     }
 
     /// Recover a possible interrupted operation which is not a compaction.
@@ -687,7 +685,7 @@ impl<S: Storage> Store<S> {
         if self.capacity()?.remaining() < length as usize {
             return Err(StoreError::NoCapacity);
         }
-        while self.immediate_capacity()?.unwrap_or(0) < length {
+        while self.immediate_capacity()? < length {
             self.compact()?;
         }
         Ok(())
@@ -784,23 +782,6 @@ impl<S: Storage> Store<S> {
         self.wipe_span(pos, head - pos)?;
         // Mark the erase entry as done.
         self.set_padding(erase)?;
-        Ok(())
-    }
-
-    /// Finish a compaction sequence.
-    ///
-    /// Because compaction may temporarily move the tail outside the virtual window, we must keep
-    /// compacting until that invariant is restored. As such, this function must be called each time
-    /// the store is compacted without checking whether there is immediate capacity.
-    fn finish_compaction(&mut self) -> StoreResult<()> {
-        let mut count = self.format.num_pages() - 2;
-        while count > 0 && self.immediate_capacity()?.is_none() {
-            self.compact()?;
-            count -= 1;
-        }
-        if self.immediate_capacity()?.is_none() {
-            return Err(StoreError::InvalidStorage);
-        }
         Ok(())
     }
 
@@ -945,10 +926,10 @@ impl<S: Storage> Store<S> {
     }
 
     /// Returns the number of words that can be written without compaction.
-    fn immediate_capacity(&self) -> StoreResult<Option<Nat>> {
+    fn immediate_capacity(&self) -> StoreResult<Nat> {
         let tail = self.tail()?;
         let end = or_invalid(self.head)? + self.format.virt_size();
-        Ok(end.get().checked_sub(tail.get()))
+        Ok(end.get().saturating_sub(tail.get()))
     }
 
     /// Returns the position of the first word in the store.
@@ -1413,34 +1394,34 @@ mod tests {
         let mut driver = MINIMAL.new_driver().power_on().unwrap();
 
         // Don't compact if enough immediate capacity.
-        assert_eq!(driver.store().immediate_capacity().unwrap(), Some(42));
-        assert_eq!(driver.store().capacity().unwrap().remaining(), 37);
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 39);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 34);
         assert_eq!(driver.store().head().unwrap().get(), 0);
-        driver.store_mut().prepare(37).unwrap();
+        driver.store_mut().prepare(34).unwrap();
         assert_eq!(driver.store().head().unwrap().get(), 0);
 
         // Fill the store.
         for key in 0..4 {
-            driver.insert(key, &[0x38; 32]).unwrap();
+            driver.insert(key, &[0x38; 28]).unwrap();
         }
         driver.check().unwrap();
-        assert_eq!(driver.store().immediate_capacity().unwrap(), Some(6));
-        assert_eq!(driver.store().capacity().unwrap().remaining(), 1);
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 7);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 2);
         // Removing entries increases available capacity but not immediate capacity.
         driver.remove(0).unwrap();
         driver.remove(2).unwrap();
         driver.check().unwrap();
-        assert_eq!(driver.store().immediate_capacity().unwrap(), Some(6));
-        assert_eq!(driver.store().capacity().unwrap().remaining(), 19);
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 7);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 18);
 
-        // Prepare for next write (8 words data + 1 word overhead).
+        // Prepare for next write (7 words data + 1 word overhead).
         assert_eq!(driver.store().head().unwrap().get(), 0);
-        driver.store_mut().prepare(9).unwrap();
+        driver.store_mut().prepare(8).unwrap();
         driver.check().unwrap();
-        assert_eq!(driver.store().head().unwrap().get(), 18);
+        assert_eq!(driver.store().head().unwrap().get(), 16);
         // The available capacity did not change, but the immediate capacity is above 8.
-        assert_eq!(driver.store().immediate_capacity().unwrap(), Some(14));
-        assert_eq!(driver.store().capacity().unwrap().remaining(), 19);
+        assert_eq!(driver.store().immediate_capacity().unwrap(), 14);
+        assert_eq!(driver.store().capacity().unwrap().remaining(), 18);
     }
 
     #[test]

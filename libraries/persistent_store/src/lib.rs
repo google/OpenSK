@@ -139,6 +139,7 @@
 //! -   [Q](format::Format::virt_page_size) = P - 2 the number of words in a virtual page.
 //! -   [M](format::Format::max_prefix_len) = min(Q - 1, 256) the maximum length in words of a
 //!     value.
+//! -   [W](format::Format::window_size) = (N - 1) × Q - M the window size.
 //! -   [V](format::Format::virt_size) = (N - 1) × (Q - 1) - M the virtual capacity.
 //! -   [C](format::Format::total_capacity) = V - N the user capacity.
 //!
@@ -163,7 +164,8 @@
 //!
 //! We define t\_i as one past the last entry of the window i. If there are no entries in that
 //! window, we have t\_i = h\_i. We call t\_i the tail of the window i. We define the compaction
-//! invariant as t\_i - h\_i ≤ V.
+//! invariant as t\_i - h\_i ≤ V and the window invariant as t\_i - h\_i ≤ W. The compaction
+//! invariant may temporarily be broken during a sequence of (at most N - 1) compactions.
 //!
 //! We define |x| as the capacity used before position x. We have |x| ≤ x. We define the capacity
 //! invariant as |t\_i| - |h\_i| ≤ C.
@@ -204,87 +206,107 @@
 //!
 //! ## Compaction
 //!
-//! It should always be possible to fully compact the store, after what the remaining capacity
-//! should be available in the current window (restoring the compaction invariant). We consider all
-//! notations on the virtual storage after the full compaction. We will use the |x| notation
-//! although we update the state of the virtual storage. This is fine because compaction doesn't
-//! change the status of an existing word.
+//! Let I be a window at which all invariants hold. We will show that the next N - 1 compactions
+//! will preserve the window invariant (the capacity invariant is trivially preserved) after each
+//! compaction. We will also show that after N - 1 compactions, the compaction invariant is
+//! restored.
 //!
-//! We want to show that the next N - 1 compactions won't move the tail past the last page of their
-//! window, with I the initial window:
+//! We consider all notations on the virtual storage after the full compaction. We will use the |x|
+//! notation although we update the state of the virtual storage. This is fine because compaction
+//! doesn't change the status of an existing word.
 //!
-//! |                  |            |   |                     |
-//! | ----------------:| ----------:|:-:|:------------------- |
-//! | ∀(1 ≤ i ≤ N - 1) | t\_{I + i} | ≤ | (I + i + N - 1) × Q |
+//! We first show that after each compaction, the window invariant is preserved.
+//!
+//! ```text
+//! ∀(1 ≤ i ≤ N - 1)   t_{I + i} - h_{I + i}  ≤  W
+//! ```
 //!
 //! We assume i between 1 and N - 1.
 //!
 //! One step of compaction advances the tail by how many words were used in the first page of the
 //! window with the last entry possibly overlapping on the next page.
 //!
-//! |    |            |   |                                      |
-//! | --:| ----------:|:-:|:------------------------------------ |
-//! | ∀j | t\_{j + 1} | = | t\_j + \|h\_{j + 1}\| - \|h\_j\| + 1 |
+//! ```text
+//! ∀j   t_{j + 1}  =  t_j + |h_{j + 1}| - |h_j| + 1
+//! ```
 //!
 //! By induction, we have:
 //!
-//! |            |   |                                      |
-//! | ----------:|:-:|:------------------------------------ |
-//! | t\_{I + i} | ≤ | t\_I + \|h\_{I + i}\| - \|h\_I\| + i |
+//! ```text
+//! t_{I + i}  =  t_I + |h_{I + i}| - |h_I| + i
+//! ```
 //!
 //! We have the following properties:
 //!
-//! |                           |   |                   |
-//! | -------------------------:|:-:|:----------------- |
-//! | t\_I                      | ≤ | h\_I + V          |
-//! | \|h\_{I + i}\| - \|h\_I\| | ≤ | h\_{I + i} - h\_I |
-//! | h\_{I + i}                | ≤ | (I + i) × Q + M   |
+//! ```text
+//! t_I  ≤  h_I + V
+//! |h_{I + i}| - |h_I|  ≤  h_{I + i} - h_I
+//! ```
 //!
 //! Replacing into our previous equality, we can conclude:
 //!
-//! |            |   |                                             |
-//! | ----------:|:-:| ------------------------------------------- |
-//! | t\_{I + i} | = | t_I + \|h_{I + i}\| - \|h_I\| + i           |
-//! |            | ≤ | h\_I + V + (I + i) * Q + M - h\_I + i       |
-//! |            | = | (N - 1) × (Q - 1) - M + (I + i) × Q + M + i |
-//! |            | = | (N - 1) × (Q - 1) + (I + i) × Q + i         |
-//! |            | = | (I + i + N - 1) × Q + i - (N - 1)           |
-//! |            | ≤ | (I + i + N - 1) × Q                         |
+//! ```text
+//! t_{I + i}  =  t_I + |h_{I + i}| - |h_I| + i
+//!            ≤  h_I + V + h_{I + 1} - h_I + i
+//! iff
+//! t_{I + i} - h_{I + 1}  ≤  V + i
+//!                        ≤  V + N - 1
+//!                        =  W
+//! ```
 //!
-//! We also want to show that after N - 1 compactions, the remaining capacity is available without
-//! compaction.
+//! An important corollary is that the tail stays within the window:
 //!
-//! |   |                                               |                                   |
-//! | -:| --------------------------------------------- | --------------------------------- |
-//! |   | V - (t\_{I + N - 1} - h\_{I + N - 1})         | The available words in the window |
-//! | ≥ | C - (\|t\_{I + N - 1}\| - \|h\_{I + N - 1}\|) | The remaining capacity            |
-//! | + | 1                                             | Reserved for clear                |
+//! ```text
+//! t_{I + i}  ≤  (I + i + N - 1) × Q
+//! ```
+//!
+//! We have the following property:
+//!
+//! ```text
+//! h_{I + i}  ≤  (I + i) × Q + M
+//! ```
+//!
+//! From which we conclude with the definition of W:
+//!
+//! ```text
+//! t_{I + i}  ≤  h_{I + i} + W
+//!            ≤  (I + i) × Q + M + (N - 1) × Q - M
+//!            =  (I + i + N - 1) × Q
+//! ```
+//!
+//! We finally show that after N - 1 compactions, the compaction invariant is restored. In
+//! particular, the remaining capacity is available without compaction.
+//!
+//! ```text
+//! V - (t_{I + N - 1} - h_{I + N - 1})  ≥  C - (|t_{I + N - 1}| - |h_{I + N - 1}|) + 1
+//! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   ~
+//!         immediate capacity                        remaining capacity              |
+//!                                                                         reserved for clear
+//! ```
 //!
 //! We can replace the definition of C and simplify:
 //!
-//! |     |                                       |   |                                                       |
-//! | ---:| -------------------------------------:|:-:|:----------------------------------------------------- |
-//! |     | V - (t\_{I + N - 1} - h\_{I + N - 1}) | ≥ | V - N - (\|t\_{I + N - 1}\| - \|h\_{I + N - 1}\|) + 1 |
-//! | iff | t\_{I + N - 1} - h\_{I + N - 1}       | ≤ | \|t\_{I + N - 1}\| - \|h\_{I + N - 1}\| + N - 1       |
+//! ```text
+//! V - (t_{I + N - 1} - h_{I + N - 1})  ≥  V - N - (|t_{I + N - 1}| - |h_{I + N - 1}|) + 1
+//! iff  t_{I + N - 1} - h_{I + N - 1}  ≤  |t_{I + N - 1}| - |h_{I + N - 1}| + N - 1
+//! ```
 //!
 //! We have the following properties:
 //!
-//!
-//! |                                         |   |                                              |        |
-//! | ---------------------------------------:|:-:|:-------------------------------------------- |:------ |
-//! | t\_{I + N - 1}                          | = | t\_I + \|h\_{I + N - 1}\| - \|h\_I\| + N - 1 |        |
-//! | \|t\_{I + N - 1}\| - \|h\_{I + N - 1}\| | = | \|t\_I\| - \|h\_I\|   | Compaction preserves capacity |
-//! | \|h\_{I + N - 1}\| - \|t\_I\|           | ≤ | h\_{I + N - 1} - t\_I |                               |
+//! ```text
+//! t_{I + N - 1}  =  t_I + |h_{I + N - 1}| - |h_I| + N - 1
+//! |t_{I + N - 1}| - |h_{I + N - 1}|  =  |t_I| - |h_I|
+//! |h_{I + N - 1}| - |t_I|  ≤  h_{I + N - 1} - t_I
+//! ```
 //!
 //! From which we conclude:
 //!
-//! |     |                                 |   |                                                 |
-//! | ---:| -------------------------------:|:-:|:----------------------------------------------- |
-//! |     | t\_{I + N - 1} - h\_{I + N - 1} | ≤ | \|t\_{I + N - 1}\| - \|h\_{I + N - 1}\| + N - 1 |
-//! | iff | t\_I + \|h\_{I + N - 1}\| - \|h\_I\| + N - 1 - h\_{I + N - 1} | ≤ | \|t\_I\| - \|h\_I\| + N - 1 |
-//! | iff | t\_I + \|h\_{I + N - 1}\| - h\_{I + N - 1}                    | ≤ | \|t\_I\| |
-//! | iff | \|h\_{I + N - 1}\| - \|t\_I\|                                 | ≤ | h\_{I + N - 1} - t\_I |
-//!
+//! ```text
+//!      t_{I + N - 1} - h_{I + N - 1}  ≤  |t_{I + N - 1}| - |h_{I + N - 1}| + N - 1
+//! iff  t_I + |h_{I + N - 1}| - |h_I| + N - 1 - h_{I + N - 1}  ≤  |t_I| - |h_I| + N - 1
+//! iff  t_I + |h_{I + N - 1}| - h_{I + N - 1}  ≤  |t_I|
+//! iff  |h_{I + N - 1}| - |t_I|  ≤  h_{I + N - 1} - t_I
+//! ```
 //!
 //! ## Checksum
 //!

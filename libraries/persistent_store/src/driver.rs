@@ -453,6 +453,12 @@ impl StoreDriverOn {
         self.apply(StoreOperation::Transaction { updates })
     }
 
+    /// Applies a clear operation to the store and model without interruption.
+    #[cfg(feature = "std")]
+    pub fn clear(&mut self, min_key: usize) -> Result<(), StoreInvariant> {
+        self.apply(StoreOperation::Clear { min_key })
+    }
+
     /// Checks that the store and model are in sync.
     pub fn check(&self) -> Result<(), StoreInvariant> {
         self.recover_check(&[])
@@ -607,6 +613,14 @@ impl<'a> StoreInterruption<'a> {
     pub fn none() -> StoreInterruption<'a> {
         StoreInterruption {
             delay: usize::max_value(),
+            corrupt: Box::new(|_, _| {}),
+        }
+    }
+
+    /// Builds an interruption without corruption.
+    pub fn pure(delay: usize) -> StoreInterruption<'a> {
+        StoreInterruption {
+            delay,
             corrupt: Box::new(|_, _| {}),
         }
     }

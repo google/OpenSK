@@ -532,7 +532,7 @@ impl<S: Storage> Store<S> {
         self.entries = Some(Vec::new());
         let mut pos = or_invalid(self.head)?;
         let mut prev_pos = pos;
-        let end = pos + self.format.virt_size();
+        let end = pos + self.format.window_size();
         while pos < end {
             let entry_pos = pos;
             match self.parse_entry(&mut pos)? {
@@ -789,7 +789,7 @@ impl<S: Storage> Store<S> {
     fn transaction_apply(&mut self, sorted_keys: &[Nat], marker: Position) -> StoreResult<()> {
         self.delete_keys(&sorted_keys, marker)?;
         self.set_padding(marker)?;
-        let end = or_invalid(self.head)? + self.format.virt_size();
+        let end = or_invalid(self.head)? + self.format.window_size();
         let mut pos = marker + 1;
         while pos < end {
             let entry_pos = pos;

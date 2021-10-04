@@ -46,7 +46,10 @@ fn interrupted_overflowing_compaction() {
             StoreInterruption::pure(1),
         ) {
             Ok((None, d)) => driver = d.power_on().unwrap(),
-            _ => unreachable!(),
+            _ => {
+                assert!(false);
+                return;
+            }
         }
     }
 }
@@ -114,7 +117,10 @@ fn full_compaction_with_max_prefix() {
             StoreInterruption::pure(1),
         ) {
             Ok((None, d)) => driver = d.power_on().unwrap(),
-            _ => unreachable!(),
+            _ => {
+                assert!(false);
+                return;
+            }
         }
     }
     check_lifetime(&mut driver, c + n - 1);

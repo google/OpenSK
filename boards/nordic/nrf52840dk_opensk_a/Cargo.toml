@@ -5,6 +5,10 @@ authors = ["Tock Project Developers <tock-dev@googlegroups.com>"]
 build = "build.rs"
 edition = "2018"
 
+[[bin]]
+path = "../nrf52840dk_opensk/src/main.rs"
+name = "nrf52840dk_opensk_a"
+
 [dependencies]
 components = { path = "../../components" }
 cortexm4 = { path = "../../../arch/cortex-m4" }

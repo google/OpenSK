@@ -132,7 +132,7 @@ SUPPORTED_BOARDS = {
             kernel_address=0x60000,
             padding_address=None,
             firmware_size=0x40000,
-            metadata_address=0x4000,
+            metadata_address=0x5000,
             app_ldscript="nrf52840_layout_b.ld",
             app_address=0x80000,
         ),

@@ -264,26 +264,35 @@ impl Format {
         self.bytes_to_words(self.max_value_len())
     }
 
+    /// The virtual window size in words, denoted by W.
+    ///
+    /// This is the span of virtual storage that is accessible. In particular, all store content
+    /// fits within this window.
+    ///
+    /// We have W = (N - 1) × Q - M.
+    pub fn window_size(&self) -> Nat {
+        (self.num_pages() - 1) * self.virt_page_size() - self.max_prefix_len()
+    }
+
     /// The total virtual capacity in words, denoted by V.
     ///
-    /// We have V = (N - 1) × Q - M - 1.
+    /// This is the span of virtual storage after which we trigger a compaction. This is smaller
+    /// than the virtual window because compaction may transiently overflow out of this virtual
+    /// capacity.
     ///
-    /// We can show V ≥ (N - 2) × Q with the following steps:
-    /// - M + 1 ≤ Q from M < Q from [M](Format::max_prefix_len)'s definition
-    /// - -M - 1 ≥ -Q from above
-    /// - V ≥ (N - 1) × Q - Q from V's definition
+    /// We have V = W - (N - 1) = (N - 1) × (Q - 1) - M.
     pub fn virt_size(&self) -> Nat {
-        (self.num_pages() - 1) * self.virt_page_size() - self.max_prefix_len() - 1
+        (self.num_pages() - 1) * (self.virt_page_size() - 1) - self.max_prefix_len()
     }
 
     /// The total user capacity in words, denoted by C.
     ///
-    /// We have C = V - N = (N - 1) × (Q - 1) - M - 2.
+    /// We have C = V - N = (N - 1) × (Q - 2) - M - 1.
     ///
-    /// We can show C ≥ (N - 2) × (Q - 1) - 2 with the following steps:
-    /// - V ≥ (N - 2) × Q from [V](Format::virt_size)'s definition
-    /// - C ≥ (N - 2) × Q - N from C's definition
-    /// - (N - 2) × Q - N = (N - 2) × (Q - 1) - 2 by calculus
+    /// We can show C ≥ (N - 2) × (Q - 2) - 2 with the following steps:
+    /// - M ≤ Q - 1 from M < Q from [M](Format::max_prefix_len)'s definition
+    /// - C ≥ (N - 1) × (Q - 2) - (Q - 1) - 1 from C's definition
+    /// - C ≥ (N - 2) × (Q - 2) - 2 by calculus
     pub fn total_capacity(&self) -> Nat {
         // From the virtual capacity, we reserve N - 1 words for `Erase` entries and 1 word for a
         // `Clear` entry.
@@ -353,7 +362,7 @@ impl Format {
             WordState::Partial
         } else {
             let tail = COMPACT_TAIL.get(word);
-            if tail > self.virt_size() + self.max_prefix_len() {
+            if tail > self.window_size() {
                 return Err(StoreError::InvalidStorage);
             }
             WordState::Valid(CompactInfo { tail })

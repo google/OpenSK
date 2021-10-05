@@ -200,7 +200,9 @@ def create_metadata(firmware_image, partition_address):
   timestamp = struct.pack("<I", int(time.time()))
   partition_start = struct.pack("<I", partition_address)
   sha256_hash = hashlib.sha256()
-  sha256_hash.update(firmware_image + timestamp + partition_start)
+  sha256_hash.update(firmware_image)
+  sha256_hash.update(timestamp)
+  sha256_hash.update(partition_start)
   checksum = sha256_hash.digest()
   return checksum + timestamp + partition_start
 
@@ -575,10 +577,7 @@ class OpenSKInstaller:
   def verify_flashed_app(self, expected_app):
     if self.args.programmer not in ("jlink", "openocd"):
       return False
-    args = copy.copy(self.tockloader_default_args)
-    board_props = SUPPORTED_BOARDS[self.args.board]
-    setattr(args, "app_address", board_props.app_address)
-    tock = loader.TockLoader(args)
+    tock = loader.TockLoader(self.tockloader_default_args)
     tock.open()
     app_found = False
     with tock._start_communication_with_board():

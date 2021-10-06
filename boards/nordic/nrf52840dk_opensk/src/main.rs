@@ -67,6 +67,7 @@
 #![feature(const_in_array_repeat_expressions)]
 #![deny(missing_docs)]
 
+use core::env;
 use kernel::common::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::component::Component;
 use kernel::hil::led::LedLow;
@@ -128,19 +129,7 @@ const NUM_PROCS: usize = 8;
 static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
     [None; NUM_PROCS];
 
-static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 2] = [
-    // We implement NUM_PAGES = 20 as 16 + 4 to satisfy the MPU.
-    kernel::StorageLocation {
-        address: 0xC0000,
-        size: 0x10000, // 16 pages
-        storage_type: kernel::StorageType::STORE,
-    },
-    kernel::StorageLocation {
-        address: 0xD0000,
-        size: 0x4000, // 4 pages
-        storage_type: kernel::StorageType::STORE,
-    },
-];
+include!(concat!(env!("OUT_DIR"), "/locations.rs"));
 
 static mut CHIP: Option<&'static nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>> = None;
 

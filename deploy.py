@@ -22,13 +22,13 @@ from __future__ import print_function
 import argparse
 import collections
 import copy
+import datetime
 import hashlib
 import os
 import shutil
 import struct
 import subprocess
 import sys
-import time
 
 import colorama
 from six.moves import input
@@ -59,7 +59,8 @@ OpenSKBoard = collections.namedtuple(
         # specified on the board's `layout.ld` file) and will end at
         # `app_address`.
         "padding_address",
-        # If present, enforce that the firmware image equals this value.
+        # If present, enforce that the firmware image equals this value,
+        # padding it with 0xFF bytes.
         "firmware_size",
         # Set to None if metadata is not required for the board.
         # Writes the metadata that is checked by the custom bootloader for
@@ -197,7 +198,8 @@ def assert_python_library(module):
 
 
 def create_metadata(firmware_image, partition_address):
-  timestamp = struct.pack("<I", int(time.time()))
+  t = datetime.datetime.utcnow().timestamp()
+  timestamp = struct.pack("<I", int(t))
   partition_start = struct.pack("<I", partition_address)
   sha256_hash = hashlib.sha256()
   sha256_hash.update(firmware_image)

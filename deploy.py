@@ -22,11 +22,8 @@ from __future__ import print_function
 import argparse
 import collections
 import copy
-import datetime
-import hashlib
 import os
 import shutil
-import struct
 import subprocess
 import sys
 from typing import Dict, List, Tuple
@@ -38,6 +35,8 @@ from tockloader import tab
 from tockloader import tbfh
 from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
+
+from tools.deploy_partition import create_metadata, pad_to
 
 PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
 
@@ -197,39 +196,6 @@ def assert_python_library(module: str):
   except ModuleNotFoundError:
     fatal((f"Couldn't load python3 module {module}. "
            f"Try to run: pip3 install {module}"))
-
-
-def create_metadata(firmware_image: bytes, partition_address: int) -> bytes:
-  """Creates the matching metadata for the given firmware.
-
-  The metadata consists of a timestamp, the expected address and a hash of
-  the image and the other properties in this metadata.
-
-  Args:
-    firmware_image: A byte array of kernel and app, padding to full length.
-    partition_address: The address to be written as a metadata property.
-
-  Returns:
-    A byte array consisting of 32B hash, 4B timestamp and 4B partition address
-    in little endian encoding.
-  """
-  t = datetime.datetime.utcnow().timestamp()
-  timestamp = struct.pack("<I", int(t))
-  partition_start = struct.pack("<I", partition_address)
-  sha256_hash = hashlib.sha256()
-  sha256_hash.update(firmware_image)
-  sha256_hash.update(timestamp)
-  sha256_hash.update(partition_start)
-  checksum = sha256_hash.digest()
-  return checksum + timestamp + partition_start
-
-
-def pad_to(binary: bytes, length: int) -> bytes:
-  """Extends the given binary to the new length with a 0xFF padding."""
-  if len(binary) > length:
-    fatal(f"Binary size {len(binary)} exceeds flash partition {length}.")
-  padding = bytes([0xFF] * (length - len(binary)))
-  return binary + padding
 
 
 class RemoveConstAction(argparse.Action):

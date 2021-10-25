@@ -487,6 +487,24 @@ class OpenSKInstaller:
     except TockLoaderException as e:
       fatal(f"Couldn't write binary: {str(e)}")
 
+  def clear_flash(self, address, size):
+    if self.args.programmer == "none":
+      return 0
+    info("Erasing the persistent storage")
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    # Use tockloader if possible
+    if self.args.programmer in ("jlink", "openocd"):
+      binary = bytes([0xFF] * size)
+      self.write_binary(binary, address)
+      return 0
+    if self.args.programmer == "pyocd":
+      self.checked_command([
+          "pyocd", "erase", f"--target={board_props.pyocd_target}", "--sector",
+          f"{address}+{size}"
+      ])
+      return 0
+    fatal(f"Programmer {self.args.programmer} is not supported.")
+
   def read_kernel(self):
     board_props = SUPPORTED_BOARDS[self.args.board]
     kernel_file = os.path.join("third_party", "tock", "target",
@@ -510,6 +528,11 @@ class OpenSKInstaller:
     info("Flashing padding application")
     self.write_binary(self.get_padding(), board_props.padding_address)
 
+  def clear_unused_pages(self, padding_address, padding_size, page_size):
+    cleared_size = padding_size - (padding_size % page_size)
+    clear_address = padding_address + padding_size - cleared_size
+    self.clear_flash(clear_address, cleared_size)
+
   def install_metadata(self):
 
     def pad_to(binary, length):
@@ -521,6 +544,9 @@ class OpenSKInstaller:
     board_props = SUPPORTED_BOARDS[self.args.board]
     if board_props.metadata_address is None:
       return
+    kernel_address = board_props.kernel_address
+    app_address = board_props.app_address
+    page_size = board_props.page_size
 
     kernel = self.read_kernel()
     app_tab_path = "target/tab/ctap2.tab"
@@ -530,13 +556,21 @@ class OpenSKInstaller:
     arch = board_props.arch
     if arch not in app_tab.get_supported_architectures():
       fatal(f"Architecture not found: {arch}")
-    app = app_tab.extract_app(arch).get_binary(board_props.app_address)
+    app = app_tab.extract_app(arch).get_binary(app_address)
 
-    kernel_size = board_props.app_address - board_props.kernel_address
+    kernel_size = app_address - kernel_address
     app_size = board_props.firmware_size - kernel_size
     firmware_image = pad_to(kernel, kernel_size) + pad_to(app, app_size)
 
-    metadata = create_metadata(firmware_image, board_props.kernel_address)
+    # Clear unused pages so their content matches the expected padding.
+    kernel_pad_address = kernel_address + len(kernel)
+    kernel_pad_size = kernel_size - len(kernel)
+    self.clear_unused_pages(kernel_pad_address, kernel_pad_size, page_size)
+    app_pad_address = app_address + len(app)
+    app_pad_size = app_size - len(app)
+    self.clear_unused_pages(app_pad_address, app_pad_size, page_size)
+
+    metadata = create_metadata(firmware_image, kernel_address)
     if self.args.verbose_build:
       info(f"Metadata bytes: {metadata}")
 
@@ -556,24 +590,6 @@ class OpenSKInstaller:
     except TockLoaderException as e:
       # Erasing apps is not critical
       info(f"A non-critical error occurred while erasing apps: {str(e)}")
-
-  def clear_storage(self):
-    if self.args.programmer == "none":
-      return 0
-    info("Erasing the persistent storage")
-    board_props = SUPPORTED_BOARDS[self.args.board]
-    # Use tockloader if possible
-    if self.args.programmer in ("jlink", "openocd"):
-      storage = bytes([0xFF] * board_props.storage_size)
-      self.write_binary(storage, board_props.storage_address)
-      return 0
-    if self.args.programmer == "pyocd":
-      self.checked_command([
-          "pyocd", "erase", f"--target={board_props.pyocd_target}", "--sector",
-          f"{board_props.storage_address}+{board_props.storage_size}"
-      ])
-      return 0
-    fatal(f"Programmer {self.args.programmer} is not supported.")
 
   # pylint: disable=protected-access
   def verify_flashed_app(self, expected_app):
@@ -678,11 +694,11 @@ class OpenSKInstaller:
       self.build_example()
 
     # Erase persistent storage
+    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.clear_storage:
-      self.clear_storage()
+      self.clear_flash(board_props.storage_address, board_props.storage_size)
 
     # Flashing
-    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.programmer in ("jlink", "openocd"):
       # We rely on Tockloader to do the job
       if self.args.clear_apps:

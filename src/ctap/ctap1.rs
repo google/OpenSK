@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::apdu::{ApduStatusCode, APDU};
+use super::apdu::{Apdu, ApduStatusCode};
 use super::hid::ChannelID;
 use super::status_code::Ctap2StatusCode;
 use super::CtapState;
@@ -82,7 +82,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
-        let apdu: APDU = match APDU::try_from(message) {
+        let apdu: Apdu = match Apdu::try_from(message) {
             Ok(apdu) => apdu,
             Err(apdu_status_code) => {
                 return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
@@ -91,7 +91,7 @@ impl TryFrom<&[u8]> for U2fCommand {
 
         let lc = apdu.lc as usize;
 
-        // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always
+        // ISO7816 Apdu Header format. Each cell is 1 byte. Note that the CTAP flavor always
         // encodes the length on 3 bytes and doesn't use the field "Le" (Length Expected).
         // We keep the 2 byte of "Le" for the packet length in mind, but always ignore its value.
         // Lc is using big-endian encoding

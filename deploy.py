@@ -29,6 +29,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from typing import Dict, List, Tuple
 
 import colorama
 from six.moves import input
@@ -159,7 +160,8 @@ SUPPORTED_BOARDS = {
 APP_HEAP_SIZE = 90000
 
 
-def get_supported_boards():
+def get_supported_boards() -> Tuple[str]:
+  """Returns a tuple all valid supported boards."""
   boards = []
   for name, props in SUPPORTED_BOARDS.items():
     if all((os.path.exists(os.path.join(props.path, "Cargo.toml")),
@@ -168,28 +170,28 @@ def get_supported_boards():
   return tuple(set(boards))
 
 
-def fatal(msg):
+def fatal(msg: str):
   print(f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
         f"{colorama.Style.RESET_ALL} {msg}")
   sys.exit(1)
 
 
-def error(msg):
+def error(msg: str):
   print(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
 
 
-def info(msg):
+def info(msg: str):
   print(f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
         f"{colorama.Style.RESET_ALL} {msg}")
 
 
-def assert_mandatory_binary(binary):
-  if not shutil.which(binary):
-    fatal((f"Couldn't find {binary} binary. Make sure it is installed and "
+def assert_mandatory_binary(binary_name: str):
+  if not shutil.which(binary_name):
+    fatal((f"Couldn't find {binary_name} binary. Make sure it is installed and "
            "that your PATH is set correctly."))
 
 
-def assert_python_library(module):
+def assert_python_library(module: str):
   try:
     __import__(module)
   except ModuleNotFoundError:
@@ -197,7 +199,20 @@ def assert_python_library(module):
            f"Try to run: pip3 install {module}"))
 
 
-def create_metadata(firmware_image, partition_address):
+def create_metadata(firmware_image: bytes, partition_address: int) -> bytes:
+  """Creates the matching metadata for the given firmware.
+
+  The metadata consists of a timestamp, the expected address and a hash of
+  the image and the other properties in this metadata.
+
+  Args:
+    firmware_image: A byte array of kernel and app, padding to full length.
+    partition_address: The address to be written as a metadata property.
+
+  Returns:
+    A byte array consisting of 32B hash, 4B timestamp and 4B partition address
+    in little endian encoding.
+  """
   t = datetime.datetime.utcnow().timestamp()
   timestamp = struct.pack("<I", int(t))
   partition_start = struct.pack("<I", partition_address)
@@ -207,6 +222,14 @@ def create_metadata(firmware_image, partition_address):
   sha256_hash.update(partition_start)
   checksum = sha256_hash.digest()
   return checksum + timestamp + partition_start
+
+
+def pad_to(binary: bytes, length: int) -> bytes:
+  """Extends the given binary to the new length with a 0xFF padding."""
+  if len(binary) > length:
+    fatal(f"Binary size {len(binary)} exceeds flash partition {length}.")
+  padding = bytes([0xFF] * (length - len(binary)))
+  return binary + padding
 
 
 class RemoveConstAction(argparse.Action):
@@ -247,6 +270,18 @@ class RemoveConstAction(argparse.Action):
 
 
 class OpenSKInstaller:
+  """Checks, builds and installs various parts of OpenSK.
+
+  This module can perform the following tasks:
+    - build and install Tock OS
+    - check, build and install the main ctap2 application
+    - build and install example applications
+    - write padding
+    - erase apps and persistent storage
+    - write metadata entries for upgradable boards
+
+    OpenSKInstaller(args).run()
+  """
 
   def __init__(self, args):
     self.args = args
@@ -276,7 +311,21 @@ class OpenSKInstaller:
         port=None,
     )
 
-  def checked_command(self, cmd, env=None, cwd=None):
+  def checked_command(self,
+                      cmd: List[str],
+                      env: Dict[str, str] = None,
+                      cwd: str = None):
+    """Executes the given command.
+
+    Outside of debug mode, the command's output is muted. Exits if the called
+    process returns an error.
+
+    Args:
+      cmd: A list of strings. The first string is the command, the other list
+      elements are parameters to that command."
+      env: The dictionary of environment variables.
+      cwd: The directory to execute from.
+    """
     stdout = None if self.args.verbose_build else subprocess.DEVNULL
     try:
       subprocess.run(
@@ -284,7 +333,11 @@ class OpenSKInstaller:
     except subprocess.CalledProcessError as e:
       fatal(f"Failed to execute {cmd[0]}: {str(e)}")
 
-  def checked_command_output(self, cmd, env=None, cwd=None):
+  def checked_command_output(self,
+                             cmd: List[str],
+                             env: Dict[str, str] = None,
+                             cwd: str = None) -> str:
+    """Executes cmd like checked_command, but returns the output."""
     cmd_output = ""
     try:
       cmd_output = subprocess.run(
@@ -300,6 +353,7 @@ class OpenSKInstaller:
     return cmd_output.decode()
 
   def update_rustc_if_needed(self):
+    """Updates the Rust and installs the necessary target toolchain."""
     target_toolchain_fullstring = "stable"
     with open("rust-toolchain", "r", encoding="utf-8") as f:
       content = f.readlines()
@@ -339,6 +393,7 @@ class OpenSKInstaller:
     info("Rust toolchain up-to-date")
 
   def build_tockos(self):
+    """Buids Tock OS with the parameters specified in args."""
     info(f"Building Tock OS for board {self.args.board}")
     props = SUPPORTED_BOARDS[self.args.board]
     out_directory = os.path.join("third_party", "tock", "target", props.arch,
@@ -351,15 +406,28 @@ class OpenSKInstaller:
     self.checked_command(["make"], cwd=props.path, env=env)
 
   def build_example(self):
+    """Builds an example with the name from args."""
     info(f"Building example {self.args.application}")
     self._build_app_or_example(is_example=True)
 
   def build_opensk(self):
+    """Runs essential tests in OpenSK, then builds it if successful."""
     info("Building OpenSK application")
     self._check_invariants()
     self._build_app_or_example(is_example=False)
 
-  def _build_app_or_example(self, is_example):
+  def _build_app_or_example(self, is_example: bool):
+    """Builds the application specified through args.
+
+    This function specifies the used compile time flags, specifying the linker
+    script and reducing the binary size. It compiles the application and calls
+    elf2tab to create a TAB file out of the produced binary.
+
+    The settings in self.args have to match is_example.
+
+    Args:
+      is_example: Whether args.application is an example or the main ctap2 app.
+    """
     assert self.args.application
     # Ideally we would build a TAB file for all boards at once but depending on
     # the chip on the board, the link script could be totally different.
@@ -400,11 +468,13 @@ class OpenSKInstaller:
     self.create_tab_file({props.arch: app_path})
 
   def _check_invariants(self):
+    """Runs selected unit tests to check preconditions in the code."""
     print("Testing invariants in customization.rs...")
     self.checked_command_output(
         ["cargo", "test", "--features=std", "--lib", "customization"])
 
-  def generate_crypto_materials(self, force_regenerate):
+  def generate_crypto_materials(self, force_regenerate: bool):
+    """Calls a shell script that generates cryptographic material."""
     has_error = subprocess.call([
         os.path.join("tools", "gen_key_materials.sh"),
         "Y" if force_regenerate else "N",
@@ -413,8 +483,9 @@ class OpenSKInstaller:
       error(("Something went wrong while trying to generate ECC "
              "key and/or certificate for OpenSK"))
 
-  def create_tab_file(self, binaries):
-    assert binaries
+  def create_tab_file(self, binary_names: Dict[str, str]):
+    """Checks and uses elf2tab to generated an TAB file out of the binaries."""
+    assert binary_names
     assert self.args.application
     info("Generating Tock TAB file for application/example "
          f"{self.args.application}")
@@ -433,7 +504,7 @@ class OpenSKInstaller:
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
     stack_sizes = set()
-    for arch, app_file in binaries.items():
+    for arch, app_file in binary_names.items():
       dest_file = os.path.join(self.tab_folder, f"{arch}.elf")
       shutil.copyfile(app_file, dest_file)
       elf2tab_args.append(dest_file)
@@ -457,7 +528,8 @@ class OpenSKInstaller:
     else:
       self.checked_command(elf2tab_args)
 
-  def install_tab_file(self, tab_filename):
+  def install_tab_file(self, tab_filename: str):
+    """Calls Tockloader to install a TAB file."""
     assert self.args.application
     info(f"Installing Tock application {self.args.application}")
     args = copy.copy(self.tockloader_default_args)
@@ -473,13 +545,15 @@ class OpenSKInstaller:
       fatal("Couldn't install Tock application "
             f"{self.args.application}: {str(e)}")
 
-  def get_padding(self):
+  def get_padding(self) -> bytes:
+    """Creates a padding application binary."""
     padding = tbfh.TBFHeaderPadding(
         SUPPORTED_BOARDS[self.args.board].app_address -
         SUPPORTED_BOARDS[self.args.board].padding_address)
     return padding.get_binary()
 
-  def write_binary(self, binary, address):
+  def write_binary(self, binary: bytes, address: int):
+    """Writes a binary to the device's flash at the given address."""
     tock = loader.TockLoader(self.tockloader_default_args)
     tock.open()
     try:
@@ -487,7 +561,8 @@ class OpenSKInstaller:
     except TockLoaderException as e:
       fatal(f"Couldn't write binary: {str(e)}")
 
-  def read_kernel(self):
+  def read_kernel(self) -> bytes:
+    """Reads the kernel file from disk and returns it as a byte array."""
     board_props = SUPPORTED_BOARDS[self.args.board]
     kernel_file = os.path.join("third_party", "tock", "target",
                                board_props.arch, "release",
@@ -496,14 +571,23 @@ class OpenSKInstaller:
       fatal(f"File not found: {kernel_file}")
     with open(kernel_file, "rb") as firmware:
       kernel = firmware.read()
-    return kernel
+
+    # Pads the kernel to the expected length.
+    if board_props.padding_address is None:
+      end_address = board_props.app_address
+    else:
+      end_address = board_props.padding_address
+    kernel_size = end_address - board_props.kernel_address
+    return pad_to(kernel, kernel_size)
 
   def install_tock_os(self):
+    """Reads the kernel from disk and writes it to the device's flash."""
     kernel = self.read_kernel()
     board_props = SUPPORTED_BOARDS[self.args.board]
     self.write_binary(kernel, board_props.kernel_address)
 
   def install_padding(self):
+    """Generates a padding application and writes it to the address in args."""
     board_props = SUPPORTED_BOARDS[self.args.board]
     if board_props.padding_address is None:
       return
@@ -511,13 +595,7 @@ class OpenSKInstaller:
     self.write_binary(self.get_padding(), board_props.padding_address)
 
   def install_metadata(self):
-
-    def pad_to(binary, length):
-      if len(binary) > length:
-        fatal(f"Binary size {len(binary)} exceeds flash partition {length}.")
-      padding = bytes([0xFF] * (length - len(binary)))
-      return binary + padding
-
+    """Generates and writes firmware metadata at the metadata address."""
     board_props = SUPPORTED_BOARDS[self.args.board]
     if board_props.metadata_address is None:
       return
@@ -534,7 +612,8 @@ class OpenSKInstaller:
 
     kernel_size = board_props.app_address - board_props.kernel_address
     app_size = board_props.firmware_size - kernel_size
-    firmware_image = pad_to(kernel, kernel_size) + pad_to(app, app_size)
+    # The kernel is already padded when read.
+    firmware_image = kernel + pad_to(app, app_size)
 
     metadata = create_metadata(firmware_image, board_props.kernel_address)
     if self.args.verbose_build:
@@ -544,6 +623,7 @@ class OpenSKInstaller:
     self.write_binary(metadata, board_props.metadata_address)
 
   def clear_apps(self):
+    """Uses Tockloader to erase all applications on the device."""
     args = copy.copy(self.tockloader_default_args)
     # Ensure we don't force erase all apps but only the apps starting
     # at `board.app_address`. This makes sure we don't erase the padding.
@@ -558,6 +638,7 @@ class OpenSKInstaller:
       info(f"A non-critical error occurred while erasing apps: {str(e)}")
 
   def clear_storage(self):
+    """Overwrites the storage's flash with 0xFF bytes."""
     if self.args.programmer == "none":
       return 0
     info("Erasing the persistent storage")
@@ -576,7 +657,8 @@ class OpenSKInstaller:
     fatal(f"Programmer {self.args.programmer} is not supported.")
 
   # pylint: disable=protected-access
-  def verify_flashed_app(self, expected_app):
+  def verify_flashed_app(self, expected_app: str) -> bool:
+    """Uses Tockloader to check if an app of the expected name was written."""
     if self.args.programmer not in ("jlink", "openocd"):
       return False
     tock = loader.TockLoader(self.tockloader_default_args)
@@ -587,7 +669,8 @@ class OpenSKInstaller:
       app_found = expected_app in apps
     return app_found
 
-  def create_hex_file(self, dest_file):
+  def create_hex_file(self, dest_file: str):
+    """Creates an intelhex file from the kernel and app binaries on disk."""
     # We produce an intelhex file with everything in it
     # https://en.wikipedia.org/wiki/Intel_HEX
     # pylint: disable=g-import-not-at-top,import-outside-toplevel
@@ -626,6 +709,7 @@ class OpenSKInstaller:
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
+    """Checks versions of the used tools, exits on version mismatch."""
     if not tockloader.__version__.startswith("1.5."):
       fatal(("Your version of tockloader seems incompatible: found "
              f"{tockloader.__version__}, expected 1.5.x."))
@@ -656,7 +740,8 @@ class OpenSKInstaller:
     if self.args.programmer == "none":
       assert_python_library("intelhex")
 
-  def run(self):
+  def run(self) -> int:
+    """Reads args to decide and run all required tasks."""
     self.check_prerequisites()
     self.update_rustc_if_needed()
 
@@ -770,6 +855,7 @@ class OpenSKInstaller:
 
 
 def main(args):
+  """Verifies some args, then runs a new OpenSKInstaller."""
   colorama.init()
 
   # Make sure the current working directory is the right one before running

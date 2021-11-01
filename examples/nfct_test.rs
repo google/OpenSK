@@ -31,6 +31,8 @@ mod example {
     use libtock_drivers::timer::Timestamp;
 
     #[derive(Copy, Clone, Debug, PartialEq)]
+    // The actual lint upper_case_acronyms is not supported in all toolchains.
+    #[allow(clippy::all)]
     enum ReturnCode {
         /// Operation completed successfully
         SUCCESS,

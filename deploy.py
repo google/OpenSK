@@ -353,7 +353,7 @@ class OpenSKInstaller:
     return cmd_output.decode()
 
   def update_rustc_if_needed(self):
-    """Updates the Rust and install the necessary target toolchain."""
+    """Updates the Rust and installs the necessary target toolchain."""
     target_toolchain_fullstring = "stable"
     with open("rust-toolchain", "r", encoding="utf-8") as f:
       content = f.readlines()
@@ -658,7 +658,7 @@ class OpenSKInstaller:
 
   # pylint: disable=protected-access
   def verify_flashed_app(self, expected_app: str) -> bool:
-    """Uses Tockloader check if an app of the expected name was written."""
+    """Uses Tockloader to check if an app of the expected name was written."""
     if self.args.programmer not in ("jlink", "openocd"):
       return False
     tock = loader.TockLoader(self.tockloader_default_args)

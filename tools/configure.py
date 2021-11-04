@@ -124,7 +124,10 @@ def main(args):
                 length=32, byteorder='big', signed=False)
     }
 
-  for authenticator in tqdm(get_opensk_devices(args.batch)):
+  devices = get_opensk_devices(args.batch)
+  if not devices:
+    fatal("No devices found.")
+  for authenticator in tqdm(devices):
     # If the device supports it, wink to show which device
     # we're going to program.
     if authenticator.device.capabilities & hid.CAPABILITY.WINK:

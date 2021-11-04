@@ -23,5 +23,9 @@ set -e
 BOARD="$1"
 
 ./deploy.py --board=$BOARD --opensk --programmer=none
-python -m tools.deploy_partition --board=$BOARD
-nrfjprog --reset --family NRF52
+python3 -m tools.deploy_partition --board=$BOARD
+if nrfjprog --reset --family NRF52 ; then
+  echo "Upgrade finished!"
+else
+  echo "Please replug OpenSK to reboot"
+fi

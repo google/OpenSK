@@ -20,7 +20,7 @@ commit() {
 }
 
 get_root() {
-  git ls-tree HEAD:third_party | sed -n 's/^.* \([^ ]\+\)\ttock$/\1/p'
+  git ls-tree HEAD:third_party | sed -En 's/^.* ([^ ]+)\ttock$/\1/p'
 }
 
 get_head() {
@@ -105,7 +105,7 @@ save() {
     rm ../../patches/tock/*.patch
     for file in $(git format-patch "${root}"); do
       sed -n '/^diff/,$p' "${file}" \
-        | head -n-3 > "../../patches/tock/${file#*-}"
+        | sed '/^-- $/,$d' > "../../patches/tock/${file#*-}"
     done
     git clean -qfxd
     top="$(get_head)"

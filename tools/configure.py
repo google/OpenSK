@@ -125,6 +125,7 @@ def main(args):
     }
 
   devices = get_opensk_devices(args.batch)
+  responses = []
   if not devices:
     fatal("No devices found.")
   for authenticator in tqdm(devices):
@@ -134,12 +135,15 @@ def main(args):
       authenticator.device.wink()
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
     info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
-    info("Please touch the device to confirm...")
+    if args.lock or args.priv_key:
+      info("Please touch the device to confirm...")
     try:
       result = authenticator.send_cbor(
           OPENSK_VENDOR_CONFIGURE,
           data=cbor_data,
       )
+      status = {"cert": result[1], "pkey": result[2]}
+      responses.append(status)
       info(f"Certificate: {'Present' if result[1] else 'Missing'}")
       info(f"Private Key: {'Present' if result[2] else 'Missing'}")
       if args.lock:
@@ -156,6 +160,7 @@ def main(args):
              "the given cert/key don't match the ones currently programmed)."))
       else:
         error(f"Failed to configure OpenSK (unknown error: {ex}")
+  return responses
 
 
 if __name__ == "__main__":

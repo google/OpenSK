@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from typing import Dict, List, Tuple
 
 import colorama
@@ -36,6 +37,7 @@ from tockloader import tbfh
 from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
 
+import tools.configure
 from tools.deploy_partition import create_metadata, pad_to
 
 PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
@@ -706,6 +708,19 @@ class OpenSKInstaller:
     if self.args.programmer == "none":
       assert_python_library("intelhex")
 
+  def configure_device(self):
+    """Checks the device configuration, and sets it according to args."""
+    configure_response = tools.configure.main(
+        argparse.Namespace(
+            batch=False,
+            certificate=self.args.config_cert,
+            priv_key=self.args.config_pkey,
+            lock=self.args.lock_device,
+        ))
+    if not configure_response:
+      return None
+    return configure_response[0]
+
   def run(self) -> int:
     """Reads args to decide and run all required tasks."""
     self.check_prerequisites()
@@ -746,17 +761,13 @@ class OpenSKInstaller:
         self.install_padding()
         self.install_tab_file(f"target/tab/{self.args.application}.tab")
         self.install_metadata()
-        if self.verify_flashed_app(self.args.application):
-          info("You're all set!")
-          return 0
-        error(
-            ("It seems that something went wrong. App/example not found "
-             "on your board. Ensure the connections between the programmer and "
-             "the board are correct."))
-        return 1
-      return 0
+        if not self.verify_flashed_app(self.args.application):
+          error(("It seems that something went wrong. App/example not found "
+                 "on your board. Ensure the connections between the programmer "
+                 "and the board are correct."))
+          return 1
 
-    if self.args.programmer in ("pyocd", "nordicdfu", "none"):
+    elif self.args.programmer in ("pyocd", "nordicdfu", "none"):
       dest_file = f"target/{self.args.board}_merged.hex"
       os.makedirs("target", exist_ok=True)
       self.create_hex_file(dest_file)
@@ -793,7 +804,7 @@ class OpenSKInstaller:
           fatal("Multiple DFU devices are detected. Please only connect one.")
         # Run the command without capturing stdout so that we show progress
         info("Flashing device using DFU...")
-        return subprocess.run(
+        dfu_return_code = subprocess.run(
             [
                 "nrfutil", "dfu", "usb-serial", f"--package={dfu_pkg_file}",
                 f"--serial-number={serial_number[0]}"
@@ -801,22 +812,49 @@ class OpenSKInstaller:
             check=False,
             timeout=None,
         ).returncode
+        if dfu_return_code != 0:
+          return dfu_return_code
 
     # Configure OpenSK through vendor specific command if needed
-    if any([
-        self.args.lock_device,
-        self.args.config_cert,
-        self.args.config_pkey,
-    ]):
-      # pylint: disable=g-import-not-at-top,import-outside-toplevel
-      import tools.configure
-      tools.configure.main(
-          argparse.Namespace(
-              batch=False,
-              certificate=self.args.config_cert,
-              priv_key=self.args.config_pkey,
-              lock=self.args.lock_device,
-          ))
+    if self.args.programmer == "none":
+      if any([
+          self.args.lock_device,
+          self.args.config_cert,
+          self.args.config_pkey,
+      ]):
+        fatal("Unexpected arguments to configure your device. Since you "
+              "selected the programmer \"none\", the device is not ready to be "
+              "configured yet.")
+      return 0
+
+    # Perform checks if OpenSK was flashed.
+    if self.args.application != "ctap2":
+      return 0
+
+    # Trying to check or configure the device. Booting might take some time.
+    for i in range(5):
+      # Increasing wait time, total of 10 seconds.
+      time.sleep(i)
+      devices = tools.configure.get_opensk_devices(False)
+      if devices:
+        break
+
+    if not devices:
+      fatal("No device to configure found.")
+    status = self.configure_device()
+    if not status:
+      fatal("Could not read device configuration.")
+
+    if status["cert"] and status["pkey"]:
+      info("You're all set!")
+    else:
+      info("Your device is not yet configured, and lacks some functionality. "
+           "If you run into issues, this command might help:\n\n"
+           "./tools/configure.py \\\n"
+           "    --certificate=crypto_data/opensk_cert.pem \\\n"
+           "    --private-key=crypto_data/opensk.key\n\n"
+           "Please read the Certificate considerations in docs/customization.md"
+           " to understand the privacy trade-off.")
     return 0
 
 

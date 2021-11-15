@@ -19,6 +19,8 @@ persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
+# This import explicitly locks the version.
+serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]

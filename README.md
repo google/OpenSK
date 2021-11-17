@@ -12,6 +12,9 @@ This repository contains a Rust implementation of a
 [FIDO2](https://fidoalliance.org/fido2/) authenticator.
 We developed OpenSK as a [Tock OS](https://tockos.org) application.
 
+We intend to bring a full open source experience to security keys, from
+application to operating system. You can even 3D print your own open source
+enclosure!
 You can see OpenSK in action in this
 [video on YouTube](https://www.youtube.com/watch?v=klEozvpw0xg)!
 

@@ -4,7 +4,20 @@
 
 ![Nordic dongle](../img/dongle_front.jpg)
 
-### Flashing using DFU
+### 3D printed enclosure
+
+To protect and carry your key, we partnered with a professional designer and we
+are providing a custom enclosure that can be printed on both professional 3D
+printers and hobbyist models.
+
+![OpenSK Enclosure](img/enclosure.jpg)
+
+All the required files can be downloaded from
+[Thingiverse](https://www.thingiverse.com/thing:4132768) including the STEP
+file, allowing you to easily make the modifications you need to further
+customize it.
+
+### Flashing using DFU (preferred method)
 
 To flash the firmware, run:
 
@@ -47,11 +60,10 @@ Follow these steps:
     ![Nordic dongle retainer clip](../img/dongle_clip.jpg)
 
 1.  Depending on the programmer you're using, you may have to adapt the next
-    command line. Run our script for compiling/flashing Tock OS on your device
-    (_output may differ_):
+    command line. Run our script for compiling/flashing Tock OS on your device:
 
     ```shell
-    $ ./deploy.py os --board=nrf52840_dongle_opensk --programmer=jlink
+    $ ./deploy.py --board=nrf52840_dongle_opensk --programmer=jlink
     ```
 
 1.  Remove the programming cable and the USB-A extension cable.

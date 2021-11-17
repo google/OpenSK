@@ -2,19 +2,6 @@
 
 ## Customization
 
-### 3D printed enclosure
-
-To protect and carry your key, we partnered with a professional designer and we
-are providing a custom enclosure that can be printed on both professional 3D
-printers and hobbyist models.
-
-![OpenSK Enclosure](img/enclosure.jpg)
-
-All the required files can be downloaded from
-[Thingiverse](https://www.thingiverse.com/thing:4132768) including the STEP
-file, allowing you to easily make the modifications you need to further
-customize it.
-
 ### Cryptographic material
 
 All the generated certificates and private keys are stored in the directory
@@ -41,7 +28,7 @@ and private key.
 Our build script `build.rs` is responsible for converting the `aaguid.txt` file
 into raw data that is then used by the Rust file `src/ctap/key_material.rs`.
 
-Please make sure to savely store all private key material before calling
+Please make sure to safely store all private key material before calling
 `reset.sh`, or the files will be lost.
 
 #### Certificate considerations

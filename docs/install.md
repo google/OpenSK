@@ -25,8 +25,9 @@ following:
 *   python3 and pip (can be installed with the `python3-pip` package on Debian)
 *   the OpenSSL command line tool (can be installed and configured with the
     `libssl-dev` and `pkg-config` packages on Debian)
-*   nrfutil (can be installed using `pip3 install nrfutil`) if you want to flash
+*   `nrfutil` (can be installed using `pip3 install nrfutil`) if you want to flash
     a device with DFU
+*   `uuid-runtime` if you are missing the `uuidgen` command.
 
 The proprietary software to use the default programmer can be found on the
 [Segger website](https://www.segger.com/downloads/jlink). Please follow their

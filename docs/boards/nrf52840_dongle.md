@@ -71,11 +71,11 @@ Follow these steps:
 ### Buttons and LEDs
 
 The bigger, white button conveys user presence to the application. Some actions
-like register and login will make the board blink, asking you to confirm the
+like register and login will make the dongle blink, asking you to confirm the
 transaction with a button press. The small, sideways pointing buttong next to it
-restarts the board.
+restarts the dongle.
 
-The 4 LEDs show the state of the app. There are different patterns:
+The 2 LEDs show the state of the app. There are different patterns:
 
 | Pattern                            | Cause                  |
 |------------------------------------|------------------------|

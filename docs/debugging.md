@@ -83,7 +83,7 @@ driver, before faulting the app, you can use the `--panic-console` flag of the
 
 ```shell
 # Example on Nordic nRF52840-DK board
-./deploy.py --board=nrf52840dk_opensk --opensk --panic-console
+./deploy.py --board=nrf52840dk --opensk --panic-console
 ```
 
 ### Memory allocations

@@ -1,10 +1,10 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=develop)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=develop)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=develop)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=develop)
-[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=develop)](https://coveralls.io/github/google/OpenSK?branch=develop)
+![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=stable)
+![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=stable)
+![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=stable)
+![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=stable)
+[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=stable)](https://coveralls.io/github/google/OpenSK?branch=stable)
 
 ## OpenSK
 
@@ -18,26 +18,23 @@ enclosure!
 You can see OpenSK in action in this
 [video on YouTube](https://www.youtube.com/watch?v=klEozvpw0xg)!
 
-You are viewing the branch for developers. New features are developed here
-before they are stabilized. If you instead want to use the FIDO certified
-firmware, please go back to the
-[stable branch](https://github.com/google/OpenSK).
-
 ### FIDO2
 
-The develop branch implements the
-[CTAP2.1 specification](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html).
-This branch is not FIDO certified. The implementation is backwards compatible
-to CTAP2.0. Additionally, OpenSK supports U2F, and non-discoverable credentials
+The stable branch implements the
+[CTAP2.0 specification](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html)
+and is FIDO certified. OpenSK supports U2F, and non-discoverable credentials
 created with either protocol are compatible with the other.
+
+If you want to use features of the newer FIDO 2.1, you can try our
+[develop branch](https://github.com/google/OpenSK/tree/develop). This version is
+NOT certified and less thoroughly tested though. If you plan to add features to
+OpenSK, you should switch to develop.
 
 ### :warning: Disclaimer
 
 This project is **proof-of-concept and a research platform**. It is **NOT**
-meant for a daily usage. It comes with a few limitations:
-  
-*   This branch is under development, and therefore less rigorously tested than the stable branch.
-*   The cryptography implementations are not resistent against side-channel attacks.
+meant for a daily usage. The cryptography implementations are not resistent
+against side-channel attacks.
 
 We're still in the process of integrating the
 [ARM&reg; CryptoCell-310](https://developer.arm.com/ip-products/security-ip/cryptocell-300-family)
@@ -46,7 +43,7 @@ embedded in the
 to enable hardware-accelerated cryptography. Our placeholder implementations of required
 cryptography algorithms (ECDSA, ECC secp256r1, HMAC-SHA256 and AES256) in Rust are research-quality
 code. They haven't been reviewed and don't provide constant-time guarantees.
-  
+
 ## Hardware
 
 You will need one the following supported boards:

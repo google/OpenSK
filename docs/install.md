@@ -38,48 +38,16 @@ haven't tested them on Windows and other platforms.
 
 ### Compiling the firmware
 
-If this is your first time installing OpenSK, please skip directly to
-[Initial setup](#Initial-setup). Else, see
-[Updating your setup](#Updating-your-setup) below.
+If you are switching branches or used an old version of OpenSK before, we have
+tools to help you migrate on our develop branch. You find more information on
+how to update your setup or reset your storage in its
+[install instructions](https://github.com/google/OpenSK/blob/develop/docs/install.md).
 
-#### Updating your setup
-
-Depending on the difference to your last state, you may need some of the
-following steps:
-
-*   If you are not just testing minor changes, reset and redo the setup. This
-    will delete all uncommited changes.
-
-    ```shell
-    ./reset.sh
-    ./setup.sh
-    ```
-
-*   Flash your board according to the
-    [flashing instructions below](#Flashing-a-firmware]. If you come from an
-    OpenSK version before the 2.0 certified one, your credential storage is not
-    backwards compatible and you have to reset it. :warning: You will lose
-    logins to all websites that you registered with OpenSK. To erase your
-    persistent storage, run the deploy script twice: Once with the application
-    parameter `--erase_storage`, and once with `--opensk` as usual.
-
-    This reset also clears the certificate. For a privacy discussion, see the
-    [certificate section in Customization](customization.md#Certificate-considerations).
-    If you want to reinstall it, you also need to rerun:
-
-    ```shell
-    ./tools/configure.py \
-        --certificate=crypto_data/opensk_cert.pem \
-        --private-key=crypto_data/opensk.key
-    ```
-
-#### Initial setup
-
-To clone and setup the repository for the develop branch, run the following
+To clone and setup the repository for the stable branch, run the following
 commands:
 
 ```shell
-git clone -b develop https://github.com/google/OpenSK.git
+git clone https://github.com/google/OpenSK.git
 cd OpenSK
 ./setup.sh
 ```
@@ -136,16 +104,14 @@ We recommend that you flash your development board with JTAG and dongles with
 DFU, as described in the [board documentation](#Flashing-a-firmware) linked
 above. However, we support other programmers:
 
-*   OpenOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk
-    --programmer=openocd`
-*   pyOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk
-    --programmer=pyocd`
-*   Custom: `./deploy.py --board=nrf52840_dongle_opensk --opensk
-    --programmer=none`. In this case, an IntelHex file will be created and how
-    to program a board is left to the user.
+*   OpenOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=openocd`
+*   pyOCD: `./deploy.py --board=nrf52840_dongle --opensk --programmer=pyocd`
+*   Custom: `./deploy.py --board=nrf52840_dongle --opensk --programmer=none`.
+    In this case, an IntelHex file will be created and how to program a board is
+    left to the user.
 
 If your board is already flashed with Tock OS, you may skip installing it:
-`./deploy.py --board=nrf52840dk_opensk --opensk --no-tockos`
+`./deploy.py --board=nrf52840dk --opensk --no-tockos`
 
 For more options, we invite you to read the help of our `deploy.py` script by
 running `./deploy.py --help`.

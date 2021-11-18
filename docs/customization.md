@@ -38,8 +38,8 @@ register OpenSK on a website, you attest the legitimacy of your hardware. For
 self-generated certificates, this claim is rather trivial. Still, it is required
 by some websites and to use U2F.
 
-Usually, the attestation private key is shared between a batch of at least 100
-thousand security keys of the same model. If you build your own OpenSK, your
+Usually, the attestation private key is shared between a batch of at least
+100,000 security keys of the same model. If you build your own OpenSK, your
 private key is unique to you. This makes you identifiable across registrations:
 Two websites could collaborate to track if registrations were attested with the
 same key material. If you use OpenSK beyond experimentation, please consider

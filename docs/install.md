@@ -79,9 +79,8 @@ To clone and setup the repository for the develop branch, run the following
 commands:
 
 ```shell
-git clone https://github.com/kaczmarczyck/OpenSK.git
+git clone -b develop https://github.com/google/OpenSK.git
 cd OpenSK
-git checkout develop
 ./setup.sh
 ```
 

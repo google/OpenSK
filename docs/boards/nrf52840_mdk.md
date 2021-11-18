@@ -14,7 +14,7 @@ After general setup, you still need these steps:
 
 1.  Download the
     [script](https://github.com/makerdiary/nrf52840-mdk-usb-dongle/blob/master/tools/uf2conv.py)
-    from Makerdiary's GitHub into the OpenSK repository.o
+    from Makerdiary's GitHub into the OpenSK repository.
 
 1.  Run the script:
 

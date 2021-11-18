@@ -748,7 +748,6 @@ class OpenSKInstaller:
         self.install_metadata()
         if self.verify_flashed_app(self.args.application):
           info("You're all set!")
-          # TODO set notice to configure
           return 0
         error(
             ("It seems that something went wrong. App/example not found "

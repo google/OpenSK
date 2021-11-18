@@ -1192,7 +1192,9 @@ where
         params: AuthenticatorVendorConfigureParameters,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        (self.check_user_presence)(cid)?;
+        if params.attestation_material.is_some() || params.lockdown {
+            (self.check_user_presence)(cid)?;
+        }
 
         // Sanity checks
         let current_priv_key = self.persistent_store.attestation_private_key()?;

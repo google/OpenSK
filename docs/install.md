@@ -39,7 +39,7 @@ haven't tested them on Windows and other platforms.
 ### Compiling the firmware
 
 If you are switching branches or used an old version of OpenSK before, we have
-tools to help you migrate on our develop branch. You find more information on
+tools to help you migrate to our develop branch. You find more information on
 how to update your setup or reset your storage in its
 [install instructions](https://github.com/google/OpenSK/blob/develop/docs/install.md).
 

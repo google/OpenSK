@@ -10,7 +10,7 @@ To protect and carry your key, we partnered with a professional designer and we
 are providing a custom enclosure that can be printed on both professional 3D
 printers and hobbyist models.
 
-![OpenSK Enclosure](img/enclosure.jpg)
+![OpenSK Enclosure](../img/enclosure.jpg)
 
 All the required files can be downloaded from
 [Thingiverse](https://www.thingiverse.com/thing:4132768) including the STEP
@@ -43,7 +43,7 @@ If you want to use JTAG with the dongle, you need additional hardware.
 *   optionally a
     [Tag-Connect TC2050 retainer clip](http://www.tag-connect.com/TC2050-CLIP)
     to keep the spring loaded connector pressed to the PCB.
-    
+
 Follow these steps:
 
 1.  The JTAG probe used for programming won't provide power to the board.

@@ -35,7 +35,7 @@ created with either protocol are compatible with the other.
 
 This project is **proof-of-concept and a research platform**. It is **NOT**
 meant for a daily usage. It comes with a few limitations:
-  
+
 *   This branch is under development, and therefore less rigorously tested than the stable branch.
 *   The cryptography implementations are not resistent against side-channel attacks.
 

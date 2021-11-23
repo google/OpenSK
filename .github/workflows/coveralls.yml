@@ -39,7 +39,7 @@ jobs:
           RUSTFLAGS: "-Zinstrument-coverage"
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"
       - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ -s . -t lcov --ignore-not-existing -o ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
+        run: grcov . --binary-path ./target/debug/ --source-dir . --output-type lcov --ignore-not-existing ---output-path ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
       - uses: coverallsapp/github-action@1.1.3
         name: upload report to coveralls
         with:

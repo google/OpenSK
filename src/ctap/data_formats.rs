@@ -515,6 +515,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 /// The credProtect extension's policies for resident credentials.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
+#[allow(clippy::enum_variant_names)]
 pub enum CredentialProtectionPolicy {
     /// The credential is always discoverable, as if it had no protection level.
     UserVerificationOptional = 0x01,
@@ -1983,7 +1984,7 @@ mod test {
         assert_eq!(created_cbor, cbor_sub_command);
 
         for command in ConfigSubCommand::into_enum_iter() {
-            let created_cbor: cbor::Value = command.clone().into();
+            let created_cbor: cbor::Value = command.into();
             let reconstructed = ConfigSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }
@@ -2053,7 +2054,7 @@ mod test {
         assert_eq!(created_cbor, cbor_sub_command);
 
         for command in CredentialManagementSubCommand::into_enum_iter() {
-            let created_cbor: cbor::Value = command.clone().into();
+            let created_cbor: cbor::Value = command.into();
             let reconstructed = CredentialManagementSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }

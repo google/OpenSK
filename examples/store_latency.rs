@@ -54,7 +54,7 @@ unsafe fn boot_store(erase: bool) -> Store<Storage> {
 
 #[derive(Debug)]
 struct StorageConfig {
-    page_size: usize,
+    _page_size: usize,
     num_pages: usize,
 }
 
@@ -62,7 +62,7 @@ fn storage_config() -> StorageConfig {
     use persistent_store::Storage;
     let storage = new_storage().unwrap();
     StorageConfig {
-        page_size: storage.page_size(),
+        _page_size: storage.page_size(),
         num_pages: storage.num_pages(),
     }
 }
@@ -120,7 +120,7 @@ fn compute_latency(
 
     // Measure latency of insert.
     let key = 1 + key_increment * count;
-    let ((), time) = measure(&timer, || {
+    let ((), time) = measure(timer, || {
         store.insert(key, &vec![0; 4 * word_length]).unwrap()
     });
     writeln!(console, "Insert: {:.1}ms.", time.ms()).unwrap();
@@ -131,12 +131,12 @@ fn compute_latency(
     );
 
     // Measure latency of boot.
-    let (mut store, time) = measure(&timer, || unsafe { boot_store(false) });
+    let (mut store, time) = measure(timer, || unsafe { boot_store(false) });
     writeln!(console, "Boot: {:.1}ms.", time.ms()).unwrap();
     stat.boot_ms = time.ms();
 
     // Measure latency of remove.
-    let ((), time) = measure(&timer, || store.remove(key).unwrap());
+    let ((), time) = measure(timer, || store.remove(key).unwrap());
     writeln!(console, "Remove: {:.1}ms.", time.ms()).unwrap();
     stat.remove_ms = time.ms();
 

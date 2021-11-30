@@ -54,7 +54,6 @@ unsafe fn boot_store(erase: bool) -> Store<Storage> {
 
 #[derive(Debug)]
 struct StorageConfig {
-    _page_size: usize,
     num_pages: usize,
 }
 
@@ -62,7 +61,6 @@ fn storage_config() -> StorageConfig {
     use persistent_store::Storage;
     let storage = new_storage().unwrap();
     StorageConfig {
-        _page_size: storage.page_size(),
         num_pages: storage.num_pages(),
     }
 }

@@ -25,6 +25,7 @@ use sk_cbor::{
 };
 
 #[derive(Debug, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub enum ResponseData {
     AuthenticatorMakeCredential(AuthenticatorMakeCredentialResponse),
     AuthenticatorGetAssertion(AuthenticatorGetAssertionResponse),

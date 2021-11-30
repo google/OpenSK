@@ -709,7 +709,7 @@ impl<'a> Iterator for IterCredentials<'a> {
             if !key::CREDENTIALS.contains(&key) {
                 continue;
             }
-            let value = self.unwrap(handle.get_value(&self.store).ok())?;
+            let value = self.unwrap(handle.get_value(self.store).ok())?;
             let credential = self.unwrap(deserialize_credential(&value))?;
             return Some((key, credential));
         }

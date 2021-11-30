@@ -37,6 +37,7 @@ const MIN_LARGE_BLOB_LEN: usize = 17;
 
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub enum Command {
     AuthenticatorMakeCredential(AuthenticatorMakeCredentialParameters),
     AuthenticatorGetAssertion(AuthenticatorGetAssertionParameters),

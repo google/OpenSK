@@ -1553,16 +1553,16 @@ mod test {
             .get_pin_protocol(PinUvAuthProtocol::V1)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v1 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
         let pin_uv_auth_token_v2 = client_pin
             .get_pin_protocol(PinUvAuthProtocol::V2)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v2 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V2);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V2);
         let pin_uv_auth_param_v1_from_v2_token =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V1);
         let pin_uv_auth_param_v2_from_v1_token =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
@@ -1624,7 +1624,7 @@ mod test {
             .get_pin_protocol(PinUvAuthProtocol::V1)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v1 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(

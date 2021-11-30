@@ -131,8 +131,8 @@ pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
 }
 
-fn cbor_write(value: cbor::Value, mut encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
-    cbor::writer::write_nested(value, &mut encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
+fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
+    cbor::writer::write_nested(value, encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
@@ -939,7 +939,7 @@ where
                 return Ok(credential);
             }
             let credential =
-                self.decrypt_credential_source(allowed_credential.key_id, &rp_id_hash)?;
+                self.decrypt_credential_source(allowed_credential.key_id, rp_id_hash)?;
             if credential.is_some() {
                 return Ok(credential);
             }

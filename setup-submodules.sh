@@ -18,6 +18,7 @@ export TERM=${TERM:-vt100}
 done_text="$(tput bold)DONE.$(tput sgr0)"
 
 set -e
+shopt -s nullglob
 
 # Ensure the submodules are pulled and up-to-date
 git submodule update --init
@@ -40,35 +41,19 @@ echo -n '[-] Copying additional boards to Tock... '
 cp -r boards/* third_party/tock/boards
 echo $done_text
 
-# Apply patches to kernel. Do that in a sub-shell.
-(
-  cd third_party/tock/ && \
-  for p in ../../patches/tock/*.patch
-  do
-    echo -n '[-] Applying patch "'$(basename $p)'"... '
-    if git apply "$p"
-    then
-      echo $done_text
-    else
-      patch_conflict_detected
-    fi
-  done
-)
-
-# Now apply patches to libtock-rs. Do that in a sub-shell.
-#
-# Commented out as there are not patches at the moment, and the pattern fails in
-# that case.
-#(
-#  cd third_party/libtock-rs/ && \
-#  for p in ../../patches/libtock-rs/*.patch
-#  do
-#    echo -n '[-] Applying patch "'$(basename $p)'"... '
-#    if git apply "$p"
-#    then
-#      echo $done_text
-#    else
-#      patch_conflict_detected
-#    fi
-#  done
-#)
+for module in tock libtock-rs; do
+  # Apply patches to the submodule. Do that in a sub-shell.
+  (
+    cd third_party/"${module}"/ && \
+      for p in ../../patches/"${module}"/*.patch
+      do
+        echo -n '[-] Applying patch "'$(basename $p)'"... '
+        if git apply "$p"
+        then
+          echo $done_text
+        else
+          patch_conflict_detected
+        fi
+      done
+  )
+done

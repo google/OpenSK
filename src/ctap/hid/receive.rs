@@ -91,7 +91,7 @@ impl MessageAssembler {
     ) -> Result<Option<Message>, (ChannelID, Error)> {
         // TODO: Support non-full-speed devices (i.e. packet len != 64)? This isn't recommended by
         // section 8.8.1
-        let (cid, processed_packet) = CtapHid::process_single_packet(&packet);
+        let (cid, processed_packet) = CtapHid::process_single_packet(packet);
 
         if !self.idle && timestamp - self.last_timestamp >= CtapHid::TIMEOUT_DURATION {
             // The current channel timed out.

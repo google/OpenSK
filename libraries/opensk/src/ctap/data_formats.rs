@@ -1163,63 +1163,38 @@ impl From<CredentialManagementSubCommandParameters> for cbor::Value {
     }
 }
 
+fn ok_or_cbor_type<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
+    value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+}
+
 pub fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Unsigned(unsigned) => Ok(unsigned),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_unsigned())
 }
 
 pub fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Unsigned(unsigned) => {
-            if unsigned <= core::i64::MAX as u64 {
-                Ok(unsigned as i64)
-            } else {
-                Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
-            }
-        }
-        cbor::Value::Negative(signed) => Ok(signed),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_integer())
 }
 
 pub fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::ByteString(byte_string) => Ok(byte_string),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_byte_string())
 }
 
 pub fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::TextString(text_string) => Ok(text_string),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_text_string())
 }
 
 pub fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Array(array) => Ok(array),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_array())
 }
 
 pub fn extract_map(
     cbor_value: cbor::Value,
 ) -> Result<Vec<(cbor::Value, cbor::Value)>, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Map(map) => Ok(map),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_map())
 }
 
 pub fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusCode> {
-    match cbor_value {
-        cbor::Value::Simple(cbor::SimpleValue::FalseValue) => Ok(false),
-        cbor::Value::Simple(cbor::SimpleValue::TrueValue) => Ok(true),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
-    }
+    ok_or_cbor_type(cbor_value.extract_bool())
 }
 
 pub fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {

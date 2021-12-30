@@ -19,9 +19,13 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+/// The CBOR data structure.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Value(pub(crate) ValueImpl);
+
 /// Possible CBOR values.
 #[derive(Clone, Debug)]
-pub enum Value {
+pub(crate) enum ValueImpl {
     /// Unsigned integer value (uint).
     Unsigned(u64),
     /// Signed integer value (nint). Only 63 bits of information are used here.
@@ -42,7 +46,7 @@ pub enum Value {
 
 /// Specific simple CBOR values.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SimpleValue {
+pub(crate) enum SimpleValue {
     FalseValue = 20,
     TrueValue = 21,
     NullValue = 22,
@@ -75,119 +79,146 @@ impl Value {
     /// For simplicity, this only takes i64. Construct directly for the last bit.
     pub fn integer(int: i64) -> Value {
         if int >= 0 {
-            Value::Unsigned(int as u64)
+            Value(ValueImpl::Unsigned(int as u64))
         } else {
-            Value::Negative(int)
+            Value(ValueImpl::Negative(int))
         }
+    }
+
+    /// Create a CBOR array value.
+    pub fn array(a: Vec<Value>) -> Value {
+        Value(ValueImpl::Array(a))
+    }
+
+    /// Create a CBOR map value.
+    pub fn map(m: Vec<(Value, Value)>) -> Value {
+        Value(ValueImpl::Map(m))
+    }
+
+    /// Create a CBOR tagged value.
+    pub fn tag(int: u64, value: Value) -> Value {
+        Value(ValueImpl::Tag(int, Box::new(value)))
     }
 
     /// Create a CBOR boolean simple value.
     pub fn bool_value(b: bool) -> Value {
         if b {
-            Value::Simple(SimpleValue::TrueValue)
+            Value(ValueImpl::Simple(SimpleValue::TrueValue))
         } else {
-            Value::Simple(SimpleValue::FalseValue)
+            Value(ValueImpl::Simple(SimpleValue::FalseValue))
         }
     }
 
-    /// Return the major type for the [`Value`].
-    pub fn type_label(&self) -> u8 {
-        // TODO use enum discriminant instead when stable
-        // https://github.com/rust-lang/rust/issues/60553
-        match self {
-            Value::Unsigned(_) => 0,
-            Value::Negative(_) => 1,
-            Value::ByteString(_) => 2,
-            Value::TextString(_) => 3,
-            Value::Array(_) => 4,
-            Value::Map(_) => 5,
-            Value::Tag(_, _) => 6,
-            Value::Simple(_) => 7,
-        }
+    /// Creates a null value.
+    pub fn null_value() -> Value {
+        Value(ValueImpl::Simple(SimpleValue::NullValue))
+    }
+
+    /// Creates an undefined value.
+    pub fn undefined() -> Value {
+        Value(ValueImpl::Simple(SimpleValue::Undefined))
     }
 
     pub fn extract_unsigned(self) -> Option<u64> {
         match self {
-            Value::Unsigned(unsigned) => Some(unsigned),
+            Value(ValueImpl::Unsigned(unsigned)) => Some(unsigned),
             _ => None,
         }
     }
 
     pub fn extract_integer(self) -> Option<i64> {
         match self {
-            Value::Unsigned(unsigned) => {
+            Value(ValueImpl::Unsigned(unsigned)) => {
                 if unsigned <= core::i64::MAX as u64 {
                     Some(unsigned as i64)
                 } else {
                     None
                 }
             }
-            Value::Negative(signed) => Some(signed),
+            Value(ValueImpl::Negative(signed)) => Some(signed),
             _ => None,
         }
     }
 
     pub fn extract_byte_string(self) -> Option<Vec<u8>> {
         match self {
-            Value::ByteString(byte_string) => Some(byte_string),
+            Value(ValueImpl::ByteString(byte_string)) => Some(byte_string),
             _ => None,
         }
     }
 
     pub fn extract_text_string(self) -> Option<String> {
         match self {
-            Value::TextString(text_string) => Some(text_string),
+            Value(ValueImpl::TextString(text_string)) => Some(text_string),
             _ => None,
         }
     }
 
     pub fn extract_array(self) -> Option<Vec<Value>> {
         match self {
-            Value::Array(array) => Some(array),
+            Value(ValueImpl::Array(array)) => Some(array),
             _ => None,
         }
     }
 
     pub fn extract_map(self) -> Option<Vec<(Value, Value)>> {
         match self {
-            Value::Map(map) => Some(map),
+            Value(ValueImpl::Map(map)) => Some(map),
             _ => None,
         }
     }
 
     pub fn extract_tag(self) -> Option<(u64, Value)> {
         match self {
-            Value::Tag(tag, value) => Some((tag, *value)),
+            Value(ValueImpl::Tag(tag, value)) => Some((tag, *value)),
             _ => None,
         }
     }
 
     pub fn extract_bool(self) -> Option<bool> {
         match self {
-            Value::Simple(SimpleValue::FalseValue) => Some(false),
-            Value::Simple(SimpleValue::TrueValue) => Some(true),
+            Value(ValueImpl::Simple(SimpleValue::FalseValue)) => Some(false),
+            Value(ValueImpl::Simple(SimpleValue::TrueValue)) => Some(true),
             _ => None,
         }
     }
 
     pub fn extract_null(self) -> Option<()> {
         match self {
-            Value::Simple(SimpleValue::NullValue) => Some(()),
+            Value(ValueImpl::Simple(SimpleValue::NullValue)) => Some(()),
             _ => None,
         }
     }
 
     pub fn extract_undefined(self) -> Option<()> {
         match self {
-            Value::Simple(SimpleValue::Undefined) => Some(()),
+            Value(ValueImpl::Simple(SimpleValue::Undefined)) => Some(()),
             _ => None,
         }
     }
 }
 
-impl Ord for Value {
-    fn cmp(&self, other: &Value) -> Ordering {
-        use super::values::Value::{
+impl ValueImpl {
+    /// Return the major type for the [`ValueImpl`].
+    pub fn type_label(&self) -> u8 {
+        // TODO use enum discriminant instead when stable
+        // https://github.com/rust-lang/rust/issues/60553
+        match self {
+            ValueImpl::Unsigned(_) => 0,
+            ValueImpl::Negative(_) => 1,
+            ValueImpl::ByteString(_) => 2,
+            ValueImpl::TextString(_) => 3,
+            ValueImpl::Array(_) => 4,
+            ValueImpl::Map(_) => 5,
+            ValueImpl::Tag(_, _) => 6,
+            ValueImpl::Simple(_) => 7,
+        }
+    }
+}
+
+impl Ord for ValueImpl {
+    fn cmp(&self, other: &ValueImpl) -> Ordering {
+        use super::values::ValueImpl::{
             Array, ByteString, Map, Negative, Simple, Tag, TextString, Unsigned,
         };
         let self_type_value = self.type_label();
@@ -234,16 +265,16 @@ impl Ord for Value {
     }
 }
 
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Value) -> Option<Ordering> {
+impl PartialOrd for ValueImpl {
+    fn partial_cmp(&self, other: &ValueImpl) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for Value {}
+impl Eq for ValueImpl {}
 
-impl PartialEq for Value {
-    fn eq(&self, other: &Value) -> bool {
+impl PartialEq for ValueImpl {
+    fn eq(&self, other: &ValueImpl) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
@@ -263,7 +294,7 @@ impl SimpleValue {
 
 impl From<u64> for Value {
     fn from(unsigned: u64) -> Self {
-        Value::Unsigned(unsigned)
+        Value(ValueImpl::Unsigned(unsigned))
     }
 }
 
@@ -281,37 +312,43 @@ impl From<i32> for Value {
 
 impl From<Vec<u8>> for Value {
     fn from(bytes: Vec<u8>) -> Self {
-        Value::ByteString(bytes)
+        Value(ValueImpl::ByteString(bytes))
     }
 }
 
 impl From<&[u8]> for Value {
     fn from(bytes: &[u8]) -> Self {
-        Value::ByteString(bytes.to_vec())
+        Value(ValueImpl::ByteString(bytes.to_vec()))
+    }
+}
+
+impl From<&[u8; 0]> for Value {
+    fn from(bytes: &[u8; 0]) -> Self {
+        Value(ValueImpl::ByteString(bytes.to_vec()))
     }
 }
 
 impl From<String> for Value {
     fn from(text: String) -> Self {
-        Value::TextString(text)
+        Value(ValueImpl::TextString(text))
     }
 }
 
 impl From<&str> for Value {
     fn from(text: &str) -> Self {
-        Value::TextString(text.to_string())
+        Value(ValueImpl::TextString(text.to_string()))
     }
 }
 
 impl From<Vec<Value>> for Value {
     fn from(array: Vec<Value>) -> Self {
-        Value::Array(array)
+        Value(ValueImpl::Array(array))
     }
 }
 
 impl From<Vec<(Value, Value)>> for Value {
     fn from(map: Vec<(Value, Value)>) -> Self {
-        Value::Map(map)
+        Value(ValueImpl::Map(map))
     }
 }
 
@@ -373,7 +410,7 @@ mod test {
     fn test_extract_unsigned() {
         assert_eq!(cbor_int!(1).extract_unsigned(), Some(1));
         assert_eq!(cbor_int!(-1).extract_unsigned(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_unsigned(), None);
+        assert_eq!(cbor_bytes!(b"").extract_unsigned(), None);
         assert_eq!(cbor_text!("").extract_unsigned(), None);
         assert_eq!(cbor_array![].extract_unsigned(), None);
         assert_eq!(cbor_map! {}.extract_unsigned(), None);
@@ -405,7 +442,7 @@ mod test {
     fn test_extract_integer() {
         assert_eq!(cbor_int!(1).extract_integer(), Some(1));
         assert_eq!(cbor_int!(-1).extract_integer(), Some(-1));
-        assert_eq!(cbor_bytes!(vec![]).extract_integer(), None);
+        assert_eq!(cbor_bytes!(b"").extract_integer(), None);
         assert_eq!(cbor_text!("").extract_integer(), None);
         assert_eq!(cbor_array![].extract_integer(), None);
         assert_eq!(cbor_map! {}.extract_integer(), None);
@@ -437,7 +474,7 @@ mod test {
     fn test_extract_byte_string() {
         assert_eq!(cbor_int!(1).extract_byte_string(), None);
         assert_eq!(cbor_int!(-1).extract_byte_string(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_byte_string(), Some(Vec::new()));
+        assert_eq!(cbor_bytes!(b"").extract_byte_string(), Some(Vec::new()));
         assert_eq!(
             cbor_bytes_lit!(b"bar").extract_byte_string(),
             Some(b"bar".to_vec())
@@ -453,7 +490,7 @@ mod test {
     fn test_extract_text_string() {
         assert_eq!(cbor_int!(1).extract_text_string(), None);
         assert_eq!(cbor_int!(-1).extract_text_string(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_text_string(), None);
+        assert_eq!(cbor_bytes!(b"").extract_text_string(), None);
         assert_eq!(cbor_text!("").extract_text_string(), Some(String::new()));
         assert_eq!(cbor_text!("s").extract_text_string(), Some("s".to_string()));
         assert_eq!(cbor_array![].extract_text_string(), None);
@@ -466,7 +503,7 @@ mod test {
     fn test_extract_array() {
         assert_eq!(cbor_int!(1).extract_array(), None);
         assert_eq!(cbor_int!(-1).extract_array(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_array(), None);
+        assert_eq!(cbor_bytes!(b"").extract_array(), None);
         assert_eq!(cbor_text!("").extract_array(), None);
         assert_eq!(cbor_array![].extract_array(), Some(Vec::new()));
         assert_eq!(
@@ -482,7 +519,7 @@ mod test {
     fn test_extract_map() {
         assert_eq!(cbor_int!(1).extract_map(), None);
         assert_eq!(cbor_int!(-1).extract_map(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_map(), None);
+        assert_eq!(cbor_bytes!(b"").extract_map(), None);
         assert_eq!(cbor_text!("").extract_map(), None);
         assert_eq!(cbor_array![].extract_map(), None);
         assert_eq!(cbor_map! {}.extract_map(), Some(Vec::new()));
@@ -498,7 +535,7 @@ mod test {
     fn test_extract_tag() {
         assert_eq!(cbor_int!(1).extract_tag(), None);
         assert_eq!(cbor_int!(-1).extract_tag(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_tag(), None);
+        assert_eq!(cbor_bytes!(b"").extract_tag(), None);
         assert_eq!(cbor_text!("").extract_tag(), None);
         assert_eq!(cbor_array![].extract_tag(), None);
         assert_eq!(cbor_map! {}.extract_tag(), None);
@@ -513,7 +550,7 @@ mod test {
     fn test_extract_bool() {
         assert_eq!(cbor_int!(1).extract_bool(), None);
         assert_eq!(cbor_int!(-1).extract_bool(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_bool(), None);
+        assert_eq!(cbor_bytes!(b"").extract_bool(), None);
         assert_eq!(cbor_text!("").extract_bool(), None);
         assert_eq!(cbor_array![].extract_bool(), None);
         assert_eq!(cbor_map! {}.extract_bool(), None);
@@ -528,7 +565,7 @@ mod test {
     fn test_extract_null() {
         assert_eq!(cbor_int!(1).extract_null(), None);
         assert_eq!(cbor_int!(-1).extract_null(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_null(), None);
+        assert_eq!(cbor_bytes!(b"").extract_null(), None);
         assert_eq!(cbor_text!("").extract_null(), None);
         assert_eq!(cbor_array![].extract_null(), None);
         assert_eq!(cbor_map! {}.extract_null(), None);
@@ -543,7 +580,7 @@ mod test {
     fn test_extract_undefined() {
         assert_eq!(cbor_int!(1).extract_undefined(), None);
         assert_eq!(cbor_int!(-1).extract_undefined(), None);
-        assert_eq!(cbor_bytes!(vec![]).extract_undefined(), None);
+        assert_eq!(cbor_bytes!(b"").extract_undefined(), None);
         assert_eq!(cbor_text!("").extract_undefined(), None);
         assert_eq!(cbor_array![].extract_undefined(), None);
         assert_eq!(cbor_map! {}.extract_undefined(), None);
@@ -567,8 +604,8 @@ mod test {
         assert!(cbor_int!(-24) < cbor_int!(-1000));
         assert!(cbor_int!(-1000) < cbor_int!(-1000000));
         assert!(cbor_int!(-1000000) < cbor_int!(core::i64::MIN));
-        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(vec![]));
-        assert!(cbor_bytes!(vec![]) < cbor_bytes!(vec![0x00]));
+        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(b""));
+        assert!(cbor_bytes!(b"") < cbor_bytes!(vec![0x00]));
         assert!(cbor_bytes!(vec![0x00]) < cbor_bytes!(vec![0x01]));
         assert!(cbor_bytes!(vec![0x01]) < cbor_bytes!(vec![0xFF]));
         assert!(cbor_bytes!(vec![0xFF]) < cbor_bytes!(vec![0x00, 0x00]));
@@ -599,8 +636,8 @@ mod test {
         assert!(cbor_map! {0 => 0} < cbor_tagged!(2, cbor_int!(0)));
         assert!(cbor_map! {0 => 0, 0 => 0} < cbor_bool!(false));
         assert!(cbor_bool!(false) < cbor_bool!(true));
-        assert!(cbor_bool!(true) < Value::Simple(SimpleValue::NullValue));
-        assert!(Value::Simple(SimpleValue::NullValue) < Value::Simple(SimpleValue::Undefined));
+        assert!(cbor_bool!(true) < cbor_null!());
+        assert!(cbor_null!() < cbor_undefined!());
         assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_tagged!(2, cbor_int!(0)));
         assert!(cbor_int!(1) < cbor_int!(-1));
         assert!(cbor_int!(1) < cbor_bytes!(vec![0x00]));

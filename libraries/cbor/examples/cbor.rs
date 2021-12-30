@@ -18,7 +18,7 @@
 
 extern crate alloc;
 
-use sk_cbor::values::{SimpleValue, Value};
+use sk_cbor::values::Value;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_map, cbor_null, cbor_true};
 
 fn hexify(data: &[u8]) -> String {
@@ -32,17 +32,14 @@ fn hexify(data: &[u8]) -> String {
 fn main() {
     // Build a CBOR object with various different types included. Note that this
     // object is not built in canonical order.
-    let manual_object = Value::Map(vec![
+    let manual_object = Value::map(vec![
         (
-            Value::Unsigned(1),
-            Value::Array(vec![Value::Unsigned(2), Value::Unsigned(3)]),
+            Value::from(1),
+            Value::array(vec![Value::from(2), Value::from(3)]),
         ),
-        (
-            Value::TextString("tstr".to_owned()),
-            Value::ByteString(vec![1, 2, 3]),
-        ),
-        (Value::Negative(-2), Value::Simple(SimpleValue::NullValue)),
-        (Value::Unsigned(3), Value::Simple(SimpleValue::TrueValue)),
+        (Value::from("tstr".to_owned()), Value::from(vec![1, 2, 3])),
+        (Value::from(-2), Value::null_value()),
+        (Value::from(3), Value::bool_value(true)),
     ]);
 
     // Build the same object using the crate's convenience macros.

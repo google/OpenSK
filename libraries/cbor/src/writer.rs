@@ -14,7 +14,7 @@
 
 //! Functionality for serializing CBOR values into bytes.
 
-use super::values::{Constants, Value};
+use super::values::{Constants, Value, ValueImpl};
 use alloc::vec::Vec;
 
 /// Possible errors from a serialization operation.
@@ -60,25 +60,25 @@ impl<'a> Writer<'a> {
         if remaining_depth.map_or(false, |d| d < 0) {
             return Err(EncoderError::TooMuchNesting);
         }
-        let type_label = value.type_label();
-        match value {
-            Value::Unsigned(unsigned) => self.start_item(type_label, unsigned),
-            Value::Negative(negative) => self.start_item(type_label, -(negative + 1) as u64),
-            Value::ByteString(byte_string) => {
+        let type_label = value.0.type_label();
+        match value.0 {
+            ValueImpl::Unsigned(unsigned) => self.start_item(type_label, unsigned),
+            ValueImpl::Negative(negative) => self.start_item(type_label, -(negative + 1) as u64),
+            ValueImpl::ByteString(byte_string) => {
                 self.start_item(type_label, byte_string.len() as u64);
                 self.encoded_cbor.extend(byte_string);
             }
-            Value::TextString(text_string) => {
+            ValueImpl::TextString(text_string) => {
                 self.start_item(type_label, text_string.len() as u64);
                 self.encoded_cbor.extend(text_string.into_bytes());
             }
-            Value::Array(array) => {
+            ValueImpl::Array(array) => {
                 self.start_item(type_label, array.len() as u64);
                 for el in array {
                     self.encode_cbor(el, remaining_depth.map(|d| d - 1))?;
                 }
             }
-            Value::Map(mut map) => {
+            ValueImpl::Map(mut map) => {
                 map.sort_by(|a, b| a.0.cmp(&b.0));
                 let map_len = map.len();
                 map.dedup_by(|a, b| a.0.eq(&b.0));
@@ -91,11 +91,11 @@ impl<'a> Writer<'a> {
                     self.encode_cbor(v, remaining_depth.map(|d| d - 1))?;
                 }
             }
-            Value::Tag(tag, inner_value) => {
+            ValueImpl::Tag(tag, inner_value) => {
                 self.start_item(type_label, tag);
                 self.encode_cbor(*inner_value, remaining_depth.map(|d| d - 1))?;
             }
-            Value::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
+            ValueImpl::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
         }
         Ok(())
     }

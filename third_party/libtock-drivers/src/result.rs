@@ -15,6 +15,7 @@ pub type TockResult<T> = Result<T, TockError>;
 // This trait allows to flexibly use `Result::unwrap` or `Option::unwrap` and is configured to do
 // so depending on the `debug_ctap` feature.
 pub trait FlexUnwrap<T> {
+    #[track_caller]
     fn flex_unwrap(self) -> T;
 }
 

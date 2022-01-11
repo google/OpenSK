@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::clock::CtapInstant;
+
 use super::super::customization::MAX_MSG_SIZE;
 use super::{ChannelID, CtapHid, CtapHidCommand, HidPacket, Message, ProcessedPacket};
 use alloc::vec::Vec;
 use core::mem::swap;
-use libtock_drivers::timer::Timestamp;
 
 // A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
 pub struct MessageAssembler {
@@ -25,7 +26,7 @@ pub struct MessageAssembler {
     // Current channel ID.
     cid: ChannelID,
     // Timestamp of the last packet received on the current channel.
-    last_timestamp: Timestamp<isize>,
+    last_timestamp: CtapInstant,
     // Current command.
     cmd: u8,
     // Sequence number expected for the next packet.
@@ -57,7 +58,7 @@ impl MessageAssembler {
         MessageAssembler {
             idle: true,
             cid: [0, 0, 0, 0],
-            last_timestamp: Timestamp::from_ms(0),
+            last_timestamp: CtapInstant::new(0),
             cmd: 0,
             seq: 0,
             remaining_payload_len: 0,
@@ -70,7 +71,7 @@ impl MessageAssembler {
     pub fn reset(&mut self) {
         self.idle = true;
         self.cid = [0, 0, 0, 0];
-        self.last_timestamp = Timestamp::from_ms(0);
+        self.last_timestamp = CtapInstant::new(0);
         self.cmd = 0;
         self.seq = 0;
         self.remaining_payload_len = 0;
@@ -87,13 +88,13 @@ impl MessageAssembler {
     pub fn parse_packet(
         &mut self,
         packet: &HidPacket,
-        timestamp: Timestamp<isize>,
+        timestamp: CtapInstant,
     ) -> Result<Option<Message>, (ChannelID, Error)> {
         // TODO: Support non-full-speed devices (i.e. packet len != 64)? This isn't recommended by
         // section 8.8.1
         let (cid, processed_packet) = CtapHid::process_single_packet(packet);
 
-        if !self.idle && timestamp - self.last_timestamp >= CtapHid::TIMEOUT_DURATION {
+        if !self.idle && timestamp >= self.last_timestamp + CtapHid::TIMEOUT_DURATION {
             // The current channel timed out.
             // Save the channel ID and reset the state.
             let current_cid = self.cid;
@@ -160,7 +161,7 @@ impl MessageAssembler {
         cmd: u8,
         len: usize,
         data: &[u8],
-        timestamp: Timestamp<isize>,
+        timestamp: CtapInstant,
     ) -> Result<Option<Message>, (ChannelID, Error)> {
         // Reject invalid lengths early to reduce the risk of running out of memory.
         // TODO: also reject invalid commands early?
@@ -198,12 +199,10 @@ impl MessageAssembler {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use libtock_drivers::timer::Duration;
+    use crate::ctap::hid::CtapHid;
+    use embedded_time::duration::Milliseconds;
 
-    // Except for tests that exercise timeouts, all packets are synchronized at the same dummy
-    // timestamp.
-    const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
+    use super::*;
 
     fn byte_extend(bytes: &[u8], padding: u8) -> HidPacket {
         let len = bytes.len();
@@ -223,10 +222,12 @@ mod test {
     #[test]
     fn test_empty_payload() {
         let mut assembler = MessageAssembler::new();
+        // Except for tests that exercise timeouts, all packets are synchronized at the same dummy
+        // timestamp.
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -242,7 +243,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90, 0x00, 0x10]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -261,7 +262,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x90, 0x00, 0x10], 0xFF),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -277,14 +278,14 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -300,21 +301,21 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x80]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x01]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -330,7 +331,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x1D, 0xB9]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
@@ -338,7 +339,7 @@ mod test {
             assert_eq!(
                 assembler.parse_packet(
                     &zero_extend(&[0x12, 0x34, 0x56, 0x78, seq]),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(None)
             );
@@ -346,7 +347,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x7F]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -371,21 +372,21 @@ mod test {
                         &[0x12, 0x34, 0x56, 0x78, 0x80 | cmd as u8, 0x00, 0x80],
                         byte
                     ),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(None)
             );
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x00], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(None)
             );
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x01], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(Some(Message {
                     cid: [0x12, 0x34, 0x56, 0x78],
@@ -409,21 +410,21 @@ mod test {
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, cid, 0x80 | cmd as u8, 0x00, 0x80], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(None)
             );
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, cid, 0x00], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(None)
             );
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, cid, 0x01], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(Some(Message {
                     cid: [0x12, 0x34, 0x56, cid],
@@ -440,7 +441,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
@@ -452,7 +453,7 @@ mod test {
                 assert_eq!(
                     assembler.parse_packet(
                         &byte_extend(&[0x12, 0x34, 0x56, 0x9A, cmd as u8, 0x00], byte),
-                        DUMMY_TIMESTAMP
+                        CtapInstant::new(0)
                     ),
                     Err(([0x12, 0x34, 0x56, 0x9A], Error::UnexpectedChannel))
                 );
@@ -462,7 +463,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -484,7 +485,7 @@ mod test {
             assert_eq!(
                 assembler.parse_packet(
                     &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x10], byte),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Ok(Some(Message {
                     cid: [0x12, 0x34, 0x56, 0x78],
@@ -498,7 +499,7 @@ mod test {
             assert_eq!(
                 assembler.parse_packet(
                     &zero_extend(&[0x12, 0x34, 0x56, 0x78, seq]),
-                    DUMMY_TIMESTAMP
+                    CtapInstant::new(0)
                 ),
                 Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedContinuation))
             );
@@ -511,14 +512,14 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x80]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedInit))
         );
@@ -530,14 +531,14 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x01]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedSeq))
         );
@@ -549,14 +550,14 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
         assert_eq!(
             assembler.parse_packet(
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
-                DUMMY_TIMESTAMP + CtapHid::TIMEOUT_DURATION
+                CtapInstant::new(0) + CtapHid::TIMEOUT_DURATION
             ),
             Err(([0x12, 0x34, 0x56, 0x78], Error::Timeout))
         );
@@ -564,9 +565,9 @@ mod test {
 
     #[test]
     fn test_just_in_time_packets() {
-        let mut timestamp = DUMMY_TIMESTAMP;
+        let mut timestamp: CtapInstant = CtapInstant::new(0);
         // Delay between each packet is just below the threshold.
-        let delay = CtapHid::TIMEOUT_DURATION - Duration::from_ms(1);
+        let delay = CtapHid::TIMEOUT_DURATION - Milliseconds(1_u32);
 
         let mut assembler = MessageAssembler::new();
         assert_eq!(
@@ -577,13 +578,13 @@ mod test {
             Ok(None)
         );
         for seq in 0..0x7F {
-            timestamp += delay;
+            timestamp = timestamp + delay;
             assert_eq!(
                 assembler.parse_packet(&zero_extend(&[0x12, 0x34, 0x56, 0x78, seq]), timestamp),
                 Ok(None)
             );
         }
-        timestamp += delay;
+        timestamp = timestamp + delay;
         assert_eq!(
             assembler.parse_packet(&zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x7F]), timestamp),
             Ok(Some(Message {
@@ -601,7 +602,7 @@ mod test {
         assert_eq!(
             assembler.parse_packet(
                 &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x02, 0x00], 0x51),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(None)
         );
@@ -612,7 +613,7 @@ mod test {
                     0x12, 0x34, 0x56, 0x78, 0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
                     0xDE, 0xF0
                 ]),
-                DUMMY_TIMESTAMP
+                CtapInstant::new(0)
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],

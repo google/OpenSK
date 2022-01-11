@@ -211,7 +211,7 @@ pub fn switch_off_leds() {
 }
 
 const KEEPALIVE_DELAY_MS: isize = 100;
-pub const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
+pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 
 fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
@@ -219,7 +219,11 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
+<<<<<<< HEAD:src/env/tock/mod.rs
     send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY)?;
+=======
+    send_keepalive_up_needed(cid, KEEPALIVE_DELAY_TOCK)?;
+>>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock):src/env/tock.rs
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -245,7 +249,7 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
             keepalive_expired.set(true);
         });
         let mut keepalive = keepalive_callback.init().flex_unwrap();
-        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY).flex_unwrap();
+        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY_TOCK).flex_unwrap();
 
         // Wait for a button touch or an alarm.
         libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
@@ -269,7 +273,11 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
+<<<<<<< HEAD:src/env/tock/mod.rs
             keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY);
+=======
+            keepalive_response = send_keepalive_up_needed(cid, KEEPALIVE_DELAY_TOCK);
+>>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock):src/env/tock.rs
         }
 
         if button_touched.get() || keepalive_response.is_err() {

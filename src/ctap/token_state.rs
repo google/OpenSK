@@ -18,14 +18,16 @@ use crate::ctap::timed_permission::TimedPermission;
 use alloc::string::String;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-use libtock_drivers::timer::{ClockValue, Duration};
+use embedded_time::duration::Milliseconds;
+
+use crate::clock::{ClockInt, CtapInstant};
 
 /// Timeout for auth tokens.
 ///
 /// This usage time limit is correct for USB, BLE, and internal.
 /// NFC only allows 19.8 seconds.
 /// TODO(#15) multiplex over transports, add NFC
-const INITIAL_USAGE_TIME_LIMIT: Duration<isize> = Duration::from_ms(30000);
+const INITIAL_USAGE_TIME_LIMIT: Milliseconds<ClockInt> = Milliseconds(30000 as ClockInt);
 
 /// Implements pinUvAuthToken state from section 6.5.2.1.
 ///
@@ -111,14 +113,14 @@ impl PinUvAuthTokenState {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self, now: ClockValue) {
+    pub fn begin_using_pin_uv_auth_token(&mut self, now: CtapInstant) {
         self.user_verified = true;
         self.usage_timer = TimedPermission::granted(now, INITIAL_USAGE_TIME_LIMIT);
         self.in_use = true;
     }
 
     /// Updates the usage timer, and disables the pinUvAuthToken on timeout.
-    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, now: ClockValue) {
+    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, now: CtapInstant) {
         if !self.in_use {
             return;
         }
@@ -158,20 +160,16 @@ mod test {
     use super::*;
     use enum_iterator::IntoEnumIterator;
 
-    const CLOCK_FREQUENCY_HZ: usize = 32768;
-    const START_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
-    const SMALL_DURATION: Duration<isize> = Duration::from_ms(100);
-
     #[test]
     fn test_observer() {
         let mut token_state = PinUvAuthTokenState::new();
-        let mut now = START_CLOCK_VALUE;
+        let mut now: CtapInstant = CtapInstant::new(0);
         token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.is_in_use());
-        now = now.wrapping_add(SMALL_DURATION);
+        now = now + Milliseconds(100_u32);
         token_state.pin_uv_auth_token_usage_timer_observer(now);
         assert!(token_state.is_in_use());
-        now = now.wrapping_add(INITIAL_USAGE_TIME_LIMIT);
+        now = now + INITIAL_USAGE_TIME_LIMIT;
         token_state.pin_uv_auth_token_usage_timer_observer(now);
         assert!(!token_state.is_in_use());
     }
@@ -179,7 +177,8 @@ mod test {
     #[test]
     fn test_stop() {
         let mut token_state = PinUvAuthTokenState::new();
-        token_state.begin_using_pin_uv_auth_token(START_CLOCK_VALUE);
+        let now: CtapInstant = CtapInstant::new(0);
+        token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.is_in_use());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.is_in_use());
@@ -265,11 +264,12 @@ mod test {
     fn test_user_verified_flag() {
         let mut token_state = PinUvAuthTokenState::new();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(START_CLOCK_VALUE);
+        let now: CtapInstant = CtapInstant::new(0);
+        token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.get_user_verified_flag_value());
         token_state.clear_user_verified_flag();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(START_CLOCK_VALUE);
+        token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.get_user_verified_flag_value());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.get_user_verified_flag_value());

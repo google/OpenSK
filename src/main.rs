@@ -24,21 +24,26 @@ extern crate lang_items;
 #[cfg(feature = "with_ctap1")]
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
+use core::convert::TryFrom;
+use core::convert::TryInto;
+#[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+#[cfg(feature = "debug_ctap")]
+use ctap2::clock::CtapClock;
+use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY};
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
-use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv, KEEPALIVE_DELAY};
+use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv, KEEPALIVE_DELAY_TOCK};
+#[cfg(feature = "debug_ctap")]
+use embedded_time::duration::Microseconds;
+use embedded_time::duration::Milliseconds;
 #[cfg(feature = "with_ctap1")]
 use libtock_drivers::buttons::{self, ButtonState};
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
+#[cfg(feature = "with_ctap1")]
 use libtock_drivers::result::FlexUnwrap;
-use libtock_drivers::timer;
 use libtock_drivers::timer::Duration;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::timer::Timer;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::timer::Timestamp;
 use libtock_drivers::usb_ctap_hid;
 
 libtock_core::stack_size! {0x4000}
@@ -46,17 +51,14 @@ libtock_core::stack_size! {0x4000}
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
 
 fn main() {
-    // Setup the timer with a dummy callback (we only care about reading the current time, but the
-    // API forces us to set an alarm callback too).
-    let mut with_callback = timer::with_callback(|_, _| {});
-    let timer = with_callback.init().flex_unwrap();
+    let clock = new_clock();
 
     // Setup USB driver.
     if !usb_ctap_hid::setup() {
         panic!("Cannot setup USB driver");
     }
 
-    let boot_time = timer.get_current_clock().flex_unwrap();
+    let boot_time = clock.try_now().unwrap();
     let env = TockEnv::new();
     let mut ctap = ctap2::Ctap::new(env, boot_time);
 
@@ -86,17 +88,18 @@ fn main() {
         }
 
         let mut pkt_request = [0; 64];
-        let has_packet = match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY) {
-            Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
-                #[cfg(feature = "debug_ctap")]
-                print_packet_notice("Received packet", &timer);
-                true
-            }
-            Some(_) => panic!("Error receiving packet"),
-            None => false,
-        };
+        let has_packet =
+            match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK) {
+                Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+                    #[cfg(feature = "debug_ctap")]
+                    print_packet_notice("Received packet", &clock);
+                    true
+                }
+                Some(_) => panic!("Error receiving packet"),
+                None => false,
+            };
 
-        let now = timer.get_current_clock().flex_unwrap();
+        let now = clock.try_now().unwrap();
         #[cfg(feature = "with_ctap1")]
         {
             if button_touched.get() {
@@ -124,7 +127,7 @@ fn main() {
                 match status {
                     None => {
                         #[cfg(feature = "debug_ctap")]
-                        print_packet_notice("Sending packet timed out", &timer);
+                        print_packet_notice("Sending packet timed out", &clock);
                         // TODO: reset the ctap_hid state.
                         // Since sending the packet timed out, we cancel this reply.
                         break;
@@ -132,19 +135,20 @@ fn main() {
                     Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending packet"),
                     Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
                         #[cfg(feature = "debug_ctap")]
-                        print_packet_notice("Sent packet", &timer);
+                        print_packet_notice("Sent packet", &clock);
                     }
                     Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
                         #[cfg(feature = "debug_ctap")]
-                        print_packet_notice("Received an UNEXPECTED packet", &timer);
+                        print_packet_notice("Received an UNEXPECTED packet", &clock);
                         // TODO: handle this unexpected packet.
                     }
                 }
             }
         }
 
-        let now = timer.get_current_clock().flex_unwrap();
-        if let Some(wait_duration) = now.wrapping_sub(last_led_increment) {
+        let now = clock.try_now().unwrap();
+        if let Some(wait_duration) = now.checked_duration_since(&last_led_increment) {
+            let wait_duration: Milliseconds<ClockInt> = wait_duration.try_into().unwrap();
             if wait_duration > KEEPALIVE_DELAY {
                 // Loops quickly when waiting for U2F user presence, so the next LED blink
                 // state is only set if enough time has elapsed.
@@ -177,9 +181,11 @@ fn main() {
 }
 
 #[cfg(feature = "debug_ctap")]
-fn print_packet_notice(notice_text: &str, timer: &Timer) {
-    let now = timer.get_current_clock().flex_unwrap();
-    let now_us = (Timestamp::<f64>::from_clock_value(now).ms() * 1000.0) as u64;
+fn print_packet_notice(notice_text: &str, clock: &CtapClock) {
+    let now = clock.try_now().unwrap();
+    let now_us = Microseconds::<u64>::try_from(now.duration_since_epoch())
+        .unwrap()
+        .0;
     writeln!(
         Console::new(),
         "{} at {}.{:06} s",

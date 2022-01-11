@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::super::clock::CtapInstant;
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorCredentialManagementParameters;
 use super::data_formats::{
@@ -30,7 +31,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-use libtock_drivers::timer::ClockValue;
 
 /// Generates a set with all existing RP IDs.
 fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2StatusCode> {
@@ -137,7 +137,7 @@ fn process_get_creds_metadata(
 fn process_enumerate_rps_begin(
     env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
-    now: ClockValue,
+    now: CtapInstant,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_set = get_stored_rp_ids(env)?;
     let total_rps = rp_set.len();
@@ -174,7 +174,7 @@ fn process_enumerate_credentials_begin(
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
-    now: ClockValue,
+    now: CtapInstant,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_hash = sub_command_params
         .rp_id_hash
@@ -252,7 +252,7 @@ pub fn process_credential_management(
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     cred_management_params: AuthenticatorCredentialManagementParameters,
-    now: ClockValue,
+    now: CtapInstant,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let AuthenticatorCredentialManagementParameters {
         sub_command,
@@ -359,9 +359,6 @@ mod test {
     use crate::env::Env;
     use crypto::rng256::Rng256;
 
-    const CLOCK_FREQUENCY_HZ: usize = 32768;
-    const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
-
     fn create_credential_source(rng: &mut impl Rng256) -> PublicKeyCredentialSource {
         let private_key = crypto::ecdsa::SecKey::gensk(rng);
         PublicKeyCredentialSource {
@@ -388,7 +385,7 @@ mod test {
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
         let credential_source = create_credential_source(env.rng());
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
@@ -410,7 +407,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let initial_capacity = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -435,7 +432,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -470,7 +467,7 @@ mod test {
         let mut credential_source2 = create_credential_source(env.rng());
         credential_source2.rp_id = "another.example.com".to_string();
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source1).unwrap();
@@ -493,7 +490,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let first_rp_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -517,7 +514,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let second_rp_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -542,7 +539,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -559,7 +556,7 @@ mod test {
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
         let credential_source = create_credential_source(env.rng());
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         const NUM_CREDENTIALS: usize = 20;
@@ -591,7 +588,7 @@ mod test {
                 &mut ctap_state.stateful_command_permission,
                 &mut ctap_state.client_pin,
                 cred_management_params,
-                DUMMY_CLOCK_VALUE,
+                CtapInstant::new(0),
             );
             match cred_management_response.unwrap() {
                 ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -621,7 +618,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -643,7 +640,7 @@ mod test {
         credential_source2.user_display_name = Some("User Two".to_string());
         credential_source2.user_icon = Some("icon2".to_string());
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source1).unwrap();
@@ -673,7 +670,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let first_credential_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -696,7 +693,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let second_credential_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -720,7 +717,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -738,7 +735,7 @@ mod test {
         let mut credential_source = create_credential_source(env.rng());
         credential_source.credential_id = vec![0x1D; 32];
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source).unwrap();
@@ -770,7 +767,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -788,7 +785,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -806,7 +803,7 @@ mod test {
         let mut credential_source = create_credential_source(env.rng());
         credential_source.credential_id = vec![0x1D; 32];
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source).unwrap();
@@ -844,7 +841,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -867,7 +864,7 @@ mod test {
     #[test]
     fn test_process_credential_management_invalid_pin_uv_auth_param() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
 
@@ -882,7 +879,7 @@ mod test {
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,

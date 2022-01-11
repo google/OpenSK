@@ -65,6 +65,8 @@ use self::timed_permission::TimedPermission;
 use self::timed_permission::U2fUserPresenceState;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
+use crate::clock::{ClockInt, CtapInstant};
+use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
 use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -78,7 +80,10 @@ use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-use libtock_drivers::timer::{ClockValue, Duration};
+use embedded_time::duration::Milliseconds;
+#[cfg(feature = "debug_ctap")]
+use libtock_drivers::console::Console;
+use libtock_drivers::crp;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 
@@ -101,12 +106,14 @@ const ED_FLAG: u8 = 0x80;
 // CTAP2 specification section 6 requires that the depth of nested CBOR structures be limited to at most four levels.
 const MAX_CBOR_NESTING_DEPTH: i8 = 4;
 
-pub const TOUCH_TIMEOUT_MS: isize = 30000;
+pub const TOUCH_TIMEOUT_MS: ClockInt = 30000;
 #[cfg(feature = "with_ctap1")]
-const U2F_UP_PROMPT_TIMEOUT: Duration<isize> = Duration::from_ms(10000);
+pub const TOUCH_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(TOUCH_TIMEOUT_MS);
+#[cfg(feature = "with_ctap1")]
+const U2F_UP_PROMPT_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(10000 as ClockInt);
 // TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
-const RESET_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(10000);
-const STATEFUL_COMMAND_TIMEOUT_DURATION: Duration<isize> = Duration::from_ms(30000);
+const RESET_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(10000 as ClockInt);
+const STATEFUL_COMMAND_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(30000 as ClockInt);
 
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
@@ -239,7 +246,7 @@ impl StatefulPermission {
     ///
     /// Resets are only possible after a power cycle. Therefore, initialization
     /// means allowing Reset, and Reset cannot be granted later.
-    pub fn new_reset(now: ClockValue) -> StatefulPermission {
+    pub fn new_reset(now: CtapInstant) -> StatefulPermission {
         StatefulPermission {
             permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
             command_type: Some(StatefulCommand::Reset),
@@ -253,7 +260,7 @@ impl StatefulPermission {
     }
 
     /// Checks the permission timeout.
-    pub fn check_command_permission(&mut self, now: ClockValue) -> Result<(), Ctap2StatusCode> {
+    pub fn check_command_permission(&mut self, now: CtapInstant) -> Result<(), Ctap2StatusCode> {
         if self.permission.is_granted(now) {
             Ok(())
         } else {
@@ -270,7 +277,7 @@ impl StatefulPermission {
     }
 
     /// Sets a new command state, and starts a new clock for timeouts.
-    pub fn set_command(&mut self, now: ClockValue, new_command_type: StatefulCommand) {
+    pub fn set_command(&mut self, now: CtapInstant, new_command_type: StatefulCommand) {
         match &new_command_type {
             // Reset is only allowed after a power cycle.
             StatefulCommand::Reset => unreachable!(),
@@ -335,22 +342,19 @@ pub struct CtapState {
 }
 
 impl CtapState {
-    pub fn new(env: &mut impl Env, now: ClockValue) -> Self {
+    pub fn new(env: &mut impl Env, now: CtapInstant) -> Self {
         storage::init(env).ok().unwrap();
         let client_pin = ClientPin::new(env.rng());
         CtapState {
             client_pin,
             #[cfg(feature = "with_ctap1")]
-            u2f_up_state: U2fUserPresenceState::new(
-                U2F_UP_PROMPT_TIMEOUT,
-                Duration::from_ms(TOUCH_TIMEOUT_MS),
-            ),
+            u2f_up_state: U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT),
             stateful_command_permission: StatefulPermission::new_reset(now),
             large_blobs: LargeBlobs::new(),
         }
     }
 
-    pub fn update_timeouts(&mut self, now: ClockValue) {
+    pub fn update_timeouts(&mut self, now: CtapInstant) {
         // Ignore the result, just update.
         let _ = self
             .stateful_command_permission
@@ -448,7 +452,7 @@ impl CtapState {
         env: &mut impl Env,
         command_cbor: &[u8],
         cid: ChannelID,
-        now: ClockValue,
+        now: CtapInstant,
     ) -> Vec<u8> {
         let cmd = Command::deserialize(command_cbor);
         debug_ctap!(env, "Received command: {:#?}", cmd);
@@ -457,10 +461,8 @@ impl CtapState {
                 // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
                 #[cfg(feature = "with_ctap1")]
                 {
-                    self.u2f_up_state = U2fUserPresenceState::new(
-                        U2F_UP_PROMPT_TIMEOUT,
-                        Duration::from_ms(TOUCH_TIMEOUT_MS),
-                    );
+                    self.u2f_up_state =
+                        U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
                 }
                 match (&command, self.stateful_command_permission.get_command()) {
                     (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
@@ -925,7 +927,7 @@ impl CtapState {
         env: &mut impl Env,
         get_assertion_params: AuthenticatorGetAssertionParameters,
         cid: ChannelID,
-        now: ClockValue,
+        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorGetAssertionParameters {
             rp_id,
@@ -1055,7 +1057,7 @@ impl CtapState {
     fn process_get_next_assertion(
         &mut self,
         env: &mut impl Env,
-        now: ClockValue,
+        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
             .check_command_permission(now)?;
@@ -1136,7 +1138,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         cid: ChannelID,
-        now: ClockValue,
+        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
             .check_command_permission(now)?;
@@ -1150,10 +1152,7 @@ impl CtapState {
         self.client_pin.reset(env.rng());
         #[cfg(feature = "with_ctap1")]
         {
-            self.u2f_up_state = U2fUserPresenceState::new(
-                U2F_UP_PROMPT_TIMEOUT,
-                Duration::from_ms(TOUCH_TIMEOUT_MS),
-            );
+            self.u2f_up_state = U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
         }
         Ok(ResponseData::AuthenticatorReset)
     }
@@ -1312,12 +1311,12 @@ impl CtapState {
     }
 
     #[cfg(feature = "with_ctap1")]
-    pub fn u2f_grant_user_presence(&mut self, now: ClockValue) {
+    pub fn u2f_grant_user_presence(&mut self, now: CtapInstant) {
         self.u2f_up_state.grant_up(now)
     }
 
     #[cfg(feature = "with_ctap1")]
-    pub fn u2f_needs_user_presence(&mut self, now: ClockValue) -> bool {
+    pub fn u2f_needs_user_presence(&mut self, now: CtapInstant) -> bool {
         self.u2f_up_state.is_up_needed(now)
     }
 }
@@ -1336,8 +1335,6 @@ mod test {
     use crate::env::test::TestEnv;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
-    const CLOCK_FREQUENCY_HZ: usize = 32768;
-    const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
     // The keep-alive logic in the processing of some commands needs a channel ID to send
     // keep-alive packets to.
     // In tests where we define a dummy user-presence check that immediately returns, the channel
@@ -1389,9 +1386,9 @@ mod test {
     #[test]
     fn test_get_info() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let info_reponse =
-            ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+            ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL_ID, CtapInstant::new(0));
 
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
@@ -1501,7 +1498,7 @@ mod test {
     #[test]
     fn test_resident_process_make_credential() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
@@ -1519,7 +1516,7 @@ mod test {
     #[test]
     fn test_non_resident_process_make_credential() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
@@ -1538,7 +1535,7 @@ mod test {
     #[test]
     fn test_process_make_credential_unsupported_algorithm() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.pub_key_cred_params = vec![];
@@ -1555,7 +1552,7 @@ mod test {
     fn test_process_make_credential_credential_excluded() {
         let mut env = TestEnv::new();
         let excluded_private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
         let make_credential_params =
@@ -1587,7 +1584,7 @@ mod test {
     #[test]
     fn test_process_make_credential_credential_with_cred_protect() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
         let make_credential_params =
@@ -1638,7 +1635,7 @@ mod test {
     #[test]
     fn test_process_make_credential_hmac_secret() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -1665,7 +1662,7 @@ mod test {
     #[test]
     fn test_process_make_credential_hmac_secret_resident_key() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -1691,7 +1688,7 @@ mod test {
     #[test]
     fn test_process_make_credential_min_pin_length() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // First part: The extension is ignored, since the RP ID is not on the list.
         let extensions = MakeCredentialExtensions {
@@ -1740,7 +1737,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cred_blob_ok() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
             cred_blob: Some(vec![0xCB]),
@@ -1772,7 +1769,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cred_blob_too_big() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
             cred_blob: Some(vec![0xCB; MAX_CRED_BLOB_LENGTH + 1]),
@@ -1804,7 +1801,7 @@ mod test {
     #[test]
     fn test_process_make_credential_large_blob_key() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
             large_blob_key: Some(true),
@@ -1839,7 +1836,7 @@ mod test {
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
@@ -1888,7 +1885,7 @@ mod test {
     #[test]
     fn test_non_resident_process_make_credential_with_pin() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
@@ -1908,7 +1905,7 @@ mod test {
     #[test]
     fn test_resident_process_make_credential_with_pin() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -1923,7 +1920,7 @@ mod test {
     #[test]
     fn test_process_make_credential_with_pin_always_uv() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         storage::toggle_always_uv(&mut env).unwrap();
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -1951,7 +1948,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
@@ -2046,7 +2043,7 @@ mod test {
     #[test]
     fn test_resident_process_get_assertion() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
         assert!(ctap_state
@@ -2069,7 +2066,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
@@ -2131,7 +2128,7 @@ mod test {
     fn test_helper_process_get_assertion_hmac_secret(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -2167,7 +2164,7 @@ mod test {
         let key_agreement_response =
             ctap_state
                 .client_pin
-                .process_command(&mut env, client_pin_params, DUMMY_CLOCK_VALUE);
+                .process_command(&mut env, client_pin_params, CtapInstant::new(0));
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),
@@ -2178,7 +2175,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
     }
@@ -2198,7 +2195,7 @@ mod test {
     ) {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -2223,7 +2220,7 @@ mod test {
         let key_agreement_response =
             ctap_state
                 .client_pin
-                .process_command(&mut env, client_pin_params, DUMMY_CLOCK_VALUE);
+                .process_command(&mut env, client_pin_params, CtapInstant::new(0));
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),
@@ -2234,7 +2231,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
     }
@@ -2254,7 +2251,7 @@ mod test {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2295,7 +2292,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             get_assertion_response,
@@ -2318,7 +2315,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
@@ -2355,7 +2352,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert_eq!(
             get_assertion_response,
@@ -2368,7 +2365,7 @@ mod test {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2406,7 +2403,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         let expected_extension_cbor = [
@@ -2426,7 +2423,7 @@ mod test {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2464,7 +2461,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let large_blob_key = match get_assertion_response.unwrap() {
             ResponseData::AuthenticatorGetAssertion(get_assertion_response) => {
@@ -2484,7 +2481,7 @@ mod test {
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
 
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user1 = PublicKeyCredentialUserEntity {
@@ -2535,7 +2532,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response_with_user(
@@ -2548,7 +2545,7 @@ mod test {
         );
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         check_assertion_response_with_user(
             get_assertion_response,
             user1,
@@ -2559,7 +2556,7 @@ mod test {
         );
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2579,7 +2576,7 @@ mod test {
     #[test]
     fn test_process_get_next_assertion_three_credentials_no_uv() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x01];
@@ -2622,7 +2619,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(
@@ -2633,15 +2630,15 @@ mod test {
         );
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         check_assertion_response(get_assertion_response, vec![0x02], signature_counter, None);
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         check_assertion_response(get_assertion_response, vec![0x01], signature_counter, None);
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2651,10 +2648,10 @@ mod test {
     #[test]
     fn test_process_get_next_assertion_not_allowed() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2687,7 +2684,7 @@ mod test {
             &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
 
@@ -2704,10 +2701,15 @@ mod test {
             4 => cbor_array![ES256_CRED_PARAM],
         };
         assert!(cbor_write(cbor_value, &mut command_cbor).is_ok());
-        ctap_state.process_command(&mut env, &command_cbor, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        ctap_state.process_command(
+            &mut env,
+            &command_cbor,
+            DUMMY_CHANNEL_ID,
+            CtapInstant::new(0),
+        );
 
         let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
+            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2718,7 +2720,7 @@ mod test {
     fn test_process_reset() {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let credential_id = vec![0x01, 0x23, 0x45, 0x67];
         let credential_source = PublicKeyCredentialSource {
@@ -2739,7 +2741,7 @@ mod test {
         assert!(storage::count_credentials(&mut env).unwrap() > 0);
 
         let reset_reponse =
-            ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+            ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL_ID, CtapInstant::new(0));
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
         assert!(storage::count_credentials(&mut env).unwrap() == 0);
@@ -2750,9 +2752,10 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reset_reponse =
+            ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, CtapInstant::new(0));
 
         assert_eq!(
             reset_reponse,
@@ -2763,26 +2766,27 @@ mod test {
     #[test]
     fn test_process_reset_not_first() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // This is a GetNextAssertion command.
-        ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL_ID, CtapInstant::new(0));
 
-        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reset_reponse =
+            ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, CtapInstant::new(0));
         assert_eq!(reset_reponse, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
     }
 
     #[test]
     fn test_process_credential_management_unknown_subcommand() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // The subcommand 0xEE does not exist.
         let reponse = ctap_state.process_command(
             &mut env,
             &[0x0A, 0xA1, 0x01, 0x18, 0xEE],
             DUMMY_CHANNEL_ID,
-            DUMMY_CLOCK_VALUE,
+            CtapInstant::new(0),
         );
         let expected_response = vec![Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND as u8];
         assert_eq!(reponse, expected_response);
@@ -2791,11 +2795,11 @@ mod test {
     #[test]
     fn test_process_unknown_command() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // This command does not exist.
         let reponse =
-            ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+            ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL_ID, CtapInstant::new(0));
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
         assert_eq!(reponse, expected_response);
     }
@@ -2804,7 +2808,7 @@ mod test {
     fn test_encrypt_decrypt_credential() {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // Usually, the relying party ID or its hash is provided by the client.
         // We are not testing the correctness of our SHA256 here, only if it is checked.
@@ -2824,7 +2828,7 @@ mod test {
     fn test_encrypt_decrypt_bad_hmac() {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // Same as above.
         let rp_id_hash = [0x55; 32];
@@ -2844,7 +2848,7 @@ mod test {
     #[test]
     fn test_signature_counter() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut last_counter = storage::global_signature_counter(&mut env).unwrap();
         assert!(last_counter > 0);
@@ -2861,7 +2865,7 @@ mod test {
     #[test]
     fn test_vendor_configure() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // Nothing should be configured at the beginning
         let response = ctap_state.process_vendor_configure(
@@ -3066,7 +3070,7 @@ mod test {
         // The test identifier matches partition B.
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         const METADATA_LEN: usize = 40;
 
         let data = vec![0xFF; 0x1000];
@@ -3157,7 +3161,7 @@ mod test {
     fn test_vendor_upgrade_no_second_partition() {
         let mut env = TestEnv::new();
         env.disable_upgrade_storage();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
@@ -3176,7 +3180,7 @@ mod test {
     #[test]
     fn test_vendor_upgrade_info() {
         let mut env = TestEnv::new();
-        let ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let partition_address = env.upgrade_storage().unwrap().partition_address();
 
         let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info(&mut env);

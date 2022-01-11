@@ -18,6 +18,7 @@ extern crate lang_items;
 
 use arrayref::array_ref;
 use core::convert::TryFrom;
+use ctap2::clock::CtapInstant;
 use ctap2::ctap::cbor_read;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
@@ -28,13 +29,8 @@ use ctap2::ctap::hid::send::HidPacketIterator;
 use ctap2::ctap::hid::{ChannelID, CtapHidCommand, HidPacket, Message};
 use ctap2::env::test::TestEnv;
 use ctap2::Ctap;
-use libtock_drivers::timer::{ClockValue, Timestamp};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
-
-const CLOCK_FREQUENCY_HZ: usize = 32768;
-const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
-const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum InputType {
@@ -76,8 +72,9 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
     let mut assembler_reply = MessageAssembler::new();
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
-        for pkt_reply in ctap.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE) {
-            if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP) {
+        for pkt_reply in ctap.process_hid_packet(&pkt_request, CtapInstant::new(0)) {
+            if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0))
+            {
                 result_cid.copy_from_slice(&result.payload[8..12]);
             }
         }
@@ -114,9 +111,9 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in hid_packet_iterator {
-            for pkt_reply in ctap.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE) {
+            for pkt_reply in ctap.process_hid_packet(&pkt_request, CtapInstant::new(0)) {
                 // Only checks for assembling crashes, not for semantics.
-                let _ = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP);
+                let _ = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0));
             }
         }
     }
@@ -127,7 +124,7 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
 // using an initialized and allocated channel.
 pub fn process_ctap_any_type(data: &[u8]) {
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(TestEnv::new(), DUMMY_CLOCK_VALUE);
+    let mut ctap = Ctap::new(TestEnv::new(), CtapInstant::new(0));
     let cid = initialize(&mut ctap);
     // Wrap input as message with the allocated cid.
     let mut command = cid.to_vec();
@@ -143,7 +140,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
         return;
     }
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(TestEnv::new(), DUMMY_CLOCK_VALUE);
+    let mut ctap = Ctap::new(TestEnv::new(), CtapInstant::new(0));
     let cid = initialize(&mut ctap);
     // Wrap input as message with allocated cid and command type.
     let mut command = cid.to_vec();
@@ -173,10 +170,13 @@ pub fn split_assemble_hid_packets(data: &[u8]) {
         let packets: Vec<HidPacket> = hid_packet_iterator.collect();
         if let Some((last_packet, first_packets)) = packets.split_last() {
             for packet in first_packets {
-                assert_eq!(assembler.parse_packet(packet, DUMMY_TIMESTAMP), Ok(None));
+                assert_eq!(
+                    assembler.parse_packet(packet, CtapInstant::new(0)),
+                    Ok(None)
+                );
             }
             assert_eq!(
-                assembler.parse_packet(last_packet, DUMMY_TIMESTAMP),
+                assembler.parse_packet(last_packet, CtapInstant::new(0)),
                 Ok(Some(message))
             );
         }

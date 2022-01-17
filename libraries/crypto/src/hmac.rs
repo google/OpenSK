@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Hash256, HashBlockSize64Bytes};
+use super::Hash256;
 use arrayref::array_ref;
 use subtle::ConstantTimeEq;
 
@@ -21,7 +21,7 @@ const HASH_SIZE: usize = 32;
 
 pub fn verify_hmac_256<H>(key: &[u8], contents: &[u8], mac: &[u8; HASH_SIZE]) -> bool
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     let expected_mac = hmac_256::<H>(key, contents);
     bool::from(expected_mac.ct_eq(mac))
@@ -31,7 +31,7 @@ where
 // against the pin ¯\_(ツ)_/¯
 pub fn verify_hmac_256_first_128bits<H>(key: &[u8], contents: &[u8], pin: &[u8; 16]) -> bool
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     let expected_mac = hmac_256::<H>(key, contents);
     bool::from(array_ref![expected_mac, 0, 16].ct_eq(pin))
@@ -39,7 +39,7 @@ where
 
 pub fn hmac_256<H>(key: &[u8], contents: &[u8]) -> [u8; HASH_SIZE]
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     let mut ipad: [u8; BLOCK_SIZE] = [0x36; BLOCK_SIZE];
     let mut opad: [u8; BLOCK_SIZE] = [0x5c; BLOCK_SIZE];

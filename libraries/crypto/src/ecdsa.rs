@@ -18,7 +18,7 @@ use super::ec::int256::Int256;
 use super::ec::point::PointP256;
 use super::hmac::hmac_256;
 use super::rng256::Rng256;
-use super::{Hash256, HashBlockSize64Bytes};
+use super::Hash256;
 use alloc::vec;
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
@@ -82,7 +82,7 @@ impl SecKey {
     /// Creates a deterministic ECDSA signature based on RFC 6979.
     pub fn sign_rfc6979<H>(&self, msg: &[u8]) -> Signature
     where
-        H: Hash256 + HashBlockSize64Bytes,
+        H: Hash256,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -131,7 +131,7 @@ impl SecKey {
     #[cfg(test)]
     pub fn get_k_rfc6979<H>(&self, msg: &[u8]) -> NonZeroExponentP256
     where
-        H: Hash256 + HashBlockSize64Bytes,
+        H: Hash256,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -288,7 +288,7 @@ impl PubKey {
 
 struct Rfc6979<H>
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     k: [u8; 32],
     v: [u8; 32],
@@ -297,7 +297,7 @@ where
 
 impl<H> Rfc6979<H>
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     pub fn new(sk: &SecKey, msg: &[u8]) -> Rfc6979<H> {
         let h1 = H::hash(msg);

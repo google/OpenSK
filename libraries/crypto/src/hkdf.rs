@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::hmac::hmac_256;
-use super::{Hash256, HashBlockSize64Bytes};
+use super::Hash256;
 
 const HASH_SIZE: usize = 32;
 
@@ -28,7 +28,7 @@ const HASH_SIZE: usize = 32;
 /// default block of zeros and the output length l as 32.
 pub fn hkdf_empty_salt_256<H>(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE]
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     // Salt is a zero block here.
     let prk = hmac_256::<H>(&[0; HASH_SIZE], ikm);
@@ -55,7 +55,7 @@ where
 #[cfg(test)]
 pub fn hkdf<H>(salt: &[u8], ikm: &[u8], l: u8, info: &[u8]) -> Vec<u8>
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     let prk = if salt.is_empty() {
         hmac_256::<H>(&[0; HASH_SIZE], ikm)

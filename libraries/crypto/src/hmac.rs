@@ -46,6 +46,13 @@ pub fn hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8]) -> [u8; HASH_SIZE]
 where
     H: Hash256,
 {
+    H::hmac(key, contents)
+}
+
+pub(crate) fn software_hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8]) -> [u8; HASH_SIZE]
+where
+    H: Hash256,
+{
     let mut ipad: [u8; BLOCK_SIZE] = [0x36; BLOCK_SIZE];
     let mut opad: [u8; BLOCK_SIZE] = [0x5c; BLOCK_SIZE];
     if key.len() <= BLOCK_SIZE {

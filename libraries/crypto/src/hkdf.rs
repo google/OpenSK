@@ -38,116 +38,11 @@ where
     hmac_256::<H>(&prk, t.as_slice())
 }
 
-/// Computes the HKDF.
-///
-/// # Arguments
-///
-/// * `salt` - Optional salt value (a non-secret random value)
-/// * `ikm` - Input keying material
-/// * `l` - Length of output keying material in octets
-/// * `info` - Optional context and application specific information
-///
-/// Defined in RFC: https://tools.ietf.org/html/rfc5869
-///
-/// `salt` and `info` can be be empty. `salt` then defaults to one block of
-/// zeros of size `HASH_SIZE`. Argument order is taken from:
-/// https://fidoalliance.org/specs/fido-v2.1-rd-20201208/fido-client-to-authenticator-protocol-v2.1-rd-20201208.html#pinProto2
-#[cfg(test)]
-pub fn hkdf<H>(salt: &[u8], ikm: &[u8], l: u8, info: &[u8]) -> Vec<u8>
-where
-    H: Hash256,
-{
-    let prk = if salt.is_empty() {
-        hmac_256::<H>(&[0; HASH_SIZE], ikm)
-    } else {
-        hmac_256::<H>(salt, ikm)
-    };
-    let mut t = vec![];
-    let mut okm = vec![];
-    for i in 0..(l as usize + HASH_SIZE - 1) / HASH_SIZE {
-        t.extend_from_slice(info);
-        t.push((i + 1) as u8);
-        t = hmac_256::<H>(&prk, t.as_slice()).to_vec();
-        okm.extend_from_slice(t.as_slice());
-    }
-    okm.truncate(l as usize);
-    okm
-}
-
 #[cfg(test)]
 mod test {
     use super::super::sha256::Sha256;
     use super::*;
     use arrayref::array_ref;
-
-    #[test]
-    fn test_hkdf_sha256_vectors() {
-        // Test vectors taken from https://tools.ietf.org/html/rfc5869.
-        let ikm = hex::decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b").unwrap();
-        let salt = hex::decode("000102030405060708090a0b0c").unwrap();
-        let info = hex::decode("f0f1f2f3f4f5f6f7f8f9").unwrap();
-        let l = 42;
-        let okm = hex::decode(
-            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
-        )
-        .unwrap();
-        assert_eq!(
-            hkdf::<Sha256>(salt.as_slice(), ikm.as_slice(), l, info.as_slice()),
-            okm
-        );
-
-        let ikm = hex::decode(
-            "000102030405060708090a0b0c0d0e0f\
-                                101112131415161718191a1b1c1d1e1f\
-                                202122232425262728292a2b2c2d2e2f\
-                                303132333435363738393a3b3c3d3e3f\
-                                404142434445464748494a4b4c4d4e4f",
-        )
-        .unwrap();
-        let salt = hex::decode(
-            "606162636465666768696a6b6c6d6e6f\
-                               707172737475767778797a7b7c7d7e7f\
-                               808182838485868788898a8b8c8d8e8f\
-                               909192939495969798999a9b9c9d9e9f\
-                               a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
-        )
-        .unwrap();
-        let info = hex::decode(
-            "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf\
-                               c0c1c2c3c4c5c6c7c8c9cacbcccdcecf\
-                               d0d1d2d3d4d5d6d7d8d9dadbdcdddedf\
-                               e0e1e2e3e4e5e6e7e8e9eaebecedeeef\
-                               f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
-        )
-        .unwrap();
-        let l = 82;
-        let okm = hex::decode(
-            "b11e398dc80327a1c8e7f78c596a4934\
-                              4f012eda2d4efad8a050cc4c19afa97c\
-                              59045a99cac7827271cb41c65e590e09\
-                              da3275600c2f09b8367793a9aca3db71\
-                              cc30c58179ec3e87c14c01d5c1f3434f\
-                              1d87",
-        )
-        .unwrap();
-        assert_eq!(
-            hkdf::<Sha256>(salt.as_slice(), ikm.as_slice(), l, info.as_slice()),
-            okm
-        );
-
-        let ikm = hex::decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b").unwrap();
-        let salt = hex::decode("").unwrap();
-        let info = hex::decode("").unwrap();
-        let l = 42;
-        let okm = hex::decode(
-            "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8",
-        )
-        .unwrap();
-        assert_eq!(
-            hkdf::<Sha256>(salt.as_slice(), ikm.as_slice(), l, info.as_slice()),
-            okm
-        );
-    }
 
     #[test]
     fn test_hkdf_empty_salt_256_sha256_vectors() {
@@ -180,47 +75,6 @@ mod test {
                 &hkdf_empty_salt_256::<Sha256>(&ikm.as_bytes(), &info[..]),
                 array_ref!(okm, 0, 32)
             );
-        }
-    }
-
-    #[test]
-    fn test_hkdf_length() {
-        let salt = [];
-        let mut input = Vec::new();
-        for l in 0..128 {
-            assert_eq!(
-                hkdf::<Sha256>(&salt, input.as_slice(), l, input.as_slice()).len(),
-                l as usize
-            );
-            input.push(b'A');
-        }
-    }
-
-    #[test]
-    fn test_hkdf_empty_salt() {
-        let salt = [];
-        let mut input = Vec::new();
-        for l in 0..128 {
-            assert_eq!(
-                hkdf::<Sha256>(&salt, input.as_slice(), l, input.as_slice()),
-                hkdf::<Sha256>(&[0; 32], input.as_slice(), l, input.as_slice())
-            );
-            input.push(b'A');
-        }
-    }
-
-    #[test]
-    fn test_hkdf_compare_implementations() {
-        let salt = [];
-        let l = 32;
-
-        let mut input = Vec::new();
-        for _ in 0..128 {
-            assert_eq!(
-                hkdf::<Sha256>(&salt, input.as_slice(), l, input.as_slice()),
-                hkdf_empty_salt_256::<Sha256>(input.as_slice(), input.as_slice())
-            );
-            input.push(b'A');
         }
     }
 }

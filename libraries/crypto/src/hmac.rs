@@ -114,6 +114,23 @@ mod test {
     }
 
     #[test]
+    fn test_hmac_sha256_examples() {
+        let key = [0; KEY_SIZE];
+        assert_eq!(
+            hmac_256::<Sha256>(&key, &[]),
+            hex::decode("b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad")
+                .unwrap()
+                .as_slice()
+        );
+        assert_eq!(
+            hmac_256::<Sha256>(&key, b"The quick brown fox jumps over the lazy dog"),
+            hex::decode("fb011e6154a19b9a4c767373c305275a5a69e8b68b0b4c9200c383dced19a416")
+                .unwrap()
+                .as_slice()
+        );
+    }
+
+    #[test]
     fn test_hash_sha256_for_various_lengths() {
         // This test makes sure that the key hashing and hash padding are implemented properly.
         //
@@ -256,7 +273,7 @@ mod test {
         ];
 
         let mut input = Vec::new();
-        let key = [b'A'; 32];
+        let key = [b'A'; KEY_SIZE];
         for i in 0..128 {
             assert_eq!(
                 hmac_256::<Sha256>(&key, &input),

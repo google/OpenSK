@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::ctap::status_code::Ctap2StatusCode;
-use alloc::vec;
 use alloc::vec::Vec;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::rng256::Rng256;
@@ -28,20 +27,17 @@ pub fn aes256_cbc_encrypt(
     if plaintext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
+    let mut ciphertext = Vec::with_capacity(plaintext.len() + 16 * embeds_iv as usize);
     let iv = if embeds_iv {
         let random_bytes = rng.gen_uniform_u8x32();
-        *array_ref!(random_bytes, 0, 16)
+        ciphertext.extend_from_slice(&random_bytes[..16]);
+        *array_ref!(ciphertext, 0, 16)
     } else {
         [0u8; 16]
     };
-    let mut blocks = Vec::with_capacity(plaintext.len() / 16);
-    // TODO(https://github.com/rust-lang/rust/issues/74985) Use array_chunks when stable.
-    for block in plaintext.chunks_exact(16) {
-        blocks.push(*array_ref!(block, 0, 16));
-    }
-    cbc_encrypt(aes_enc_key, iv, &mut blocks);
-    let mut ciphertext = if embeds_iv { iv.to_vec() } else { vec![] };
-    ciphertext.extend(blocks.iter().flatten());
+    let start = ciphertext.len();
+    ciphertext.extend_from_slice(plaintext);
+    cbc_encrypt(aes_enc_key, iv, &mut ciphertext[start..]);
     Ok(ciphertext)
 }
 
@@ -51,28 +47,19 @@ pub fn aes256_cbc_decrypt(
     ciphertext: &[u8],
     embeds_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    if ciphertext.len() % 16 != 0 {
+    if ciphertext.len() % 16 != 0 || (embeds_iv && ciphertext.is_empty()) {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
-    let mut block_len = ciphertext.len() / 16;
-    // TODO(https://github.com/rust-lang/rust/issues/74985) Use array_chunks when stable.
-    let mut block_iter = ciphertext.chunks_exact(16);
-    let iv = if embeds_iv {
-        block_len -= 1;
-        let iv_block = block_iter
-            .next()
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        *array_ref!(iv_block, 0, 16)
+    let (iv, ciphertext) = if embeds_iv {
+        let (iv, ciphertext) = ciphertext.split_at(16);
+        (*array_ref!(iv, 0, 16), ciphertext)
     } else {
-        [0u8; 16]
+        ([0u8; 16], ciphertext)
     };
-    let mut blocks = Vec::with_capacity(block_len);
-    for block in block_iter {
-        blocks.push(*array_ref!(block, 0, 16));
-    }
+    let mut plaintext = ciphertext.to_vec();
     let aes_dec_key = crypto::aes256::DecryptionKey::new(aes_enc_key);
-    cbc_decrypt(&aes_dec_key, iv, &mut blocks);
-    Ok(blocks.iter().flatten().cloned().collect::<Vec<u8>>())
+    cbc_decrypt(&aes_dec_key, iv, &mut plaintext);
+    Ok(plaintext)
 }
 
 #[cfg(test)]

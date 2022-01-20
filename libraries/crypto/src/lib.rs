@@ -47,15 +47,6 @@ pub trait Hash256: Sized {
     }
 }
 
-// Traits for block ciphers that operate on 16-byte blocks.
-pub trait Encrypt16BytesBlock {
-    fn encrypt_block(&self, block: &mut [u8; 16]);
-}
-
-pub trait Decrypt16BytesBlock {
-    fn decrypt_block(&self, block: &mut [u8; 16]);
-}
-
 // Trait for hash functions that operate on 64-byte input blocks.
 pub trait HashBlockSize64Bytes {
     type State;

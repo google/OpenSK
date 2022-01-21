@@ -16,8 +16,13 @@ use super::util::{xor_block_16, Block16};
 use crate::aes256::{DecryptionKey, EncryptionKey};
 use core::convert::TryInto;
 
-pub fn cbc_encrypt(key: &EncryptionKey, mut iv: Block16, blocks: &mut [u8]) {
-    for block in blocks.chunks_mut(16) {
+/// Encrypts a byte slice.
+///
+/// # Panics
+///
+/// Panics if the byte slice is not a multiple of the block size (16 bytes).
+pub fn cbc_encrypt(key: &EncryptionKey, mut iv: Block16, bytes: &mut [u8]) {
+    for block in bytes.chunks_mut(16) {
         let block: &mut Block16 = block.try_into().unwrap();
         xor_block_16(block, &iv);
         key.encrypt_block(block);
@@ -25,8 +30,13 @@ pub fn cbc_encrypt(key: &EncryptionKey, mut iv: Block16, blocks: &mut [u8]) {
     }
 }
 
-pub fn cbc_decrypt(key: &DecryptionKey, mut iv: Block16, blocks: &mut [u8]) {
-    for block in blocks.chunks_mut(16) {
+/// Decrypts a byte slice.
+///
+/// # Panics
+///
+/// Panics if the byte slice is not a multiple of the block size (16 bytes).
+pub fn cbc_decrypt(key: &DecryptionKey, mut iv: Block16, bytes: &mut [u8]) {
+    for block in bytes.chunks_mut(16) {
         let block: &mut Block16 = block.try_into().unwrap();
         let tmp = *block;
         key.decrypt_block(block);

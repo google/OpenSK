@@ -44,7 +44,9 @@ pub const PIN_AUTH_LENGTH: usize = 16;
 /// The length of the pinUvAuthToken used throughout PIN protocols.
 ///
 /// The code assumes that this value is a multiple of the AES block length. It
-/// is fixed since CTAP2.1.
+/// is fixed since CTAP2.1, and the specification suggests that it coincides
+/// with the HMAC key length. Therefore a change would require a more general
+/// HMAC implementation.
 pub const PIN_TOKEN_LENGTH: usize = 32;
 
 /// The length of the encrypted PINs when received by SetPin or ChangePin.
@@ -486,9 +488,9 @@ impl ClientPin {
         if decrypted_salts.len() != 32 && decrypted_salts.len() != 64 {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let mut output = hmac_256::<Sha256>(&cred_random[..], &decrypted_salts[..32]).to_vec();
+        let mut output = hmac_256::<Sha256>(cred_random, &decrypted_salts[..32]).to_vec();
         if decrypted_salts.len() == 64 {
-            let mut output2 = hmac_256::<Sha256>(&cred_random[..], &decrypted_salts[32..]).to_vec();
+            let mut output2 = hmac_256::<Sha256>(cred_random, &decrypted_salts[32..]).to_vec();
             output.append(&mut output2);
         }
         shared_secret.encrypt(rng, &output)
@@ -1553,16 +1555,16 @@ mod test {
             .get_pin_protocol(PinUvAuthProtocol::V1)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v1 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
         let pin_uv_auth_token_v2 = client_pin
             .get_pin_protocol(PinUvAuthProtocol::V2)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v2 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V2);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V2);
         let pin_uv_auth_param_v1_from_v2_token =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v2, &message, PinUvAuthProtocol::V1);
         let pin_uv_auth_param_v2_from_v1_token =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
@@ -1624,7 +1626,7 @@ mod test {
             .get_pin_protocol(PinUvAuthProtocol::V1)
             .get_pin_uv_auth_token();
         let pin_uv_auth_param_v1 =
-            authenticate_pin_uv_auth_token(&pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
+            authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V1);
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(

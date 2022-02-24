@@ -607,7 +607,7 @@ mod test {
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in &[packet1, packet2] {
             for pkt_reply in
-                ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, &mut ctap_state)
+                ctap_hid.process_hid_packet(pkt_request, DUMMY_CLOCK_VALUE, &mut ctap_state)
             {
                 if let Some(message) = assembler_reply
                     .parse_packet(&pkt_reply, DUMMY_TIMESTAMP)

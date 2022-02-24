@@ -41,15 +41,10 @@ pub trait Hash256: Sized {
         h.update(contents);
         h.finalize()
     }
-}
 
-// Traits for block ciphers that operate on 16-byte blocks.
-pub trait Encrypt16BytesBlock {
-    fn encrypt_block(&self, block: &mut [u8; 16]);
-}
-
-pub trait Decrypt16BytesBlock {
-    fn decrypt_block(&self, block: &mut [u8; 16]);
+    fn hmac(key: &[u8; 32], contents: &[u8]) -> [u8; 32] {
+        hmac::software_hmac_256::<Self>(key, contents)
+    }
 }
 
 // Trait for hash functions that operate on 64-byte input blocks.

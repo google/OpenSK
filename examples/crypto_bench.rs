@@ -20,9 +20,7 @@ extern crate lang_items;
 use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
-use crypto::{
-    aes256, cbc, ecdsa, rng256, sha256, Decrypt16BytesBlock, Encrypt16BytesBlock, Hash256,
-};
+use crypto::{aes256, cbc, ecdsa, rng256, sha256, Hash256};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
@@ -78,11 +76,11 @@ fn main() {
     // CBC
     let mut blocks = Vec::new();
     for i in 0..8 {
-        blocks.resize(1 << i, [0; 16]);
+        blocks.resize(1 << (i + 4), 0);
         bench(
             &mut console,
             &timer,
-            &format!("cbc::cbc_encrypt({} bytes)", blocks.len() * 16),
+            &format!("cbc::cbc_encrypt({} bytes)", blocks.len()),
             || {
                 cbc::cbc_encrypt(&ek, [0; 16], &mut blocks);
             },
@@ -92,11 +90,11 @@ fn main() {
 
     let mut blocks = Vec::new();
     for i in 0..8 {
-        blocks.resize(1 << i, [0; 16]);
+        blocks.resize(1 << (i + 4), 0);
         bench(
             &mut console,
             &timer,
-            &format!("cbc::cbc_decrypt({} bytes)", blocks.len() * 16),
+            &format!("cbc::cbc_decrypt({} bytes)", blocks.len()),
             || {
                 cbc::cbc_decrypt(&dk, [0; 16], &mut blocks);
             },

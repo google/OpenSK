@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::util::{xor_block_16, Block16};
-use super::{Decrypt16BytesBlock, Encrypt16BytesBlock};
 use arrayref::{array_mut_ref, array_ref};
 
 /** A portable and naive textbook implementation of AES-256 **/
@@ -54,11 +53,9 @@ impl EncryptionKey {
 
         EncryptionKey { enc_round_keys }
     }
-}
 
-impl Encrypt16BytesBlock for EncryptionKey {
     // Encrypt an AES block in place.
-    fn encrypt_block(&self, block: &mut Block16) {
+    pub fn encrypt_block(&self, block: &mut Block16) {
         add_round_key(block, &self.enc_round_keys[0]);
         for i in 1..14 {
             aes_enc(block, &self.enc_round_keys[i]);
@@ -82,11 +79,9 @@ impl DecryptionKey {
 
         DecryptionKey { dec_round_keys }
     }
-}
 
-impl Decrypt16BytesBlock for DecryptionKey {
     // Decrypt an AES block in place.
-    fn decrypt_block(&self, block: &mut Block16) {
+    pub fn decrypt_block(&self, block: &mut Block16) {
         add_round_key(block, &self.dec_round_keys[0]);
         for i in 1..14 {
             aes_dec(block, &self.dec_round_keys[i]);

@@ -134,7 +134,7 @@ pub trait SharedSecret {
     fn authenticate(&self, message: &[u8]) -> Vec<u8>;
 }
 
-fn verify_v1(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+fn verify_v1(key: &[u8; 32], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
     if signature.len() != 16 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -145,7 +145,7 @@ fn verify_v1(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2St
     }
 }
 
-fn verify_v2(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+fn verify_v2(key: &[u8; 32], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
     if signature.len() != 32 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }

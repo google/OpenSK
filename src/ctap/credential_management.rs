@@ -359,7 +359,9 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::super::CtapState;
     use super::*;
-    use crypto::rng256::{Rng256, ThreadRng256};
+    use crate::env::test::TestEnv;
+    use crate::env::Env;
+    use crypto::rng256::Rng256;
 
     const CLOCK_FREQUENCY_HZ: usize = 32768;
     const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
@@ -383,15 +385,14 @@ mod test {
     }
 
     fn test_helper_process_get_creds_metadata(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
-        let credential_source = create_credential_source(&mut rng);
+        let credential_source = create_credential_source(env.rng());
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
@@ -467,17 +468,16 @@ mod test {
 
     #[test]
     fn test_process_enumerate_rps_with_uv() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source1 = create_credential_source(&mut rng);
-        let mut credential_source2 = create_credential_source(&mut rng);
+        let credential_source1 = create_credential_source(env.rng());
+        let mut credential_source2 = create_credential_source(env.rng());
         credential_source2.rp_id = "another.example.com".to_string();
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         ctap_state
@@ -565,15 +565,14 @@ mod test {
 
     #[test]
     fn test_process_enumerate_rps_completeness() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source = create_credential_source(&mut rng);
+        let credential_source = create_credential_source(env.rng());
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         const NUM_CREDENTIALS: usize = 20;
@@ -648,20 +647,19 @@ mod test {
 
     #[test]
     fn test_process_enumerate_credentials_with_uv() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source1 = create_credential_source(&mut rng);
-        let mut credential_source2 = create_credential_source(&mut rng);
+        let credential_source1 = create_credential_source(env.rng());
+        let mut credential_source2 = create_credential_source(env.rng());
         credential_source2.user_handle = vec![0x02];
         credential_source2.user_name = Some("user2".to_string());
         credential_source2.user_display_name = Some("User Two".to_string());
         credential_source2.user_icon = Some("icon2".to_string());
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         ctap_state
@@ -754,16 +752,15 @@ mod test {
 
     #[test]
     fn test_process_delete_credential() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let mut credential_source = create_credential_source(&mut rng);
+        let mut credential_source = create_credential_source(env.rng());
         credential_source.credential_id = vec![0x1D; 32];
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         ctap_state
@@ -826,16 +823,15 @@ mod test {
 
     #[test]
     fn test_process_update_user_information() {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let mut credential_source = create_credential_source(&mut rng);
+        let mut credential_source = create_credential_source(env.rng());
         credential_source.credential_id = vec![0x1D; 32];
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
         ctap_state
@@ -899,9 +895,8 @@ mod test {
 
     #[test]
     fn test_process_credential_management_invalid_pin_uv_auth_param() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
 

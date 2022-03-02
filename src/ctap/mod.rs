@@ -65,6 +65,7 @@ use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
 use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
+use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -329,12 +330,7 @@ impl StatefulPermission {
 
 // This struct currently holds all state, not only the persistent memory. The persistent members are
 // in the persistent store field.
-pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>>
-{
-    rng: &'a mut R,
-    // A function to check user presence, ultimately returning true if user presence was detected,
-    // false otherwise.
-    check_user_presence: CheckUserPresence,
+pub struct CtapState {
     persistent_store: PersistentStore,
     client_pin: ClientPin,
     #[cfg(feature = "with_ctap1")]
@@ -345,21 +341,11 @@ pub struct CtapState<'a, R: Rng256, CheckUserPresence: Fn(ChannelID) -> Result<(
     upgrade_locations: Option<UpgradeLocations>,
 }
 
-impl<'a, R, CheckUserPresence> CtapState<'a, R, CheckUserPresence>
-where
-    R: Rng256,
-    CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-{
-    pub fn new(
-        rng: &'a mut R,
-        check_user_presence: CheckUserPresence,
-        now: ClockValue,
-    ) -> CtapState<'a, R, CheckUserPresence> {
-        let persistent_store = PersistentStore::new(rng);
-        let client_pin = ClientPin::new(rng);
+impl CtapState {
+    pub fn new(env: &mut impl Env, now: ClockValue) -> CtapState {
+        let persistent_store = PersistentStore::new(env.rng());
+        let client_pin = ClientPin::new(env.rng());
         CtapState {
-            rng,
-            check_user_presence,
             persistent_store,
             client_pin,
             #[cfg(feature = "with_ctap1")]
@@ -381,9 +367,12 @@ where
         self.client_pin.update_timeouts(now);
     }
 
-    pub fn increment_global_signature_counter(&mut self) -> Result<(), Ctap2StatusCode> {
+    pub fn increment_global_signature_counter(
+        &mut self,
+        env: &mut impl Env,
+    ) -> Result<(), Ctap2StatusCode> {
         if USE_SIGNATURE_COUNTER {
-            let increment = self.rng.gen_uniform_u32x8()[0] % 8 + 1;
+            let increment = env.rng().gen_uniform_u32x8()[0] % 8 + 1;
             self.persistent_store
                 .incr_global_signature_counter(increment)?;
         }
@@ -404,6 +393,7 @@ where
     // compatible with U2F.
     pub fn encrypt_key_handle(
         &mut self,
+        env: &mut impl Env,
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -413,7 +403,7 @@ where
         private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
-        let mut encrypted_id = aes256_cbc_encrypt(self.rng, &aes_enc_key, &plaintext, true)?;
+        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
         let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
@@ -464,6 +454,7 @@ where
 
     pub fn process_command(
         &mut self,
+        env: &mut impl Env,
         command_cbor: &[u8],
         cid: ChannelID,
         now: ClockValue,
@@ -501,20 +492,22 @@ where
                 }
                 let response = match command {
                     Command::AuthenticatorMakeCredential(params) => {
-                        self.process_make_credential(params, cid)
+                        self.process_make_credential(env, params, cid)
                     }
                     Command::AuthenticatorGetAssertion(params) => {
-                        self.process_get_assertion(params, cid, now)
+                        self.process_get_assertion(env, params, cid, now)
                     }
-                    Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(now),
+                    Command::AuthenticatorGetNextAssertion => {
+                        self.process_get_next_assertion(env, now)
+                    }
                     Command::AuthenticatorGetInfo => self.process_get_info(),
                     Command::AuthenticatorClientPin(params) => self.client_pin.process_command(
-                        self.rng,
+                        env.rng(),
                         &mut self.persistent_store,
                         params,
                         now,
                     ),
-                    Command::AuthenticatorReset => self.process_reset(cid, now),
+                    Command::AuthenticatorReset => self.process_reset(env, cid, now),
                     Command::AuthenticatorCredentialManagement(params) => {
                         process_credential_management(
                             &mut self.persistent_store,
@@ -524,7 +517,7 @@ where
                             now,
                         )
                     }
-                    Command::AuthenticatorSelection => self.process_selection(cid),
+                    Command::AuthenticatorSelection => self.process_selection(env, cid),
                     Command::AuthenticatorLargeBlobs(params) => self.large_blobs.process_command(
                         &mut self.persistent_store,
                         &mut self.client_pin,
@@ -535,7 +528,7 @@ where
                     }
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
-                        self.process_vendor_configure(params, cid)
+                        self.process_vendor_configure(env, params, cid)
                     }
                     Command::AuthenticatorVendorUpgrade(params) => {
                         self.process_vendor_upgrade(params)
@@ -564,6 +557,7 @@ where
 
     fn pin_uv_auth_precheck(
         &mut self,
+        env: &mut impl Env,
         pin_uv_auth_param: &Option<Vec<u8>>,
         pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
         cid: ChannelID,
@@ -571,7 +565,7 @@ where
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                (self.check_user_presence)(cid)?;
+                env.user_presence().check(cid)?;
                 if self.persistent_store.pin_hash()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
@@ -585,6 +579,7 @@ where
 
     fn process_make_credential(
         &mut self,
+        env: &mut impl Env,
         make_credential_params: AuthenticatorMakeCredentialParameters,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -601,7 +596,7 @@ where
             enterprise_attestation,
         } = make_credential_params;
 
-        self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
+        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
 
         if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
@@ -681,13 +676,13 @@ where
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
-                    let _ = (self.check_user_presence)(cid);
+                    let _ = env.user_presence().check(cid);
                     return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
                 }
             }
         }
 
-        (self.check_user_presence)(cid)?;
+        env.user_presence().check(cid)?;
         self.client_pin.clear_token_flags();
 
         let mut cred_protect_policy = extensions.cred_protect;
@@ -719,15 +714,15 @@ where
             flags |= ED_FLAG
         };
         let large_blob_key = match (options.rk, extensions.large_blob_key) {
-            (true, Some(true)) => Some(self.rng.gen_uniform_u8x32().to_vec()),
+            (true, Some(true)) => Some(env.rng().gen_uniform_u8x32().to_vec()),
             _ => None,
         };
 
-        let sk = crypto::ecdsa::SecKey::gensk(self.rng);
+        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let pk = sk.genpk();
 
         let credential_id = if options.rk {
-            let random_id = self.rng.gen_uniform_u8x32().to_vec();
+            let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
@@ -753,7 +748,7 @@ where
             self.persistent_store.store_credential(credential_source)?;
             random_id
         } else {
-            self.encrypt_key_handle(sk.clone(), &rp_id_hash)?
+            self.encrypt_key_handle(env, sk.clone(), &rp_id_hash)?
         };
 
         let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
@@ -842,6 +837,7 @@ where
     // and returns the correct Get(Next)Assertion response.
     fn assertion_response(
         &mut self,
+        env: &mut impl Env,
         mut credential: PublicKeyCredentialSource,
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
@@ -858,7 +854,7 @@ where
             let encrypted_output = if let Some(hmac_secret_input) = extensions.hmac_secret {
                 let cred_random = self.generate_cred_random(&credential.private_key, has_uv)?;
                 Some(self.client_pin.process_hmac_secret(
-                    self.rng,
+                    env.rng(),
                     hmac_secret_input,
                     &cred_random,
                 )?)
@@ -949,6 +945,7 @@ where
 
     fn process_get_assertion(
         &mut self,
+        env: &mut impl Env,
         get_assertion_params: AuthenticatorGetAssertionParameters,
         cid: ChannelID,
         now: ClockValue,
@@ -963,7 +960,7 @@ where
             pin_uv_auth_protocol,
         } = get_assertion_params;
 
-        self.pin_uv_auth_precheck(&pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
+        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
 
         if extensions.hmac_secret.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.
@@ -1045,11 +1042,11 @@ where
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         if options.up {
-            (self.check_user_presence)(cid)?;
+            env.user_presence().check(cid)?;
             self.client_pin.clear_token_flags();
         }
 
-        self.increment_global_signature_counter()?;
+        self.increment_global_signature_counter(env)?;
 
         let assertion_input = AssertionInput {
             client_data_hash,
@@ -1069,11 +1066,12 @@ where
                 .set_command(now, assertion_state);
             number_of_credentials
         };
-        self.assertion_response(credential, assertion_input, number_of_credentials)
+        self.assertion_response(env, credential, assertion_input, number_of_credentials)
     }
 
     fn process_get_next_assertion(
         &mut self,
+        env: &mut impl Env,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
@@ -1082,7 +1080,7 @@ where
             .stateful_command_permission
             .next_assertion_credential()?;
         let credential = self.persistent_store.get_credential(credential_key)?;
-        self.assertion_response(credential, assertion_input, None)
+        self.assertion_response(env, credential, assertion_input, None)
     }
 
     fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
@@ -1159,6 +1157,7 @@ where
 
     fn process_reset(
         &mut self,
+        env: &mut impl Env,
         cid: ChannelID,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -1168,10 +1167,10 @@ where
             StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
-        (self.check_user_presence)(cid)?;
+        env.user_presence().check(cid)?;
 
-        self.persistent_store.reset(self.rng)?;
-        self.client_pin.reset(self.rng);
+        self.persistent_store.reset(env.rng())?;
+        self.client_pin.reset(env.rng());
         #[cfg(feature = "with_ctap1")]
         {
             self.u2f_up_state = U2fUserPresenceState::new(
@@ -1182,18 +1181,23 @@ where
         Ok(ResponseData::AuthenticatorReset)
     }
 
-    fn process_selection(&self, cid: ChannelID) -> Result<ResponseData, Ctap2StatusCode> {
-        (self.check_user_presence)(cid)?;
+    fn process_selection(
+        &self,
+        env: &mut impl Env,
+        cid: ChannelID,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        env.user_presence().check(cid)?;
         Ok(ResponseData::AuthenticatorSelection)
     }
 
     fn process_vendor_configure(
         &mut self,
+        env: &mut impl Env,
         params: AuthenticatorVendorConfigureParameters,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         if params.attestation_material.is_some() || params.lockdown {
-            (self.check_user_presence)(cid)?;
+            env.user_presence().check(cid)?;
         }
 
         // Sanity checks
@@ -1341,8 +1345,8 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
+    use crate::env::test::TestEnv;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
-    use crypto::rng256::ThreadRng256;
 
     const CLOCK_FREQUENCY_HZ: usize = 32768;
     const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
@@ -1396,10 +1400,10 @@ mod test {
 
     #[test]
     fn test_get_info() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-        let info_reponse = ctap_state.process_command(&[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
+        let info_reponse =
+            ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
@@ -1508,13 +1512,12 @@ mod test {
 
     #[test]
     fn test_resident_process_make_credential() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         check_make_response(
             make_credential_response,
@@ -1527,14 +1530,13 @@ mod test {
 
     #[test]
     fn test_non_resident_process_make_credential() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         check_make_response(
             make_credential_response,
@@ -1547,14 +1549,13 @@ mod test {
 
     #[test]
     fn test_process_make_credential_unsupported_algorithm() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.pub_key_cred_params = vec![];
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         assert_eq!(
             make_credential_response,
@@ -1564,10 +1565,9 @@ mod test {
 
     #[test]
     fn test_process_make_credential_credential_excluded() {
-        let mut rng = ThreadRng256 {};
-        let excluded_private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let excluded_private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
         let make_credential_params =
@@ -1592,7 +1592,7 @@ mod test {
             .is_ok());
 
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
@@ -1601,15 +1601,14 @@ mod test {
 
     #[test]
     fn test_process_make_credential_credential_with_cred_protect() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
         let make_credential_params =
             create_make_credential_parameters_with_cred_protect_policy(test_policy);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
@@ -1626,7 +1625,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
@@ -1636,7 +1635,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_cred_protect_policy(test_policy);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
@@ -1653,15 +1652,14 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
     }
 
     #[test]
     fn test_process_make_credential_hmac_secret() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -1671,7 +1669,7 @@ mod test {
         make_credential_params.options.rk = false;
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         let expected_extension_cbor = [
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
@@ -1687,9 +1685,8 @@ mod test {
 
     #[test]
     fn test_process_make_credential_hmac_secret_resident_key() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -1698,7 +1695,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         let expected_extension_cbor = [
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
@@ -1714,9 +1711,8 @@ mod test {
 
     #[test]
     fn test_process_make_credential_min_pin_length() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // First part: The extension is ignored, since the RP ID is not on the list.
         let extensions = MakeCredentialExtensions {
@@ -1726,7 +1722,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         check_make_response(
             make_credential_response,
             0x41,
@@ -1750,7 +1746,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         let expected_extension_cbor = [
             0xA1, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68,
             0x04,
@@ -1766,9 +1762,8 @@ mod test {
 
     #[test]
     fn test_process_make_credential_cred_blob_ok() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let extensions = MakeCredentialExtensions {
             cred_blob: Some(vec![0xCB]),
@@ -1777,7 +1772,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         let expected_extension_cbor = [
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
         ];
@@ -1802,9 +1797,8 @@ mod test {
 
     #[test]
     fn test_process_make_credential_cred_blob_too_big() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let extensions = MakeCredentialExtensions {
             cred_blob: Some(vec![0xCB; MAX_CRED_BLOB_LENGTH + 1]),
@@ -1813,7 +1807,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         let expected_extension_cbor = [
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF4,
         ];
@@ -1838,9 +1832,8 @@ mod test {
 
     #[test]
     fn test_process_make_credential_large_blob_key() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let extensions = MakeCredentialExtensions {
             large_blob_key: Some(true),
@@ -1849,7 +1842,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         let large_blob_key = match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 make_credential_response.large_blob_key.unwrap()
@@ -1872,14 +1865,13 @@ mod test {
     fn test_helper_process_make_credential_with_pin_and_uv(
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
         ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
@@ -1893,8 +1885,11 @@ mod test {
         make_credential_params.options.uv = true;
         make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
-        let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params.clone(), DUMMY_CHANNEL_ID);
+        let make_credential_response = ctap_state.process_make_credential(
+            &mut env,
+            make_credential_params.clone(),
+            DUMMY_CHANNEL_ID,
+        );
 
         check_make_response(
             make_credential_response,
@@ -1905,7 +1900,7 @@ mod test {
         );
 
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -1924,15 +1919,14 @@ mod test {
 
     #[test]
     fn test_non_resident_process_make_credential_with_pin() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         check_make_response(
             make_credential_response,
@@ -1945,14 +1939,13 @@ mod test {
 
     #[test]
     fn test_resident_process_make_credential_with_pin() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
@@ -1961,14 +1954,13 @@ mod test {
 
     #[test]
     fn test_process_make_credential_with_pin_always_uv() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         ctap_state.persistent_store.toggle_always_uv().unwrap();
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
@@ -1979,7 +1971,7 @@ mod test {
         make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
         make_credential_params.pin_uv_auth_protocol = Some(PinUvAuthProtocol::V1);
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -1988,14 +1980,14 @@ mod test {
 
     #[test]
     fn test_process_make_credential_cancelled() {
-        let mut rng = ThreadRng256 {};
-        let user_presence_always_cancel = |_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
-        let mut ctap_state =
-            CtapState::new(&mut rng, user_presence_always_cancel, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        env.user_presence()
+            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
 
         assert_eq!(
             make_credential_response,
@@ -2085,13 +2077,12 @@ mod test {
 
     #[test]
     fn test_resident_process_get_assertion() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let make_credential_params = create_minimal_make_credential_parameters();
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2107,6 +2098,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2124,7 +2116,7 @@ mod test {
         credential_id: Option<Vec<u8>>,
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> AuthenticatorGetAssertionParameters {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let platform_public_key = key_agreement_key.genpk();
         let public_key = match key_agreement_response {
             ResponseData::AuthenticatorClientPin(Some(client_pin_response)) => {
@@ -2138,7 +2130,7 @@ mod test {
             .unwrap();
 
         let salt = vec![0x01; 32];
-        let salt_enc = shared_secret.as_ref().encrypt(&mut rng, &salt).unwrap();
+        let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: CoseKey::from(platform_public_key),
@@ -2172,10 +2164,9 @@ mod test {
     }
 
     fn test_helper_process_get_assertion_hmac_secret(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let make_extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -2185,7 +2176,7 @@ mod test {
         make_credential_params.options.rk = false;
         make_credential_params.extensions = make_extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
         assert!(make_credential_response.is_ok());
         let credential_id = match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
@@ -2209,7 +2200,7 @@ mod test {
             permissions_rp_id: None,
         };
         let key_agreement_response = ctap_state.client_pin.process_command(
-            ctap_state.rng,
+            env.rng(),
             &mut ctap_state.persistent_store,
             client_pin_params,
             DUMMY_CLOCK_VALUE,
@@ -2221,6 +2212,7 @@ mod test {
             pin_uv_auth_protocol,
         );
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2241,10 +2233,9 @@ mod test {
     fn test_helper_resident_process_get_assertion_hmac_secret(
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let make_extensions = MakeCredentialExtensions {
             hmac_secret: true,
@@ -2253,7 +2244,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = make_extensions;
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
         let client_pin_params = AuthenticatorClientPinParameters {
@@ -2267,7 +2258,7 @@ mod test {
             permissions_rp_id: None,
         };
         let key_agreement_response = ctap_state.client_pin.process_command(
-            ctap_state.rng,
+            env.rng(),
             &mut ctap_state.persistent_store,
             client_pin_params,
             DUMMY_CLOCK_VALUE,
@@ -2279,6 +2270,7 @@ mod test {
             pin_uv_auth_protocol,
         );
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2298,11 +2290,10 @@ mod test {
 
     #[test]
     fn test_resident_process_get_assertion_with_cred_protect() {
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let credential_id = rng.gen_uniform_u8x32().to_vec();
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let credential_id = env.rng().gen_uniform_u8x32().to_vec();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2343,6 +2334,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2365,6 +2357,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2407,6 +2400,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2419,11 +2413,10 @@ mod test {
 
     #[test]
     fn test_process_get_assertion_with_cred_blob() {
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let credential_id = rng.gen_uniform_u8x32().to_vec();
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let credential_id = env.rng().gen_uniform_u8x32().to_vec();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2461,6 +2454,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2483,11 +2477,10 @@ mod test {
 
     #[test]
     fn test_process_get_assertion_with_large_blob_key() {
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let credential_id = rng.gen_uniform_u8x32().to_vec();
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let credential_id = env.rng().gen_uniform_u8x32().to_vec();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2525,6 +2518,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2541,14 +2535,13 @@ mod test {
     fn test_helper_process_get_next_assertion_two_credentials_with_uv(
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
-        let mut rng = ThreadRng256 {};
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x88; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
 
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user1 = PublicKeyCredentialUserEntity {
@@ -2559,7 +2552,7 @@ mod test {
         };
         make_credential_params.user = user1.clone();
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user2 = PublicKeyCredentialUserEntity {
@@ -2570,7 +2563,7 @@ mod test {
         };
         make_credential_params.user = user2.clone();
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
         ctap_state.client_pin = client_pin;
@@ -2596,6 +2589,7 @@ mod test {
             pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2613,7 +2607,8 @@ mod test {
             &[],
         );
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         check_assertion_response_with_user(
             get_assertion_response,
             user1,
@@ -2623,7 +2618,8 @@ mod test {
             &[],
         );
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2642,9 +2638,8 @@ mod test {
 
     #[test]
     fn test_process_get_next_assertion_three_credentials_no_uv() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x01];
@@ -2652,7 +2647,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x02];
@@ -2660,7 +2655,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x03];
@@ -2668,7 +2663,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2684,6 +2679,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2699,13 +2695,16 @@ mod test {
             Some(3),
         );
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         check_assertion_response(get_assertion_response, vec![0x02], signature_counter, None);
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         check_assertion_response(get_assertion_response, vec![0x01], signature_counter, None);
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2714,11 +2713,11 @@ mod test {
 
     #[test]
     fn test_process_get_next_assertion_not_allowed() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2727,12 +2726,12 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x01];
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x02];
         assert!(ctap_state
-            .process_make_credential(make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2748,6 +2747,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
             get_assertion_params,
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2767,9 +2767,10 @@ mod test {
             4 => cbor_array![ES256_CRED_PARAM],
         };
         assert!(cbor_write(cbor_value, &mut command_cbor).is_ok());
-        ctap_state.process_command(&command_cbor, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        ctap_state.process_command(&mut env, &command_cbor, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
-        let get_assertion_response = ctap_state.process_get_next_assertion(DUMMY_CLOCK_VALUE);
+        let get_assertion_response =
+            ctap_state.process_get_next_assertion(&mut env, DUMMY_CLOCK_VALUE);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2778,10 +2779,9 @@ mod test {
 
     #[test]
     fn test_process_reset() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let credential_id = vec![0x01, 0x23, 0x45, 0x67];
         let credential_source = PublicKeyCredentialSource {
@@ -2805,7 +2805,7 @@ mod test {
         assert!(ctap_state.persistent_store.count_credentials().unwrap() > 0);
 
         let reset_reponse =
-            ctap_state.process_command(&[0x07], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+            ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
         assert!(ctap_state.persistent_store.count_credentials().unwrap() == 0);
@@ -2813,12 +2813,12 @@ mod test {
 
     #[test]
     fn test_process_reset_cancelled() {
-        let mut rng = ThreadRng256 {};
-        let user_presence_always_cancel = |_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
-        let mut ctap_state =
-            CtapState::new(&mut rng, user_presence_always_cancel, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        env.user_presence()
+            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
-        let reset_reponse = ctap_state.process_reset(DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
         assert_eq!(
             reset_reponse,
@@ -2828,25 +2828,24 @@ mod test {
 
     #[test]
     fn test_process_reset_not_first() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // This is a GetNextAssertion command.
-        ctap_state.process_command(&[0x08], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
 
-        let reset_reponse = ctap_state.process_reset(DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         assert_eq!(reset_reponse, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
     }
 
     #[test]
     fn test_process_credential_management_unknown_subcommand() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // The subcommand 0xEE does not exist.
         let reponse = ctap_state.process_command(
+            &mut env,
             &[0x0A, 0xA1, 0x01, 0x18, 0xEE],
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
@@ -2857,28 +2856,27 @@ mod test {
 
     #[test]
     fn test_process_unknown_command() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // This command does not exist.
-        let reponse = ctap_state.process_command(&[0xDF], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
+        let reponse =
+            ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
         assert_eq!(reponse, expected_response);
     }
 
     #[test]
     fn test_encrypt_decrypt_credential() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // Usually, the relying party ID or its hash is provided by the client.
         // We are not testing the correctness of our SHA256 here, only if it is checked.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = ctap_state
-            .encrypt_key_handle(private_key.clone(), &rp_id_hash)
+            .encrypt_key_handle(&mut env, private_key.clone(), &rp_id_hash)
             .unwrap();
         let decrypted_source = ctap_state
             .decrypt_credential_source(encrypted_id, &rp_id_hash)
@@ -2890,15 +2888,14 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_bad_hmac() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // Same as above.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = ctap_state
-            .encrypt_key_handle(private_key, &rp_id_hash)
+            .encrypt_key_handle(&mut env, private_key, &rp_id_hash)
             .unwrap();
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();
@@ -2912,9 +2909,8 @@ mod test {
 
     #[test]
     fn test_signature_counter() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         let mut last_counter = ctap_state
             .persistent_store
@@ -2922,7 +2918,9 @@ mod test {
             .unwrap();
         assert!(last_counter > 0);
         for _ in 0..100 {
-            assert!(ctap_state.increment_global_signature_counter().is_ok());
+            assert!(ctap_state
+                .increment_global_signature_counter(&mut env)
+                .is_ok());
             let next_counter = ctap_state
                 .persistent_store
                 .global_signature_counter()
@@ -2934,12 +2932,12 @@ mod test {
 
     #[test]
     fn test_vendor_configure() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
         // Nothing should be configured at the beginning
         let response = ctap_state.process_vendor_configure(
+            &mut env,
             AuthenticatorVendorConfigureParameters {
                 lockdown: false,
                 attestation_material: None,
@@ -2960,6 +2958,7 @@ mod test {
         let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         let dummy_cert = [0xddu8; 20];
         let response = ctap_state.process_vendor_configure(
+            &mut env,
             AuthenticatorVendorConfigureParameters {
                 lockdown: false,
                 attestation_material: Some(AuthenticatorAttestationMaterial {
@@ -2998,6 +2997,7 @@ mod test {
         // Try to inject other dummy values and check that initial values are retained.
         let other_dummy_key = [0x44u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
         let response = ctap_state.process_vendor_configure(
+            &mut env,
             AuthenticatorVendorConfigureParameters {
                 lockdown: false,
                 attestation_material: Some(AuthenticatorAttestationMaterial {
@@ -3035,6 +3035,7 @@ mod test {
 
         // Now try to lock the device
         let response = ctap_state.process_vendor_configure(
+            &mut env,
             AuthenticatorVendorConfigureParameters {
                 lockdown: true,
                 attestation_material: None,
@@ -3054,9 +3055,8 @@ mod test {
 
     #[test]
     fn test_parse_metadata() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         // The test buffer starts fully erased with 0xFF bytes.
         // The compiler issues an incorrect warning.
         #[allow(unused_mut)]
@@ -3094,8 +3094,8 @@ mod test {
 
     #[test]
     fn test_verify_signature() {
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let message = [0x44; 64];
         let signed_hash = Sha256::hash(&message);
         let signature = private_key.sign_rfc6979::<Sha256>(&message);
@@ -3153,10 +3153,9 @@ mod test {
         // The test partition storage has size 0x40000.
         // The test metadata storage has size 0x1000.
         // The test identifier matches partition B.
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         const METADATA_LEN: usize = 40;
 
         let data = vec![0xFF; 0x1000];
@@ -3230,9 +3229,8 @@ mod test {
 
     #[test]
     fn test_vendor_upgrade_no_second_partition() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.upgrade_locations = None;
 
         let data = vec![0xFF; 0x1000];
@@ -3248,9 +3246,8 @@ mod test {
 
     #[test]
     fn test_vendor_upgrade_info() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         let partition_address = ctap_state
             .upgrade_locations
             .as_ref()

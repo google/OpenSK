@@ -15,23 +15,19 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+extern crate arrayref;
+extern crate byteorder;
 #[cfg(feature = "std")]
 extern crate core;
 extern crate lang_items;
-#[macro_use]
-extern crate arrayref;
-extern crate byteorder;
-
-mod ctap;
-pub mod embedded_flash;
 
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::rng256::TockRng256;
-use ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
-use ctap::status_code::Ctap2StatusCode;
-use ctap::CtapState;
+use ctap2::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
+use ctap2::ctap::status_code::Ctap2StatusCode;
+use ctap2::env;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons;
 use libtock_drivers::buttons::ButtonState;
@@ -53,6 +49,31 @@ const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
 
+struct TockEnv {
+    rng: TockRng256,
+    user_presence: UserPresence,
+}
+
+struct UserPresence;
+impl env::UserPresence for UserPresence {
+    fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+        check_user_presence(cid)
+    }
+}
+
+impl env::Env for TockEnv {
+    type Rng = TockRng256;
+    type UserPresence = UserPresence;
+
+    fn rng(&mut self) -> &mut Self::Rng {
+        &mut self.rng
+    }
+
+    fn user_presence(&mut self) -> &mut Self::UserPresence {
+        &mut self.user_presence
+    }
+}
+
 fn main() {
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
@@ -65,9 +86,11 @@ fn main() {
     }
 
     let boot_time = timer.get_current_clock().flex_unwrap();
-    let mut rng = TockRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, check_user_presence, boot_time);
-    let mut ctap_hid = CtapHid::new();
+    let env = TockEnv {
+        rng: TockRng256 {},
+        user_presence: UserPresence,
+    };
+    let mut ctap = ctap2::Ctap::new(env, boot_time);
 
     let mut led_counter = 0;
     let mut last_led_increment = boot_time;
@@ -109,7 +132,7 @@ fn main() {
         #[cfg(feature = "with_ctap1")]
         {
             if button_touched.get() {
-                ctap_state.u2f_up_state.grant_up(now);
+                ctap.state().u2f_up_state.grant_up(now);
             }
             // Cleanup button callbacks. We miss button presses while processing though.
             // Heavy computation mostly follows a registered touch luckily. Unregistering
@@ -123,11 +146,11 @@ fn main() {
 
         // These calls are making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
-        ctap_state.update_timeouts(now);
-        ctap_hid.wink_permission = ctap_hid.wink_permission.check_expiration(now);
+        ctap.state().update_timeouts(now);
+        ctap.hid().wink_permission = ctap.hid().wink_permission.check_expiration(now);
 
         if has_packet {
-            let reply = ctap_hid.process_hid_packet(&pkt_request, now, &mut ctap_state);
+            let reply = ctap.process_hid_packet(&pkt_request, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
                 let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT);
@@ -167,14 +190,14 @@ fn main() {
             last_led_increment = now;
         }
 
-        if ctap_hid.wink_permission.is_granted(now) {
+        if ctap.hid().wink_permission.is_granted(now) {
             wink_leds(led_counter);
         } else {
             #[cfg(not(feature = "with_ctap1"))]
             switch_off_leds();
             #[cfg(feature = "with_ctap1")]
             {
-                if ctap_state.u2f_up_state.is_up_needed(now) {
+                if ctap.state().u2f_up_state.is_up_needed(now) {
                     // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
                     // delay caused by processing and sending of packets.
                     blink_leds(led_counter);
@@ -315,7 +338,8 @@ fn switch_off_leds() {
 
 fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
-    const TIMEOUT_ITERATIONS: usize = ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
+    const TIMEOUT_ITERATIONS: usize =
+        ctap2::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
     send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;

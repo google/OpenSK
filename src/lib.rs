@@ -15,9 +15,44 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+#[macro_use]
+extern crate arrayref;
+
+use crate::ctap::hid::send::HidPacketIterator;
+use crate::ctap::hid::{CtapHid, HidPacket};
+use crate::ctap::CtapState;
+use crate::env::Env;
+use libtock_drivers::timer::ClockValue;
 
 pub mod ctap;
 pub mod embedded_flash;
+pub mod env;
 
-#[macro_use]
-extern crate arrayref;
+pub struct Ctap<E: Env> {
+    env: E,
+    state: CtapState,
+    hid: CtapHid,
+}
+
+impl<E: Env> Ctap<E> {
+    // This should only take the environment, but it temporarily takes the boot time until the
+    // clock is part of the environment.
+    pub fn new(mut env: E, now: ClockValue) -> Self {
+        let state = CtapState::new(&mut env, now);
+        let hid = CtapHid::new();
+        Ctap { env, state, hid }
+    }
+
+    pub fn state(&mut self) -> &mut CtapState {
+        &mut self.state
+    }
+
+    pub fn hid(&mut self) -> &mut CtapHid {
+        &mut self.hid
+    }
+
+    pub fn process_hid_packet(&mut self, packet: &HidPacket, now: ClockValue) -> HidPacketIterator {
+        self.hid
+            .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+    }
+}

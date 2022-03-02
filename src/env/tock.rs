@@ -1,4 +1,4 @@
-use crate::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
+use crate::ctap::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
@@ -77,7 +77,7 @@ fn send_keepalive_up_needed(
                 }
                 match processed_packet {
                     ProcessedPacket::InitPacket { cmd, .. } => {
-                        if cmd == CtapHid::COMMAND_CANCEL {
+                        if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
                             #[cfg(feature = "debug_ctap")]
                             writeln!(Console::new(), "User presence check cancelled").unwrap();

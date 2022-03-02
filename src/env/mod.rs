@@ -6,9 +6,13 @@ use crypto::rng256::Rng256;
 pub mod test;
 
 pub trait UserPresence {
+    /// Blocks for user presence.
+    ///
+    /// Returns an error in case of timeout or keepalive error.
     fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode>;
 }
 
+/// Describes what CTAP needs to function.
 pub trait Env {
     type Rng: Rng256;
     type UserPresence: UserPresence;

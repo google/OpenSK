@@ -28,6 +28,7 @@ pub mod ctap;
 pub mod embedded_flash;
 pub mod env;
 
+/// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {
     env: E,
     state: CtapState,
@@ -35,6 +36,7 @@ pub struct Ctap<E: Env> {
 }
 
 impl<E: Env> Ctap<E> {
+    /// Instantiates a CTAP implementation given its environment.
     // This should only take the environment, but it temporarily takes the boot time until the
     // clock is part of the environment.
     pub fn new(mut env: E, now: ClockValue) -> Self {

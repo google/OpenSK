@@ -18,16 +18,16 @@ extern crate lang_items;
 
 use arrayref::array_ref;
 use core::convert::TryFrom;
-use crypto::rng256::ThreadRng256;
+use ctap2::ctap::cbor_read;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters,
 };
 use ctap2::ctap::hid::receive::MessageAssembler;
 use ctap2::ctap::hid::send::HidPacketIterator;
-use ctap2::ctap::hid::{ChannelID, CtapHid, HidPacket, Message};
-use ctap2::ctap::status_code::Ctap2StatusCode;
-use ctap2::ctap::{cbor_read, CtapState};
+use ctap2::ctap::hid::{ChannelID, HidPacket, Message};
+use ctap2::env::test::TestEnv;
+use ctap2::Ctap;
 use libtock_drivers::timer::{ClockValue, Timestamp};
 
 const COMMAND_INIT: u8 = 0x06;
@@ -44,10 +44,6 @@ pub enum InputType {
     CborGetAssertionParameter,
     CborClientPinParameter,
     Ctap1,
-}
-
-fn user_immediately_present(_: ChannelID) -> Result<(), Ctap2StatusCode> {
-    Ok(())
 }
 
 // Converts a byte slice into Message
@@ -71,13 +67,7 @@ fn raw_to_message(data: &[u8]) -> Message {
 
 // Returns an initialized ctap state, hid and the allocated cid
 // after processing the init command.
-fn initialize<CheckUserPresence>(
-    ctap_state: &mut CtapState<ThreadRng256, CheckUserPresence>,
-    ctap_hid: &mut CtapHid,
-) -> ChannelID
-where
-    CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-{
+fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
     let nonce = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
     let message = Message {
         cid: CHANNEL_BROADCAST,
@@ -87,7 +77,7 @@ where
     let mut assembler_reply = MessageAssembler::new();
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
-        for pkt_reply in ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, ctap_state) {
+        for pkt_reply in ctap.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE) {
             if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP) {
                 result_cid.copy_from_slice(&result.payload[8..12]);
             }
@@ -120,20 +110,12 @@ fn is_type(data: &[u8], input_type: InputType) -> bool {
 
 // Interprets the raw data as a complete message (with channel id, command type and payload) and
 // invokes message splitting, packet processing at CTAP HID level and response assembling.
-fn process_message<CheckUserPresence>(
-    data: &[u8],
-    ctap_state: &mut CtapState<ThreadRng256, CheckUserPresence>,
-    ctap_hid: &mut CtapHid,
-) where
-    CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-{
+fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
     let message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in hid_packet_iterator {
-            for pkt_reply in
-                ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, ctap_state)
-            {
+            for pkt_reply in ctap.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE) {
                 // Only checks for assembling crashes, not for semantics.
                 let _ = assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP);
             }
@@ -146,14 +128,12 @@ fn process_message<CheckUserPresence>(
 // using an initialized and allocated channel.
 pub fn process_ctap_any_type(data: &[u8]) {
     // Initialize ctap state and hid and get the allocated cid.
-    let mut rng = ThreadRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-    let mut ctap_hid = CtapHid::new();
-    let cid = initialize(&mut ctap_state, &mut ctap_hid);
+    let mut ctap = Ctap::new(TestEnv::new(), DUMMY_CLOCK_VALUE);
+    let cid = initialize(&mut ctap);
     // Wrap input as message with the allocated cid.
     let mut command = cid.to_vec();
     command.extend(data);
-    process_message(&command, &mut ctap_state, &mut ctap_hid);
+    process_message(&command, &mut ctap);
 }
 
 // Interprets the raw data as of the given input type and
@@ -164,10 +144,8 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
         return;
     }
     // Initialize ctap state and hid and get the allocated cid.
-    let mut rng = ThreadRng256 {};
-    let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
-    let mut ctap_hid = CtapHid::new();
-    let cid = initialize(&mut ctap_state, &mut ctap_hid);
+    let mut ctap = Ctap::new(TestEnv::new(), DUMMY_CLOCK_VALUE);
+    let cid = initialize(&mut ctap);
     // Wrap input as message with allocated cid and command type.
     let mut command = cid.to_vec();
     match input_type {
@@ -185,7 +163,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
         }
     }
     command.extend(data);
-    process_message(&command, &mut ctap_state, &mut ctap_hid);
+    process_message(&command, &mut ctap);
 }
 
 // Splits the given data as HID packets and reassembles it, verifying that the original input message is reconstructed.

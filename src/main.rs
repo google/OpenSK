@@ -24,10 +24,9 @@ extern crate lang_items;
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-use crypto::rng256::TockRng256;
 use ctap2::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
 use ctap2::ctap::status_code::Ctap2StatusCode;
-use ctap2::env;
+use ctap2::env::tock::TockEnv;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons;
 use libtock_drivers::buttons::ButtonState;
@@ -49,31 +48,6 @@ const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
 
-struct TockEnv {
-    rng: TockRng256,
-    user_presence: UserPresence,
-}
-
-struct UserPresence;
-impl env::UserPresence for UserPresence {
-    fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
-        check_user_presence(cid)
-    }
-}
-
-impl env::Env for TockEnv {
-    type Rng = TockRng256;
-    type UserPresence = UserPresence;
-
-    fn rng(&mut self) -> &mut Self::Rng {
-        &mut self.rng
-    }
-
-    fn user_presence(&mut self) -> &mut Self::UserPresence {
-        &mut self.user_presence
-    }
-}
-
 fn main() {
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
@@ -86,10 +60,7 @@ fn main() {
     }
 
     let boot_time = timer.get_current_clock().flex_unwrap();
-    let env = TockEnv {
-        rng: TockRng256 {},
-        user_presence: UserPresence,
-    };
+    let env = TockEnv::new(check_user_presence);
     let mut ctap = ctap2::Ctap::new(env, boot_time);
 
     let mut led_counter = 0;

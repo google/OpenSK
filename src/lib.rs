@@ -57,4 +57,9 @@ impl<E: Env> Ctap<E> {
         self.hid
             .process_hid_packet(&mut self.env, packet, now, &mut self.state)
     }
+
+    pub fn update_timeouts(&mut self, now: ClockValue) {
+        self.state.update_timeouts(now);
+        self.hid.wink_permission = self.hid.wink_permission.check_expiration(now);
+    }
 }

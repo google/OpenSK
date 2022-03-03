@@ -103,7 +103,7 @@ fn main() {
         #[cfg(feature = "with_ctap1")]
         {
             if button_touched.get() {
-                ctap.state().u2f_up_state.grant_up(now);
+                ctap.state().u2f_grant_user_presence(now);
             }
             // Cleanup button callbacks. We miss button presses while processing though.
             // Heavy computation mostly follows a registered touch luckily. Unregistering
@@ -117,8 +117,7 @@ fn main() {
 
         // These calls are making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
-        ctap.state().update_timeouts(now);
-        ctap.hid().wink_permission = ctap.hid().wink_permission.check_expiration(now);
+        ctap.update_timeouts(now);
 
         if has_packet {
             let reply = ctap.process_hid_packet(&pkt_request, now);
@@ -161,14 +160,14 @@ fn main() {
             last_led_increment = now;
         }
 
-        if ctap.hid().wink_permission.is_granted(now) {
+        if ctap.hid().should_wink(now) {
             wink_leds(led_counter);
         } else {
             #[cfg(not(feature = "with_ctap1"))]
             switch_off_leds();
             #[cfg(feature = "with_ctap1")]
             {
-                if ctap.state().u2f_up_state.is_up_needed(now) {
+                if ctap.state().u2f_needs_user_presence(now) {
                     // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
                     // delay caused by processing and sending of packets.
                     blink_leds(led_counter);

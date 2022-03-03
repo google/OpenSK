@@ -334,7 +334,7 @@ pub struct CtapState {
     persistent_store: PersistentStore,
     client_pin: ClientPin,
     #[cfg(feature = "with_ctap1")]
-    pub u2f_up_state: U2fUserPresenceState,
+    pub(crate) u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission,
     large_blobs: LargeBlobs,
@@ -1331,6 +1331,16 @@ impl CtapState {
         );
         auth_data.extend(&signature_counter);
         Ok(auth_data)
+    }
+
+    #[cfg(feature = "with_ctap1")]
+    pub fn u2f_grant_user_presence(&mut self, now: ClockValue) {
+        self.u2f_up_state.grant_up(now)
+    }
+
+    #[cfg(feature = "with_ctap1")]
+    pub fn u2f_needs_user_presence(&mut self, now: ClockValue) -> bool {
+        self.u2f_up_state.is_up_needed(now)
     }
 }
 

@@ -71,7 +71,7 @@ pub struct CtapHid {
     // In packets, the ID encoding is Big Endian to match what is used throughout CTAP (with the
     // u32::to/from_be_bytes methods).
     allocated_cids: usize,
-    pub wink_permission: TimedPermission,
+    pub(crate) wink_permission: TimedPermission,
 }
 
 #[allow(dead_code)]
@@ -397,6 +397,10 @@ impl CtapHid {
             payload: vec![status_code],
         })
         .unwrap()
+    }
+
+    pub fn should_wink(&self, now: ClockValue) -> bool {
+        self.wink_permission.is_granted(now)
     }
 
     #[cfg(feature = "with_ctap1")]

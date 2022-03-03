@@ -22,12 +22,12 @@ use super::ctap1;
 use super::status_code::Ctap2StatusCode;
 use super::timed_permission::TimedPermission;
 use super::CtapState;
+use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-use crypto::rng256::Rng256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
 use libtock_drivers::timer::{ClockValue, Duration, Timestamp};
@@ -71,7 +71,7 @@ pub struct CtapHid {
     // In packets, the ID encoding is Big Endian to match what is used throughout CTAP (with the
     // u32::to/from_be_bytes methods).
     allocated_cids: usize,
-    pub wink_permission: TimedPermission,
+    pub(crate) wink_permission: TimedPermission,
 }
 
 #[allow(dead_code)]
@@ -146,16 +146,13 @@ impl CtapHid {
 
     // Process an incoming USB HID packet, and optionally returns a list of outgoing packets to
     // send as a reply.
-    pub fn process_hid_packet<R, CheckUserPresence>(
+    pub fn process_hid_packet(
         &mut self,
+        env: &mut impl Env,
         packet: &HidPacket,
         clock_value: ClockValue,
-        ctap_state: &mut CtapState<R, CheckUserPresence>,
-    ) -> HidPacketIterator
-    where
-        R: Rng256,
-        CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-    {
+        ctap_state: &mut CtapState,
+    ) -> HidPacketIterator {
         // TODO: Send COMMAND_KEEPALIVE every 100ms?
         match self
             .assembler
@@ -183,6 +180,7 @@ impl CtapHid {
 
                         #[cfg(feature = "with_ctap1")]
                         match ctap1::Ctap1Command::process_command(
+                            env,
                             &message.payload,
                             ctap_state,
                             clock_value,
@@ -200,7 +198,7 @@ impl CtapHid {
                         // don't handle any other packet in the meantime.
                         // TODO: Send keep-alive packets in the meantime.
                         let response =
-                            ctap_state.process_command(&message.payload, cid, clock_value);
+                            ctap_state.process_command(env, &message.payload, cid, clock_value);
                         if let Some(iterator) = CtapHid::split_message(Message {
                             cid,
                             cmd: CtapHid::COMMAND_CBOR,
@@ -401,6 +399,10 @@ impl CtapHid {
         .unwrap()
     }
 
+    pub fn should_wink(&self, now: ClockValue) -> bool {
+        self.wink_permission.is_granted(now)
+    }
+
     #[cfg(feature = "with_ctap1")]
     fn ctap1_error_message(
         cid: ChannelID,
@@ -433,27 +435,25 @@ impl CtapHid {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crypto::rng256::ThreadRng256;
+    use crate::env::test::TestEnv;
 
     const CLOCK_FREQUENCY_HZ: usize = 32768;
     // Except for tests for timeouts (done in ctap1.rs), transactions are time independant.
     const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
     const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
 
-    fn process_messages<CheckUserPresence>(
+    fn process_messages(
+        env: &mut impl Env,
         ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState<ThreadRng256, CheckUserPresence>,
+        ctap_state: &mut CtapState,
         request: Vec<Message>,
-    ) -> Option<Vec<Message>>
-    where
-        CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-    {
+    ) -> Option<Vec<Message>> {
         let mut result = Vec::new();
         let mut assembler_reply = MessageAssembler::new();
         for msg_request in request {
             for pkt_request in HidPacketIterator::new(msg_request).unwrap() {
                 for pkt_reply in
-                    ctap_hid.process_hid_packet(&pkt_request, DUMMY_CLOCK_VALUE, ctap_state)
+                    ctap_hid.process_hid_packet(env, &pkt_request, DUMMY_CLOCK_VALUE, ctap_state)
                 {
                     match assembler_reply.parse_packet(&pkt_reply, DUMMY_TIMESTAMP) {
                         Ok(Some(message)) => result.push(message),
@@ -466,15 +466,14 @@ mod test {
         Some(result)
     }
 
-    fn cid_from_init<CheckUserPresence>(
+    fn cid_from_init(
+        env: &mut impl Env,
         ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState<ThreadRng256, CheckUserPresence>,
-    ) -> ChannelID
-    where
-        CheckUserPresence: Fn(ChannelID) -> Result<(), Ctap2StatusCode>,
-    {
+        ctap_state: &mut CtapState,
+    ) -> ChannelID {
         let nonce = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
         let reply = process_messages(
+            env,
             ctap_hid,
             ctap_state,
             vec![Message {
@@ -521,15 +520,16 @@ mod test {
 
     #[test]
     fn test_spurious_continuation_packet() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
 
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
         let mut assembler_reply = MessageAssembler::new();
-        for pkt_reply in ctap_hid.process_hid_packet(&packet, DUMMY_CLOCK_VALUE, &mut ctap_state) {
+        for pkt_reply in
+            ctap_hid.process_hid_packet(&mut env, &packet, DUMMY_CLOCK_VALUE, &mut ctap_state)
+        {
             // Continuation packets are silently ignored.
             assert_eq!(
                 assembler_reply
@@ -542,12 +542,12 @@ mod test {
 
     #[test]
     fn test_command_init() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
 
         let reply = process_messages(
+            &mut env,
             &mut ctap_hid,
             &mut ctap_state,
             vec![Message {
@@ -587,11 +587,10 @@ mod test {
 
     #[test]
     fn test_command_init_for_sync() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
-        let cid = cid_from_init(&mut ctap_hid, &mut ctap_state);
+        let cid = cid_from_init(&mut env, &mut ctap_hid, &mut ctap_state);
 
         // Ping packet with a length longer than one packet.
         let mut packet1 = [0x51; 64];
@@ -606,9 +605,12 @@ mod test {
         let mut result = Vec::new();
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in &[packet1, packet2] {
-            for pkt_reply in
-                ctap_hid.process_hid_packet(pkt_request, DUMMY_CLOCK_VALUE, &mut ctap_state)
-            {
+            for pkt_reply in ctap_hid.process_hid_packet(
+                &mut env,
+                pkt_request,
+                DUMMY_CLOCK_VALUE,
+                &mut ctap_state,
+            ) {
                 if let Some(message) = assembler_reply
                     .parse_packet(&pkt_reply, DUMMY_TIMESTAMP)
                     .unwrap()
@@ -647,13 +649,13 @@ mod test {
 
     #[test]
     fn test_command_ping() {
-        let mut rng = ThreadRng256 {};
-        let user_immediately_present = |_| Ok(());
-        let mut ctap_state = CtapState::new(&mut rng, user_immediately_present, DUMMY_CLOCK_VALUE);
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         let mut ctap_hid = CtapHid::new();
-        let cid = cid_from_init(&mut ctap_hid, &mut ctap_state);
+        let cid = cid_from_init(&mut env, &mut ctap_hid, &mut ctap_state);
 
         let reply = process_messages(
+            &mut env,
             &mut ctap_hid,
             &mut ctap_state,
             vec![Message {

@@ -16,7 +16,7 @@
 // For now, only the CTAP2 codes are here, the CTAP1 are not included.
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Ctap2StatusCode {
     CTAP2_OK = 0x00,
     CTAP1_ERR_INVALID_COMMAND = 0x01,

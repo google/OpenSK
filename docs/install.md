@@ -162,8 +162,8 @@ access to its debugging port. For that purpose, the flash storage is split into
 *   firmware partition B
 *   the persistent storage for credentials
 
-The storage is backwards compatible to non-upgradble boards. Deploying an
-upgradble board automatically installs the bootloader. Please keep in mind that
+The storage is backward compatible to non-upgradable boards. Deploying an
+upgradable board automatically installs the bootloader. Please keep in mind that
 you have to safely store your private signing key for upgrades if you want to
 use this feature. For more information on the cryptographic material, see
 [Customization](customization.md).

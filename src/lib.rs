@@ -24,19 +24,18 @@ use crate::ctap::CtapState;
 use crate::env::Env;
 use libtock_drivers::timer::ClockValue;
 
+pub mod api;
 // Implementation details must be public for testing (in particular fuzzing).
 #[cfg(feature = "std")]
 pub mod ctap;
 #[cfg(not(feature = "std"))]
 mod ctap;
-// Store example binaries use the flash directly. Eventually, they should access it from env::tock.
-pub mod embedded_flash;
 pub mod env;
 
 /// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {
     env: E,
-    state: CtapState,
+    state: CtapState<E>,
     hid: CtapHid,
 }
 
@@ -50,7 +49,7 @@ impl<E: Env> Ctap<E> {
         Ctap { env, state, hid }
     }
 
-    pub fn state(&mut self) -> &mut CtapState {
+    pub fn state(&mut self) -> &mut CtapState<E> {
         &mut self.state
     }
 

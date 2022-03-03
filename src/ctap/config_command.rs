@@ -19,11 +19,12 @@ use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLen
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
+use crate::env::Env;
 use alloc::vec;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
-fn process_enable_enterprise_attestation(
-    persistent_store: &mut PersistentStore,
+fn process_enable_enterprise_attestation<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     if ENTERPRISE_ATTESTATION_MODE.is_some() {
         persistent_store.enable_enterprise_attestation()?;
@@ -34,16 +35,16 @@ fn process_enable_enterprise_attestation(
 }
 
 /// Processes the subcommand toggleAlwaysUv for AuthenticatorConfig.
-fn process_toggle_always_uv(
-    persistent_store: &mut PersistentStore,
+fn process_toggle_always_uv<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     persistent_store.toggle_always_uv()?;
     Ok(ResponseData::AuthenticatorConfig)
 }
 
 /// Processes the subcommand setMinPINLength for AuthenticatorConfig.
-fn process_set_min_pin_length(
-    persistent_store: &mut PersistentStore,
+fn process_set_min_pin_length<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     params: SetMinPinLengthParams,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let SetMinPinLengthParams {
@@ -74,8 +75,8 @@ fn process_set_min_pin_length(
 }
 
 /// Processes the AuthenticatorConfig command.
-pub fn process_config(
-    persistent_store: &mut PersistentStore,
+pub fn process_config<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     client_pin: &mut ClientPin,
     params: AuthenticatorConfigParameters,
 ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -129,13 +130,13 @@ mod test {
     use crate::ctap::customization::ENFORCE_ALWAYS_UV;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
-    use crypto::rng256::ThreadRng256;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn test_process_enable_enterprise_attestation() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -161,9 +162,9 @@ mod test {
 
     #[test]
     fn test_process_toggle_always_uv() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -197,9 +198,9 @@ mod test {
     }
 
     fn test_helper_process_toggle_always_uv_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
@@ -268,9 +269,9 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -313,9 +314,9 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_rp_ids() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -390,9 +391,9 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_force_pin_change_implicit() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -414,9 +415,9 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_force_pin_change_explicit() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -446,9 +447,9 @@ mod test {
 
     #[test]
     fn test_process_config_vendor_prototype() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);

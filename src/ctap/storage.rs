@@ -26,7 +26,7 @@ use crate::ctap::data_formats::{
 use crate::ctap::key_material;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
-use crate::embedded_flash::{new_storage, Storage};
+use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -56,22 +56,22 @@ struct PinProperties {
 }
 
 /// CTAP persistent storage.
-pub struct PersistentStore {
-    store: persistent_store::Store<Storage>,
+pub struct PersistentStore<E: Env> {
+    store: persistent_store::Store<E::Storage>,
 }
 
-impl PersistentStore {
+impl<E: Env> PersistentStore<E> {
     /// Gives access to the persistent store.
     ///
     /// # Safety
     ///
     /// This should be at most one instance of persistent store per program lifetime.
-    pub fn new(rng: &mut impl Rng256) -> PersistentStore {
-        let storage = new_storage().ok().unwrap();
+    pub fn new(env: &mut E) -> Self {
+        let storage = env.storage().ok().unwrap();
         let mut store = PersistentStore {
             store: persistent_store::Store::new(storage).ok().unwrap(),
         };
-        store.init(rng).ok().unwrap();
+        store.init(env.rng()).ok().unwrap();
         store
     }
 
@@ -265,7 +265,7 @@ impl PersistentStore {
     pub fn iter_credentials<'a>(
         &'a self,
         result: &'a mut Result<(), Ctap2StatusCode>,
-    ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
+    ) -> Result<IterCredentials<'a, E>, Ctap2StatusCode> {
         IterCredentials::new(&self.store, result)
     }
 
@@ -655,9 +655,9 @@ impl From<persistent_store::StoreError> for Ctap2StatusCode {
 }
 
 /// Iterator for credentials.
-pub struct IterCredentials<'a> {
+pub struct IterCredentials<'a, E: Env> {
     /// The store being iterated.
-    store: &'a persistent_store::Store<Storage>,
+    store: &'a persistent_store::Store<E::Storage>,
 
     /// The store iterator.
     iter: persistent_store::StoreIter<'a>,
@@ -669,12 +669,12 @@ pub struct IterCredentials<'a> {
     result: &'a mut Result<(), Ctap2StatusCode>,
 }
 
-impl<'a> IterCredentials<'a> {
+impl<'a, E: Env> IterCredentials<'a, E> {
     /// Creates a credential iterator.
     fn new(
-        store: &'a persistent_store::Store<Storage>,
+        store: &'a persistent_store::Store<E::Storage>,
         result: &'a mut Result<(), Ctap2StatusCode>,
-    ) -> Result<IterCredentials<'a>, Ctap2StatusCode> {
+    ) -> Result<Self, Ctap2StatusCode> {
         let iter = store.iter()?;
         Ok(IterCredentials {
             store,
@@ -696,7 +696,7 @@ impl<'a> IterCredentials<'a> {
     }
 }
 
-impl<'a> Iterator for IterCredentials<'a> {
+impl<'a, E: Env> Iterator for IterCredentials<'a, E> {
     type Item = (usize, PublicKeyCredentialSource);
 
     fn next(&mut self) -> Option<(usize, PublicKeyCredentialSource)> {
@@ -752,6 +752,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 mod test {
     use super::*;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
+    use crate::env::test::TestEnv;
     use crypto::rng256::{Rng256, ThreadRng256};
 
     fn create_credential_source(
@@ -778,24 +779,24 @@ mod test {
 
     #[test]
     fn test_store() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
-        let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        let credential_source = create_credential_source(env.rng(), "example.com", vec![]);
         assert!(persistent_store.store_credential(credential_source).is_ok());
         assert!(persistent_store.count_credentials().unwrap() > 0);
     }
 
     #[test]
     fn test_delete_credential() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
         let mut credential_ids = vec![];
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
+            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
@@ -810,8 +811,8 @@ mod test {
 
     #[test]
     fn test_update_credential() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         let user = PublicKeyCredentialUserEntity {
             // User ID is ignored.
             user_id: vec![0x00],
@@ -824,7 +825,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
         );
 
-        let credential_source = create_credential_source(&mut rng, "example.com", vec![0x1D]);
+        let credential_source = create_credential_source(env.rng(), "example.com", vec![0x1D]);
         let credential_id = credential_source.credential_id.clone();
         assert!(persistent_store.store_credential(credential_source).is_ok());
         let stored_credential = persistent_store
@@ -848,12 +849,12 @@ mod test {
 
     #[test]
     fn test_credential_order() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let credential_source = create_credential_source(env.rng(), "example.com", vec![]);
         let current_latest_creation = credential_source.creation_order;
         assert!(persistent_store.store_credential(credential_source).is_ok());
-        let mut credential_source = create_credential_source(&mut rng, "example.com", vec![]);
+        let mut credential_source = create_credential_source(env.rng(), "example.com", vec![]);
         credential_source.creation_order = persistent_store.new_creation_order().unwrap();
         assert!(credential_source.creation_order > current_latest_creation);
         let current_latest_creation = credential_source.creation_order;
@@ -863,18 +864,18 @@ mod test {
 
     #[test]
     fn test_fill_store() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
 
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
+            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
-            &mut rng,
+            env.rng(),
             "example.com",
             vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
         );
@@ -890,12 +891,12 @@ mod test {
 
     #[test]
     fn test_overwrite() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
         // These should have different IDs.
-        let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x00]);
+        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x00]);
         let credential_id0 = credential_source0.credential_id.clone();
         let credential_id1 = credential_source1.credential_id.clone();
 
@@ -915,15 +916,15 @@ mod test {
             .unwrap()
             .is_some());
 
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut persistent_store = PersistentStore::new(&mut env);
         for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(&mut rng, "example.com", user_handle);
+            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             assert!(persistent_store.store_credential(credential_source).is_ok());
             assert_eq!(persistent_store.count_credentials().unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
-            &mut rng,
+            env.rng(),
             "example.com",
             vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
         );
@@ -939,12 +940,12 @@ mod test {
 
     #[test]
     fn test_get_credential() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
+        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x01]);
         let credential_source2 =
-            create_credential_source(&mut rng, "another.example.com", vec![0x02]);
+            create_credential_source(env.rng(), "another.example.com", vec![0x02]);
         let credential_sources = vec![credential_source0, credential_source1, credential_source2];
         for credential_source in credential_sources.into_iter() {
             let cred_id = credential_source.credential_id.clone();
@@ -957,11 +958,11 @@ mod test {
 
     #[test]
     fn test_find() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
-        let credential_source0 = create_credential_source(&mut rng, "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(&mut rng, "example.com", vec![0x01]);
+        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x01]);
         let id0 = credential_source0.credential_id.clone();
         let key0 = credential_source0.private_key.clone();
         assert!(persistent_store
@@ -997,13 +998,13 @@ mod test {
 
     #[test]
     fn test_find_with_cred_protect() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
         assert_eq!(persistent_store.count_credentials().unwrap(), 0);
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
@@ -1025,8 +1026,8 @@ mod test {
 
     #[test]
     fn test_master_keys() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // Master keys stay the same within the same CTAP reset cycle.
         let master_keys_1 = persistent_store.master_keys().unwrap();
@@ -1038,7 +1039,7 @@ mod test {
         // same keys.
         let master_encryption_key = master_keys_1.encryption.to_vec();
         let master_hmac_key = master_keys_1.hmac.to_vec();
-        persistent_store.reset(&mut rng).unwrap();
+        persistent_store.reset(env.rng()).unwrap();
         let master_keys_3 = persistent_store.master_keys().unwrap();
         assert!(master_keys_3.encryption != master_encryption_key.as_slice());
         assert!(master_keys_3.hmac != master_hmac_key.as_slice());
@@ -1046,8 +1047,8 @@ mod test {
 
     #[test]
     fn test_cred_random_secret() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // CredRandom secrets stay the same within the same CTAP reset cycle.
         let cred_random_with_uv_1 = persistent_store.cred_random_secret(true).unwrap();
@@ -1059,7 +1060,7 @@ mod test {
 
         // CredRandom secrets change after reset. This test may fail if the random generator produces the
         // same keys.
-        persistent_store.reset(&mut rng).unwrap();
+        persistent_store.reset(env.rng()).unwrap();
         let cred_random_with_uv_3 = persistent_store.cred_random_secret(true).unwrap();
         let cred_random_without_uv_3 = persistent_store.cred_random_secret(false).unwrap();
         assert!(cred_random_with_uv_1 != cred_random_with_uv_3);
@@ -1068,15 +1069,15 @@ mod test {
 
     #[test]
     fn test_pin_hash_and_length() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // Pin hash is initially not set.
         assert!(persistent_store.pin_hash().unwrap().is_none());
         assert!(persistent_store.pin_code_point_length().unwrap().is_none());
 
         // Setting the pin sets the pin hash.
-        let random_data = rng.gen_uniform_u8x32();
+        let random_data = env.rng().gen_uniform_u8x32();
         assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
         let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
         let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
@@ -1096,15 +1097,15 @@ mod test {
         );
 
         // Resetting the storage resets the pin hash.
-        persistent_store.reset(&mut rng).unwrap();
+        persistent_store.reset(env.rng()).unwrap();
         assert!(persistent_store.pin_hash().unwrap().is_none());
         assert!(persistent_store.pin_code_point_length().unwrap().is_none());
     }
 
     #[test]
     fn test_pin_retries() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // The pin retries is initially at the maximum.
         assert_eq!(persistent_store.pin_retries(), Ok(MAX_PIN_RETRIES));
@@ -1126,8 +1127,8 @@ mod test {
 
     #[test]
     fn test_persistent_keys() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
         assert!(persistent_store
@@ -1151,7 +1152,7 @@ mod test {
         assert_eq!(&persistent_store.aaguid().unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
-        persistent_store.reset(&mut rng).unwrap();
+        persistent_store.reset(env.rng()).unwrap();
         assert_eq!(
             &persistent_store.attestation_private_key().unwrap().unwrap(),
             &dummy_key
@@ -1165,8 +1166,8 @@ mod test {
 
     #[test]
     fn test_min_pin_length() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // The minimum PIN length is initially at the default.
         assert_eq!(
@@ -1187,8 +1188,8 @@ mod test {
 
     #[test]
     fn test_min_pin_length_rp_ids() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
@@ -1213,8 +1214,8 @@ mod test {
 
     #[test]
     fn test_max_large_blob_array_size() {
-        let mut rng = ThreadRng256 {};
-        let persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let persistent_store = PersistentStore::new(&mut env);
 
         assert!(
             MAX_LARGE_BLOB_ARRAY_SIZE
@@ -1225,8 +1226,8 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         let large_blob_array = vec![0x01, 0x02, 0x03];
         assert!(persistent_store
@@ -1248,8 +1249,8 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array_overwrite() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         let large_blob_array = vec![0x11; 5];
         assert!(persistent_store
@@ -1272,8 +1273,8 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array_no_commit() {
-        let mut rng = ThreadRng256 {};
-        let persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let persistent_store = PersistentStore::new(&mut env);
 
         let empty_blob_array = vec![
             0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
@@ -1289,8 +1290,8 @@ mod test {
 
     #[test]
     fn test_global_signature_counter() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         let mut counter_value = 1;
         assert_eq!(
@@ -1311,8 +1312,8 @@ mod test {
 
     #[test]
     fn test_force_pin_change() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         assert!(!persistent_store.has_force_pin_change().unwrap());
         assert_eq!(persistent_store.force_pin_change(), Ok(()));
@@ -1323,20 +1324,20 @@ mod test {
 
     #[test]
     fn test_enterprise_attestation() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         assert!(!persistent_store.enterprise_attestation().unwrap());
         assert_eq!(persistent_store.enable_enterprise_attestation(), Ok(()));
         assert!(persistent_store.enterprise_attestation().unwrap());
-        persistent_store.reset(&mut rng).unwrap();
+        persistent_store.reset(env.rng()).unwrap();
         assert!(!persistent_store.enterprise_attestation().unwrap());
     }
 
     #[test]
     fn test_always_uv() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut persistent_store = PersistentStore::new(&mut env);
 
         if ENFORCE_ALWAYS_UV {
             assert!(persistent_store.has_always_uv().unwrap());
@@ -1355,11 +1356,11 @@ mod test {
 
     #[test]
     fn test_serialize_deserialize_credential() {
-        let mut rng = ThreadRng256 {};
-        let private_key = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
             private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],

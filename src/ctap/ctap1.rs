@@ -178,10 +178,10 @@ impl Ctap1Command {
     const VENDOR_SPECIFIC_FIRST: u8 = 0x40;
     const VENDOR_SPECIFIC_LAST: u8 = 0xBF;
 
-    pub fn process_command(
-        env: &mut impl Env,
+    pub fn process_command<E: Env>(
+        env: &mut E,
         message: &[u8],
-        ctap_state: &mut CtapState,
+        ctap_state: &mut CtapState<E>,
         clock_value: ClockValue,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         if !ctap_state
@@ -243,11 +243,11 @@ impl Ctap1Command {
     // +------+-------------------+-----------------+------------+--------------------+
     // + 0x00 | application (32B) | challenge (32B) | key handle | User pub key (65B) |
     // +------+-------------------+-----------------+------------+--------------------+
-    fn process_register(
-        env: &mut impl Env,
+    fn process_register<E: Env>(
+        env: &mut E,
         challenge: [u8; 32],
         application: [u8; 32],
-        ctap_state: &mut CtapState,
+        ctap_state: &mut CtapState<E>,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let pk = sk.genpk();
@@ -307,13 +307,13 @@ impl Ctap1Command {
     // +-------------------+---------+--------------+-----------------+
     // + application (32B) | UP (1B) | Counter (4B) | challenge (32B) |
     // +-------------------+---------+--------------+-----------------+
-    fn process_authenticate(
-        env: &mut impl Env,
+    fn process_authenticate<E: Env>(
+        env: &mut E,
         challenge: [u8; 32],
         application: [u8; 32],
         key_handle: Vec<u8>,
         flags: Ctap1Flags,
-        ctap_state: &mut CtapState,
+        ctap_state: &mut CtapState<E>,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         let credential_source = ctap_state
             .decrypt_credential_source(key_handle, &application)

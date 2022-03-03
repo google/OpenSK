@@ -1,9 +1,11 @@
+use self::storage::{SyscallStorage, SyscallUpgradeStorage};
 use crate::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
 use crypto::rng256::TockRng256;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
@@ -12,16 +14,46 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::{led, timer, usb_ctap_hid};
+use persistent_store::StorageResult;
+
+mod storage;
 
 pub struct TockEnv {
     rng: TockRng256,
+    storage: bool,
+    upgrade_storage: bool,
 }
 
 impl TockEnv {
-    pub fn new() -> Self {
-        let rng = TockRng256 {};
-        TockEnv { rng }
+    /// Returns the unique instance of the Tock environment.
+    ///
+    /// This function returns `Some` the first time it is called. Afterwards, it repeatedly returns
+    /// `None`.
+    pub fn new() -> Option<Self> {
+        // Make sure the environment was not already taken.
+        static TAKEN: AtomicBool = AtomicBool::new(false);
+        if TAKEN.fetch_or(true, Ordering::SeqCst) {
+            return None;
+        }
+        Some(TockEnv {
+            rng: TockRng256 {},
+            storage: false,
+            upgrade_storage: false,
+        })
     }
+}
+
+/// Creates a new storage instance.
+///
+/// # Safety
+///
+/// It is probably technically memory-safe to hame multiple storage instances at the same time, but
+/// for extra precaution we mark the function as unsafe. To ensure correct usage, this function
+/// should only be called if the previous storage instance was dropped.
+// This function is exposed for example binaries testing the hardware. This could probably be
+// cleaned up by having the persistent store return its storage.
+pub unsafe fn steal_storage() -> StorageResult<SyscallStorage> {
+    SyscallStorage::new()
 }
 
 impl UserPresence for TockEnv {
@@ -33,6 +65,8 @@ impl UserPresence for TockEnv {
 impl Env for TockEnv {
     type Rng = TockRng256;
     type UserPresence = Self;
+    type Storage = SyscallStorage;
+    type UpgradeStorage = SyscallUpgradeStorage;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -40,6 +74,18 @@ impl Env for TockEnv {
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
         self
+    }
+
+    fn storage(&mut self) -> StorageResult<Self::Storage> {
+        assert!(!self.storage);
+        self.storage = true;
+        unsafe { steal_storage() }
+    }
+
+    fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
+        assert!(!self.upgrade_storage);
+        self.upgrade_storage = true;
+        SyscallUpgradeStorage::new()
     }
 }
 

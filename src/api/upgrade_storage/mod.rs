@@ -14,6 +14,8 @@
 
 use persistent_store::StorageResult;
 
+pub(crate) mod helper;
+
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {
     /// Reads a slice of the partition, if within bounds.

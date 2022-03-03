@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::helper::ModRange;
-use super::upgrade_storage::UpgradeStorage;
+use crate::api::upgrade_storage::helper::ModRange;
+use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::boxed::Box;
 use persistent_store::{StorageError, StorageResult};
 

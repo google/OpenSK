@@ -1,7 +1,11 @@
+use self::upgrade_storage::BufferUpgradeStorage;
 use crate::ctap::hid::ChannelID;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
 use crypto::rng256::ThreadRng256;
+use persistent_store::{BufferOptions, BufferStorage, StorageResult};
+
+mod upgrade_storage;
 
 pub struct TestEnv {
     rng: ThreadRng256,
@@ -37,6 +41,8 @@ impl UserPresence for TestUserPresence {
 impl Env for TestEnv {
     type Rng = ThreadRng256;
     type UserPresence = TestUserPresence;
+    type Storage = BufferStorage;
+    type UpgradeStorage = BufferUpgradeStorage;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -44,5 +50,24 @@ impl Env for TestEnv {
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
         &mut self.user_presence
+    }
+
+    fn storage(&mut self) -> StorageResult<Self::Storage> {
+        // Use the Nordic configuration.
+        const PAGE_SIZE: usize = 0x1000;
+        const NUM_PAGES: usize = 20;
+        let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
+        let options = BufferOptions {
+            word_size: 4,
+            page_size: PAGE_SIZE,
+            max_word_writes: 2,
+            max_page_erases: 10000,
+            strict_mode: true,
+        };
+        Ok(BufferStorage::new(store, options))
+    }
+
+    fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
+        BufferUpgradeStorage::new()
     }
 }

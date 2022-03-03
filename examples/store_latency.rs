@@ -21,7 +21,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use core::fmt::Write;
-use ctap2::embedded_flash::{new_storage, Storage};
+use ctap2::env::tock::{steal_storage, TockEnv};
+use ctap2::env::Env;
 use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
@@ -40,9 +41,9 @@ fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>
 }
 
 // Only use one store at a time.
-unsafe fn boot_store(erase: bool) -> Store<Storage> {
+unsafe fn boot_store(erase: bool) -> Store<<TockEnv as Env>::Storage> {
     use persistent_store::Storage;
-    let mut storage = new_storage().unwrap();
+    let mut storage = steal_storage().unwrap();
     let num_pages = storage.num_pages();
     if erase {
         for page in 0..num_pages {
@@ -59,7 +60,7 @@ struct StorageConfig {
 
 fn storage_config() -> StorageConfig {
     use persistent_store::Storage;
-    let storage = new_storage().unwrap();
+    let storage = unsafe { steal_storage() }.unwrap();
     StorageConfig {
         num_pages: storage.num_pages(),
     }

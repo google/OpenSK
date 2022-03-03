@@ -23,6 +23,7 @@ use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::storage::PersistentStore;
 use super::{StatefulCommand, StatefulPermission};
+use crate::env::Env;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
@@ -32,8 +33,8 @@ use crypto::Hash256;
 use libtock_drivers::timer::ClockValue;
 
 /// Generates a set with all existing RP IDs.
-fn get_stored_rp_ids(
-    persistent_store: &PersistentStore,
+fn get_stored_rp_ids<E: Env>(
+    persistent_store: &PersistentStore<E>,
 ) -> Result<BTreeSet<String>, Ctap2StatusCode> {
     let mut rp_set = BTreeSet::new();
     let mut iter_result = Ok(());
@@ -108,8 +109,8 @@ fn enumerate_credentials_response(
 /// Check if the token permissions have the correct associated RP ID.
 ///
 /// Either no RP ID is associated, or the RP ID matches the stored credential.
-fn check_rp_id_permissions(
-    persistent_store: &mut PersistentStore,
+fn check_rp_id_permissions<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     client_pin: &mut ClientPin,
     credential_id: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
@@ -122,8 +123,8 @@ fn check_rp_id_permissions(
 }
 
 /// Processes the subcommand getCredsMetadata for CredentialManagement.
-fn process_get_creds_metadata(
-    persistent_store: &PersistentStore,
+fn process_get_creds_metadata<E: Env>(
+    persistent_store: &PersistentStore<E>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     Ok(AuthenticatorCredentialManagementResponse {
         existing_resident_credentials_count: Some(persistent_store.count_credentials()? as u64),
@@ -135,8 +136,8 @@ fn process_get_creds_metadata(
 }
 
 /// Processes the subcommand enumerateRPsBegin for CredentialManagement.
-fn process_enumerate_rps_begin(
-    persistent_store: &PersistentStore,
+fn process_enumerate_rps_begin<E: Env>(
+    persistent_store: &PersistentStore<E>,
     stateful_command_permission: &mut StatefulPermission,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -155,8 +156,8 @@ fn process_enumerate_rps_begin(
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
-fn process_enumerate_rps_get_next_rp(
-    persistent_store: &PersistentStore,
+fn process_enumerate_rps_get_next_rp<E: Env>(
+    persistent_store: &PersistentStore<E>,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_index = stateful_command_permission.next_enumerate_rp()?;
@@ -170,8 +171,8 @@ fn process_enumerate_rps_get_next_rp(
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
-fn process_enumerate_credentials_begin(
-    persistent_store: &PersistentStore,
+fn process_enumerate_credentials_begin<E: Env>(
+    persistent_store: &PersistentStore<E>,
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
@@ -207,8 +208,8 @@ fn process_enumerate_credentials_begin(
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
-fn process_enumerate_credentials_get_next_credential(
-    persistent_store: &PersistentStore,
+fn process_enumerate_credentials_get_next_credential<E: Env>(
+    persistent_store: &PersistentStore<E>,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential()?;
@@ -217,8 +218,8 @@ fn process_enumerate_credentials_get_next_credential(
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.
-fn process_delete_credential(
-    persistent_store: &mut PersistentStore,
+fn process_delete_credential<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
@@ -231,8 +232,8 @@ fn process_delete_credential(
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
-fn process_update_user_information(
-    persistent_store: &mut PersistentStore,
+fn process_update_user_information<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
@@ -248,8 +249,8 @@ fn process_update_user_information(
 }
 
 /// Processes the CredentialManagement command and all its subcommands.
-pub fn process_credential_management(
-    persistent_store: &mut PersistentStore,
+pub fn process_credential_management<E: Env>(
+    persistent_store: &mut PersistentStore<E>,
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     cred_management_params: AuthenticatorCredentialManagementParameters,

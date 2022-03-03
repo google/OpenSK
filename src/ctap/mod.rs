@@ -64,7 +64,7 @@ use self::storage::PersistentStore;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
-use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
+use crate::api::upgrade_storage::UpgradeStorage;
 use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -161,7 +161,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 /// The upgrade hash is computed over the firmware image and all metadata,
 /// except the hash itself.
 fn parse_metadata(
-    upgrade_locations: &UpgradeLocations,
+    upgrade_locations: &impl UpgradeStorage,
     metadata: &[u8],
 ) -> Result<[u8; 32], Ctap2StatusCode> {
     const METADATA_LEN: usize = 40;
@@ -330,20 +330,21 @@ impl StatefulPermission {
 
 // This struct currently holds all state, not only the persistent memory. The persistent members are
 // in the persistent store field.
-pub struct CtapState {
-    persistent_store: PersistentStore,
+pub struct CtapState<E: Env> {
+    persistent_store: PersistentStore<E>,
     client_pin: ClientPin,
     #[cfg(feature = "with_ctap1")]
     pub(crate) u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission,
     large_blobs: LargeBlobs,
-    upgrade_locations: Option<UpgradeLocations>,
+    // Upgrade support is optional.
+    upgrade_locations: Option<E::UpgradeStorage>,
 }
 
-impl CtapState {
-    pub fn new(env: &mut impl Env, now: ClockValue) -> CtapState {
-        let persistent_store = PersistentStore::new(env.rng());
+impl<E: Env> CtapState<E> {
+    pub fn new(env: &mut E, now: ClockValue) -> Self {
+        let persistent_store = PersistentStore::new(env);
         let client_pin = ClientPin::new(env.rng());
         CtapState {
             persistent_store,
@@ -355,7 +356,7 @@ impl CtapState {
             ),
             stateful_command_permission: StatefulPermission::new_reset(now),
             large_blobs: LargeBlobs::new(),
-            upgrade_locations: UpgradeLocations::new().ok(),
+            upgrade_locations: env.upgrade_storage().ok(),
         }
     }
 
@@ -369,7 +370,7 @@ impl CtapState {
 
     pub fn increment_global_signature_counter(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
     ) -> Result<(), Ctap2StatusCode> {
         if USE_SIGNATURE_COUNTER {
             let increment = env.rng().gen_uniform_u32x8()[0] % 8 + 1;
@@ -393,7 +394,7 @@ impl CtapState {
     // compatible with U2F.
     pub fn encrypt_key_handle(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -454,7 +455,7 @@ impl CtapState {
 
     pub fn process_command(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         command_cbor: &[u8],
         cid: ChannelID,
         now: ClockValue,
@@ -557,7 +558,7 @@ impl CtapState {
 
     fn pin_uv_auth_precheck(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         pin_uv_auth_param: &Option<Vec<u8>>,
         pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
         cid: ChannelID,
@@ -579,7 +580,7 @@ impl CtapState {
 
     fn process_make_credential(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         make_credential_params: AuthenticatorMakeCredentialParameters,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -837,7 +838,7 @@ impl CtapState {
     // and returns the correct Get(Next)Assertion response.
     fn assertion_response(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         mut credential: PublicKeyCredentialSource,
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
@@ -945,7 +946,7 @@ impl CtapState {
 
     fn process_get_assertion(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         get_assertion_params: AuthenticatorGetAssertionParameters,
         cid: ChannelID,
         now: ClockValue,
@@ -1071,7 +1072,7 @@ impl CtapState {
 
     fn process_get_next_assertion(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
@@ -1157,7 +1158,7 @@ impl CtapState {
 
     fn process_reset(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         cid: ChannelID,
         now: ClockValue,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -1183,7 +1184,7 @@ impl CtapState {
 
     fn process_selection(
         &self,
-        env: &mut impl Env,
+        env: &mut E,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         env.user_presence().check(cid)?;
@@ -1192,7 +1193,7 @@ impl CtapState {
 
     fn process_vendor_configure(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         params: AuthenticatorVendorConfigureParameters,
         cid: ChannelID,
     ) -> Result<ResponseData, Ctap2StatusCode> {

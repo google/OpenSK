@@ -114,6 +114,18 @@ pub enum KeepaliveStatus {
 /// - information about requested winks.
 ///
 /// The wink information can be polled to decide to i.e. blink LEDs.
+///
+/// To process a packet and receive the response, you can call `process_hid_packet`.
+/// If you want more control, you can also do the processing in steps:
+///
+/// 1.  `HidPacket` -> `Option<Message>`
+///     `parse_packet` assembles the message and preprocesses all pure HID commands and errors.
+/// 2.  `Option<Message>` -> `Message`
+///     If you didn't receive any message or preprocessing discarded it, stop.
+/// 3.  `Message` -> `Message`
+///     `process_message` handles all protocol interactions.
+/// 4.  `Message` -> `HidPacketIterator
+///     `split_message` creates packets out of the response message.
 pub struct CtapHid {
     assembler: MessageAssembler,
     // The specification only requires unique CIDs, the allocation algorithm is vendor specific.
@@ -175,58 +187,93 @@ impl CtapHid {
         }
     }
 
-    /// Processes an assembled incoming message and returns an outgoing message if necessary.
-    pub fn process_message(
-        &mut self,
-        env: &mut impl Env,
-        message: Message,
-        clock_value: ClockValue,
-        ctap_state: &mut CtapState,
-    ) -> Option<Message> {
-        #[cfg(feature = "debug_ctap")]
-        writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
-
-        let cid = message.cid;
-        if !self.has_valid_channel(&message) {
-            #[cfg(feature = "debug_ctap")]
-            writeln!(&mut Console::new(), "Invalid channel: {:02x?}", cid).unwrap();
-            return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL));
-        }
-        // If another command arrives, stop winking to prevent accidential button touches.
-        self.wink_permission = TimedPermission::waiting();
-
-        match message.cmd {
-            // CTAP 2.1 from 2021-06-15, section 11.2.9.1.1.
-            CtapHidCommand::Msg => {
-                // If we don't have CTAP1 backward compatibilty, this command is invalid.
-                #[cfg(not(feature = "with_ctap1"))]
-                return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD));
-
-                #[cfg(feature = "with_ctap1")]
-                match ctap1::Ctap1Command::process_command(
-                    env,
-                    &message.payload,
-                    ctap_state,
-                    clock_value,
-                ) {
-                    Ok(payload) => Some(CtapHid::ctap1_success_message(cid, &payload)),
-                    Err(ctap1_status_code) => {
-                        Some(CtapHid::ctap1_error_message(cid, ctap1_status_code))
+    /// Parses a packet, and preprocesses some messages and errors.
+    ///
+    /// The preprocessed commands are:
+    /// - INIT
+    /// - CANCEL
+    /// - ERROR
+    /// - Unknown and unexpected commands like KEEPALIVE
+    /// - LOCK is not implemented and currently treated like an unknown command
+    ///
+    /// Commands that may still be processed:
+    /// - PING
+    /// - MSG
+    /// - WINK
+    /// - CBOR
+    ///
+    /// You may ignore PING, it's behaving correctly by default (input == output).
+    /// Ignoring the others is incorrect behavior. You have to at least replace them with an error
+    /// message:
+    /// `CtapHid::error_message(message.cid, CtapHid::ERR_INVALID_CMD)`
+    pub fn parse_packet(&mut self, packet: &HidPacket, clock_value: ClockValue) -> Option<Message> {
+        match self
+            .assembler
+            .parse_packet(packet, Timestamp::<isize>::from_clock_value(clock_value))
+        {
+            Ok(Some(message)) => {
+                #[cfg(feature = "debug_ctap")]
+                writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
+                self.preprocess_message(message)
+            }
+            Ok(None) => {
+                // Waiting for more packets to assemble the message, nothing to send for now.
+                None
+            }
+            Err((cid, error)) => {
+                if !self.is_allocated_channel(cid)
+                    && error != receive::Error::UnexpectedContinuation
+                {
+                    Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL))
+                } else {
+                    match error {
+                        receive::Error::UnexpectedChannel => {
+                            Some(CtapHid::error_message(cid, CtapHid::ERR_CHANNEL_BUSY))
+                        }
+                        receive::Error::UnexpectedInit => {
+                            // TODO: Should we send another error code in this case?
+                            // Technically, we were expecting a sequence number and got another
+                            // byte, although the command/seqnum bit has higher-level semantics
+                            // than sequence numbers.
+                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
+                        }
+                        receive::Error::UnexpectedContinuation => {
+                            // CTAP specification (version 20190130) section 8.1.5.4
+                            // Spurious continuation packets will be ignored.
+                            None
+                        }
+                        receive::Error::UnexpectedSeq => {
+                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
+                        }
+                        receive::Error::UnexpectedLen => {
+                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN))
+                        }
+                        receive::Error::Timeout => {
+                            Some(CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT))
+                        }
                     }
                 }
             }
-            // CTAP 2.1 from 2021-06-15, section 11.2.9.1.2.
-            CtapHidCommand::Cbor => {
-                // Each transaction is atomic, so we process the command directly here and
-                // don't handle any other packet in the meantime.
-                // TODO: Send "Processing" type keep-alive packets in the meantime.
-                let response = ctap_state.process_command(env, &message.payload, cid, clock_value);
-                Some(Message {
-                    cid,
-                    cmd: CtapHidCommand::Cbor,
-                    payload: response,
-                })
-            }
+        }
+    }
+
+    /// Processes HID-only commands of a message and returns an outgoing message if necessary.
+    ///
+    /// The preprocessed commands are:
+    /// - INIT
+    /// - CANCEL
+    /// - ERROR
+    /// - Unknown and unexpected commands like KEEPALIVE
+    /// - LOCK is not implemented and currently treated like an unknown command
+    fn preprocess_message(&mut self, message: Message) -> Option<Message> {
+        let cid = message.cid;
+        if !self.has_valid_channel(&message) {
+            return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL));
+        }
+
+        match message.cmd {
+            CtapHidCommand::Msg => Some(message),
+            CtapHidCommand::Cbor => Some(message),
             // CTAP 2.1 from 2021-06-15, section 11.2.9.1.3.
             CtapHidCommand::Init => {
                 if message.payload.len() != 8 {
@@ -268,20 +315,69 @@ impl CtapHid {
                 // CANCEL is handled during user presence checks in main.
                 None
             }
-            // CTAP 2.1 from 2021-06-15, section 11.2.9.2.1.
-            CtapHidCommand::Wink => {
-                if !message.payload.is_empty() {
-                    return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN));
-                }
-                self.wink_permission =
-                    TimedPermission::granted(clock_value, CtapHid::WINK_TIMEOUT_DURATION);
-                // The response is empty like the request.
-                Some(message)
-            }
+            CtapHidCommand::Wink => Some(message),
             _ => {
                 // Unknown or unsupported command.
                 Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD))
             }
+        }
+    }
+
+    /// Processes a message's commands that affect the protocol outside HID.
+    pub fn process_message(
+        &mut self,
+        env: &mut impl Env,
+        message: Message,
+        clock_value: ClockValue,
+        ctap_state: &mut CtapState,
+    ) -> Message {
+        // If another command arrives, stop winking to prevent accidential button touches.
+        self.wink_permission = TimedPermission::waiting();
+
+        let cid = message.cid;
+        match message.cmd {
+            // CTAP 2.1 from 2021-06-15, section 11.2.9.1.1.
+            CtapHidCommand::Msg => {
+                // If we don't have CTAP1 backward compatibilty, this command is invalid.
+                #[cfg(not(feature = "with_ctap1"))]
+                return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD);
+
+                #[cfg(feature = "with_ctap1")]
+                match ctap1::Ctap1Command::process_command(
+                    env,
+                    &message.payload,
+                    ctap_state,
+                    clock_value,
+                ) {
+                    Ok(payload) => CtapHid::ctap1_success_message(cid, &payload),
+                    Err(ctap1_status_code) => CtapHid::ctap1_error_message(cid, ctap1_status_code),
+                }
+            }
+            // CTAP 2.1 from 2021-06-15, section 11.2.9.1.2.
+            CtapHidCommand::Cbor => {
+                // Each transaction is atomic, so we process the command directly here and
+                // don't handle any other packet in the meantime.
+                // TODO: Send "Processing" type keep-alive packets in the meantime.
+                let response = ctap_state.process_command(env, &message.payload, cid, clock_value);
+                Message {
+                    cid,
+                    cmd: CtapHidCommand::Cbor,
+                    payload: response,
+                }
+            }
+            // CTAP 2.1 from 2021-06-15, section 11.2.9.2.1.
+            CtapHidCommand::Wink => {
+                if message.payload.is_empty() {
+                    self.wink_permission =
+                        TimedPermission::granted(clock_value, CtapHid::WINK_TIMEOUT_DURATION);
+                    // The response is empty like the request.
+                    message
+                } else {
+                    CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN)
+                }
+            }
+            // All other commands have already been processed, keep them as is.
+            _ => message,
         }
     }
 
@@ -293,52 +389,16 @@ impl CtapHid {
         clock_value: ClockValue,
         ctap_state: &mut CtapState,
     ) -> HidPacketIterator {
-        let reponse_message = match self
-            .assembler
-            .parse_packet(packet, Timestamp::<isize>::from_clock_value(clock_value))
-        {
-            Ok(Some(message)) => self.process_message(env, message, clock_value, ctap_state),
-            Ok(None) => {
-                // Waiting for more packets to assemble the message, nothing to send for now.
-                None
-            }
-            Err((cid, error)) => {
-                if !self.is_allocated_channel(cid)
-                    && error != receive::Error::UnexpectedContinuation
-                {
-                    Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL))
-                } else {
-                    match error {
-                        receive::Error::UnexpectedChannel => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_CHANNEL_BUSY))
-                        }
-                        receive::Error::UnexpectedInit => {
-                            // TODO: Should we send another error code in this case?
-                            // Technically, we were expecting a sequence number and got another
-                            // byte, although the command/seqnum bit has higher-level semantics
-                            // than sequence numbers.
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
-                        }
-                        receive::Error::UnexpectedContinuation => {
-                            // CTAP specification (version 20190130) section 8.1.5.4
-                            // Spurious continuation packets will be ignored.
-                            None
-                        }
-                        receive::Error::UnexpectedSeq => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
-                        }
-                        receive::Error::UnexpectedLen => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN))
-                        }
-                        receive::Error::Timeout => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT))
-                        }
-                    }
-                }
-            }
-        };
-        if let Some(message) = reponse_message {
-            CtapHid::split_message(message)
+        if let Some(message) = self.parse_packet(packet, clock_value) {
+            let processed_message = self.process_message(env, message, clock_value, ctap_state);
+            #[cfg(feature = "debug_ctap")]
+            writeln!(
+                &mut Console::new(),
+                "Sending message: {:02x?}",
+                processed_message
+            )
+            .unwrap();
+            CtapHid::split_message(processed_message)
         } else {
             HidPacketIterator::none()
         }
@@ -402,8 +462,6 @@ impl CtapHid {
     /// correctly handled by the CTAP implementation. It is therefore an internal error from the
     /// HID perspective.
     fn split_message(message: Message) -> HidPacketIterator {
-        #[cfg(feature = "debug_ctap")]
-        writeln!(&mut Console::new(), "Sending message: {:02x?}", message).unwrap();
         let cid = message.cid;
         HidPacketIterator::new(message).unwrap_or_else(|| {
             // The error payload is 1 <= 7609 bytes, so unwrap() is safe.

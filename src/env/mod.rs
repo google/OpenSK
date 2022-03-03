@@ -4,6 +4,7 @@ use crypto::rng256::Rng256;
 
 #[cfg(feature = "std")]
 pub mod test;
+pub mod tock;
 
 pub trait UserPresence {
     /// Blocks for user presence.

@@ -27,19 +27,18 @@ pub struct TockEnv {
 impl TockEnv {
     /// Returns the unique instance of the Tock environment.
     ///
-    /// This function returns `Some` the first time it is called. Afterwards, it repeatedly returns
-    /// `None`.
-    pub fn new() -> Option<Self> {
+    /// # Panics
+    ///
+    /// - If called a second time.
+    pub fn new() -> Self {
         // Make sure the environment was not already taken.
         static TAKEN: AtomicBool = AtomicBool::new(false);
-        if TAKEN.fetch_or(true, Ordering::SeqCst) {
-            return None;
-        }
-        Some(TockEnv {
+        assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
+        TockEnv {
             rng: TockRng256 {},
             storage: false,
             upgrade_storage: false,
-        })
+        }
     }
 }
 
@@ -47,11 +46,11 @@ impl TockEnv {
 ///
 /// # Safety
 ///
-/// It is probably technically memory-safe to hame multiple storage instances at the same time, but
+/// It is probably technically memory-safe to have multiple storage instances at the same time, but
 /// for extra precaution we mark the function as unsafe. To ensure correct usage, this function
 /// should only be called if the previous storage instance was dropped.
-// This function is exposed for example binaries testing the hardware. This could probably be
-// cleaned up by having the persistent store return its storage.
+// This function is exposed to example binaries testing the hardware. This could probably be cleaned
+// up by having the persistent store return its storage.
 pub unsafe fn steal_storage() -> StorageResult<SyscallStorage> {
     SyscallStorage::new()
 }

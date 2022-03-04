@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ impl CryptoCell310 {
 
     /// Adds data to the current hash computation.
     ///
-    /// You have to know in advance is this is going to be the last block, and indicate that
+    /// You have to know in advance if is this is going to be the last block, and indicate that
     /// correctly. Sizes of chunks before the last need to be multiples of 64.
     pub fn update(&self, data: &[u8], is_last_block: bool) {
         // Start CryptoCell

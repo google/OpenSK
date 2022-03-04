@@ -71,3 +71,9 @@ jobs:
         with:
           command: fmt
           args: --manifest-path tools/heapviz/Cargo.toml --all -- --check
+
+      - name: Cargo format bootloader
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path bootloader/Cargo.toml --all -- --check

@@ -384,6 +384,39 @@ class OpenSKInstaller:
     self._check_invariants()
     self._build_app_or_example(is_example=False)
 
+  def build_bootloader(self):
+    """Builds the upgrade bootloader."""
+    props = SUPPORTED_BOARDS[self.args.board]
+    info("Building bootloader")
+    rust_flags = [
+        f"--remap-path-prefix={os.getcwd()}=",
+        "-C",
+        "link-arg=-Wl,-Tlink.x",
+        "-C",
+        "link-arg=-nostartfiles",
+    ]
+    env = os.environ.copy()
+    env["RUSTFLAGS"] = " ".join(rust_flags)
+    cargo_command = ["cargo", "build", "--release", f"--target={props.arch}"]
+    self.checked_command(cargo_command, cwd="bootloader", env=env)
+    binary_path = os.path.join("target", props.arch, "release", "bootloader")
+    objcopy_command = [
+        "llvm-objcopy", "-O", "binary", binary_path, f"{binary_path}.bin"
+    ]
+    self.checked_command(objcopy_command, cwd="bootloader")
+
+  def flash_bootloader(self):
+    """Flashes the upgrade bootloader."""
+    props = SUPPORTED_BOARDS[self.args.board]
+    info("Flashing bootloader")
+    bin_file = os.path.join("bootloader", "target", props.arch, "release",
+                            "bootloader.bin")
+    if not os.path.exists(bin_file):
+      fatal(f"File not found: {bin_file}")
+    with open(bin_file, "rb") as bootloader_bin:
+      bootloader = bootloader_bin.read()
+    self.write_binary(bootloader, 0)
+
   def _build_app_or_example(self, is_example: bool):
     """Builds the application specified through args.
 
@@ -732,8 +765,12 @@ class OpenSKInstaller:
       return 0
 
     # Compile what needs to be compiled
+    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.tockos:
       self.build_tockos()
+
+    if board_props.metadata_address is not None:
+      self.build_bootloader()
 
     if self.args.application == "ctap2":
       self.generate_crypto_materials(self.args.regenerate_keys)
@@ -748,7 +785,6 @@ class OpenSKInstaller:
       self.clear_storage()
 
     # Flashing
-    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.programmer in ("jlink", "openocd"):
       # We rely on Tockloader to do the job
       if self.args.clear_apps:
@@ -756,6 +792,9 @@ class OpenSKInstaller:
       if self.args.tockos:
         # Install Tock OS
         self.install_tock_os()
+      if board_props.metadata_address is not None:
+        # Install the bootloader
+        self.flash_bootloader()
       # Install padding and application if needed
       if self.args.application:
         self.install_padding()

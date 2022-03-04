@@ -82,3 +82,9 @@ jobs:
         with:
           command: check
           args: --target thumbv7em-none-eabi --release --examples
+
+      - name: Check bootloader
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --manifest-path bootloader/Cargo.toml --target thumbv7em-none-eabi --release

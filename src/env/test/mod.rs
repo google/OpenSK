@@ -17,6 +17,14 @@ pub struct TestUserPresence {
     check: Box<dyn Fn(ChannelID) -> Result<(), Ctap2StatusCode>>,
 }
 
+pub struct TestWrite;
+
+impl core::fmt::Write for TestWrite {
+    fn write_str(&mut self, _: &str) -> core::fmt::Result {
+        Ok(())
+    }
+}
+
 impl TestEnv {
     pub fn new() -> Self {
         let rng = ThreadRng256 {};
@@ -34,7 +42,7 @@ impl TestUserPresence {
 }
 
 impl UserPresence for TestUserPresence {
-    fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
         (self.check)(cid)
     }
 }
@@ -51,6 +59,7 @@ impl Env for TestEnv {
     type Storage = BufferStorage;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
+    type Write = TestWrite;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -81,5 +90,9 @@ impl Env for TestEnv {
 
     fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
         self
+    }
+
+    fn write(&mut self) -> Self::Write {
+        TestWrite
     }
 }

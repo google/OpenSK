@@ -26,10 +26,6 @@ use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
-#[cfg(feature = "debug_ctap")]
-use core::fmt::Write;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::console::Console;
 use libtock_drivers::timer::{ClockValue, Duration, Timestamp};
 
 // CTAP specification (version 20190130) section 8.1
@@ -159,14 +155,12 @@ impl CtapHid {
             .parse_packet(packet, Timestamp::<isize>::from_clock_value(clock_value))
         {
             Ok(Some(message)) => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
+                debug_ctap!(env, "Received message: {:02x?}", message);
 
                 let cid = message.cid;
                 if !self.has_valid_channel(&message) {
-                    #[cfg(feature = "debug_ctap")]
-                    writeln!(&mut Console::new(), "Invalid channel: {:02x?}", cid).unwrap();
-                    return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL);
+                    debug_ctap!(env, "Invalid channel: {:02x?}", cid);
+                    return CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_CHANNEL);
                 }
                 // If another command arrives, stop winking to prevent accidential button touches.
                 self.wink_permission = TimedPermission::waiting();
@@ -176,7 +170,7 @@ impl CtapHid {
                     CtapHid::COMMAND_MSG => {
                         // If we don't have CTAP1 backward compatibilty, this command is invalid.
                         #[cfg(not(feature = "with_ctap1"))]
-                        return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD);
+                        return CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_CMD);
 
                         #[cfg(feature = "with_ctap1")]
                         match ctap1::Ctap1Command::process_command(
@@ -185,9 +179,9 @@ impl CtapHid {
                             ctap_state,
                             clock_value,
                         ) {
-                            Ok(payload) => CtapHid::ctap1_success_message(cid, &payload),
+                            Ok(payload) => CtapHid::ctap1_success_message(env, cid, &payload),
                             Err(ctap1_status_code) => {
-                                CtapHid::ctap1_error_message(cid, ctap1_status_code)
+                                CtapHid::ctap1_error_message(env, cid, ctap1_status_code)
                             }
                         }
                     }
@@ -199,11 +193,14 @@ impl CtapHid {
                         // TODO: Send keep-alive packets in the meantime.
                         let response =
                             ctap_state.process_command(env, &message.payload, cid, clock_value);
-                        if let Some(iterator) = CtapHid::split_message(Message {
-                            cid,
-                            cmd: CtapHid::COMMAND_CBOR,
-                            payload: response,
-                        }) {
+                        if let Some(iterator) = CtapHid::split_message(
+                            env,
+                            Message {
+                                cid,
+                                cmd: CtapHid::COMMAND_CBOR,
+                                payload: response,
+                            },
+                        ) {
                             iterator
                         } else {
                             // Handle the case of a payload > 7609 bytes.
@@ -213,20 +210,23 @@ impl CtapHid {
                             //
                             // The error payload that we send instead is 1 <= 7609 bytes, so it is
                             // safe to unwrap() the result.
-                            CtapHid::split_message(Message {
-                                cid,
-                                cmd: CtapHid::COMMAND_CBOR,
-                                payload: vec![
-                                    Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8,
-                                ],
-                            })
+                            CtapHid::split_message(
+                                env,
+                                Message {
+                                    cid,
+                                    cmd: CtapHid::COMMAND_CBOR,
+                                    payload: vec![
+                                        Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8,
+                                    ],
+                                },
+                            )
                             .unwrap()
                         }
                     }
                     // CTAP specification (version 20190130) section 8.1.9.1.3
                     CtapHid::COMMAND_INIT => {
                         if message.payload.len() != 8 {
-                            return CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN);
+                            return CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_LEN);
                         }
 
                         let new_cid = if cid == CtapHid::CHANNEL_BROADCAST {
@@ -248,11 +248,14 @@ impl CtapHid {
                         payload[16] = CtapHid::CAPABILITIES;
 
                         // This unwrap is safe because the payload length is 17 <= 7609 bytes.
-                        CtapHid::split_message(Message {
-                            cid,
-                            cmd: CtapHid::COMMAND_INIT,
-                            payload,
-                        })
+                        CtapHid::split_message(
+                            env,
+                            Message {
+                                cid,
+                                cmd: CtapHid::COMMAND_INIT,
+                                payload,
+                            },
+                        )
                         .unwrap()
                     }
                     // CTAP specification (version 20190130) section 8.1.9.1.4
@@ -260,7 +263,7 @@ impl CtapHid {
                         // Pong the same message.
                         // This unwrap is safe because if we could parse the incoming message, it's
                         // payload length must be <= 7609 bytes.
-                        CtapHid::split_message(message).unwrap()
+                        CtapHid::split_message(env, message).unwrap()
                     }
                     // CTAP specification (version 20190130) section 8.1.9.1.5
                     CtapHid::COMMAND_CANCEL => {
@@ -272,22 +275,25 @@ impl CtapHid {
                     // CTAP specification (version 20190130) section 8.1.9.2.1
                     CtapHid::COMMAND_WINK => {
                         if !message.payload.is_empty() {
-                            return CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN);
+                            return CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_LEN);
                         }
                         self.wink_permission =
                             TimedPermission::granted(clock_value, CtapHid::WINK_TIMEOUT_DURATION);
-                        CtapHid::split_message(Message {
-                            cid,
-                            cmd: CtapHid::COMMAND_WINK,
-                            payload: vec![],
-                        })
+                        CtapHid::split_message(
+                            env,
+                            Message {
+                                cid,
+                                cmd: CtapHid::COMMAND_WINK,
+                                payload: vec![],
+                            },
+                        )
                         .unwrap()
                     }
                     // CTAP specification (version 20190130) section 8.1.9.2.2
                     // TODO: implement LOCK
                     _ => {
                         // Unknown or unsupported command.
-                        CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD)
+                        CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_CMD)
                     }
                 }
             }
@@ -299,18 +305,18 @@ impl CtapHid {
                 if !self.is_allocated_channel(cid)
                     && error != receive::Error::UnexpectedContinuation
                 {
-                    CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL)
+                    CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_CHANNEL)
                 } else {
                     match error {
                         receive::Error::UnexpectedChannel => {
-                            CtapHid::error_message(cid, CtapHid::ERR_CHANNEL_BUSY)
+                            CtapHid::error_message(env, cid, CtapHid::ERR_CHANNEL_BUSY)
                         }
                         receive::Error::UnexpectedInit => {
                             // TODO: Should we send another error code in this case?
                             // Technically, we were expecting a sequence number and got another
                             // byte, although the command/seqnum bit has higher-level semantics
                             // than sequence numbers.
-                            CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ)
+                            CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_SEQ)
                         }
                         receive::Error::UnexpectedContinuation => {
                             // CTAP specification (version 20190130) section 8.1.5.4
@@ -318,13 +324,13 @@ impl CtapHid {
                             HidPacketIterator::none()
                         }
                         receive::Error::UnexpectedSeq => {
-                            CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ)
+                            CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_SEQ)
                         }
                         receive::Error::UnexpectedLen => {
-                            CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN)
+                            CtapHid::error_message(env, cid, CtapHid::ERR_INVALID_LEN)
                         }
                         receive::Error::Timeout => {
-                            CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT)
+                            CtapHid::error_message(env, cid, CtapHid::ERR_MSG_TIMEOUT)
                         }
                     }
                 }
@@ -345,13 +351,16 @@ impl CtapHid {
         cid != CtapHid::CHANNEL_RESERVED && u32::from_be_bytes(cid) as usize <= self.allocated_cids
     }
 
-    fn error_message(cid: ChannelID, error_code: u8) -> HidPacketIterator {
+    fn error_message<E: Env>(env: &mut E, cid: ChannelID, error_code: u8) -> HidPacketIterator {
         // This unwrap is safe because the payload length is 1 <= 7609 bytes.
-        CtapHid::split_message(Message {
-            cid,
-            cmd: CtapHid::COMMAND_ERROR,
-            payload: vec![error_code],
-        })
+        CtapHid::split_message(
+            env,
+            Message {
+                cid,
+                cmd: CtapHid::COMMAND_ERROR,
+                payload: vec![error_code],
+            },
+        )
         .unwrap()
     }
 
@@ -379,23 +388,29 @@ impl CtapHid {
         }
     }
 
-    fn split_message(message: Message) -> Option<HidPacketIterator> {
-        #[cfg(feature = "debug_ctap")]
-        writeln!(&mut Console::new(), "Sending message: {:02x?}", message).unwrap();
+    fn split_message<E: Env>(env: &mut E, message: Message) -> Option<HidPacketIterator> {
+        debug_ctap!(env, "Sending message: {:02x?}", message);
         HidPacketIterator::new(message)
     }
 
-    pub fn keepalive(cid: ChannelID, status: KeepaliveStatus) -> HidPacketIterator {
+    pub fn keepalive<E: Env>(
+        env: &mut E,
+        cid: ChannelID,
+        status: KeepaliveStatus,
+    ) -> HidPacketIterator {
         let status_code = match status {
             KeepaliveStatus::Processing => 1,
             KeepaliveStatus::UpNeeded => 2,
         };
         // This unwrap is safe because the payload length is 1 <= 7609 bytes.
-        CtapHid::split_message(Message {
-            cid,
-            cmd: CtapHid::COMMAND_KEEPALIVE,
-            payload: vec![status_code],
-        })
+        CtapHid::split_message(
+            env,
+            Message {
+                cid,
+                cmd: CtapHid::COMMAND_KEEPALIVE,
+                payload: vec![status_code],
+            },
+        )
         .unwrap()
     }
 
@@ -404,30 +419,41 @@ impl CtapHid {
     }
 
     #[cfg(feature = "with_ctap1")]
-    fn ctap1_error_message(
+    fn ctap1_error_message<E: Env>(
+        env: &mut E,
         cid: ChannelID,
         error_code: ctap1::Ctap1StatusCode,
     ) -> HidPacketIterator {
         // This unwrap is safe because the payload length is 2 <= 7609 bytes
         let code: u16 = error_code.into();
-        CtapHid::split_message(Message {
-            cid,
-            cmd: CtapHid::COMMAND_MSG,
-            payload: code.to_be_bytes().to_vec(),
-        })
+        CtapHid::split_message(
+            env,
+            Message {
+                cid,
+                cmd: CtapHid::COMMAND_MSG,
+                payload: code.to_be_bytes().to_vec(),
+            },
+        )
         .unwrap()
     }
 
     #[cfg(feature = "with_ctap1")]
-    fn ctap1_success_message(cid: ChannelID, payload: &[u8]) -> HidPacketIterator {
+    fn ctap1_success_message<E: Env>(
+        env: &mut E,
+        cid: ChannelID,
+        payload: &[u8],
+    ) -> HidPacketIterator {
         let mut response = payload.to_vec();
         let code: u16 = ctap1::Ctap1StatusCode::SW_SUCCESS.into();
         response.extend_from_slice(&code.to_be_bytes());
-        CtapHid::split_message(Message {
-            cid,
-            cmd: CtapHid::COMMAND_MSG,
-            payload: response,
-        })
+        CtapHid::split_message(
+            env,
+            Message {
+                cid,
+                cmd: CtapHid::COMMAND_MSG,
+                payload: response,
+            },
+        )
         .unwrap()
     }
 }

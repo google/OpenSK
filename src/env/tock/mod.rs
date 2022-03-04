@@ -10,7 +10,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crypto::rng256::TockRng256;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
-#[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
@@ -58,8 +57,8 @@ pub unsafe fn steal_storage() -> StorageResult<SyscallStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
-        check_user_presence(cid)
+    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+        check_user_presence(self, cid)
     }
 }
 
@@ -82,6 +81,7 @@ impl Env for TockEnv {
     type Storage = SyscallStorage;
     type UpgradeStorage = SyscallUpgradeStorage;
     type FirmwareProtection = Self;
+    type Write = Console;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -104,6 +104,10 @@ impl Env for TockEnv {
     fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
         self
     }
+
+    fn write(&mut self) -> Self::Write {
+        Console::new()
+    }
 }
 
 /// Asserts a boolean is false and sets it to true.
@@ -114,10 +118,11 @@ fn assert_once(b: &mut bool) {
 
 // Returns whether the keepalive was sent, or false if cancelled.
 fn send_keepalive_up_needed(
+    env: &mut TockEnv,
     cid: ChannelID,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
-    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
+    let keepalive_msg = CtapHid::keepalive(env, cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout);
         match status {
@@ -228,13 +233,13 @@ pub fn switch_off_leds() {
 const KEEPALIVE_DELAY_MS: isize = 100;
 pub const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 
-fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize =
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
-    send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;
+    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY)?;
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -284,7 +289,7 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(cid, KEEPALIVE_DELAY);
+            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY);
         }
 
         if button_touched.get() || keepalive_response.is_err() {

@@ -74,15 +74,11 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-#[cfg(feature = "debug_ctap")]
-use core::fmt::Write;
 use crypto::ecdsa;
 use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::console::Console;
 use libtock_drivers::timer::{ClockValue, Duration};
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -461,8 +457,7 @@ impl<E: Env> CtapState<E> {
         now: ClockValue,
     ) -> Vec<u8> {
         let cmd = Command::deserialize(command_cbor);
-        #[cfg(feature = "debug_ctap")]
-        writeln!(&mut Console::new(), "Received command: {:#?}", cmd).unwrap();
+        debug_ctap!(env, "Received command: {:#?}", cmd);
         match cmd {
             Ok(command) => {
                 // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
@@ -536,8 +531,7 @@ impl<E: Env> CtapState<E> {
                     }
                     Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(),
                 };
-                #[cfg(feature = "debug_ctap")]
-                writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
+                debug_ctap!(env, "Sending response: {:#?}", response);
                 match response {
                     Ok(response_data) => {
                         let mut response_vec = vec![0x00];

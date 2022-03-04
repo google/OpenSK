@@ -64,6 +64,7 @@ use self::storage::PersistentStore;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
@@ -82,7 +83,6 @@ use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
-use libtock_drivers::crp;
 use libtock_drivers::timer::{ClockValue, Duration};
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -1254,7 +1254,7 @@ impl<E: Env> CtapState<E> {
             let need_certificate = USE_BATCH_ATTESTATION;
 
             if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
-                || crp::set_protection(crp::ProtectionLevel::FullyLocked).is_err()
+                || !env.firmware_protection().lock()
             {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }

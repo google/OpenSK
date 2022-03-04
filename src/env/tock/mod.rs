@@ -1,4 +1,5 @@
 use self::storage::{SyscallStorage, SyscallUpgradeStorage};
+use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
@@ -13,7 +14,7 @@ use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::{led, timer, usb_ctap_hid};
+use libtock_drivers::{crp, led, timer, usb_ctap_hid};
 use persistent_store::StorageResult;
 
 mod storage;
@@ -62,11 +63,18 @@ impl UserPresence for TockEnv {
     }
 }
 
+impl FirmwareProtection for TockEnv {
+    fn lock(&mut self) -> bool {
+        crp::set_protection(crp::ProtectionLevel::FullyLocked).is_ok()
+    }
+}
+
 impl Env for TockEnv {
     type Rng = TockRng256;
     type UserPresence = Self;
     type Storage = SyscallStorage;
     type UpgradeStorage = SyscallUpgradeStorage;
+    type FirmwareProtection = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -84,6 +92,10 @@ impl Env for TockEnv {
     fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
         assert_once(&mut self.upgrade_storage);
         SyscallUpgradeStorage::new()
+    }
+
+    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
+        self
     }
 }
 

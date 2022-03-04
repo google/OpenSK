@@ -65,7 +65,14 @@ impl UserPresence for TockEnv {
 
 impl FirmwareProtection for TockEnv {
     fn lock(&mut self) -> bool {
-        crp::set_protection(crp::ProtectionLevel::FullyLocked).is_ok()
+        matches!(
+            crp::set_protection(crp::ProtectionLevel::FullyLocked),
+            Ok(())
+                | Err(TockError::Command(CommandError {
+                    return_code: EALREADY,
+                    ..
+                }))
+        )
     }
 }
 

@@ -21,8 +21,8 @@ use super::data_formats::{
 };
 use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
-use super::storage::PersistentStore;
 use super::{StatefulCommand, StatefulPermission};
+use crate::ctap::storage;
 use crate::env::Env;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
@@ -33,12 +33,10 @@ use crypto::Hash256;
 use libtock_drivers::timer::ClockValue;
 
 /// Generates a set with all existing RP IDs.
-fn get_stored_rp_ids<E: Env>(
-    persistent_store: &PersistentStore<E>,
-) -> Result<BTreeSet<String>, Ctap2StatusCode> {
+fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2StatusCode> {
     let mut rp_set = BTreeSet::new();
     let mut iter_result = Ok(());
-    for (_, credential) in persistent_store.iter_credentials(&mut iter_result)? {
+    for (_, credential) in storage::iter_credentials(env, &mut iter_result)? {
         rp_set.insert(credential.rp_id);
     }
     iter_result?;
@@ -109,8 +107,8 @@ fn enumerate_credentials_response(
 /// Check if the token permissions have the correct associated RP ID.
 ///
 /// Either no RP ID is associated, or the RP ID matches the stored credential.
-fn check_rp_id_permissions<E: Env>(
-    persistent_store: &mut PersistentStore<E>,
+fn check_rp_id_permissions(
+    env: &mut impl Env,
     client_pin: &mut ClientPin,
     credential_id: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
@@ -118,30 +116,30 @@ fn check_rp_id_permissions<E: Env>(
     if client_pin.has_no_rp_id_permission().is_ok() {
         return Ok(());
     }
-    let (_, credential) = persistent_store.find_credential_item(credential_id)?;
+    let (_, credential) = storage::find_credential_item(env, credential_id)?;
     client_pin.has_no_or_rp_id_permission(&credential.rp_id)
 }
 
 /// Processes the subcommand getCredsMetadata for CredentialManagement.
-fn process_get_creds_metadata<E: Env>(
-    persistent_store: &PersistentStore<E>,
+fn process_get_creds_metadata(
+    env: &mut impl Env,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: Some(persistent_store.count_credentials()? as u64),
+        existing_resident_credentials_count: Some(storage::count_credentials(env)? as u64),
         max_possible_remaining_resident_credentials_count: Some(
-            persistent_store.remaining_credentials()? as u64,
+            storage::remaining_credentials(env)? as u64,
         ),
         ..Default::default()
     })
 }
 
 /// Processes the subcommand enumerateRPsBegin for CredentialManagement.
-fn process_enumerate_rps_begin<E: Env>(
-    persistent_store: &PersistentStore<E>,
+fn process_enumerate_rps_begin(
+    env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
     now: ClockValue,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp_set = get_stored_rp_ids(persistent_store)?;
+    let rp_set = get_stored_rp_ids(env)?;
     let total_rps = rp_set.len();
 
     if total_rps > 1 {
@@ -156,12 +154,12 @@ fn process_enumerate_rps_begin<E: Env>(
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
-fn process_enumerate_rps_get_next_rp<E: Env>(
-    persistent_store: &PersistentStore<E>,
+fn process_enumerate_rps_get_next_rp(
+    env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_index = stateful_command_permission.next_enumerate_rp()?;
-    let rp_set = get_stored_rp_ids(persistent_store)?;
+    let rp_set = get_stored_rp_ids(env)?;
     // A BTreeSet is already sorted.
     let rp_id = rp_set
         .into_iter()
@@ -171,8 +169,8 @@ fn process_enumerate_rps_get_next_rp<E: Env>(
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
-fn process_enumerate_credentials_begin<E: Env>(
-    persistent_store: &PersistentStore<E>,
+fn process_enumerate_credentials_begin(
+    env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
@@ -183,7 +181,7 @@ fn process_enumerate_credentials_begin<E: Env>(
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
     client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash[..])?;
     let mut iter_result = Ok(());
-    let iter = persistent_store.iter_credentials(&mut iter_result)?;
+    let iter = storage::iter_credentials(env, &mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
         .filter_map(|(key, credential)| {
             let cred_rp_id_hash = Sha256::hash(credential.rp_id.as_bytes());
@@ -199,7 +197,7 @@ fn process_enumerate_credentials_begin<E: Env>(
     let current_key = rp_credentials
         .pop()
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-    let credential = persistent_store.get_credential(current_key)?;
+    let credential = storage::get_credential(env, current_key)?;
     if total_credentials > 1 {
         stateful_command_permission
             .set_command(now, StatefulCommand::EnumerateCredentials(rp_credentials));
@@ -208,18 +206,18 @@ fn process_enumerate_credentials_begin<E: Env>(
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
-fn process_enumerate_credentials_get_next_credential<E: Env>(
-    persistent_store: &PersistentStore<E>,
+fn process_enumerate_credentials_get_next_credential(
+    env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential()?;
-    let credential = persistent_store.get_credential(credential_key)?;
+    let credential = storage::get_credential(env, credential_key)?;
     enumerate_credentials_response(credential, None)
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.
-fn process_delete_credential<E: Env>(
-    persistent_store: &mut PersistentStore<E>,
+fn process_delete_credential(
+    env: &mut impl Env,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
@@ -227,13 +225,13 @@ fn process_delete_credential<E: Env>(
         .credential_id
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
         .key_id;
-    check_rp_id_permissions(persistent_store, client_pin, &credential_id)?;
-    persistent_store.delete_credential(&credential_id)
+    check_rp_id_permissions(env, client_pin, &credential_id)?;
+    storage::delete_credential(env, &credential_id)
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
-fn process_update_user_information<E: Env>(
-    persistent_store: &mut PersistentStore<E>,
+fn process_update_user_information(
+    env: &mut impl Env,
     client_pin: &mut ClientPin,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
@@ -244,13 +242,13 @@ fn process_update_user_information<E: Env>(
     let user = sub_command_params
         .user
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-    check_rp_id_permissions(persistent_store, client_pin, &credential_id)?;
-    persistent_store.update_credential(&credential_id, user)
+    check_rp_id_permissions(env, client_pin, &credential_id)?;
+    storage::update_credential(env, &credential_id, user)
 }
 
 /// Processes the CredentialManagement command and all its subcommands.
-pub fn process_credential_management<E: Env>(
-    persistent_store: &mut PersistentStore<E>,
+pub fn process_credential_management(
+    env: &mut impl Env,
     stateful_command_permission: &mut StatefulPermission,
     client_pin: &mut ClientPin,
     cred_management_params: AuthenticatorCredentialManagementParameters,
@@ -306,37 +304,34 @@ pub fn process_credential_management<E: Env>(
     let response = match sub_command {
         CredentialManagementSubCommand::GetCredsMetadata => {
             client_pin.has_no_rp_id_permission()?;
-            Some(process_get_creds_metadata(persistent_store)?)
+            Some(process_get_creds_metadata(env)?)
         }
         CredentialManagementSubCommand::EnumerateRpsBegin => {
             client_pin.has_no_rp_id_permission()?;
             Some(process_enumerate_rps_begin(
-                persistent_store,
+                env,
                 stateful_command_permission,
                 now,
             )?)
         }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp => Some(
-            process_enumerate_rps_get_next_rp(persistent_store, stateful_command_permission)?,
+            process_enumerate_rps_get_next_rp(env, stateful_command_permission)?,
         ),
         CredentialManagementSubCommand::EnumerateCredentialsBegin => {
             Some(process_enumerate_credentials_begin(
-                persistent_store,
+                env,
                 stateful_command_permission,
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                 now,
             )?)
         }
-        CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {
-            Some(process_enumerate_credentials_get_next_credential(
-                persistent_store,
-                stateful_command_permission,
-            )?)
-        }
+        CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => Some(
+            process_enumerate_credentials_get_next_credential(env, stateful_command_permission)?,
+        ),
         CredentialManagementSubCommand::DeleteCredential => {
             process_delete_credential(
-                persistent_store,
+                env,
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
             )?;
@@ -344,7 +339,7 @@ pub fn process_credential_management<E: Env>(
         }
         CredentialManagementSubCommand::UpdateUserInformation => {
             process_update_user_information(
-                persistent_store,
+                env,
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
             )?;
@@ -396,7 +391,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let management_data = vec![CredentialManagementSubCommand::GetCredsMetadata as u8];
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
@@ -411,7 +406,7 @@ mod test {
             pin_uv_auth_param: Some(pin_uv_auth_param.clone()),
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -427,10 +422,7 @@ mod test {
             _ => panic!("Invalid response type"),
         };
 
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
+        storage::store_credential(&mut env, credential_source).unwrap();
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
@@ -439,7 +431,7 @@ mod test {
             pin_uv_auth_param: Some(pin_uv_auth_param),
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -481,16 +473,10 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source1)
-            .unwrap();
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source2)
-            .unwrap();
+        storage::store_credential(&mut env, credential_source1).unwrap();
+        storage::store_credential(&mut env, credential_source2).unwrap();
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
@@ -503,7 +489,7 @@ mod test {
             pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -527,7 +513,7 @@ mod test {
             pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -552,7 +538,7 @@ mod test {
             pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -580,13 +566,10 @@ mod test {
         for i in 0..NUM_CREDENTIALS {
             let mut credential = credential_source.clone();
             credential.rp_id = i.to_string();
-            ctap_state
-                .persistent_store
-                .store_credential(credential)
-                .unwrap();
+            storage::store_credential(&mut env, credential).unwrap();
         }
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
@@ -604,7 +587,7 @@ mod test {
 
         for _ in 0..NUM_CREDENTIALS {
             let cred_management_response = process_credential_management(
-                &mut ctap_state.persistent_store,
+                &mut env,
                 &mut ctap_state.stateful_command_permission,
                 &mut ctap_state.client_pin,
                 cred_management_params,
@@ -634,7 +617,7 @@ mod test {
         }
 
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -663,16 +646,10 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source1)
-            .unwrap();
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source2)
-            .unwrap();
+        storage::store_credential(&mut env, credential_source1).unwrap();
+        storage::store_credential(&mut env, credential_source2).unwrap();
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
             0x2B, 0x68,
@@ -692,7 +669,7 @@ mod test {
             pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -715,7 +692,7 @@ mod test {
             pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -739,7 +716,7 @@ mod test {
             pin_uv_auth_param: None,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -764,12 +741,9 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
+        storage::store_credential(&mut env, credential_source).unwrap();
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xBD, 0xE3, 0xEF, 0x8A, 0x77, 0x01, 0xB1, 0x69, 0x19, 0xE6, 0x62, 0xB9, 0x9B, 0x89,
             0x9C, 0x64,
@@ -792,7 +766,7 @@ mod test {
             pin_uv_auth_param: pin_uv_auth_param.clone(),
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -810,7 +784,7 @@ mod test {
             pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -835,12 +809,9 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
 
-        ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .unwrap();
+        storage::store_credential(&mut env, credential_source).unwrap();
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xA5, 0x55, 0x8F, 0x03, 0xC3, 0xD3, 0x73, 0x1C, 0x07, 0xDA, 0x1F, 0x8C, 0xC7, 0xBD,
             0x9D, 0xB7,
@@ -869,7 +840,7 @@ mod test {
             pin_uv_auth_param,
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,
@@ -880,11 +851,10 @@ mod test {
             Ok(ResponseData::AuthenticatorCredentialManagement(None))
         );
 
-        let updated_credential = ctap_state
-            .persistent_store
-            .find_credential("example.com", &[0x1D; 32], false)
-            .unwrap()
-            .unwrap();
+        let updated_credential =
+            storage::find_credential(&mut env, "example.com", &[0x1D; 32], false)
+                .unwrap()
+                .unwrap();
         assert_eq!(updated_credential.user_handle, vec![0x01]);
         assert_eq!(&updated_credential.user_name.unwrap(), "new_name");
         assert_eq!(
@@ -899,7 +869,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
@@ -908,7 +878,7 @@ mod test {
             pin_uv_auth_param: Some(vec![0u8; 16]),
         };
         let cred_management_response = process_credential_management(
-            &mut ctap_state.persistent_store,
+            &mut env,
             &mut ctap_state.stateful_command_permission,
             &mut ctap_state.client_pin,
             cred_management_params,

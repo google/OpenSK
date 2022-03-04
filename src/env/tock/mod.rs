@@ -14,14 +14,14 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::{led, timer, usb_ctap_hid};
-use persistent_store::StorageResult;
+use persistent_store::{StorageResult, Store};
 
 mod storage;
 
 pub struct TockEnv {
     rng: TockRng256,
-    storage: bool,
-    upgrade_storage: bool,
+    store: Store<SyscallStorage>,
+    upgrade_storage: SyscallUpgradeStorage,
 }
 
 impl TockEnv {
@@ -34,10 +34,13 @@ impl TockEnv {
         // Make sure the environment was not already taken.
         static TAKEN: AtomicBool = AtomicBool::new(false);
         assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
+        let storage = unsafe { steal_storage() }.unwrap();
+        let store = Store::new(storage).ok().unwrap();
+        let upgrade_storage = SyscallUpgradeStorage::new().unwrap();
         TockEnv {
             rng: TockRng256 {},
-            storage: false,
-            upgrade_storage: false,
+            store,
+            upgrade_storage,
         }
     }
 }
@@ -75,21 +78,13 @@ impl Env for TockEnv {
         self
     }
 
-    fn storage(&mut self) -> StorageResult<Self::Storage> {
-        assert_once(&mut self.storage);
-        unsafe { steal_storage() }
+    fn store(&mut self) -> &mut Store<Self::Storage> {
+        &mut self.store
     }
 
-    fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
-        assert_once(&mut self.upgrade_storage);
-        SyscallUpgradeStorage::new()
+    fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
+        Some(&mut self.upgrade_storage)
     }
-}
-
-/// Asserts a boolean is false and sets it to true.
-fn assert_once(b: &mut bool) {
-    assert!(!*b);
-    *b = true;
 }
 
 // Returns whether the keepalive was sent, or false if cancelled.

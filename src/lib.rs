@@ -35,7 +35,7 @@ pub mod env;
 /// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {
     env: E,
-    state: CtapState<E>,
+    state: CtapState,
     hid: CtapHid,
 }
 
@@ -49,7 +49,7 @@ impl<E: Env> Ctap<E> {
         Ctap { env, state, hid }
     }
 
-    pub fn state(&mut self) -> &mut CtapState<E> {
+    pub fn state(&mut self) -> &mut CtapState {
         &mut self.state
     }
 

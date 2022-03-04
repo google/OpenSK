@@ -146,12 +146,12 @@ impl CtapHid {
 
     // Process an incoming USB HID packet, and optionally returns a list of outgoing packets to
     // send as a reply.
-    pub fn process_hid_packet<E: Env>(
+    pub fn process_hid_packet(
         &mut self,
-        env: &mut E,
+        env: &mut impl Env,
         packet: &HidPacket,
         clock_value: ClockValue,
-        ctap_state: &mut CtapState<E>,
+        ctap_state: &mut CtapState,
     ) -> HidPacketIterator {
         // TODO: Send COMMAND_KEEPALIVE every 100ms?
         match self
@@ -442,10 +442,10 @@ mod test {
     const DUMMY_CLOCK_VALUE: ClockValue = ClockValue::new(0, CLOCK_FREQUENCY_HZ);
     const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
 
-    fn process_messages<E: Env>(
-        env: &mut E,
+    fn process_messages(
+        env: &mut TestEnv,
         ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState<E>,
+        ctap_state: &mut CtapState,
         request: Vec<Message>,
     ) -> Option<Vec<Message>> {
         let mut result = Vec::new();
@@ -466,10 +466,10 @@ mod test {
         Some(result)
     }
 
-    fn cid_from_init<E: Env>(
-        env: &mut E,
+    fn cid_from_init(
+        env: &mut TestEnv,
         ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState<E>,
+        ctap_state: &mut CtapState,
     ) -> ChannelID {
         let nonce = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
         let reply = process_messages(

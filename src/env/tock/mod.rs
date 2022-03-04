@@ -77,16 +77,20 @@ impl Env for TockEnv {
     }
 
     fn storage(&mut self) -> StorageResult<Self::Storage> {
-        assert!(!self.storage);
-        self.storage = true;
+        assert_once(&mut self.storage);
         unsafe { steal_storage() }
     }
 
     fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
-        assert!(!self.upgrade_storage);
-        self.upgrade_storage = true;
+        assert_once(&mut self.upgrade_storage);
         SyscallUpgradeStorage::new()
     }
+}
+
+/// Asserts a boolean is false and sets it to true.
+fn assert_once(b: &mut bool) {
+    assert!(!*b);
+    *b = true;
 }
 
 // Returns whether the keepalive was sent, or false if cancelled.

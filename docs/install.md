@@ -28,6 +28,7 @@ following:
 *   `nrfutil` (can be installed using `pip3 install nrfutil`) if you want to flash
     a device with DFU
 *   `uuid-runtime` if you are missing the `uuidgen` command.
+*   `llvm` if you want to use the upgradability feature.
 
 The proprietary software to use the default programmer can be found on the
 [Segger website](https://www.segger.com/downloads/jlink). Please follow their
@@ -149,3 +150,23 @@ If your board is already flashed with Tock OS, you may skip installing it:
 
 For more options, we invite you to read the help of our `deploy.py` script by
 running `./deploy.py --help`.
+
+### Upgradability
+
+We experiment with a new CTAP command to allow upgrading your device without
+access to its debugging port. For that purpose, the flash storage is split into
+4 parts:
+
+*   the bootloader to decide with partition to boot
+*   firmware partition A
+*   firmware partition B
+*   the persistent storage for credentials
+
+The storage is backward compatible to non-upgradable boards. Deploying an
+upgradable board automatically installs the bootloader. Please keep in mind that
+you have to safely store your private signing key for upgrades if you want to
+use this feature. For more information on the cryptographic material, see
+[Customization](customization.md).
+
+So far, upgradability is only supported for the development board. See the
+instructions on the [board specific page](boards/nrf52840dk.md).

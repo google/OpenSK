@@ -29,6 +29,9 @@ cd ../..
 cd tools/heapviz
 cargo fmt --all -- --check
 cd ../..
+cd bootloader
+cargo fmt --all -- --check
+cd ..
 
 echo "Running Clippy lints..."
 cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
@@ -54,6 +57,11 @@ cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ct
 echo "Checking that examples build properly..."
 cargo check --release --target=thumbv7em-none-eabi --examples
 cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
+
+echo "Checking that bootloader builds properly..."
+cd bootloader
+cargo check --release --target=thumbv7em-none-eabi
+cd ..
 
 echo "Checking that fuzz targets build properly..."
 cargo fuzz build

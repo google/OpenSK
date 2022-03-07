@@ -119,13 +119,16 @@ pub enum KeepaliveStatus {
 /// If you want more control, you can also do the processing in steps:
 ///
 /// 1.  `HidPacket` -> `Option<Message>`
-///     `parse_packet` assembles the message and preprocesses all pure HID commands and errors.
 /// 2.  `Option<Message>` -> `Message`
-///     If you didn't receive any message or preprocessing discarded it, stop.
 /// 3.  `Message` -> `Message`
-///     `process_message` handles all protocol interactions.
-/// 4.  `Message` -> `HidPacketIterator
-///     `split_message` creates packets out of the response message.
+/// 4.  `Message` -> `HidPacketIterator`
+///
+/// These steps correspond to:
+///
+/// 1.  `parse_packet` assembles the message and preprocesses all pure HID commands and errors.
+/// 2.  If you didn't receive any message or preprocessing discarded it, stop.
+/// 3.  `process_message` handles all protocol interactions.
+/// 4.  `split_message` creates packets out of the response message.
 pub struct CtapHid {
     assembler: MessageAssembler,
     // The specification only requires unique CIDs, the allocation algorithm is vendor specific.
@@ -484,6 +487,7 @@ impl CtapHid {
         })
     }
 
+    /// Returns whether a wink permission is currently granted.
     pub fn should_wink(&self, now: ClockValue) -> bool {
         self.wink_permission.is_granted(now)
     }

@@ -14,6 +14,9 @@
 
 use super::{CtapHid, HidPacket, Message};
 
+/// Iterator for HID packets.
+///
+/// The `new` constructor splits the CTAP `Message` into `HidPacket`s for sending over USB.
 pub struct HidPacketIterator(Option<MessageSplitter>);
 
 impl HidPacketIterator {

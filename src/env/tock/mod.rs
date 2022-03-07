@@ -21,7 +21,7 @@ mod storage;
 pub struct TockEnv {
     rng: TockRng256,
     store: Store<SyscallStorage>,
-    upgrade_storage: SyscallUpgradeStorage,
+    upgrade_storage: Option<SyscallUpgradeStorage>,
 }
 
 impl TockEnv {
@@ -36,7 +36,7 @@ impl TockEnv {
         assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
         let storage = unsafe { steal_storage() }.unwrap();
         let store = Store::new(storage).ok().unwrap();
-        let upgrade_storage = SyscallUpgradeStorage::new().unwrap();
+        let upgrade_storage = SyscallUpgradeStorage::new().ok();
         TockEnv {
             rng: TockRng256 {},
             store,
@@ -83,7 +83,7 @@ impl Env for TockEnv {
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
-        Some(&mut self.upgrade_storage)
+        self.upgrade_storage.as_mut()
     }
 }
 

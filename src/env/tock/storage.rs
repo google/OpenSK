@@ -115,7 +115,7 @@ fn erase_page(ptr: usize, page_length: usize) -> StorageResult<()> {
     block_command(DRIVER_NUMBER, command_nr::ERASE_PAGE, ptr, page_length)
 }
 
-pub struct SyscallStorage {
+pub struct TockStorage {
     word_size: usize,
     page_size: usize,
     num_pages: usize,
@@ -124,7 +124,7 @@ pub struct SyscallStorage {
     storage_locations: Vec<&'static [u8]>,
 }
 
-impl SyscallStorage {
+impl TockStorage {
     /// Provides access to the embedded flash if available.
     ///
     /// # Errors
@@ -134,8 +134,8 @@ impl SyscallStorage {
     /// - The page size is a power of two.
     /// - The page size is a multiple of the word size.
     /// - The storage is page-aligned.
-    pub fn new() -> StorageResult<SyscallStorage> {
-        let mut syscall = SyscallStorage {
+    pub fn new() -> StorageResult<TockStorage> {
+        let mut syscall = TockStorage {
             word_size: get_info(command_nr::get_info_nr::WORD_SIZE, 0)?,
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
             num_pages: 0,
@@ -175,7 +175,7 @@ impl SyscallStorage {
     }
 }
 
-impl Storage for SyscallStorage {
+impl Storage for TockStorage {
     fn word_size(&self) -> usize {
         self.word_size
     }
@@ -217,13 +217,13 @@ impl Storage for SyscallStorage {
     }
 }
 
-pub struct SyscallUpgradeStorage {
+pub struct TockUpgradeStorage {
     page_size: usize,
     partition: ModRange,
     metadata: ModRange,
 }
 
-impl SyscallUpgradeStorage {
+impl TockUpgradeStorage {
     /// Provides access to the other upgrade partition and metadata if available.
     ///
     /// The implementation assumes that storage locations returned by the kernel through
@@ -238,8 +238,8 @@ impl SyscallUpgradeStorage {
     /// Returns a `NotAligned` error if partitions or metadata ranges are
     /// - not exclusive or,
     /// - not consecutive.
-    pub fn new() -> StorageResult<SyscallUpgradeStorage> {
-        let mut locations = SyscallUpgradeStorage {
+    pub fn new() -> StorageResult<TockUpgradeStorage> {
+        let mut locations = TockUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
             partition: ModRange::new_empty(),
             metadata: ModRange::new_empty(),
@@ -287,7 +287,7 @@ impl SyscallUpgradeStorage {
     }
 }
 
-impl UpgradeStorage for SyscallUpgradeStorage {
+impl UpgradeStorage for TockUpgradeStorage {
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
         if length == 0 {
             return Err(StorageError::OutOfBounds);

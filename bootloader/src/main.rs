@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2021-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,11 @@
 
 #![no_main]
 #![no_std]
+
+mod bitfields;
+mod crypto_cell;
+mod registers;
+mod static_ref;
 
 extern crate cortex_m;
 extern crate cortex_m_rt as rt;
@@ -69,7 +74,7 @@ struct BootPartition {
 }
 
 impl BootPartition {
-    const _FIRMWARE_LENGTH: usize = 0x00040000;
+    const FIRMWARE_LENGTH: usize = 0x00040000;
 
     /// Reads the metadata, returns the timestamp if all checks pass.
     pub fn read_timestamp(&self) -> Result<u32, ()> {
@@ -93,17 +98,39 @@ impl BootPartition {
         Ok(metadata.timestamp)
     }
 
-    /// Placeholder for the SHA256 implementation.
+    /// Computes the SHA256 of metadata information and partition data.
     ///
-    /// TODO implemented in next PR
-    /// Without it, the bootloader will never boot anything.
-    fn compute_upgrade_hash(&self, _metadata_page: &[u8]) -> [u8; 32] {
-        [0; 32]
+    /// Assumes that firmware address and length are divisible by the page size.
+    /// This is the hardware implementation on the cryptocell.
+    #[allow(clippy::assertions_on_constants)]
+    fn compute_upgrade_hash(&self, metadata_page: &[u8]) -> [u8; 32] {
+        debug_assert!(self.firmware_address % PAGE_SIZE == 0);
+        debug_assert!(BootPartition::FIRMWARE_LENGTH % PAGE_SIZE == 0);
+        let cc310 = crypto_cell::CryptoCell310::new();
+        for page_offset in (0..BootPartition::FIRMWARE_LENGTH).step_by(PAGE_SIZE) {
+            let page = unsafe { read_page(self.firmware_address + page_offset) };
+            cc310.update(&page, false);
+        }
+        cc310.update(&metadata_page[32..Metadata::DATA_LEN], true);
+        cc310.finalize_and_clear()
     }
 
     /// Jump to the firmware.
     pub fn boot(&self) -> ! {
         let address = self.firmware_address;
+
+        // Clear any pending Cryptocell interrupt in NVIC
+        let peripherals = cortex_m::Peripherals::take().unwrap();
+        unsafe {
+            // We could only clear cryptocell interrupts, but let's clean up before booting.
+            // Example code to clear more specifically:
+            // const CC310_IRQ: u16 = 42;
+            // peripherals.NVIC.icpr[usize::from(CC310_IRQ / 32)].write(1 << (CC310_IRQ % 32));
+            peripherals.NVIC.icer[0].write(0xffff_ffff);
+            peripherals.NVIC.icpr[0].write(0xffff_ffff);
+            peripherals.NVIC.icer[1].write(0xffff_ffff);
+            peripherals.NVIC.icpr[1].write(0xffff_ffff);
+        }
 
         #[cfg(debug_assertions)]
         rprintln!("Boot jump to {:08X}", address);

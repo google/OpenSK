@@ -1,11 +1,9 @@
-use self::storage::{SyscallStorage, SyscallUpgradeStorage};
+pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
+use crate::ctap::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
-#[cfg(feature = "debug_ctap")]
-use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
 use crypto::rng256::TockRng256;
 use libtock_core::result::{CommandError, EALREADY};
@@ -14,46 +12,45 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::{crp, led, timer, usb_ctap_hid};
-use persistent_store::StorageResult;
+use persistent_store::{StorageResult, Store};
 
 mod storage;
 
 pub struct TockEnv {
     rng: TockRng256,
-    storage: bool,
-    upgrade_storage: bool,
+    store: Store<TockStorage>,
+    upgrade_storage: Option<TockUpgradeStorage>,
 }
 
 impl TockEnv {
     /// Returns the unique instance of the Tock environment.
     ///
-    /// This function returns `Some` the first time it is called. Afterwards, it repeatedly returns
-    /// `None`.
-    pub fn new() -> Option<Self> {
-        // Make sure the environment was not already taken.
-        static TAKEN: AtomicBool = AtomicBool::new(false);
-        if TAKEN.fetch_or(true, Ordering::SeqCst) {
-            return None;
-        }
-        Some(TockEnv {
+    /// # Panics
+    ///
+    /// - If called a second time.
+    pub fn new() -> Self {
+        // We rely on `take_storage` to ensure that this function is called only once.
+        let storage = take_storage().unwrap();
+        let store = Store::new(storage).ok().unwrap();
+        let upgrade_storage = TockUpgradeStorage::new().ok();
+        TockEnv {
             rng: TockRng256 {},
-            storage: false,
-            upgrade_storage: false,
-        })
+            store,
+            upgrade_storage,
+        }
     }
 }
 
-/// Creates a new storage instance.
+/// Returns the unique storage instance.
 ///
-/// # Safety
+/// # Panics
 ///
-/// It is probably technically memory-safe to hame multiple storage instances at the same time, but
-/// for extra precaution we mark the function as unsafe. To ensure correct usage, this function
-/// should only be called if the previous storage instance was dropped.
-// This function is exposed for example binaries testing the hardware. This could probably be
-// cleaned up by having the persistent store return its storage.
-pub unsafe fn steal_storage() -> StorageResult<SyscallStorage> {
-    SyscallStorage::new()
+/// - If called a second time.
+pub fn take_storage() -> StorageResult<TockStorage> {
+    // Make sure the storage was not already taken.
+    static TAKEN: AtomicBool = AtomicBool::new(false);
+    assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
+    TockStorage::new()
 }
 
 impl UserPresence for TockEnv {
@@ -78,8 +75,8 @@ impl FirmwareProtection for TockEnv {
 impl Env for TockEnv {
     type Rng = TockRng256;
     type UserPresence = Self;
-    type Storage = SyscallStorage;
-    type UpgradeStorage = SyscallUpgradeStorage;
+    type Storage = TockStorage;
+    type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
 
@@ -91,14 +88,12 @@ impl Env for TockEnv {
         self
     }
 
-    fn storage(&mut self) -> StorageResult<Self::Storage> {
-        assert_once(&mut self.storage);
-        unsafe { steal_storage() }
+    fn store(&mut self) -> &mut Store<Self::Storage> {
+        &mut self.store
     }
 
-    fn upgrade_storage(&mut self) -> StorageResult<Self::UpgradeStorage> {
-        assert_once(&mut self.upgrade_storage);
-        SyscallUpgradeStorage::new()
+    fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
+        self.upgrade_storage.as_mut()
     }
 
     fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
@@ -110,69 +105,54 @@ impl Env for TockEnv {
     }
 }
 
-/// Asserts a boolean is false and sets it to true.
-fn assert_once(b: &mut bool) {
-    assert!(!*b);
-    *b = true;
-}
-
 // Returns whether the keepalive was sent, or false if cancelled.
 fn send_keepalive_up_needed(
     env: &mut TockEnv,
     cid: ChannelID,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
-    let keepalive_msg = CtapHid::keepalive(env, cid, KeepaliveStatus::UpNeeded);
+    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout);
         match status {
             None => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(Console::new(), "Sending a KEEPALIVE packet timed out").unwrap();
+                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
             }
             Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
             Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(Console::new(), "Sent KEEPALIVE packet").unwrap();
+                debug_ctap!(env, "Sent KEEPALIVE packet");
             }
             Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {
-                    #[cfg(feature = "debug_ctap")]
-                    writeln!(
-                        Console::new(),
+                    debug_ctap!(
+                        env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
                         received_cid,
-                    )
-                    .unwrap();
+                    );
                     return Ok(());
                 }
                 match processed_packet {
                     ProcessedPacket::InitPacket { cmd, .. } => {
-                        if cmd == CtapHid::COMMAND_CANCEL {
+                        if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
-                            #[cfg(feature = "debug_ctap")]
-                            writeln!(Console::new(), "User presence check cancelled").unwrap();
+                            debug_ctap!(env, "User presence check cancelled");
                             return Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
                         } else {
-                            #[cfg(feature = "debug_ctap")]
-                            writeln!(
-                                Console::new(),
+                            debug_ctap!(
+                                env,
                                 "Discarded packet with command {} received while sending a KEEPALIVE packet",
                                 cmd,
-                            )
-                            .unwrap();
+                            );
                         }
                     }
                     ProcessedPacket::ContinuationPacket { .. } => {
-                        #[cfg(feature = "debug_ctap")]
-                        writeln!(
-                            Console::new(),
+                        debug_ctap!(
+                            env,
                             "Discarded continuation packet received while sending a KEEPALIVE packet",
-                        )
-                        .unwrap();
+                        );
                     }
                 }
             }

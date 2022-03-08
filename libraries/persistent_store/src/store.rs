@@ -238,6 +238,11 @@ impl<S: Storage> Store<S> {
         Ok(store)
     }
 
+    /// Extracts the storage.
+    pub fn extract_storage(self) -> S {
+        self.storage
+    }
+
     /// Iterates over the entries.
     pub fn iter<'a>(&'a self) -> StoreResult<StoreIter<'a>> {
         let head = or_invalid(self.head)?;
@@ -1160,11 +1165,6 @@ impl Store<BufferStorage> {
     /// Accesses the storage mutably.
     pub fn storage_mut(&mut self) -> &mut BufferStorage {
         &mut self.storage
-    }
-
-    /// Extracts the storage.
-    pub fn extract_storage(self) -> BufferStorage {
-        self.storage
     }
 
     /// Returns the value of a possibly deleted entry.

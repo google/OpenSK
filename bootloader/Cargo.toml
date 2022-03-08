@@ -15,6 +15,7 @@ cortex-m-rt = "*"
 cortex-m-rt-macros = "*"
 panic-abort = "0.3.2"
 rtt-target = { version = "*", features = ["cortex-m"] }
+tock-registers = { version = "0.6.0", features = ["no_std_unit_tests"] }
 
 [profile.dev]
 panic = "abort"

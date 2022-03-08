@@ -1,3 +1,4 @@
+use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::ctap::hid::ChannelID;
 use crate::ctap::status_code::Ctap2StatusCode;
@@ -21,6 +22,7 @@ pub trait Env {
     type UserPresence: UserPresence;
     type Storage: Storage;
     type UpgradeStorage: UpgradeStorage;
+    type FirmwareProtection: FirmwareProtection;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
@@ -31,4 +33,6 @@ pub trait Env {
     /// Upgrade storage is optional, so implementations may return `None`. However, implementations
     /// should either always return `None` or always return `Some`.
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage>;
+
+    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection;
 }

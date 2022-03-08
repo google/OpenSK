@@ -1,4 +1,5 @@
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::hid::ChannelID;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
@@ -67,11 +68,18 @@ impl UserPresence for TestUserPresence {
     }
 }
 
+impl FirmwareProtection for TestEnv {
+    fn lock(&mut self) -> bool {
+        true
+    }
+}
+
 impl Env for TestEnv {
     type Rng = ThreadRng256;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
     type UpgradeStorage = BufferUpgradeStorage;
+    type FirmwareProtection = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -87,5 +95,9 @@ impl Env for TestEnv {
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
         self.upgrade_storage.as_mut()
+    }
+
+    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
+        self
     }
 }

@@ -21,8 +21,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use core::fmt::Write;
-use ctap2::env::tock::{steal_storage, TockEnv};
-use ctap2::env::Env;
+use ctap2::env::tock::{take_storage, TockStorage};
 use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
@@ -40,10 +39,8 @@ fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>
     (result, after - before)
 }
 
-// Only use one store at a time.
-unsafe fn boot_store(erase: bool) -> Store<<TockEnv as Env>::Storage> {
+fn boot_store(mut storage: TockStorage, erase: bool) -> Store<TockStorage> {
     use persistent_store::Storage;
-    let mut storage = steal_storage().unwrap();
     let num_pages = storage.num_pages();
     if erase {
         for page in 0..num_pages {
@@ -58,9 +55,8 @@ struct StorageConfig {
     num_pages: usize,
 }
 
-fn storage_config() -> StorageConfig {
+fn storage_config(storage: &TockStorage) -> StorageConfig {
     use persistent_store::Storage;
-    let storage = unsafe { steal_storage() }.unwrap();
     StorageConfig {
         num_pages: storage.num_pages(),
     }
@@ -77,11 +73,12 @@ struct Stat {
 }
 
 fn compute_latency(
+    storage: TockStorage,
     timer: &Timer,
     num_pages: usize,
     key_increment: usize,
     word_length: usize,
-) -> Stat {
+) -> (TockStorage, Stat) {
     let mut stat = Stat {
         key_increment,
         entry_length: word_length,
@@ -96,7 +93,7 @@ fn compute_latency(
     )
     .unwrap();
 
-    let mut store = unsafe { boot_store(true) };
+    let mut store = boot_store(storage, true);
     let total_capacity = store.capacity().unwrap().total();
     assert_eq!(store.capacity().unwrap().used(), 0);
     assert_eq!(store.lifetime().unwrap().used(), 0);
@@ -130,7 +127,8 @@ fn compute_latency(
     );
 
     // Measure latency of boot.
-    let (mut store, time) = measure(timer, || unsafe { boot_store(false) });
+    let storage = store.extract_storage();
+    let (mut store, time) = measure(timer, || boot_store(storage, false));
     writeln!(console, "Boot: {:.1}ms.", time.ms()).unwrap();
     stat.boot_ms = time.ms();
 
@@ -153,20 +151,23 @@ fn compute_latency(
     stat.compaction_ms = time.ms();
     assert!(store.lifetime().unwrap().used() > total_capacity + num_pages);
 
-    stat
+    (store.extract_storage(), stat)
 }
 
 fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().ok().unwrap();
-    let config = storage_config();
+    let storage = take_storage().unwrap();
+    let config = storage_config(&storage);
     let mut stats = Vec::new();
 
     writeln!(Console::new(), "\nRunning 2 tests...").unwrap();
     // Simulate a store full of credentials (of 50 words).
-    stats.push(compute_latency(&timer, config.num_pages, 1, 50));
+    let (storage, stat) = compute_latency(storage, &timer, config.num_pages, 1, 50);
+    stats.push(stat);
     // Simulate a store full of increments of a single counter.
-    stats.push(compute_latency(&timer, config.num_pages, 0, 1));
+    let (_storage, stat) = compute_latency(storage, &timer, config.num_pages, 0, 1);
+    stats.push(stat);
     writeln!(Console::new(), "\nDone.\n").unwrap();
 
     const HEADERS: &[&str] = &[

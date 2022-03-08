@@ -57,7 +57,7 @@ fn main() {
     }
 
     let boot_time = timer.get_current_clock().flex_unwrap();
-    let env = TockEnv::new().unwrap();
+    let env = TockEnv::new();
     let mut ctap = ctap2::Ctap::new(env, boot_time);
 
     let mut led_counter = 0;

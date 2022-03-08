@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::customization::MAX_MSG_SIZE;
-use super::{ChannelID, CtapHid, HidPacket, Message, ProcessedPacket};
+use super::{ChannelID, CtapHid, CtapHidCommand, HidPacket, Message, ProcessedPacket};
 use alloc::vec::Vec;
 use core::mem::swap;
 use libtock_drivers::timer::Timestamp;
@@ -131,7 +131,7 @@ impl MessageAssembler {
                 // Unexpected initialization packet.
                 ProcessedPacket::InitPacket { cmd, len, data } => {
                     self.reset();
-                    if cmd == CtapHid::COMMAND_INIT {
+                    if cmd == CtapHidCommand::Init as u8 {
                         self.parse_init_packet(*cid, cmd, len, data, timestamp)
                     } else {
                         Err((*cid, Error::UnexpectedInit))
@@ -189,7 +189,7 @@ impl MessageAssembler {
             swap(&mut self.payload, &mut payload);
             Some(Message {
                 cid: self.cid,
-                cmd: self.cmd,
+                cmd: CtapHidCommand::from(self.cmd),
                 payload,
             })
         }
@@ -225,12 +225,12 @@ mod test {
         let mut assembler = MessageAssembler::new();
         assert_eq!(
             assembler.parse_packet(
-                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x80]),
+                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90]),
                 DUMMY_TIMESTAMP
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x00,
+                cmd: CtapHidCommand::Cbor,
                 payload: vec![]
             }))
         );
@@ -241,12 +241,12 @@ mod test {
         let mut assembler = MessageAssembler::new();
         assert_eq!(
             assembler.parse_packet(
-                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x80, 0x00, 0x10]),
+                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90, 0x00, 0x10]),
                 DUMMY_TIMESTAMP
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x00,
+                cmd: CtapHidCommand::Cbor,
                 payload: vec![0x00; 0x10]
             }))
         );
@@ -260,12 +260,12 @@ mod test {
         let mut assembler = MessageAssembler::new();
         assert_eq!(
             assembler.parse_packet(
-                &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x80, 0x00, 0x10], 0xFF),
+                &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x90, 0x00, 0x10], 0xFF),
                 DUMMY_TIMESTAMP
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x00,
+                cmd: CtapHidCommand::Cbor,
                 payload: vec![0xFF; 0x10]
             }))
         );
@@ -288,7 +288,7 @@ mod test {
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x01,
+                cmd: CtapHidCommand::Ping,
                 payload: vec![0x00; 0x40]
             }))
         );
@@ -318,7 +318,7 @@ mod test {
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x01,
+                cmd: CtapHidCommand::Ping,
                 payload: vec![0x00; 0x80]
             }))
         );
@@ -350,7 +350,7 @@ mod test {
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x01,
+                cmd: CtapHidCommand::Ping,
                 payload: vec![0x00; 0x1DB9]
             }))
         );
@@ -362,12 +362,15 @@ mod test {
         let mut assembler = MessageAssembler::new();
         for i in 0..10 {
             // Introduce some variability in the messages.
-            let cmd = 2 * i;
+            let cmd = CtapHidCommand::from(i + 1);
             let byte = 3 * i;
 
             assert_eq!(
                 assembler.parse_packet(
-                    &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x80 | cmd, 0x00, 0x80], byte),
+                    &byte_extend(
+                        &[0x12, 0x34, 0x56, 0x78, 0x80 | cmd as u8, 0x00, 0x80],
+                        byte
+                    ),
                     DUMMY_TIMESTAMP
                 ),
                 Ok(None)
@@ -400,12 +403,12 @@ mod test {
         for i in 0..10 {
             // Introduce some variability in the messages.
             let cid = 0x78 + i;
-            let cmd = 2 * i;
+            let cmd = CtapHidCommand::from(i + 1);
             let byte = 3 * i;
 
             assert_eq!(
                 assembler.parse_packet(
-                    &byte_extend(&[0x12, 0x34, 0x56, cid, 0x80 | cmd, 0x00, 0x80], byte),
+                    &byte_extend(&[0x12, 0x34, 0x56, cid, 0x80 | cmd as u8, 0x00, 0x80], byte),
                     DUMMY_TIMESTAMP
                 ),
                 Ok(None)
@@ -443,11 +446,12 @@ mod test {
         );
 
         // Check that many sorts of packets on another channel are ignored.
-        for cmd in 0..=0xFF {
+        for i in 0..=0xFF {
+            let cmd = CtapHidCommand::from(i);
             for byte in 0..=0xFF {
                 assert_eq!(
                     assembler.parse_packet(
-                        &byte_extend(&[0x12, 0x34, 0x56, 0x9A, cmd, 0x00], byte),
+                        &byte_extend(&[0x12, 0x34, 0x56, 0x9A, cmd as u8, 0x00], byte),
                         DUMMY_TIMESTAMP
                     ),
                     Err(([0x12, 0x34, 0x56, 0x9A], Error::UnexpectedChannel))
@@ -462,7 +466,7 @@ mod test {
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x01,
+                cmd: CtapHidCommand::Ping,
                 payload: vec![0x00; 0x40]
             }))
         );
@@ -479,12 +483,12 @@ mod test {
             let byte = 2 * i;
             assert_eq!(
                 assembler.parse_packet(
-                    &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x80, 0x00, 0x10], byte),
+                    &byte_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x10], byte),
                     DUMMY_TIMESTAMP
                 ),
                 Ok(Some(Message {
                     cid: [0x12, 0x34, 0x56, 0x78],
-                    cmd: 0x00,
+                    cmd: CtapHidCommand::Ping,
                     payload: vec![byte; 0x10]
                 }))
             );
@@ -584,7 +588,7 @@ mod test {
             assembler.parse_packet(&zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x7F]), timestamp),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x01,
+                cmd: CtapHidCommand::Ping,
                 payload: vec![0x00; 0x1DB9]
             }))
         );
@@ -612,7 +616,7 @@ mod test {
             ),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
-                cmd: 0x06,
+                cmd: CtapHidCommand::Init,
                 payload: vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]
             }))
         );

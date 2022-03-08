@@ -17,7 +17,8 @@ use super::command::AuthenticatorLargeBlobsParameters;
 use super::customization::MAX_MSG_SIZE;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
-use super::storage::PersistentStore;
+use crate::ctap::storage;
+use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{ByteOrder, LittleEndian};
@@ -46,7 +47,7 @@ impl LargeBlobs {
     /// Process the large blob command.
     pub fn process_command(
         &mut self,
-        persistent_store: &mut PersistentStore,
+        env: &mut impl Env,
         client_pin: &mut ClientPin,
         large_blobs_params: AuthenticatorLargeBlobsParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
@@ -65,7 +66,7 @@ impl LargeBlobs {
             if get > MAX_FRAGMENT_LENGTH || offset.checked_add(get).is_none() {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
-            let config = persistent_store.get_large_blob_array(offset, get)?;
+            let config = storage::get_large_blob_array(env, offset, get)?;
             return Ok(ResponseData::AuthenticatorLargeBlobs(Some(
                 AuthenticatorLargeBlobsResponse { config },
             )));
@@ -84,7 +85,7 @@ impl LargeBlobs {
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
             }
-            if persistent_store.pin_hash()?.is_some() || persistent_store.has_always_uv()? {
+            if storage::pin_hash(env)?.is_some() || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =
@@ -121,7 +122,7 @@ impl LargeBlobs {
                     self.buffer = Vec::new();
                     return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
                 }
-                persistent_store.commit_large_blob_array(&self.buffer)?;
+                storage::commit_large_blob_array(env, &self.buffer)?;
                 self.buffer = Vec::new();
             }
             return Ok(ResponseData::AuthenticatorLargeBlobs(None));
@@ -137,13 +138,12 @@ mod test {
     use super::super::data_formats::PinUvAuthProtocol;
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
-    use crypto::rng256::ThreadRng256;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn test_process_command_get_empty() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -162,7 +162,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         match large_blobs_response.unwrap() {
             ResponseData::AuthenticatorLargeBlobs(Some(response)) => {
                 assert_eq!(response.config, large_blob);
@@ -173,9 +173,8 @@ mod test {
 
     #[test]
     fn test_process_command_commit_and_get() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -195,7 +194,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))
@@ -210,7 +209,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))
@@ -225,7 +224,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         match large_blobs_response.unwrap() {
             ResponseData::AuthenticatorLargeBlobs(Some(response)) => {
                 assert_eq!(response.config, large_blob);
@@ -236,9 +235,8 @@ mod test {
 
     #[test]
     fn test_process_command_commit_unexpected_offset() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -258,7 +256,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))
@@ -274,7 +272,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ),
@@ -283,9 +281,8 @@ mod test {
 
     #[test]
     fn test_process_command_commit_unexpected_length() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -306,7 +303,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))
@@ -321,7 +318,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
@@ -330,9 +327,8 @@ mod test {
 
     #[test]
     fn test_process_command_commit_end_offset_overflow() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -347,16 +343,15 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         assert_eq!(
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params),
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH),
         );
     }
 
     #[test]
     fn test_process_command_commit_unexpected_hash() {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
@@ -375,7 +370,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE),
@@ -383,9 +378,8 @@ mod test {
     }
 
     fn test_helper_process_command_commit_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut rng = ThreadRng256 {};
-        let mut persistent_store = PersistentStore::new(&mut rng);
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
@@ -396,7 +390,7 @@ mod test {
         let mut large_blob = vec![0x1B; DATA_LEN];
         large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
-        persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let mut large_blob_data = vec![0xFF; 32];
         // Command constant and offset bytes.
         large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);
@@ -416,7 +410,7 @@ mod test {
             pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let large_blobs_response =
-            large_blobs.process_command(&mut persistent_store, &mut client_pin, large_blobs_params);
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
         assert_eq!(
             large_blobs_response,
             Ok(ResponseData::AuthenticatorLargeBlobs(None))

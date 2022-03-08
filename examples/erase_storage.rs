@@ -17,7 +17,7 @@
 extern crate lang_items;
 
 use core::fmt::Write;
-use ctap2::embedded_flash::new_storage;
+use ctap2::env::tock::steal_storage;
 use libtock_drivers::console::Console;
 use libtock_drivers::led;
 use libtock_drivers::result::FlexUnwrap;
@@ -37,7 +37,7 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
 
 fn main() {
     led::get(1).flex_unwrap().on().flex_unwrap(); // red on dongle
-    let mut storage = new_storage().unwrap();
+    let mut storage = unsafe { steal_storage() }.unwrap();
     let num_pages = storage.num_pages();
     writeln!(Console::new(), "Erase {} pages of storage:", num_pages).unwrap();
     for page in 0..num_pages {

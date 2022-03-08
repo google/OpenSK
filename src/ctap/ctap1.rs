@@ -14,6 +14,7 @@
 
 use super::apdu::{Apdu, ApduStatusCode};
 use super::CtapState;
+use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -185,7 +186,7 @@ impl Ctap1Command {
         clock_value: ClockValue,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         if !ctap_state
-            .allows_ctap1()
+            .allows_ctap1(env)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
         {
             return Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED);
@@ -259,14 +260,10 @@ impl Ctap1Command {
             return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION);
         }
 
-        let certificate = ctap_state
-            .persistent_store
-            .attestation_certificate()
+        let certificate = storage::attestation_certificate(env)
             .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let private_key = ctap_state
-            .persistent_store
-            .attestation_private_key()
+        let private_key = storage::attestation_private_key(env)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
@@ -316,7 +313,7 @@ impl Ctap1Command {
         ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         let credential_source = ctap_state
-            .decrypt_credential_source(key_handle, &application)
+            .decrypt_credential_source(env, key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             if flags == Ctap1Flags::CheckOnly {
@@ -326,7 +323,11 @@ impl Ctap1Command {
                 .increment_global_signature_counter(env)
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             let mut signature_data = ctap_state
-                .generate_auth_data(&application, Ctap1Command::USER_PRESENCE_INDICATOR_BYTE)
+                .generate_auth_data(
+                    env,
+                    &application,
+                    Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
+                )
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
             let signature = credential_source
@@ -400,7 +401,7 @@ mod test {
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, START_CLOCK_VALUE);
-        ctap_state.persistent_store.toggle_always_uv().unwrap();
+        storage::toggle_always_uv(&mut env).unwrap();
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
@@ -428,10 +429,7 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        assert!(ctap_state
-            .persistent_store
-            .set_attestation_private_key(&fake_key)
-            .is_ok());
+        assert!(storage::set_attestation_private_key(&mut env, &fake_key).is_ok());
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
@@ -440,10 +438,7 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
-        assert!(ctap_state
-            .persistent_store
-            .set_attestation_certificate(&fake_cert[..])
-            .is_ok());
+        assert!(storage::set_attestation_certificate(&mut env, &fake_cert[..]).is_ok());
         ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
         ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
         let response =
@@ -452,7 +447,11 @@ mod test {
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
         assert_eq!(response[66], CREDENTIAL_ID_SIZE as u8);
         assert!(ctap_state
-            .decrypt_credential_source(response[67..67 + CREDENTIAL_ID_SIZE].to_vec(), &application)
+            .decrypt_credential_source(
+                &mut env,
+                response[67..67 + CREDENTIAL_ID_SIZE].to_vec(),
+                &application
+            )
             .unwrap()
             .is_some());
         const CERT_START: usize = 67 + CREDENTIAL_ID_SIZE;
@@ -677,10 +676,7 @@ mod test {
         assert_eq!(response[0], 0x01);
         check_signature_counter(
             array_ref!(response, 1, 4),
-            ctap_state
-                .persistent_store
-                .global_signature_counter()
-                .unwrap(),
+            storage::global_signature_counter(&mut env).unwrap(),
         );
     }
 
@@ -709,10 +705,7 @@ mod test {
         assert_eq!(response[0], 0x01);
         check_signature_counter(
             array_ref!(response, 1, 4),
-            ctap_state
-                .persistent_store
-                .global_signature_counter()
-                .unwrap(),
+            storage::global_signature_counter(&mut env).unwrap(),
         );
     }
 

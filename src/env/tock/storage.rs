@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::helper::{find_slice, is_aligned, ModRange};
-use super::upgrade_storage::UpgradeStorage;
+use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange};
+use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::vec::Vec;
 use core::cell::Cell;
 use libtock_core::{callback, syscalls};

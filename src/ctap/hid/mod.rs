@@ -526,7 +526,7 @@ mod test {
     const DUMMY_TIMESTAMP: Timestamp<isize> = Timestamp::from_ms(0);
 
     fn process_messages(
-        env: &mut impl Env,
+        env: &mut TestEnv,
         ctap_hid: &mut CtapHid,
         ctap_state: &mut CtapState,
         request: Vec<Message>,
@@ -550,7 +550,7 @@ mod test {
     }
 
     fn cid_from_init(
-        env: &mut impl Env,
+        env: &mut TestEnv,
         ctap_hid: &mut CtapHid,
         ctap_state: &mut CtapState,
     ) -> ChannelID {

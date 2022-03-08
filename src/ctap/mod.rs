@@ -60,11 +60,10 @@ use self::response::{
     AuthenticatorVendorUpgradeInfoResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
-use self::storage::PersistentStore;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
-use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
+use crate::api::upgrade_storage::UpgradeStorage;
 use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -161,7 +160,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 /// The upgrade hash is computed over the firmware image and all metadata,
 /// except the hash itself.
 fn parse_metadata(
-    upgrade_locations: &UpgradeLocations,
+    upgrade_locations: &impl UpgradeStorage,
     metadata: &[u8],
 ) -> Result<[u8; 32], Ctap2StatusCode> {
     const METADATA_LEN: usize = 40;
@@ -331,22 +330,19 @@ impl StatefulPermission {
 // This struct currently holds all state, not only the persistent memory. The persistent members are
 // in the persistent store field.
 pub struct CtapState {
-    persistent_store: PersistentStore,
     client_pin: ClientPin,
     #[cfg(feature = "with_ctap1")]
     pub(crate) u2f_up_state: U2fUserPresenceState,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission,
     large_blobs: LargeBlobs,
-    upgrade_locations: Option<UpgradeLocations>,
 }
 
 impl CtapState {
-    pub fn new(env: &mut impl Env, now: ClockValue) -> CtapState {
-        let persistent_store = PersistentStore::new(env.rng());
+    pub fn new(env: &mut impl Env, now: ClockValue) -> Self {
+        storage::init(env).ok().unwrap();
         let client_pin = ClientPin::new(env.rng());
         CtapState {
-            persistent_store,
             client_pin,
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(
@@ -355,7 +351,6 @@ impl CtapState {
             ),
             stateful_command_permission: StatefulPermission::new_reset(now),
             large_blobs: LargeBlobs::new(),
-            upgrade_locations: UpgradeLocations::new().ok(),
         }
     }
 
@@ -373,8 +368,7 @@ impl CtapState {
     ) -> Result<(), Ctap2StatusCode> {
         if USE_SIGNATURE_COUNTER {
             let increment = env.rng().gen_uniform_u32x8()[0] % 8 + 1;
-            self.persistent_store
-                .incr_global_signature_counter(increment)?;
+            storage::incr_global_signature_counter(env, increment)?;
         }
         Ok(())
     }
@@ -383,8 +377,8 @@ impl CtapState {
     // If alwaysUv is enabled and the authenticator does not support internal UV,
     // CTAP1 needs to be disabled.
     #[cfg(feature = "with_ctap1")]
-    pub fn allows_ctap1(&self) -> Result<bool, Ctap2StatusCode> {
-        Ok(!self.persistent_store.has_always_uv()?)
+    pub fn allows_ctap1(&self, env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+        Ok(!storage::has_always_uv(env)?)
     }
 
     // Encrypts the private key and relying party ID hash into a credential ID. Other
@@ -397,7 +391,7 @@ impl CtapState {
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let master_keys = self.persistent_store.master_keys()?;
+        let master_keys = storage::master_keys(env)?;
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
         let mut plaintext = [0; 64];
         private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
@@ -414,13 +408,14 @@ impl CtapState {
     // decrypted relying party ID hash.
     pub fn decrypt_credential_source(
         &self,
+        env: &mut impl Env,
         credential_id: Vec<u8>,
         rp_id_hash: &[u8],
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         if credential_id.len() != CREDENTIAL_ID_SIZE {
             return Ok(None);
         }
-        let master_keys = self.persistent_store.master_keys()?;
+        let master_keys = storage::master_keys(env)?;
         let payload_size = credential_id.len() - 32;
         if !verify_hmac_256::<Sha256>(
             &master_keys.hmac,
@@ -500,17 +495,14 @@ impl CtapState {
                     Command::AuthenticatorGetNextAssertion => {
                         self.process_get_next_assertion(env, now)
                     }
-                    Command::AuthenticatorGetInfo => self.process_get_info(),
-                    Command::AuthenticatorClientPin(params) => self.client_pin.process_command(
-                        env.rng(),
-                        &mut self.persistent_store,
-                        params,
-                        now,
-                    ),
+                    Command::AuthenticatorGetInfo => self.process_get_info(env),
+                    Command::AuthenticatorClientPin(params) => {
+                        self.client_pin.process_command(env, params, now)
+                    }
                     Command::AuthenticatorReset => self.process_reset(env, cid, now),
                     Command::AuthenticatorCredentialManagement(params) => {
                         process_credential_management(
-                            &mut self.persistent_store,
+                            env,
                             &mut self.stateful_command_permission,
                             &mut self.client_pin,
                             params,
@@ -518,22 +510,23 @@ impl CtapState {
                         )
                     }
                     Command::AuthenticatorSelection => self.process_selection(env, cid),
-                    Command::AuthenticatorLargeBlobs(params) => self.large_blobs.process_command(
-                        &mut self.persistent_store,
-                        &mut self.client_pin,
-                        params,
-                    ),
+                    Command::AuthenticatorLargeBlobs(params) => {
+                        self.large_blobs
+                            .process_command(env, &mut self.client_pin, params)
+                    }
                     Command::AuthenticatorConfig(params) => {
-                        process_config(&mut self.persistent_store, &mut self.client_pin, params)
+                        process_config(env, &mut self.client_pin, params)
                     }
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
                         self.process_vendor_configure(env, params, cid)
                     }
                     Command::AuthenticatorVendorUpgrade(params) => {
-                        self.process_vendor_upgrade(params)
+                        self.process_vendor_upgrade(env, params)
                     }
-                    Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(),
+                    Command::AuthenticatorVendorUpgradeInfo => {
+                        self.process_vendor_upgrade_info(env)
+                    }
                 };
                 #[cfg(feature = "debug_ctap")]
                 writeln!(&mut Console::new(), "Sending response: {:#?}", response).unwrap();
@@ -566,7 +559,7 @@ impl CtapState {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
                 env.user_presence().check(cid)?;
-                if self.persistent_store.pin_hash()?.is_none() {
+                if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
@@ -606,7 +599,7 @@ impl CtapState {
         let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
             let authenticator_mode =
                 ENTERPRISE_ATTESTATION_MODE.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-            if !self.persistent_store.enterprise_attestation()? {
+            if !storage::enterprise_attestation(env)? {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
             match (
@@ -630,7 +623,7 @@ impl CtapState {
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
-                if self.persistent_store.pin_hash()?.is_none() {
+                if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -651,11 +644,11 @@ impl CtapState {
                 if options.uv {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
                 }
-                if self.persistent_store.has_always_uv()? {
+                if storage::has_always_uv(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 // Corresponds to makeCredUvNotRqd set to true.
-                if options.rk && self.persistent_store.pin_hash()?.is_some() {
+                if options.rk && storage::pin_hash(env)?.is_some() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 0x00
@@ -666,12 +659,9 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if self
-                    .persistent_store
-                    .find_credential(&rp_id, &cred_desc.key_id, !has_uv)?
-                    .is_some()
+                if storage::find_credential(env, &rp_id, &cred_desc.key_id, !has_uv)?.is_some()
                     || self
-                        .decrypt_credential_source(cred_desc.key_id, &rp_id_hash)?
+                        .decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash)?
                         .is_some()
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
@@ -691,11 +681,8 @@ impl CtapState {
         {
             cred_protect_policy = DEFAULT_CRED_PROTECT;
         }
-        let min_pin_length = extensions.min_pin_length
-            && self
-                .persistent_store
-                .min_pin_length_rp_ids()?
-                .contains(&rp_id);
+        let min_pin_length =
+            extensions.min_pin_length && storage::min_pin_length_rp_ids(env)?.contains(&rp_id);
         // None for no input, false for invalid input, true for valid input.
         let has_cred_blob_output = extensions.cred_blob.is_some();
         let cred_blob = extensions
@@ -735,7 +722,7 @@ impl CtapState {
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_protect_policy,
-                creation_order: self.persistent_store.new_creation_order()?,
+                creation_order: storage::new_creation_order(env)?,
                 user_name: user
                     .user_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
@@ -745,14 +732,14 @@ impl CtapState {
                 cred_blob,
                 large_blob_key: large_blob_key.clone(),
             };
-            self.persistent_store.store_credential(credential_source)?;
+            storage::store_credential(env, credential_source)?;
             random_id
         } else {
             self.encrypt_key_handle(env, sk.clone(), &rp_id_hash)?
         };
 
-        let mut auth_data = self.generate_auth_data(&rp_id_hash, flags)?;
-        auth_data.extend(&self.persistent_store.aaguid()?);
+        let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
+        auth_data.extend(&storage::aaguid(env)?);
         // The length is fixed to 0x20 or 0x70 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -767,7 +754,7 @@ impl CtapState {
                 None
             };
             let min_pin_length_output = if min_pin_length {
-                Some(self.persistent_store.min_pin_length()? as u64)
+                Some(storage::min_pin_length(env)? as u64)
             } else {
                 None
             };
@@ -785,15 +772,11 @@ impl CtapState {
         signature_data.extend(client_data_hash);
 
         let (signature, x5c) = if USE_BATCH_ATTESTATION || ep_att {
-            let attestation_private_key = self
-                .persistent_store
-                .attestation_private_key()?
+            let attestation_private_key = storage::attestation_private_key(env)?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             let attestation_key =
                 crypto::ecdsa::SecKey::from_bytes(&attestation_private_key).unwrap();
-            let attestation_certificate = self
-                .persistent_store
-                .attestation_certificate()?
+            let attestation_certificate = storage::attestation_certificate(env)?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             (
                 attestation_key.sign_rfc6979::<Sha256>(&signature_data),
@@ -824,12 +807,13 @@ impl CtapState {
     // The computation is deterministic, and private_key expected to be unique.
     fn generate_cred_random(
         &mut self,
+        env: &mut impl Env,
         private_key: &crypto::ecdsa::SecKey,
         has_uv: bool,
     ) -> Result<[u8; 32], Ctap2StatusCode> {
         let mut private_key_bytes = [0u8; 32];
         private_key.to_bytes(&mut private_key_bytes);
-        let key = self.persistent_store.cred_random_secret(has_uv)?;
+        let key = storage::cred_random_secret(env, has_uv)?;
         Ok(hmac_256::<Sha256>(&key, &private_key_bytes))
     }
 
@@ -852,7 +836,8 @@ impl CtapState {
         // Process extensions.
         if extensions.hmac_secret.is_some() || extensions.cred_blob {
             let encrypted_output = if let Some(hmac_secret_input) = extensions.hmac_secret {
-                let cred_random = self.generate_cred_random(&credential.private_key, has_uv)?;
+                let cred_random =
+                    self.generate_cred_random(env, &credential.private_key, has_uv)?;
                 Some(self.client_pin.process_hmac_secret(
                     env.rng(),
                     hmac_secret_input,
@@ -920,22 +905,20 @@ impl CtapState {
     // Returns the first applicable credential from the allow list.
     fn get_any_credential_from_allow_list(
         &mut self,
+        env: &mut impl Env,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         rp_id: &str,
         rp_id_hash: &[u8],
         has_uv: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
-            let credential = self.persistent_store.find_credential(
-                rp_id,
-                &allowed_credential.key_id,
-                !has_uv,
-            )?;
+            let credential =
+                storage::find_credential(env, rp_id, &allowed_credential.key_id, !has_uv)?;
             if credential.is_some() {
                 return Ok(credential);
             }
             let credential =
-                self.decrypt_credential_source(allowed_credential.key_id, rp_id_hash)?;
+                self.decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash)?;
             if credential.is_some() {
                 return Ok(credential);
             }
@@ -973,7 +956,7 @@ impl CtapState {
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
-                if self.persistent_store.pin_hash()?.is_none() {
+                if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -994,7 +977,7 @@ impl CtapState {
                 if options.uv {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
                 }
-                if options.up && self.persistent_store.has_always_uv()? {
+                if options.up && storage::has_always_uv(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 0x00
@@ -1010,12 +993,18 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         let (credential, next_credential_keys) = if let Some(allow_list) = allow_list {
             (
-                self.get_any_credential_from_allow_list(allow_list, &rp_id, &rp_id_hash, has_uv)?,
+                self.get_any_credential_from_allow_list(
+                    env,
+                    allow_list,
+                    &rp_id,
+                    &rp_id_hash,
+                    has_uv,
+                )?,
                 vec![],
             )
         } else {
             let mut iter_result = Ok(());
-            let iter = self.persistent_store.iter_credentials(&mut iter_result)?;
+            let iter = storage::iter_credentials(env, &mut iter_result)?;
             let mut stored_credentials: Vec<(usize, u64)> = iter
                 .filter_map(|(key, credential)| {
                     if credential.rp_id == rp_id && (has_uv || credential.is_discoverable()) {
@@ -1033,7 +1022,7 @@ impl CtapState {
                 .collect();
             let credential = stored_credentials
                 .pop()
-                .map(|key| self.persistent_store.get_credential(key))
+                .map(|key| storage::get_credential(env, key))
                 .transpose()?;
             (credential, stored_credentials)
         };
@@ -1050,7 +1039,7 @@ impl CtapState {
 
         let assertion_input = AssertionInput {
             client_data_hash,
-            auth_data: self.generate_auth_data(&rp_id_hash, flags)?,
+            auth_data: self.generate_auth_data(env, &rp_id_hash, flags)?,
             extensions,
             has_uv,
         };
@@ -1079,12 +1068,12 @@ impl CtapState {
         let (assertion_input, credential_key) = self
             .stateful_command_permission
             .next_assertion_credential()?;
-        let credential = self.persistent_store.get_credential(credential_key)?;
+        let credential = storage::get_credential(env, credential_key)?;
         self.assertion_response(env, credential, assertion_input, None)
     }
 
-    fn process_get_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
-        let has_always_uv = self.persistent_store.has_always_uv()?;
+    fn process_get_info(&self, env: &mut impl Env) -> Result<ResponseData, Ctap2StatusCode> {
+        let has_always_uv = storage::has_always_uv(env)?;
         #[cfg_attr(not(feature = "with_ctap1"), allow(unused_mut))]
         let mut versions = vec![
             String::from(FIDO2_VERSION_STRING),
@@ -1098,10 +1087,7 @@ impl CtapState {
         }
         let mut options = vec![];
         if ENTERPRISE_ATTESTATION_MODE.is_some() {
-            options.push((
-                String::from("ep"),
-                self.persistent_store.enterprise_attestation()?,
-            ));
+            options.push((String::from("ep"), storage::enterprise_attestation(env)?));
         }
         options.append(&mut vec![
             (String::from("rk"), true),
@@ -1109,10 +1095,7 @@ impl CtapState {
             (String::from("alwaysUv"), has_always_uv),
             (String::from("credMgmt"), true),
             (String::from("authnrCfg"), true),
-            (
-                String::from("clientPin"),
-                self.persistent_store.pin_hash()?.is_some(),
-            ),
+            (String::from("clientPin"), storage::pin_hash(env)?.is_some()),
             (String::from("largeBlobs"), true),
             (String::from("pinUvAuthToken"), true),
             (String::from("setMinPINLength"), true),
@@ -1129,7 +1112,7 @@ impl CtapState {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ]),
-                aaguid: self.persistent_store.aaguid()?,
+                aaguid: storage::aaguid(env)?,
                 options: Some(options),
                 max_msg_size: Some(MAX_MSG_SIZE as u64),
                 // The order implies preference. We favor the new V2.
@@ -1142,14 +1125,14 @@ impl CtapState {
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 max_serialized_large_blob_array: Some(MAX_LARGE_BLOB_ARRAY_SIZE as u64),
-                force_pin_change: Some(self.persistent_store.has_force_pin_change()?),
-                min_pin_length: self.persistent_store.min_pin_length()?,
+                force_pin_change: Some(storage::has_force_pin_change(env)?),
+                min_pin_length: storage::min_pin_length(env)?,
                 firmware_version: None,
                 max_cred_blob_length: Some(MAX_CRED_BLOB_LENGTH as u64),
                 max_rp_ids_for_set_min_pin_length: Some(MAX_RP_IDS_LENGTH as u64),
                 certifications: None,
                 remaining_discoverable_credentials: Some(
-                    self.persistent_store.remaining_credentials()? as u64,
+                    storage::remaining_credentials(env)? as u64
                 ),
             },
         ))
@@ -1169,7 +1152,7 @@ impl CtapState {
         }
         env.user_presence().check(cid)?;
 
-        self.persistent_store.reset(env.rng())?;
+        storage::reset(env)?;
         self.client_pin.reset(env.rng());
         #[cfg(feature = "with_ctap1")]
         {
@@ -1201,8 +1184,8 @@ impl CtapState {
         }
 
         // Sanity checks
-        let current_priv_key = self.persistent_store.attestation_private_key()?;
-        let current_cert = self.persistent_store.attestation_certificate()?;
+        let current_priv_key = storage::attestation_private_key(env)?;
+        let current_cert = storage::attestation_certificate(env)?;
 
         let response = match params.attestation_material {
             // Only reading values.
@@ -1230,12 +1213,10 @@ impl CtapState {
                     }
                 }
                 if current_cert.is_none() {
-                    self.persistent_store
-                        .set_attestation_certificate(&data.certificate)?;
+                    storage::set_attestation_certificate(env, &data.certificate)?;
                 }
                 if current_priv_key.is_none() {
-                    self.persistent_store
-                        .set_attestation_private_key(&data.private_key)?;
+                    storage::set_attestation_private_key(env, &data.private_key)?;
                 }
                 AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
@@ -1263,6 +1244,7 @@ impl CtapState {
 
     fn process_vendor_upgrade(
         &mut self,
+        env: &mut impl Env,
         params: AuthenticatorVendorUpgradeParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorVendorUpgradeParameters {
@@ -1271,9 +1253,8 @@ impl CtapState {
             hash,
             signature,
         } = params;
-        let upgrade_locations = self
-            .upgrade_locations
-            .as_mut()
+        let upgrade_locations = env
+            .upgrade_storage()
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
         let written_slice = if let Some(address) = address {
             upgrade_locations
@@ -1302,10 +1283,12 @@ impl CtapState {
         Ok(ResponseData::AuthenticatorVendorUpgrade)
     }
 
-    fn process_vendor_upgrade_info(&self) -> Result<ResponseData, Ctap2StatusCode> {
-        let upgrade_locations = self
-            .upgrade_locations
-            .as_ref()
+    fn process_vendor_upgrade_info(
+        &self,
+        env: &mut impl Env,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        let upgrade_locations = env
+            .upgrade_storage()
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
         Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
             AuthenticatorVendorUpgradeInfoResponse {
@@ -1316,6 +1299,7 @@ impl CtapState {
 
     pub fn generate_auth_data(
         &self,
+        env: &mut impl Env,
         rp_id_hash: &[u8],
         flag_byte: u8,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -1327,7 +1311,7 @@ impl CtapState {
         let mut signature_counter = [0u8; 4];
         BigEndian::write_u32(
             &mut signature_counter,
-            self.persistent_store.global_signature_counter()?,
+            storage::global_signature_counter(env)?,
         );
         auth_data.extend(&signature_counter);
         Ok(auth_data)
@@ -1429,7 +1413,7 @@ mod test {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ],
-            0x03 => ctap_state.persistent_store.aaguid().unwrap(),
+            0x03 => storage::aaguid(&mut env).unwrap(),
             0x04 => cbor_map_options! {
                 "ep" => ENTERPRISE_ATTESTATION_MODE.map(|_| false),
                 "rk" => true,
@@ -1451,10 +1435,10 @@ mod test {
             0x0A => cbor_array![ES256_CRED_PARAM],
             0x0B => MAX_LARGE_BLOB_ARRAY_SIZE as u64,
             0x0C => false,
-            0x0D => ctap_state.persistent_store.min_pin_length().unwrap() as u64,
+            0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
             0x0F => MAX_CRED_BLOB_LENGTH as u64,
             0x10 => MAX_RP_IDS_LENGTH as u64,
-            0x14 => ctap_state.persistent_store.remaining_credentials().unwrap() as u64,
+            0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
         };
 
         let mut response_cbor = vec![0x00];
@@ -1532,7 +1516,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0x41,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &[],
         );
@@ -1551,7 +1535,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0x41,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             CREDENTIAL_ID_SIZE as u8,
             &[],
         );
@@ -1596,10 +1580,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(excluded_credential_source)
-            .is_ok());
+        assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
 
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
@@ -1622,10 +1603,7 @@ mod test {
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
-        let iter = ctap_state
-            .persistent_store
-            .iter_credentials(&mut iter_result)
-            .unwrap();
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -1649,10 +1627,7 @@ mod test {
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
-        let iter = ctap_state
-            .persistent_store
-            .iter_credentials(&mut iter_result)
-            .unwrap();
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -1687,7 +1662,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0xC1,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
@@ -1713,7 +1688,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0xC1,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1736,16 +1711,14 @@ mod test {
         check_make_response(
             make_credential_response,
             0x41,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &[],
         );
 
         // Second part: The extension is used.
         assert_eq!(
-            ctap_state
-                .persistent_store
-                .set_min_pin_length_rp_ids(vec!["example.com".to_string()]),
+            storage::set_min_pin_length_rp_ids(&mut env, vec!["example.com".to_string()]),
             Ok(())
         );
 
@@ -1764,7 +1737,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0xC1,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1789,16 +1762,13 @@ mod test {
         check_make_response(
             make_credential_response,
             0xC1,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &expected_extension_cbor,
         );
 
         let mut iter_result = Ok(());
-        let iter = ctap_state
-            .persistent_store
-            .iter_credentials(&mut iter_result)
-            .unwrap();
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -1824,16 +1794,13 @@ mod test {
         check_make_response(
             make_credential_response,
             0xC1,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &expected_extension_cbor,
         );
 
         let mut iter_result = Ok(());
-        let iter = ctap_state
-            .persistent_store
-            .iter_credentials(&mut iter_result)
-            .unwrap();
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -1862,10 +1829,7 @@ mod test {
         assert_eq!(large_blob_key.len(), 32);
 
         let mut iter_result = Ok(());
-        let iter = ctap_state
-            .persistent_store
-            .iter_credentials(&mut iter_result)
-            .unwrap();
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -1883,7 +1847,7 @@ mod test {
 
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         ctap_state.client_pin = client_pin;
-        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let client_data_hash = [0xCD];
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
@@ -1904,7 +1868,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0x45,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x20,
             &[],
         );
@@ -1931,7 +1895,7 @@ mod test {
     fn test_non_resident_process_make_credential_with_pin() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
-        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
@@ -1941,7 +1905,7 @@ mod test {
         check_make_response(
             make_credential_response,
             0x41,
-            &ctap_state.persistent_store.aaguid().unwrap(),
+            &storage::aaguid(&mut env).unwrap(),
             0x70,
             &[],
         );
@@ -1951,7 +1915,7 @@ mod test {
     fn test_resident_process_make_credential_with_pin() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
-        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
@@ -1967,7 +1931,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
-        ctap_state.persistent_store.toggle_always_uv().unwrap();
+        storage::toggle_always_uv(&mut env).unwrap();
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
@@ -1976,7 +1940,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
         );
 
-        ctap_state.persistent_store.set_pin(&[0x88; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
         make_credential_params.pin_uv_auth_protocol = Some(PinUvAuthProtocol::V1);
@@ -2113,10 +2077,7 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        let signature_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
     }
 
@@ -2191,7 +2152,7 @@ mod test {
         let credential_id = match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let auth_data = make_credential_response.auth_data;
-                let offset = 37 + ctap_state.persistent_store.aaguid().unwrap().len();
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
                 assert_eq!(auth_data[offset], 0x00);
                 assert_eq!(auth_data[offset + 1] as usize, CREDENTIAL_ID_SIZE);
                 auth_data[offset + 2..offset + 2 + CREDENTIAL_ID_SIZE].to_vec()
@@ -2209,12 +2170,10 @@ mod test {
             permissions: None,
             permissions_rp_id: None,
         };
-        let key_agreement_response = ctap_state.client_pin.process_command(
-            env.rng(),
-            &mut ctap_state.persistent_store,
-            client_pin_params,
-            DUMMY_CLOCK_VALUE,
-        );
+        let key_agreement_response =
+            ctap_state
+                .client_pin
+                .process_command(&mut env, client_pin_params, DUMMY_CLOCK_VALUE);
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),
@@ -2267,12 +2226,10 @@ mod test {
             permissions: None,
             permissions_rp_id: None,
         };
-        let key_agreement_response = ctap_state.client_pin.process_command(
-            env.rng(),
-            &mut ctap_state.persistent_store,
-            client_pin_params,
-            DUMMY_CLOCK_VALUE,
-        );
+        let key_agreement_response =
+            ctap_state
+                .client_pin
+                .process_command(&mut env, client_pin_params, DUMMY_CLOCK_VALUE);
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),
@@ -2326,10 +2283,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(credential)
-            .is_ok());
+        assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
@@ -2372,10 +2326,7 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        let signature_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
 
         let credential = PublicKeyCredentialSource {
@@ -2392,10 +2343,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(credential)
-            .is_ok());
+        assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
@@ -2442,10 +2390,7 @@ mod test {
             cred_blob: Some(vec![0xCB]),
             large_blob_key: None,
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(credential)
-            .is_ok());
+        assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let extensions = GetAssertionExtensions {
             cred_blob: true,
@@ -2469,10 +2414,7 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        let signature_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         let expected_extension_cbor = [
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0x41, 0xCB,
         ];
@@ -2506,10 +2448,7 @@ mod test {
             cred_blob: None,
             large_blob_key: Some(vec![0x1C; 32]),
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(credential)
-            .is_ok());
+        assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let extensions = GetAssertionExtensions {
             large_blob_key: Some(true),
@@ -2578,7 +2517,7 @@ mod test {
 
         ctap_state.client_pin = client_pin;
         // The PIN length is outside of the test scope and most likely incorrect.
-        ctap_state.persistent_store.set_pin(&[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let client_data_hash = vec![0xCD];
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
@@ -2604,10 +2543,7 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        let signature_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response_with_user(
             get_assertion_response,
             user2,
@@ -2694,10 +2630,7 @@ mod test {
             DUMMY_CHANNEL_ID,
             DUMMY_CLOCK_VALUE,
         );
-        let signature_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response(
             get_assertion_response,
             vec![0x03],
@@ -2808,17 +2741,14 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(ctap_state
-            .persistent_store
-            .store_credential(credential_source)
-            .is_ok());
-        assert!(ctap_state.persistent_store.count_credentials().unwrap() > 0);
+        assert!(storage::store_credential(&mut env, credential_source).is_ok());
+        assert!(storage::count_credentials(&mut env).unwrap() > 0);
 
         let reset_reponse =
             ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL_ID, DUMMY_CLOCK_VALUE);
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
-        assert!(ctap_state.persistent_store.count_credentials().unwrap() == 0);
+        assert!(storage::count_credentials(&mut env).unwrap() == 0);
     }
 
     #[test]
@@ -2889,7 +2819,7 @@ mod test {
             .encrypt_key_handle(&mut env, private_key.clone(), &rp_id_hash)
             .unwrap();
         let decrypted_source = ctap_state
-            .decrypt_credential_source(encrypted_id, &rp_id_hash)
+            .decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
             .unwrap()
             .unwrap();
 
@@ -2911,7 +2841,7 @@ mod test {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
             assert!(ctap_state
-                .decrypt_credential_source(modified_id, &rp_id_hash)
+                .decrypt_credential_source(&mut env, modified_id, &rp_id_hash)
                 .unwrap()
                 .is_none());
         }
@@ -2922,19 +2852,13 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
 
-        let mut last_counter = ctap_state
-            .persistent_store
-            .global_signature_counter()
-            .unwrap();
+        let mut last_counter = storage::global_signature_counter(&mut env).unwrap();
         assert!(last_counter > 0);
         for _ in 0..100 {
             assert!(ctap_state
                 .increment_global_signature_counter(&mut env)
                 .is_ok());
-            let next_counter = ctap_state
-                .persistent_store
-                .global_signature_counter()
-                .unwrap();
+            let next_counter = storage::global_signature_counter(&mut env).unwrap();
             assert!(next_counter > last_counter);
             last_counter = next_counter;
         }
@@ -2988,19 +2912,11 @@ mod test {
             ))
         );
         assert_eq!(
-            ctap_state
-                .persistent_store
-                .attestation_certificate()
-                .unwrap()
-                .unwrap(),
+            storage::attestation_certificate(&mut env).unwrap().unwrap(),
             dummy_cert
         );
         assert_eq!(
-            ctap_state
-                .persistent_store
-                .attestation_private_key()
-                .unwrap()
-                .unwrap(),
+            storage::attestation_private_key(&mut env).unwrap().unwrap(),
             dummy_key
         );
 
@@ -3027,19 +2943,11 @@ mod test {
             ))
         );
         assert_eq!(
-            ctap_state
-                .persistent_store
-                .attestation_certificate()
-                .unwrap()
-                .unwrap(),
+            storage::attestation_certificate(&mut env).unwrap().unwrap(),
             dummy_cert
         );
         assert_eq!(
-            ctap_state
-                .persistent_store
-                .attestation_private_key()
-                .unwrap()
-                .unwrap(),
+            storage::attestation_private_key(&mut env).unwrap().unwrap(),
             dummy_key
         );
 
@@ -3066,11 +2974,10 @@ mod test {
     #[test]
     fn test_parse_metadata() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
         // The test buffer starts fully erased with 0xFF bytes.
         // The compiler issues an incorrect warning.
         #[allow(unused_mut)]
-        let mut upgrade_locations = ctap_state.upgrade_locations.as_mut().unwrap();
+        let mut upgrade_locations = env.upgrade_storage().unwrap();
 
         // Partition of 0x40000 bytes and 8 bytes metadata are hashed.
         let hashed_data = vec![0xFF; 0x40000 + 8];
@@ -3170,7 +3077,7 @@ mod test {
 
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
-        let upgrade_locations = ctap_state.upgrade_locations.as_ref().unwrap();
+        let upgrade_locations = env.upgrade_storage().unwrap();
         let partition_length = upgrade_locations.partition_length();
         let mut signed_over_data = upgrade_locations
             .read_partition(0, partition_length)
@@ -3191,66 +3098,84 @@ mod test {
         };
 
         // Write to partition and metadata.
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: Some(0x20000),
-            data: data.clone(),
-            hash: hash.clone(),
-            signature: None,
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: Some(0x20000),
+                data: data.clone(),
+                hash: hash.clone(),
+                signature: None,
+            },
+        );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
 
         // We can't inject a public key for our known private key, so the last upgrade step fails.
         // verify_signature is separately tested for that reason.
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: None,
-            data: metadata.clone(),
-            hash: metadata_hash.clone(),
-            signature: Some(cose_signature.clone()),
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: None,
+                data: metadata.clone(),
+                hash: metadata_hash.clone(),
+                signature: Some(cose_signature.clone()),
+            },
+        );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
 
         // Write metadata of a wrong size.
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: None,
-            data: metadata[..METADATA_LEN - 1].to_vec(),
-            hash: metadata_hash,
-            signature: Some(cose_signature),
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: None,
+                data: metadata[..METADATA_LEN - 1].to_vec(),
+                hash: metadata_hash,
+                signature: Some(cose_signature),
+            },
+        );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         // Write outside of the partition.
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: Some(0x40000),
-            data: data.clone(),
-            hash,
-            signature: None,
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: Some(0x40000),
+                data: data.clone(),
+                hash,
+                signature: None,
+            },
+        );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         // Write a bad hash.
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: Some(0x20000),
-            data,
-            hash: [0xEE; 32].to_vec(),
-            signature: None,
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: Some(0x20000),
+                data,
+                hash: [0xEE; 32].to_vec(),
+                signature: None,
+            },
+        );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
     }
 
     #[test]
     fn test_vendor_upgrade_no_second_partition() {
         let mut env = TestEnv::new();
+        env.disable_upgrade_storage();
         let mut ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
-        ctap_state.upgrade_locations = None;
 
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
-        let response = ctap_state.process_vendor_upgrade(AuthenticatorVendorUpgradeParameters {
-            address: Some(0),
-            data,
-            hash,
-            signature: None,
-        });
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                address: Some(0),
+                data,
+                hash,
+                signature: None,
+            },
+        );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
     }
 
@@ -3258,13 +3183,9 @@ mod test {
     fn test_vendor_upgrade_info() {
         let mut env = TestEnv::new();
         let ctap_state = CtapState::new(&mut env, DUMMY_CLOCK_VALUE);
-        let partition_address = ctap_state
-            .upgrade_locations
-            .as_ref()
-            .unwrap()
-            .partition_address();
+        let partition_address = env.upgrade_storage().unwrap().partition_address();
 
-        let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info();
+        let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info(&mut env);
         assert_eq!(
             upgrade_info_reponse,
             Ok(ResponseData::AuthenticatorVendorUpgradeInfo(

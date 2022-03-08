@@ -64,3 +64,32 @@ a few things you can personalize:
     *   Whether you want to use batch attestation.
     *   Whether you want to use signature counters.
     *   Various constants to adapt to different hardware.
+
+### Testing and Fuzzing
+
+You might want to test your changes before deploying them. To run unit tests,
+make sure that at least the `std` feature is included, e.g.:
+
+```shell
+cargo test --features=std,with_ctap1
+```
+
+Alternatively, you can simply call our test script to also test all libraries,
+run clippy, check formatting and more:
+
+```shell
+./run_desktop_tests.sh
+```
+
+OpenSK is fuzzed with the [OSS-Fuzz](https://github.com/google/oss-fuzz)
+project. You can also run fuzzing locally. First install:
+
+```shell
+cargo +stable install cargo-fuzz --version 0.10.2
+```
+
+Then choose a fuzz target from `fuzz/fuzz_targets/`, e.g.:
+
+```shell
+cargo fuzz run fuzz_target_process_ctap1
+```

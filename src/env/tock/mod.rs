@@ -4,13 +4,10 @@ use crate::ctap::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, Proc
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
-#[cfg(feature = "debug_ctap")]
-use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
 use crypto::rng256::TockRng256;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
-#[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
@@ -57,8 +54,8 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn check(&self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
-        check_user_presence(cid)
+    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+        check_user_presence(self, cid)
     }
 }
 
@@ -81,6 +78,7 @@ impl Env for TockEnv {
     type Storage = TockStorage;
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
+    type Write = Console;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -101,10 +99,15 @@ impl Env for TockEnv {
     fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
         self
     }
+
+    fn write(&mut self) -> Self::Write {
+        Console::new()
+    }
 }
 
 // Returns whether the keepalive was sent, or false if cancelled.
 fn send_keepalive_up_needed(
+    env: &mut TockEnv,
     cid: ChannelID,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
@@ -113,52 +116,43 @@ fn send_keepalive_up_needed(
         let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout);
         match status {
             None => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(Console::new(), "Sending a KEEPALIVE packet timed out").unwrap();
+                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
             }
             Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
             Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(Console::new(), "Sent KEEPALIVE packet").unwrap();
+                debug_ctap!(env, "Sent KEEPALIVE packet");
             }
             Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {
-                    #[cfg(feature = "debug_ctap")]
-                    writeln!(
-                        Console::new(),
+                    debug_ctap!(
+                        env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
                         received_cid,
-                    )
-                    .unwrap();
+                    );
                     return Ok(());
                 }
                 match processed_packet {
                     ProcessedPacket::InitPacket { cmd, .. } => {
                         if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
-                            #[cfg(feature = "debug_ctap")]
-                            writeln!(Console::new(), "User presence check cancelled").unwrap();
+                            debug_ctap!(env, "User presence check cancelled");
                             return Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
                         } else {
-                            #[cfg(feature = "debug_ctap")]
-                            writeln!(
-                                Console::new(),
+                            debug_ctap!(
+                                env,
                                 "Discarded packet with command {} received while sending a KEEPALIVE packet",
                                 cmd,
-                            )
-                            .unwrap();
+                            );
                         }
                     }
                     ProcessedPacket::ContinuationPacket { .. } => {
-                        #[cfg(feature = "debug_ctap")]
-                        writeln!(
-                            Console::new(),
+                        debug_ctap!(
+                            env,
                             "Discarded continuation packet received while sending a KEEPALIVE packet",
-                        )
-                        .unwrap();
+                        );
                     }
                 }
             }
@@ -219,13 +213,13 @@ pub fn switch_off_leds() {
 const KEEPALIVE_DELAY_MS: isize = 100;
 pub const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 
-fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize =
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
-    send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;
+    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY)?;
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -275,7 +269,7 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(cid, KEEPALIVE_DELAY);
+            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY);
         }
 
         if button_touched.get() || keepalive_response.is_err() {

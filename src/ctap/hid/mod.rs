@@ -26,10 +26,6 @@ use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
-#[cfg(feature = "debug_ctap")]
-use core::fmt::Write;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::console::Console;
 use libtock_drivers::timer::{ClockValue, Duration, Timestamp};
 
 pub type HidPacket = [u8; 64];
@@ -209,14 +205,18 @@ impl CtapHid {
     /// Ignoring the others is incorrect behavior. You have to at least replace them with an error
     /// message:
     /// `CtapHid::error_message(message.cid, CtapHid::ERR_INVALID_CMD)`
-    pub fn parse_packet(&mut self, packet: &HidPacket, clock_value: ClockValue) -> Option<Message> {
+    pub fn parse_packet(
+        &mut self,
+        env: &mut impl Env,
+        packet: &HidPacket,
+        clock_value: ClockValue,
+    ) -> Option<Message> {
         match self
             .assembler
             .parse_packet(packet, Timestamp::<isize>::from_clock_value(clock_value))
         {
             Ok(Some(message)) => {
-                #[cfg(feature = "debug_ctap")]
-                writeln!(&mut Console::new(), "Received message: {:02x?}", message).unwrap();
+                debug_ctap!(env, "Received message: {:02x?}", message);
                 self.preprocess_message(message)
             }
             Ok(None) => {
@@ -392,15 +392,9 @@ impl CtapHid {
         clock_value: ClockValue,
         ctap_state: &mut CtapState,
     ) -> HidPacketIterator {
-        if let Some(message) = self.parse_packet(packet, clock_value) {
+        if let Some(message) = self.parse_packet(env, packet, clock_value) {
             let processed_message = self.process_message(env, message, clock_value, ctap_state);
-            #[cfg(feature = "debug_ctap")]
-            writeln!(
-                &mut Console::new(),
-                "Sending message: {:02x?}",
-                processed_message
-            )
-            .unwrap();
+            debug_ctap!(env, "Sending message: {:02x?}", processed_message);
             CtapHid::split_message(processed_message)
         } else {
             HidPacketIterator::none()

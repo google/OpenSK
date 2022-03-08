@@ -24,6 +24,23 @@ use crate::ctap::CtapState;
 use crate::env::Env;
 use libtock_drivers::timer::ClockValue;
 
+// Those macros should eventually be split into trace, debug, info, warn, and error macros when
+// adding either the defmt or log feature and crate dependency.
+#[cfg(feature = "debug_ctap")]
+macro_rules! debug_ctap {
+    ($env: expr, $($rest:tt)*) => {
+        use core::fmt::Write;
+        writeln!($env.write(), $($rest)*).unwrap();
+    };
+}
+#[cfg(not(feature = "debug_ctap"))]
+macro_rules! debug_ctap {
+    ($env: expr, $($rest:tt)*) => {
+        // To avoid unused variable warnings.
+        let _ = $env;
+    };
+}
+
 pub mod api;
 // Implementation details must be public for testing (in particular fuzzing).
 #[cfg(feature = "std")]

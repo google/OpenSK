@@ -219,11 +219,7 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
-<<<<<<< HEAD:src/env/tock/mod.rs
-    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY)?;
-=======
-    send_keepalive_up_needed(cid, KEEPALIVE_DELAY_TOCK)?;
->>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock):src/env/tock.rs
+    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK)?;
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -273,11 +269,7 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
-<<<<<<< HEAD:src/env/tock/mod.rs
-            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY);
-=======
-            keepalive_response = send_keepalive_up_needed(cid, KEEPALIVE_DELAY_TOCK);
->>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock):src/env/tock.rs
+            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK);
         }
 
         if button_touched.get() || keepalive_response.is_err() {

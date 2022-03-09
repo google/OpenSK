@@ -27,8 +27,8 @@ impl TimedPermission {
     }
 
     pub fn granted(now: CtapInstant, grant_duration: Milliseconds<ClockInt>) -> TimedPermission {
-        now.checked_add(grant_duration)
-            .map_or(Self::Waiting, TimedPermission::Granted)
+        // TODO: Should panic or saturate if the grant duration is too big.
+        TimedPermission::Granted(now.checked_add(grant_duration).unwrap())
     }
 
     // Checks if the timeout is not reached, false for differing ClockValue frequencies.
@@ -126,11 +126,15 @@ mod test {
     }
 
     fn request_duration() -> Milliseconds<u64> {
-        Milliseconds::new(1000_u64)
+        Milliseconds::new(1000)
     }
 
     fn presence_duration() -> Milliseconds<u64> {
-        Milliseconds::new(1000_u64)
+        Milliseconds::new(1000)
+    }
+
+    fn epsilon() -> Milliseconds<u64> {
+        Milliseconds::new(1)
     }
 
     fn grant_up_when_needed(start_time: CtapInstant) {
@@ -146,6 +150,12 @@ mod test {
         let mut u2f_state = U2fUserPresenceState::new(request_duration(), presence_duration());
         assert!(!u2f_state.consume_up(start_time));
         assert!(u2f_state.is_up_needed(start_time));
+        // The timeout excludes equality, so it should be over at this instant.
+        assert!(!u2f_state.is_up_needed(
+            start_time
+                .checked_add(presence_duration() + epsilon())
+                .unwrap()
+        ));
     }
 
     fn grant_up_timeout(start_time: CtapInstant) {
@@ -153,6 +163,12 @@ mod test {
         assert!(!u2f_state.consume_up(start_time));
         assert!(u2f_state.is_up_needed(start_time));
         u2f_state.grant_up(start_time);
+        // The timeout excludes equality, so it should be over at this instant.
+        assert!(!u2f_state.consume_up(
+            start_time
+                .checked_add(presence_duration() + epsilon())
+                .unwrap()
+        ));
     }
 
     #[test]

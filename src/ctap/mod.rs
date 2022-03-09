@@ -66,7 +66,6 @@ use self::timed_permission::U2fUserPresenceState;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::clock::{ClockInt, CtapInstant};
-use crate::embedded_flash::{UpgradeLocations, UpgradeStorage};
 use crate::env::{Env, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -81,9 +80,6 @@ use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 use embedded_time::duration::Milliseconds;
-#[cfg(feature = "debug_ctap")]
-use libtock_drivers::console::Console;
-use libtock_drivers::crp;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 

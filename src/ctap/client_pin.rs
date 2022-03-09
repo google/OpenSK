@@ -1629,7 +1629,7 @@ mod test {
             Ok(())
         );
 
-        let timeout = CtapInstant::new(0) + (Milliseconds::new(30001_u32));
+        let timeout = CtapInstant::new(0) + Milliseconds::new(30001_u32);
         client_pin.update_timeouts(timeout);
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(

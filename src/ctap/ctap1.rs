@@ -431,17 +431,7 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-<<<<<<< HEAD
         assert!(storage::set_attestation_private_key(&mut env, &fake_key).is_ok());
-        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
-        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, START_CLOCK_VALUE);
-=======
-        assert!(ctap_state
-            .persistent_store
-            .set_attestation_private_key(&fake_key)
-            .is_ok());
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0_u64));
         ctap_state.u2f_up_state.grant_up(CtapInstant::new(0_u64));
         let response = Ctap1Command::process_command(
@@ -450,23 +440,11 @@ mod test {
             &mut ctap_state,
             CtapInstant::new(0_u64),
         );
->>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock)
         // Certificate is still missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let fake_cert = [0x99u8; 100]; // Arbitrary length
-<<<<<<< HEAD
         assert!(storage::set_attestation_certificate(&mut env, &fake_cert[..]).is_ok());
-        ctap_state.u2f_up_state.consume_up(START_CLOCK_VALUE);
-        ctap_state.u2f_up_state.grant_up(START_CLOCK_VALUE);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, START_CLOCK_VALUE)
-                .unwrap();
-=======
-        assert!(ctap_state
-            .persistent_store
-            .set_attestation_certificate(&fake_cert[..])
-            .is_ok());
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0_u64));
         ctap_state.u2f_up_state.grant_up(CtapInstant::new(0_u64));
         let response = Ctap1Command::process_command(
@@ -476,7 +454,6 @@ mod test {
             CtapInstant::new(0_u64),
         )
         .unwrap();
->>>>>>> c27336d (Replaced Libtock driver clock with embedded_time::Clock)
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
         assert_eq!(response[66], CREDENTIAL_ID_SIZE as u8);
         assert!(ctap_state

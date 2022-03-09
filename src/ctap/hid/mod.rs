@@ -173,10 +173,10 @@ impl CtapHid {
     const CAPABILITIES: u8 = Self::CAPABILITY_WINK | Self::CAPABILITY_CBOR;
     #[cfg(not(feature = "with_ctap1"))]
     const CAPABILITIES: u8 = Self::CAPABILITY_WINK | Self::CAPABILITY_CBOR | Self::CAPABILITY_NMSG;
-
+    // TODO: Is this timeout duration specified?
     const TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(100 as ClockInt);
     const WINK_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(5000 as ClockInt);
-    // TODO: Is this timeout duration specified?
+
     pub fn new() -> CtapHid {
         CtapHid {
             assembler: MessageAssembler::new(),

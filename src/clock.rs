@@ -81,3 +81,69 @@ impl embedded_time::Clock for TestClock {
         Ok(embedded_time::Instant::new(0))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use embedded_time::duration::{Milliseconds, Seconds};
+
+    #[test]
+    fn test_checked_add() {
+        let clock = TestClock::new();
+        let now = clock.try_now().unwrap();
+        assert_eq!(
+            now.checked_add(Seconds::new(1u64)),
+            Some(CtapInstant::new(TEST_CLOCK_FREQUENCY_HZ as u64))
+        );
+        assert_eq!(
+            now.checked_add(Seconds::new(1u64)),
+            now.checked_add(Milliseconds::new(1000u64))
+        );
+    }
+
+    #[test]
+    fn test_checked_add_overflow() {
+        assert_eq!(
+            CtapInstant::new(u64::MAX).checked_add(Seconds::new(1u64)),
+            Some(CtapInstant::new(TEST_CLOCK_FREQUENCY_HZ as u64 - 1u64))
+        );
+    }
+
+    #[test]
+    fn test_checked_add_error() {
+        assert!(CtapInstant::new(u64::MAX)
+            .checked_add(Seconds::new(u64::MAX / TEST_CLOCK_FREQUENCY_HZ as u64))
+            .is_none());
+        let now = TestClock::new().try_now().unwrap();
+        assert!(now.checked_add(Seconds::new(u64::MAX)).is_none());
+    }
+
+    #[test]
+    fn test_duration_since() {
+        let clock = TestClock::new();
+        let early = clock.try_now().unwrap();
+        let later = CtapInstant::new(1000u64);
+        assert_eq!(
+            later.checked_duration_since(&early).unwrap().integer(),
+            1000
+        );
+        assert_eq!(early.checked_duration_since(&later), None);
+    }
+
+    #[test]
+    fn test_duration_since_overflow() {
+        let early = CtapInstant::new(u64::MAX);
+        let later = CtapInstant::new(1000u64);
+        assert_eq!(
+            later.checked_duration_since(&early).unwrap().integer(),
+            1001
+        );
+        assert_eq!(early.checked_duration_since(&later), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_panic() {
+        let _ = CtapInstant::new(0) + Milliseconds(u64::MAX / 2 + 1);
+    }
+}

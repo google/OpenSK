@@ -22,7 +22,7 @@ use crate::ctap::hid::send::HidPacketIterator;
 use crate::ctap::hid::{CtapHid, HidPacket};
 use crate::ctap::CtapState;
 use crate::env::Env;
-use libtock_drivers::timer::ClockValue;
+use clock::CtapInstant;
 
 // Those macros should eventually be split into trace, debug, info, warn, and error macros when
 // adding either the defmt or log feature and crate dependency.
@@ -42,6 +42,7 @@ macro_rules! debug_ctap {
 }
 
 pub mod api;
+pub mod clock;
 // Implementation details must be public for testing (in particular fuzzing).
 #[cfg(feature = "std")]
 pub mod ctap;
@@ -60,7 +61,7 @@ impl<E: Env> Ctap<E> {
     /// Instantiates a CTAP implementation given its environment.
     // This should only take the environment, but it temporarily takes the boot time until the
     // clock is part of the environment.
-    pub fn new(mut env: E, now: ClockValue) -> Self {
+    pub fn new(mut env: E, now: CtapInstant) -> Self {
         let state = CtapState::new(&mut env, now);
         let hid = CtapHid::new();
         Ctap { env, state, hid }
@@ -74,12 +75,16 @@ impl<E: Env> Ctap<E> {
         &mut self.hid
     }
 
-    pub fn process_hid_packet(&mut self, packet: &HidPacket, now: ClockValue) -> HidPacketIterator {
+    pub fn process_hid_packet(
+        &mut self,
+        packet: &HidPacket,
+        now: CtapInstant,
+    ) -> HidPacketIterator {
         self.hid
             .process_hid_packet(&mut self.env, packet, now, &mut self.state)
     }
 
-    pub fn update_timeouts(&mut self, now: ClockValue) {
+    pub fn update_timeouts(&mut self, now: CtapInstant) {
         self.state.update_timeouts(now);
         self.hid.wink_permission = self.hid.wink_permission.check_expiration(now);
     }

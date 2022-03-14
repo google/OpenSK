@@ -1,7 +1,7 @@
 use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::ctap::hid::ChannelID;
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
 use crypto::rng256::ThreadRng256;
 use persistent_store::{BufferOptions, BufferStorage, Store};
@@ -16,7 +16,7 @@ pub struct TestEnv {
 }
 
 pub struct TestUserPresence {
-    check: Box<dyn Fn(ChannelID) -> Result<(), Ctap2StatusCode>>,
+    check: Box<dyn Fn(Channel) -> Result<(), Ctap2StatusCode>>,
 }
 
 pub struct TestWrite;
@@ -65,14 +65,14 @@ impl TestEnv {
 }
 
 impl TestUserPresence {
-    pub fn set(&mut self, check: impl Fn(ChannelID) -> Result<(), Ctap2StatusCode> + 'static) {
+    pub fn set(&mut self, check: impl Fn(Channel) -> Result<(), Ctap2StatusCode> + 'static) {
         self.check = Box::new(check);
     }
 }
 
 impl UserPresence for TestUserPresence {
-    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
-        (self.check)(cid)
+    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
+        (self.check)(channel)
     }
 }
 

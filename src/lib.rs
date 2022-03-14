@@ -21,6 +21,7 @@ extern crate arrayref;
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
 use crate::ctap::CtapState;
+pub use crate::ctap::Transport;
 use crate::env::Env;
 use clock::CtapInstant;
 
@@ -78,10 +79,16 @@ impl<E: Env> Ctap<E> {
     pub fn process_hid_packet(
         &mut self,
         packet: &HidPacket,
+        transport: Transport,
         now: CtapInstant,
     ) -> HidPacketIterator {
-        self.hid
-            .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+        match transport {
+            Transport::MainHid => {
+                self.hid
+                    .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+            }
+            Transport::VendorHid => HidPacketIterator::none(),
+        }
     }
 
     pub fn update_timeouts(&mut self, now: CtapInstant) {

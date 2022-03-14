@@ -28,7 +28,7 @@ use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
 use ctap2::env::test::TestEnv;
-use ctap2::Ctap;
+use ctap2::{Ctap, Transport};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 
@@ -72,7 +72,9 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
     let mut assembler_reply = MessageAssembler::new();
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
-        for pkt_reply in ctap.process_hid_packet(&pkt_request, CtapInstant::new(0)) {
+        for pkt_reply in
+            ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
+        {
             if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0))
             {
                 result_cid.copy_from_slice(&result.payload[8..12]);
@@ -111,7 +113,9 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in hid_packet_iterator {
-            for pkt_reply in ctap.process_hid_packet(&pkt_request, CtapInstant::new(0)) {
+            for pkt_reply in
+                ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
+            {
                 // Only checks for assembling crashes, not for semantics.
                 let _ = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0));
             }

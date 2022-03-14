@@ -15,10 +15,8 @@
 use super::bitfields::{
     Busy, CryptoMode, HashControl, Interrupts, LliWord1, PaddingConfig, RgfEndianness, Task,
 };
-use tock_registers::{
-    register_structs,
-    registers::{ReadOnly, ReadWrite, WriteOnly},
-};
+use tock_registers::register_structs;
+use tock_registers::registers::{ReadOnly, ReadWrite, WriteOnly};
 
 register_structs! {
     pub CryptoCellControlRegisters {

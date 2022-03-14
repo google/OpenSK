@@ -15,9 +15,8 @@
 #[cfg(feature = "debug_ctap")]
 use crate::console::Console;
 use crate::result::TockError;
-use crate::timer;
 use crate::timer::Duration;
-use crate::util;
+use crate::{timer, util};
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;

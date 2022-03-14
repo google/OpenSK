@@ -1,6 +1,5 @@
 use crate::util;
-use core::alloc::GlobalAlloc;
-use core::alloc::Layout;
+use core::alloc::{GlobalAlloc, Layout};
 #[cfg(any(feature = "debug_allocations", feature = "panic_console"))]
 use core::fmt::Write;
 use core::ptr;

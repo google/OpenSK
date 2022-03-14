@@ -23,9 +23,8 @@ use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
 };
-use crate::ctap::key_material;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::INITIAL_SIGNATURE_COUNTER;
+use crate::ctap::{key_material, INITIAL_SIGNATURE_COUNTER};
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;

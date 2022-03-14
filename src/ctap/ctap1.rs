@@ -19,8 +19,7 @@ use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use core::convert::Into;
-use core::convert::TryFrom;
+use core::convert::{Into, TryFrom};
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;

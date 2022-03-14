@@ -14,16 +14,12 @@
 
 extern crate alloc;
 
-use openssl::bn;
-use openssl::ec;
-use openssl::nid;
+use openssl::{bn, ec, nid};
 use sk_cbor::cbor_map;
-use std::env;
-use std::fs;
 use std::fs::File;
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::{env, fs};
 use uuid::Uuid;
 
 fn main() {

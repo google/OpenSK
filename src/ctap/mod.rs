@@ -25,6 +25,7 @@ pub mod data_formats;
 pub mod hid;
 mod key_material;
 mod large_blobs;
+pub mod main_hid;
 mod pin_protocol;
 pub mod response;
 pub mod status_code;

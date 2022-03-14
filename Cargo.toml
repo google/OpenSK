@@ -22,6 +22,7 @@ subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 # This import explicitly locks the version.
 serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 embedded-time = "0.12.1"
+arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]
@@ -32,6 +33,7 @@ verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
 vendor_hid = []
+fuzz = ["arbitrary", "std"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

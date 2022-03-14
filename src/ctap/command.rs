@@ -26,6 +26,8 @@ use super::status_code::Ctap2StatusCode;
 use super::{cbor_read, key_material};
 use alloc::string::String;
 use alloc::vec::Vec;
+#[cfg(feature = "fuzz")]
+use arbitrary::Arbitrary;
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use sk_cbor as cbor;
@@ -155,6 +157,7 @@ impl Command {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct AuthenticatorMakeCredentialParameters {
     pub client_data_hash: Vec<u8>,
     pub rp: PublicKeyCredentialRpEntity,

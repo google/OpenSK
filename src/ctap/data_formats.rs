@@ -15,6 +15,8 @@
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
+#[cfg(feature = "fuzz")]
+use arbitrary::Arbitrary;
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use crypto::{ecdh, ecdsa};
@@ -28,6 +30,7 @@ const ES256_ALGORITHM: i64 = -7;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
     pub rp_name: Option<String>,
@@ -70,6 +73,7 @@ impl From<PublicKeyCredentialRpEntity> for cbor::Value {
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
     pub user_name: Option<String>,
@@ -117,6 +121,7 @@ impl From<PublicKeyCredentialUserEntity> for cbor::Value {
 
 // https://www.w3.org/TR/webauthn/#enumdef-publickeycredentialtype
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum PublicKeyCredentialType {
     PublicKey,
     // This is the default for all strings not covered above.
@@ -149,6 +154,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialType {
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialparameters
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialParameter {
     pub cred_type: PublicKeyCredentialType,
     pub alg: SignatureAlgorithm,
@@ -183,6 +189,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -219,6 +226,7 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
     pub key_id: Vec<u8>,
@@ -270,6 +278,7 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
     pub cred_protect: Option<CredentialProtectionPolicy>,
@@ -388,6 +397,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 
 // Even though options are optional, we can use the default if not present.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct MakeCredentialOptions {
     pub rk: bool,
     pub uv: bool,
@@ -488,6 +498,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
     // This is the default for all numbers not covered above.
@@ -516,6 +527,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 #[allow(clippy::enum_variant_names)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum CredentialProtectionPolicy {
     /// The credential is always discoverable, as if it had no protection level.
     UserVerificationOptional = 0x01,
@@ -884,6 +896,7 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum PinUvAuthProtocol {
     V1 = 1,
     V2 = 2,

@@ -11,5 +11,6 @@ embedded-time = "0.12.1"
 libtock_drivers = { path = "../../third_party/libtock-drivers" }
 crypto = { path = "../../libraries/crypto", features = ['std'] }
 sk-cbor = { path = "../../libraries/cbor" }
-ctap2 = { path = "../..", features = ['std'] }
+ctap2 = { path = "../..", features = ["fuzz"] }
 lang_items = { path = "../../third_party/lang-items", features = ['std'] }
+arbitrary = { version = "0.4.7", features = ["derive"] }

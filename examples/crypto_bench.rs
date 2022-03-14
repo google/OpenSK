@@ -24,8 +24,7 @@ use crypto::{aes256, cbc, ecdsa, rng256, sha256, Hash256};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
-use libtock_drivers::timer::Timer;
-use libtock_drivers::timer::Timestamp;
+use libtock_drivers::timer::{Timer, Timestamp};
 
 libtock_core::stack_size! {0x800}
 

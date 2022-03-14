@@ -363,7 +363,9 @@ macro_rules! cbor_bytes_lit {
 #[cfg(test)]
 mod test {
     use super::super::values::{SimpleValue, Value};
-    use alloc::{string::String, vec, vec::Vec};
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn test_cbor_simple_values() {

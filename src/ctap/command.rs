@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::cbor_read;
 use super::customization::{MAX_CREDENTIAL_COUNT_IN_LIST, MAX_LARGE_BLOB_ARRAY_SIZE};
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
@@ -23,8 +22,8 @@ use super::data_formats::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
     PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
-use super::key_material;
 use super::status_code::Ctap2StatusCode;
+use super::{cbor_read, key_material};
 use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;

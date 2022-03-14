@@ -1,3 +1,4 @@
 use_field_init_shorthand = true
 use_try_shorthand = true
 edition = "2018"
+imports_granularity = "Module"

@@ -11,8 +11,7 @@ libtock_core::stack_size! {0x4000}
 
 #[cfg(not(feature = "with_nfc"))]
 mod example {
-    use super::Console;
-    use super::Write;
+    use super::{Console, Write};
 
     pub fn nfc(console: &mut Console) {
         writeln!(console, "NFC feature flag is missing!").unwrap();
@@ -21,16 +20,12 @@ mod example {
 
 #[cfg(feature = "with_nfc")]
 mod example {
-    use super::Console;
-    use super::Write;
+    use super::{Console, Write};
     use libtock_core::result::CommandError;
-    use libtock_drivers::nfc::NfcTag;
-    use libtock_drivers::nfc::RecvOp;
-    use libtock_drivers::result::FlexUnwrap;
-    use libtock_drivers::result::TockError;
+    use libtock_drivers::nfc::{NfcTag, RecvOp};
+    use libtock_drivers::result::{FlexUnwrap, TockError};
     use libtock_drivers::timer;
-    use libtock_drivers::timer::Timer;
-    use libtock_drivers::timer::Timestamp;
+    use libtock_drivers::timer::{Timer, Timestamp};
 
     #[derive(Copy, Clone, Debug, PartialEq)]
     #[allow(clippy::upper_case_acronyms)]

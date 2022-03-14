@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use super::{
 use alloc::vec::Vec;
 use core::mem::swap;
 
-// A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
+/// A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
 pub struct MessageAssembler {
     // Whether this is waiting to receive an initialization packet.
     idle: bool,

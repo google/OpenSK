@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ pub use self::receive::MessageAssembler;
 use self::receive::MessageAssembler;
 pub use self::send::HidPacketIterator;
 use super::super::clock::{ClockInt, CtapInstant};
+use super::status_code::Ctap2StatusCode;
 use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -32,8 +33,6 @@ use enum_iterator::IntoEnumIterator;
 
 pub type HidPacket = [u8; 64];
 pub type ChannelID = [u8; 4];
-
-const CTAP2_ERR_VENDOR_INTERNAL_ERROR: u8 = 0xF2;
 
 /// CTAPHID commands
 ///
@@ -387,7 +386,7 @@ impl CtapHid {
             HidPacketIterator::new(Message {
                 cid,
                 cmd: CtapHidCommand::Cbor,
-                payload: vec![CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8],
+                payload: vec![Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8],
             })
             .unwrap()
         })

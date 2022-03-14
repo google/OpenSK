@@ -1,7 +1,7 @@
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::ctap::hid::ChannelID;
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::Channel;
 use crypto::rng256::Rng256;
 use persistent_store::{Storage, Store};
 
@@ -13,7 +13,7 @@ pub trait UserPresence {
     /// Blocks for user presence.
     ///
     /// Returns an error in case of timeout or keepalive error.
-    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode>;
+    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode>;
 }
 
 /// Describes what CTAP needs to function.

@@ -2,6 +2,7 @@ pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -54,8 +55,11 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn check(&mut self, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
-        check_user_presence(self, cid)
+    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
+        match channel {
+            Channel::MainHid(cid) => check_user_presence(self, cid),
+            Channel::VendorHid(cid) => check_user_presence(self, cid),
+        }
     }
 }
 

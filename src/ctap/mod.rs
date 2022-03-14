@@ -125,6 +125,36 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     alg: SignatureAlgorithm::ES256,
 };
 
+/// Transports supported by OpenSK.
+///
+/// An OpenSK library user annotates incoming data with this data type.
+///
+/// The difference between this data type and `AuthenticatorTransport` is that the latter
+/// corresponds to the communication defined in the CTAP specification. This data type describes
+/// the hardware path a packet took.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transport {
+    /// Corresponds to CTAP's USB transport.
+    MainHid,
+    /// No equivalent in CTAP, used for communication outside the specification.
+    VendorHid,
+}
+
+/// Communication channels between authenticator and client.
+///
+/// From OpenSK's perspective, a channel represents a client. When we receive data from a new
+/// channel, we have to assume it's a new client.
+///
+/// For HID, communication channels coincide with the channel ID. NFC and HID transports are unique
+/// channels themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channel {
+    /// Corresponds to CTAP's USB transport.
+    MainHid(ChannelID),
+    /// No equivalent in CTAP, used for communication outside the specification.
+    VendorHid(ChannelID),
+}
+
 // Helpers to perform CBOR read/write while respecting CTAP2 nesting limits.
 pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
     cbor::reader::read_nested(encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
@@ -448,7 +478,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         command_cbor: &[u8],
-        cid: ChannelID,
+        channel: Channel,
         now: CtapInstant,
     ) -> Vec<u8> {
         let cmd = Command::deserialize(command_cbor);
@@ -481,10 +511,10 @@ impl CtapState {
                 }
                 let response = match command {
                     Command::AuthenticatorMakeCredential(params) => {
-                        self.process_make_credential(env, params, cid)
+                        self.process_make_credential(env, params, channel)
                     }
                     Command::AuthenticatorGetAssertion(params) => {
-                        self.process_get_assertion(env, params, cid, now)
+                        self.process_get_assertion(env, params, channel, now)
                     }
                     Command::AuthenticatorGetNextAssertion => {
                         self.process_get_next_assertion(env, now)
@@ -493,7 +523,7 @@ impl CtapState {
                     Command::AuthenticatorClientPin(params) => {
                         self.client_pin.process_command(env, params, now)
                     }
-                    Command::AuthenticatorReset => self.process_reset(env, cid, now),
+                    Command::AuthenticatorReset => self.process_reset(env, channel, now),
                     Command::AuthenticatorCredentialManagement(params) => {
                         process_credential_management(
                             env,
@@ -503,7 +533,7 @@ impl CtapState {
                             now,
                         )
                     }
-                    Command::AuthenticatorSelection => self.process_selection(env, cid),
+                    Command::AuthenticatorSelection => self.process_selection(env, channel),
                     Command::AuthenticatorLargeBlobs(params) => {
                         self.large_blobs
                             .process_command(env, &mut self.client_pin, params)
@@ -513,7 +543,7 @@ impl CtapState {
                     }
                     // Vendor specific commands
                     Command::AuthenticatorVendorConfigure(params) => {
-                        self.process_vendor_configure(env, params, cid)
+                        self.process_vendor_configure(env, params, channel)
                     }
                     Command::AuthenticatorVendorUpgrade(params) => {
                         self.process_vendor_upgrade(env, params)
@@ -546,12 +576,12 @@ impl CtapState {
         env: &mut impl Env,
         pin_uv_auth_param: &Option<Vec<u8>>,
         pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
-        cid: ChannelID,
+        channel: Channel,
     ) -> Result<(), Ctap2StatusCode> {
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                env.user_presence().check(cid)?;
+                env.user_presence().check(channel)?;
                 if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
@@ -567,7 +597,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         make_credential_params: AuthenticatorMakeCredentialParameters,
-        cid: ChannelID,
+        channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorMakeCredentialParameters {
             client_data_hash,
@@ -582,7 +612,7 @@ impl CtapState {
             enterprise_attestation,
         } = make_credential_params;
 
-        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
+        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, channel)?;
 
         if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
@@ -659,13 +689,13 @@ impl CtapState {
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
-                    let _ = env.user_presence().check(cid);
+                    let _ = env.user_presence().check(channel);
                     return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
                 }
             }
         }
 
-        env.user_presence().check(cid)?;
+        env.user_presence().check(channel)?;
         self.client_pin.clear_token_flags();
 
         let mut cred_protect_policy = extensions.cred_protect;
@@ -923,7 +953,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         get_assertion_params: AuthenticatorGetAssertionParameters,
-        cid: ChannelID,
+        channel: Channel,
         now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorGetAssertionParameters {
@@ -936,7 +966,7 @@ impl CtapState {
             pin_uv_auth_protocol,
         } = get_assertion_params;
 
-        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, cid)?;
+        self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, channel)?;
 
         if extensions.hmac_secret.is_some() && !options.up {
             // The extension is actually supported, but we need user presence.
@@ -1024,7 +1054,7 @@ impl CtapState {
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         if options.up {
-            env.user_presence().check(cid)?;
+            env.user_presence().check(channel)?;
             self.client_pin.clear_token_flags();
         }
 
@@ -1134,7 +1164,7 @@ impl CtapState {
     fn process_reset(
         &mut self,
         env: &mut impl Env,
-        cid: ChannelID,
+        channel: Channel,
         now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         self.stateful_command_permission
@@ -1143,7 +1173,7 @@ impl CtapState {
             StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
-        env.user_presence().check(cid)?;
+        env.user_presence().check(channel)?;
 
         storage::reset(env)?;
         self.client_pin.reset(env.rng());
@@ -1157,9 +1187,9 @@ impl CtapState {
     fn process_selection(
         &self,
         env: &mut impl Env,
-        cid: ChannelID,
+        channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        env.user_presence().check(cid)?;
+        env.user_presence().check(channel)?;
         Ok(ResponseData::AuthenticatorSelection)
     }
 
@@ -1167,10 +1197,10 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         params: AuthenticatorVendorConfigureParameters,
-        cid: ChannelID,
+        channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         if params.attestation_material.is_some() || params.lockdown {
-            env.user_presence().check(cid)?;
+            env.user_presence().check(channel)?;
         }
 
         // Sanity checks
@@ -1336,7 +1366,7 @@ mod test {
     // keep-alive packets to.
     // In tests where we define a dummy user-presence check that immediately returns, the channel
     // ID is irrelevant, so we pass this (dummy but valid) value.
-    const DUMMY_CHANNEL_ID: ChannelID = [0x12, 0x34, 0x56, 0x78];
+    const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
     fn check_make_response(
         make_credential_response: Result<ResponseData, Ctap2StatusCode>,
@@ -1385,7 +1415,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let info_reponse =
-            ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL_ID, CtapInstant::new(0));
+            ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL, CtapInstant::new(0));
 
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
@@ -1499,7 +1529,7 @@ mod test {
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
             make_credential_response,
@@ -1518,7 +1548,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
             make_credential_response,
@@ -1537,7 +1567,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.pub_key_cred_params = vec![];
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         assert_eq!(
             make_credential_response,
@@ -1571,7 +1601,7 @@ mod test {
         assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
 
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
@@ -1587,7 +1617,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_cred_protect_policy(test_policy);
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
@@ -1601,7 +1631,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
@@ -1611,7 +1641,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_cred_protect_policy(test_policy);
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
@@ -1625,7 +1655,7 @@ mod test {
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
     }
 
@@ -1642,7 +1672,7 @@ mod test {
         make_credential_params.options.rk = false;
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         let expected_extension_cbor = [
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
@@ -1668,7 +1698,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         let expected_extension_cbor = [
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
@@ -1695,7 +1725,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         check_make_response(
             make_credential_response,
             0x41,
@@ -1717,7 +1747,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         let expected_extension_cbor = [
             0xA1, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68,
             0x04,
@@ -1743,7 +1773,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         let expected_extension_cbor = [
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
         ];
@@ -1775,7 +1805,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         let expected_extension_cbor = [
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF4,
         ];
@@ -1807,7 +1837,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         let large_blob_key = match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 make_credential_response.large_blob_key.unwrap()
@@ -1850,7 +1880,7 @@ mod test {
         let make_credential_response = ctap_state.process_make_credential(
             &mut env,
             make_credential_params.clone(),
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
         );
 
         check_make_response(
@@ -1862,7 +1892,7 @@ mod test {
         );
 
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -1888,7 +1918,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.options.rk = false;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
             make_credential_response,
@@ -1907,7 +1937,7 @@ mod test {
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
@@ -1922,7 +1952,7 @@ mod test {
         storage::toggle_always_uv(&mut env).unwrap();
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
@@ -1933,7 +1963,7 @@ mod test {
         make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
         make_credential_params.pin_uv_auth_protocol = Some(PinUvAuthProtocol::V1);
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -1949,7 +1979,7 @@ mod test {
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         assert_eq!(
             make_credential_response,
@@ -2044,7 +2074,7 @@ mod test {
 
         let make_credential_params = create_minimal_make_credential_parameters();
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2062,7 +2092,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -2135,7 +2165,7 @@ mod test {
         make_credential_params.options.rk = false;
         make_credential_params.extensions = make_extensions;
         let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID);
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
         let credential_id = match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
@@ -2171,7 +2201,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
@@ -2201,7 +2231,7 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = make_extensions;
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
 
         let client_pin_params = AuthenticatorClientPinParameters {
@@ -2227,7 +2257,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
@@ -2288,7 +2318,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         assert_eq!(
@@ -2311,7 +2341,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -2348,7 +2378,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         assert_eq!(
@@ -2399,7 +2429,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -2457,7 +2487,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let large_blob_key = match get_assertion_response.unwrap() {
@@ -2489,7 +2519,7 @@ mod test {
         };
         make_credential_params.user = user1.clone();
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         let user2 = PublicKeyCredentialUserEntity {
@@ -2500,7 +2530,7 @@ mod test {
         };
         make_credential_params.user = user2.clone();
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
 
         ctap_state.client_pin = client_pin;
@@ -2528,7 +2558,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -2581,7 +2611,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x02];
@@ -2589,7 +2619,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x03];
@@ -2597,7 +2627,7 @@ mod test {
         make_credential_params.user.user_display_name = Some("removed".to_string());
         make_credential_params.user.user_icon = Some("removed".to_string());
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2615,7 +2645,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -2657,12 +2687,12 @@ mod test {
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x01];
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.user.user_id = vec![0x02];
         assert!(ctap_state
-            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL_ID)
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
             .is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
@@ -2680,7 +2710,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
             get_assertion_params,
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         assert!(get_assertion_response.is_ok());
@@ -2698,12 +2728,7 @@ mod test {
             4 => cbor_array![ES256_CRED_PARAM],
         };
         assert!(cbor_write(cbor_value, &mut command_cbor).is_ok());
-        ctap_state.process_command(
-            &mut env,
-            &command_cbor,
-            DUMMY_CHANNEL_ID,
-            CtapInstant::new(0),
-        );
+        ctap_state.process_command(&mut env, &command_cbor, DUMMY_CHANNEL, CtapInstant::new(0));
 
         let get_assertion_response =
             ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
@@ -2738,7 +2763,7 @@ mod test {
         assert!(storage::count_credentials(&mut env).unwrap() > 0);
 
         let reset_reponse =
-            ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL_ID, CtapInstant::new(0));
+            ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL, CtapInstant::new(0));
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
         assert!(storage::count_credentials(&mut env).unwrap() == 0);
@@ -2751,8 +2776,7 @@ mod test {
             .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let reset_reponse =
-            ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, CtapInstant::new(0));
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL, CtapInstant::new(0));
 
         assert_eq!(
             reset_reponse,
@@ -2766,10 +2790,9 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         // This is a GetNextAssertion command.
-        ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL_ID, CtapInstant::new(0));
+        ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL, CtapInstant::new(0));
 
-        let reset_reponse =
-            ctap_state.process_reset(&mut env, DUMMY_CHANNEL_ID, CtapInstant::new(0));
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL, CtapInstant::new(0));
         assert_eq!(reset_reponse, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
     }
 
@@ -2782,7 +2805,7 @@ mod test {
         let reponse = ctap_state.process_command(
             &mut env,
             &[0x0A, 0xA1, 0x01, 0x18, 0xEE],
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
             CtapInstant::new(0),
         );
         let expected_response = vec![Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND as u8];
@@ -2796,7 +2819,7 @@ mod test {
 
         // This command does not exist.
         let reponse =
-            ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL_ID, CtapInstant::new(0));
+            ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL, CtapInstant::new(0));
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
         assert_eq!(reponse, expected_response);
     }
@@ -2871,7 +2894,7 @@ mod test {
                 lockdown: false,
                 attestation_material: None,
             },
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
         );
         assert_eq!(
             response,
@@ -2895,7 +2918,7 @@ mod test {
                     private_key: dummy_key,
                 }),
             },
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
         );
         assert_eq!(
             response,
@@ -2926,7 +2949,7 @@ mod test {
                     private_key: other_dummy_key,
                 }),
             },
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
         );
         assert_eq!(
             response,
@@ -2953,7 +2976,7 @@ mod test {
                 lockdown: true,
                 attestation_material: None,
             },
-            DUMMY_CHANNEL_ID,
+            DUMMY_CHANNEL,
         );
         assert_eq!(
             response,

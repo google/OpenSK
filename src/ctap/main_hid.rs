@@ -21,7 +21,7 @@ use crate::ctap::hid::ChannelID;
 use crate::ctap::hid::{
     CtapHid, CtapHidCommand, CtapHidError, HidPacket, HidPacketIterator, Message,
 };
-use crate::ctap::TimedPermission;
+use crate::ctap::{Channel, TimedPermission};
 use crate::env::Env;
 use embedded_time::duration::Milliseconds;
 
@@ -91,7 +91,8 @@ impl MainHid {
                 // Each transaction is atomic, so we process the command directly here and
                 // don't handle any other packet in the meantime.
                 // TODO: Send "Processing" type keep-alive packets in the meantime.
-                let response = ctap_state.process_command(env, &message.payload, cid, now);
+                let response =
+                    ctap_state.process_command(env, &message.payload, Channel::MainHid(cid), now);
                 Message {
                     cid,
                     cmd: CtapHidCommand::Cbor,

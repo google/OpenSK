@@ -34,6 +34,7 @@ use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY};
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv, KEEPALIVE_DELAY_TOCK};
+use ctap2::Transport;
 #[cfg(feature = "debug_ctap")]
 use embedded_time::duration::Microseconds;
 use embedded_time::duration::Milliseconds;
@@ -120,7 +121,7 @@ fn main() {
         ctap.update_timeouts(now);
 
         if has_packet {
-            let reply = ctap.process_hid_packet(&pkt_request, now);
+            let reply = ctap.process_hid_packet(&pkt_request, Transport::MainHid, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
                 let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT);

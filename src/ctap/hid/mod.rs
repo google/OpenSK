@@ -108,7 +108,7 @@ pub enum CtapHidError {
 /// Describes the structure of a parsed HID packet.
 ///
 /// A packet is either an Init or a Continuation packet.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessedPacket<'a> {
     InitPacket {
         cmd: u8,
@@ -767,9 +767,9 @@ mod test {
 
     #[test]
     fn test_keepalive() {
-        for status in [KeepaliveStatus::Processing, KeepaliveStatus::UpNeeded].iter() {
+        for &status in [KeepaliveStatus::Processing, KeepaliveStatus::UpNeeded].iter() {
             let cid = [0x12, 0x34, 0x56, 0x78];
-            let mut response = CtapHid::keepalive(cid, *status);
+            let mut response = CtapHid::keepalive(cid, status);
             let mut expected_packet = [0x00; 64];
             expected_packet[..8].copy_from_slice(&[
                 0x12,
@@ -779,7 +779,7 @@ mod test {
                 0xBB,
                 0x00,
                 0x01,
-                *status as u8,
+                status as u8,
             ]);
             assert_eq!(response.next(), Some(expected_packet));
             assert_eq!(response.next(), None);

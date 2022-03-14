@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ extern crate alloc;
 #[macro_use]
 extern crate arrayref;
 
-use crate::ctap::hid::{CtapHid, HidPacket, HidPacketIterator};
+use crate::ctap::hid::{HidPacket, HidPacketIterator};
+use crate::ctap::main_hid::MainHid;
 use crate::ctap::CtapState;
 use crate::env::Env;
 use clock::CtapInstant;
@@ -53,7 +54,7 @@ pub mod env;
 pub struct Ctap<E: Env> {
     env: E,
     state: CtapState,
-    hid: CtapHid,
+    hid: MainHid,
 }
 
 impl<E: Env> Ctap<E> {
@@ -62,7 +63,7 @@ impl<E: Env> Ctap<E> {
     // clock is part of the environment.
     pub fn new(mut env: E, now: CtapInstant) -> Self {
         let state = CtapState::new(&mut env, now);
-        let hid = CtapHid::new();
+        let hid = MainHid::new();
         Ctap { env, state, hid }
     }
 
@@ -70,7 +71,7 @@ impl<E: Env> Ctap<E> {
         &mut self.state
     }
 
-    pub fn hid(&mut self) -> &mut CtapHid {
+    pub fn hid(&mut self) -> &mut MainHid {
         &mut self.hid
     }
 
@@ -85,6 +86,6 @@ impl<E: Env> Ctap<E> {
 
     pub fn update_timeouts(&mut self, now: CtapInstant) {
         self.state.update_timeouts(now);
-        self.hid.wink_permission = self.hid.wink_permission.check_expiration(now);
+        self.hid.update_wink_timeout(now);
     }
 }

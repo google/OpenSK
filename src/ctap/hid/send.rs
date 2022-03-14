@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,8 +53,9 @@ struct MessageSplitter {
 }
 
 impl MessageSplitter {
-    // Try to split this message into an iterator of HID packets. This fails if the message is too
-    // long to fit into a sequence of HID packets (which is limited to 7609 bytes).
+    /// Try to split this message into an iterator of HID packets.
+    ///
+    /// This fails if the message is too long to fit into a sequence of HID packets.
     pub fn new(message: Message) -> Option<MessageSplitter> {
         if message.payload.len() > 7609 {
             None
@@ -72,9 +73,10 @@ impl MessageSplitter {
         }
     }
 
-    // Copy as many bytes as possible from data to dst, and return how many bytes are copied.
-    // Contrary to copy_from_slice, this doesn't require slices of the same length.
-    // All unused bytes in dst are set to zero, as if the data was padded with zeros to match.
+    /// Copy as many bytes as possible from data to dst, and return how many bytes are copied.
+    ///
+    /// Contrary to copy_from_slice, this doesn't require slices of the same length.
+    /// All unused bytes in dst are set to zero, as if the data was padded with zeros to match.
     fn consume_data(dst: &mut [u8], data: &[u8]) -> usize {
         let dst_len = dst.len();
         let data_len = data.len();

@@ -18,8 +18,7 @@ extern crate alloc;
 #[macro_use]
 extern crate arrayref;
 
-use crate::ctap::hid::send::HidPacketIterator;
-use crate::ctap::hid::{CtapHid, HidPacket};
+use crate::ctap::hid::{CtapHid, HidPacket, HidPacketIterator};
 use crate::ctap::CtapState;
 use crate::env::Env;
 use clock::CtapInstant;

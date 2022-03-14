@@ -15,7 +15,9 @@
 use crate::clock::CtapInstant;
 
 use super::super::customization::MAX_MSG_SIZE;
-use super::{ChannelID, CtapHid, CtapHidCommand, HidPacket, Message, ProcessedPacket};
+use super::{
+    ChannelID, CtapHid, CtapHidCommand, CtapHidError, HidPacket, Message, ProcessedPacket,
+};
 use alloc::vec::Vec;
 use core::mem::swap;
 
@@ -37,22 +39,6 @@ pub struct MessageAssembler {
     payload: Vec<u8>,
 }
 
-#[derive(PartialEq, Debug)]
-pub enum Error {
-    // Expected a continuation packet on a specific channel, got a packet on another channel.
-    UnexpectedChannel,
-    // Expected a continuation packet, got an init packet.
-    UnexpectedInit,
-    // Expected an init packet, got a continuation packet.
-    UnexpectedContinuation,
-    // Expected a continuation packet with a specific sequence number, got another sequence number.
-    UnexpectedSeq,
-    // The length of a message is too big.
-    UnexpectedLen,
-    // This packet arrived after a timeout.
-    Timeout,
-}
-
 impl MessageAssembler {
     pub fn new() -> MessageAssembler {
         MessageAssembler {
@@ -68,7 +54,7 @@ impl MessageAssembler {
 
     // Resets the message assembler to the idle state.
     // The caller can reset the assembler for example due to a timeout.
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.idle = true;
         self.cid = [0, 0, 0, 0];
         self.last_timestamp = CtapInstant::new(0);
@@ -89,7 +75,7 @@ impl MessageAssembler {
         &mut self,
         packet: &HidPacket,
         timestamp: CtapInstant,
-    ) -> Result<Option<Message>, (ChannelID, Error)> {
+    ) -> Result<Option<Message>, (ChannelID, CtapHidError)> {
         // TODO: Support non-full-speed devices (i.e. packet len != 64)? This isn't recommended by
         // section 8.8.1
         let (cid, processed_packet) = CtapHid::process_single_packet(packet);
@@ -103,7 +89,7 @@ impl MessageAssembler {
             // If the packet is from the timed-out channel, send back a timeout error.
             // Otherwise, proceed with processing the packet.
             if *cid == current_cid {
-                return Err((*cid, Error::Timeout));
+                return Err((*cid, CtapHidError::MsgTimeout));
             }
         }
 
@@ -116,7 +102,7 @@ impl MessageAssembler {
                 ProcessedPacket::ContinuationPacket { .. } => {
                     // CTAP specification (version 20190130) section 8.1.5.4
                     // Spurious continuation packets will be ignored.
-                    Err((*cid, Error::UnexpectedContinuation))
+                    Err((*cid, CtapHidError::UnexpectedContinuation))
                 }
             }
         } else {
@@ -125,7 +111,7 @@ impl MessageAssembler {
             // CTAP specification (version 20190130) section 8.1.5.1
             // Reject packets from other channels.
             if *cid != self.cid {
-                return Err((*cid, Error::UnexpectedChannel));
+                return Err((*cid, CtapHidError::ChannelBusy));
             }
 
             match processed_packet {
@@ -135,14 +121,14 @@ impl MessageAssembler {
                     if cmd == CtapHidCommand::Init as u8 {
                         self.parse_init_packet(*cid, cmd, len, data, timestamp)
                     } else {
-                        Err((*cid, Error::UnexpectedInit))
+                        Err((*cid, CtapHidError::InvalidSeq))
                     }
                 }
                 ProcessedPacket::ContinuationPacket { seq, data } => {
                     if seq != self.seq {
                         // Reject packets with the wrong sequence number.
                         self.reset();
-                        Err((*cid, Error::UnexpectedSeq))
+                        Err((*cid, CtapHidError::InvalidSeq))
                     } else {
                         // Update the last timestamp.
                         self.last_timestamp = timestamp;
@@ -162,11 +148,11 @@ impl MessageAssembler {
         len: usize,
         data: &[u8],
         timestamp: CtapInstant,
-    ) -> Result<Option<Message>, (ChannelID, Error)> {
+    ) -> Result<Option<Message>, (ChannelID, CtapHidError)> {
         // Reject invalid lengths early to reduce the risk of running out of memory.
         // TODO: also reject invalid commands early?
         if len > MAX_MSG_SIZE {
-            return Err((cid, Error::UnexpectedLen));
+            return Err((cid, CtapHidError::InvalidLen));
         }
         self.cid = cid;
         self.last_timestamp = timestamp;
@@ -455,7 +441,7 @@ mod test {
                         &byte_extend(&[0x12, 0x34, 0x56, 0x9A, cmd as u8, 0x00], byte),
                         CtapInstant::new(0)
                     ),
-                    Err(([0x12, 0x34, 0x56, 0x9A], Error::UnexpectedChannel))
+                    Err(([0x12, 0x34, 0x56, 0x9A], CtapHidError::ChannelBusy))
                 );
             }
         }
@@ -501,7 +487,10 @@ mod test {
                     &zero_extend(&[0x12, 0x34, 0x56, 0x78, seq]),
                     CtapInstant::new(0)
                 ),
-                Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedContinuation))
+                Err((
+                    [0x12, 0x34, 0x56, 0x78],
+                    CtapHidError::UnexpectedContinuation
+                ))
             );
         }
     }
@@ -521,7 +510,7 @@ mod test {
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x80]),
                 CtapInstant::new(0)
             ),
-            Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedInit))
+            Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::InvalidSeq))
         );
     }
 
@@ -540,7 +529,7 @@ mod test {
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x01]),
                 CtapInstant::new(0)
             ),
-            Err(([0x12, 0x34, 0x56, 0x78], Error::UnexpectedSeq))
+            Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::InvalidSeq))
         );
     }
 
@@ -559,7 +548,7 @@ mod test {
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
                 CtapInstant::new(0) + CtapHid::TIMEOUT_DURATION
             ),
-            Err(([0x12, 0x34, 0x56, 0x78], Error::Timeout))
+            Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::MsgTimeout))
         );
     }
 

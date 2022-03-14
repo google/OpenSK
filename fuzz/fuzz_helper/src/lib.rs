@@ -24,9 +24,9 @@ use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters,
 };
-use ctap2::ctap::hid::receive::MessageAssembler;
-use ctap2::ctap::hid::send::HidPacketIterator;
-use ctap2::ctap::hid::{ChannelID, CtapHidCommand, HidPacket, Message};
+use ctap2::ctap::hid::{
+    ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
+};
 use ctap2::env::test::TestEnv;
 use ctap2::Ctap;
 

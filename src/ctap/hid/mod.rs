@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod receive;
-pub mod send;
+mod receive;
+mod send;
 
+// Implementation details must be public for testing (in particular fuzzing).
+#[cfg(feature = "std")]
+pub use self::receive::MessageAssembler;
+#[cfg(not(feature = "std"))]
 use self::receive::MessageAssembler;
-use self::send::HidPacketIterator;
+pub use self::send::HidPacketIterator;
 use super::super::clock::{ClockInt, CtapInstant};
 #[cfg(feature = "with_ctap1")]
 use super::ctap1;
@@ -28,6 +32,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
 use embedded_time::duration::Milliseconds;
+#[cfg(test)]
+use enum_iterator::IntoEnumIterator;
 
 pub type HidPacket = [u8; 64];
 pub type ChannelID = [u8; 4];
@@ -36,6 +42,7 @@ pub type ChannelID = [u8; 4];
 ///
 /// See section 11.2.9. of FIDO 2.1 (2021-06-15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CtapHidCommand {
     Ping = 0x01,
     Msg = 0x03,
@@ -47,9 +54,7 @@ pub enum CtapHidCommand {
     Cancel = 0x11,
     Keepalive = 0x3B,
     Error = 0x3F,
-    // VendorFirst and VendorLast describe a range, and are not commands themselves.
-    _VendorFirst = 0x40,
-    _VendorLast = 0x7F,
+    // The vendor range starts here, going from 0x40 to 0x7F.
 }
 
 impl From<u8> for CtapHidCommand {
@@ -70,9 +75,40 @@ impl From<u8> for CtapHidCommand {
     }
 }
 
+/// CTAPHID errors
+///
+/// See section 11.2.9.1.6. of FIDO 2.1 (2021-06-15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtapHidError {
+    /// The command in the request is invalid.
+    InvalidCmd = 0x01,
+    /// A parameter in the request is invalid.
+    _InvalidPar = 0x02,
+    /// The length of a message is too big.
+    InvalidLen = 0x03,
+    /// Expected a continuation packet with a specific sequence number, got another sequence number.
+    ///
+    /// This error code is also used if we expect a continuation packet, and receive an init
+    /// packet. We interpreted it as invalid seq number 0.
+    InvalidSeq = 0x04,
+    /// This packet arrived after a timeout.
+    MsgTimeout = 0x05,
+    /// A packet arrived on one channel while another is busy.
+    ChannelBusy = 0x06,
+    /// Command requires channel lock.
+    _LockRequired = 0x0A,
+    /// The requested channel ID is invalid.
+    InvalidChannel = 0x0B,
+    /// Unspecified error.
+    _Other = 0x7F,
+    /// This error is silently ignored.
+    UnexpectedContinuation,
+}
+
 /// Describes the structure of a parsed HID packet.
 ///
 /// A packet is either an Init or a Continuation packet.
+#[derive(Debug, PartialEq)]
 pub enum ProcessedPacket<'a> {
     InitPacket {
         cmd: u8,
@@ -98,6 +134,7 @@ pub struct Message {
 
 /// A keepalive packet reports the reason why a command does not finish.
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeepaliveStatus {
     Processing = 0x01,
     UpNeeded = 0x02,
@@ -145,16 +182,6 @@ impl CtapHid {
     const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
     const TYPE_INIT_BIT: u8 = 0x80;
     const PACKET_TYPE_MASK: u8 = 0x80;
-
-    const ERR_INVALID_CMD: u8 = 0x01;
-    const _ERR_INVALID_PAR: u8 = 0x02;
-    const ERR_INVALID_LEN: u8 = 0x03;
-    const ERR_INVALID_SEQ: u8 = 0x04;
-    const ERR_MSG_TIMEOUT: u8 = 0x05;
-    const ERR_CHANNEL_BUSY: u8 = 0x06;
-    const _ERR_LOCK_REQUIRED: u8 = 0x0A;
-    const ERR_INVALID_CHANNEL: u8 = 0x0B;
-    const _ERR_OTHER: u8 = 0x7F;
 
     // See section 11.2.9.1.3. CTAPHID_INIT (0x06).
     const PROTOCOL_VERSION: u8 = 2;
@@ -220,37 +247,12 @@ impl CtapHid {
                 None
             }
             Err((cid, error)) => {
-                if !self.is_allocated_channel(cid)
-                    && error != receive::Error::UnexpectedContinuation
-                {
-                    Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL))
+                if matches!(error, CtapHidError::UnexpectedContinuation) {
+                    None
+                } else if !self.is_allocated_channel(cid) {
+                    Some(CtapHid::error_message(cid, CtapHidError::InvalidChannel))
                 } else {
-                    match error {
-                        receive::Error::UnexpectedChannel => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_CHANNEL_BUSY))
-                        }
-                        receive::Error::UnexpectedInit => {
-                            // TODO: Should we send another error code in this case?
-                            // Technically, we were expecting a sequence number and got another
-                            // byte, although the command/seqnum bit has higher-level semantics
-                            // than sequence numbers.
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
-                        }
-                        receive::Error::UnexpectedContinuation => {
-                            // CTAP specification (version 20190130) section 8.1.5.4
-                            // Spurious continuation packets will be ignored.
-                            None
-                        }
-                        receive::Error::UnexpectedSeq => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_SEQ))
-                        }
-                        receive::Error::UnexpectedLen => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN))
-                        }
-                        receive::Error::Timeout => {
-                            Some(CtapHid::error_message(cid, CtapHid::ERR_MSG_TIMEOUT))
-                        }
-                    }
+                    Some(CtapHid::error_message(cid, error))
                 }
             }
         }
@@ -267,7 +269,7 @@ impl CtapHid {
     fn preprocess_message(&mut self, message: Message) -> Option<Message> {
         let cid = message.cid;
         if !self.has_valid_channel(&message) {
-            return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CHANNEL));
+            return Some(CtapHid::error_message(cid, CtapHidError::InvalidChannel));
         }
 
         match message.cmd {
@@ -276,7 +278,7 @@ impl CtapHid {
             // CTAP 2.1 from 2021-06-15, section 11.2.9.1.3.
             CtapHidCommand::Init => {
                 if message.payload.len() != 8 {
-                    return Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN));
+                    return Some(CtapHid::error_message(cid, CtapHidError::InvalidLen));
                 }
 
                 let new_cid = if cid == CtapHid::CHANNEL_BROADCAST {
@@ -317,7 +319,7 @@ impl CtapHid {
             CtapHidCommand::Wink => Some(message),
             _ => {
                 // Unknown or unsupported command.
-                Some(CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD))
+                Some(CtapHid::error_message(cid, CtapHidError::InvalidCmd))
             }
         }
     }
@@ -339,7 +341,7 @@ impl CtapHid {
             CtapHidCommand::Msg => {
                 // If we don't have CTAP1 backward compatibilty, this command is invalid.
                 #[cfg(not(feature = "with_ctap1"))]
-                return CtapHid::error_message(cid, CtapHid::ERR_INVALID_CMD);
+                return CtapHid::error_message(cid, CtapHidError::InvalidCmd);
 
                 #[cfg(feature = "with_ctap1")]
                 match ctap1::Ctap1Command::process_command(
@@ -372,7 +374,7 @@ impl CtapHid {
                     // The response is empty like the request.
                     message
                 } else {
-                    CtapHid::error_message(cid, CtapHid::ERR_INVALID_LEN)
+                    CtapHid::error_message(cid, CtapHidError::InvalidLen)
                 }
             }
             // All other commands have already been processed, keep them as is.
@@ -410,11 +412,11 @@ impl CtapHid {
         cid != CtapHid::CHANNEL_RESERVED && u32::from_be_bytes(cid) as usize <= self.allocated_cids
     }
 
-    fn error_message(cid: ChannelID, error_code: u8) -> Message {
+    pub fn error_message(cid: ChannelID, error_code: CtapHidError) -> Message {
         Message {
             cid,
             cmd: CtapHidCommand::Error,
-            payload: vec![error_code],
+            payload: vec![error_code as u8],
         }
     }
 
@@ -469,7 +471,6 @@ impl CtapHid {
 
     /// Generates the HID response packets for a keepalive status.
     pub fn keepalive(cid: ChannelID, status: KeepaliveStatus) -> HidPacketIterator {
-        // This unwrap is safe because the payload length is 1 <= 7609 bytes.
         CtapHid::split_message(Message {
             cid,
             cmd: CtapHidCommand::Keepalive,
@@ -503,67 +504,24 @@ impl CtapHid {
             payload: response,
         }
     }
+
+    #[cfg(test)]
+    pub fn new_initialized() -> (CtapHid, ChannelID) {
+        (
+            CtapHid {
+                assembler: MessageAssembler::new(),
+                allocated_cids: 1,
+                wink_permission: TimedPermission::waiting(),
+            },
+            [0x00, 0x00, 0x00, 0x01],
+        )
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::env::test::TestEnv;
-
-    fn process_messages(
-        env: &mut TestEnv,
-        ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState,
-        request: Vec<Message>,
-    ) -> Option<Vec<Message>> {
-        let mut result = Vec::new();
-        let mut assembler_reply = MessageAssembler::new();
-        // Except for tests for timeouts (done in ctap1.rs), transactions are time independant.
-
-        for msg_request in request {
-            for pkt_request in HidPacketIterator::new(msg_request).unwrap() {
-                for pkt_reply in
-                    ctap_hid.process_hid_packet(env, &pkt_request, CtapInstant::new(0), ctap_state)
-                {
-                    match assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0)) {
-                        Ok(Some(message)) => result.push(message),
-                        Ok(None) => (),
-                        Err(_) => return None,
-                    }
-                }
-            }
-        }
-        Some(result)
-    }
-
-    fn cid_from_init(
-        env: &mut TestEnv,
-        ctap_hid: &mut CtapHid,
-        ctap_state: &mut CtapState,
-    ) -> ChannelID {
-        let nonce = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
-        let reply = process_messages(
-            env,
-            ctap_hid,
-            ctap_state,
-            vec![Message {
-                cid: CtapHid::CHANNEL_BROADCAST,
-                cmd: CtapHidCommand::Init,
-                payload: nonce.clone(),
-            }],
-        );
-
-        let mut cid_in_payload: ChannelID = Default::default();
-        if let Some(messages) = reply {
-            assert_eq!(messages.len(), 1);
-            assert!(messages[0].payload.len() >= 12);
-            assert_eq!(nonce, &messages[0].payload[..8]);
-            cid_in_payload.copy_from_slice(&messages[0].payload[8..12]);
-        } else {
-            panic!("The init process was not successful to generate a valid channel ID.")
-        }
-        cid_in_payload
-    }
 
     #[test]
     fn test_split_assemble() {
@@ -591,45 +549,28 @@ mod test {
     #[test]
     fn test_spurious_continuation_packet() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let mut ctap_hid = CtapHid::new();
-
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
-        let mut assembler_reply = MessageAssembler::new();
-        for pkt_reply in
-            ctap_hid.process_hid_packet(&mut env, &packet, CtapInstant::new(0), &mut ctap_state)
-        {
-            // Continuation packets are silently ignored.
-            assert_eq!(
-                assembler_reply
-                    .parse_packet(&pkt_reply, CtapInstant::new(0))
-                    .unwrap(),
-                None
-            );
-        }
+        // Continuation packets are silently ignored.
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &packet, CtapInstant::new(0)),
+            None
+        );
     }
 
     #[test]
     fn test_command_init() {
-        let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let mut ctap_hid = CtapHid::new();
-
-        let reply = process_messages(
-            &mut env,
-            &mut ctap_hid,
-            &mut ctap_state,
-            vec![Message {
-                cid: CtapHid::CHANNEL_BROADCAST,
-                cmd: CtapHidCommand::Init,
-                payload: vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0],
-            }],
-        );
-
+        let init_message = Message {
+            cid: CtapHid::CHANNEL_BROADCAST,
+            cmd: CtapHidCommand::Init,
+            payload: vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0],
+        };
+        let reply = ctap_hid.preprocess_message(init_message);
         assert_eq!(
             reply,
-            Some(vec![Message {
+            Some(Message {
                 cid: CtapHid::CHANNEL_BROADCAST,
                 cmd: CtapHidCommand::Init,
                 payload: vec![
@@ -651,16 +592,14 @@ mod test {
                     0x00,
                     CtapHid::CAPABILITIES
                 ]
-            }])
+            })
         );
     }
 
     #[test]
     fn test_command_init_for_sync() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        let mut ctap_hid = CtapHid::new();
-        let cid = cid_from_init(&mut env, &mut ctap_hid, &mut ctap_state);
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
 
         // Ping packet with a length longer than one packet.
         let mut packet1 = [0x51; 64];
@@ -672,26 +611,13 @@ mod test {
         packet2[4..15].copy_from_slice(&[
             0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
         ]);
-        let mut result = Vec::new();
-        let mut assembler_reply = MessageAssembler::new();
-        for pkt_request in &[packet1, packet2] {
-            for pkt_reply in ctap_hid.process_hid_packet(
-                &mut env,
-                pkt_request,
-                CtapInstant::new(0),
-                &mut ctap_state,
-            ) {
-                if let Some(message) = assembler_reply
-                    .parse_packet(&pkt_reply, CtapInstant::new(0))
-                    .unwrap()
-                {
-                    result.push(message);
-                }
-            }
-        }
         assert_eq!(
-            result,
-            vec![Message {
+            ctap_hid.parse_packet(&mut env, &packet1, CtapInstant::new(0)),
+            None
+        );
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &packet2, CtapInstant::new(0)),
+            Some(Message {
                 cid,
                 cmd: CtapHidCommand::Init,
                 payload: vec![
@@ -713,35 +639,188 @@ mod test {
                     0x00,
                     CtapHid::CAPABILITIES
                 ]
-            }]
+            })
         );
     }
 
     #[test]
     fn test_command_ping() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        let mut ctap_hid = CtapHid::new();
-        let cid = cid_from_init(&mut env, &mut ctap_hid, &mut ctap_state);
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
 
-        let reply = process_messages(
-            &mut env,
-            &mut ctap_hid,
-            &mut ctap_state,
-            vec![Message {
-                cid,
-                cmd: CtapHidCommand::Ping,
-                payload: vec![0x99, 0x99],
-            }],
-        );
-
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&cid);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
         assert_eq!(
-            reply,
-            Some(vec![Message {
+            ctap_hid.parse_packet(&mut env, &ping_packet, CtapInstant::new(0)),
+            Some(Message {
                 cid,
                 cmd: CtapHidCommand::Ping,
                 payload: vec![0x99, 0x99]
-            }])
+            })
+        );
+    }
+
+    #[test]
+    fn test_command_cancel() {
+        let mut env = TestEnv::new();
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
+
+        let mut cancel_packet = [0x00; 64];
+        cancel_packet[..4].copy_from_slice(&cid);
+        cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
+
+        let response = ctap_hid.parse_packet(&mut env, &cancel_packet, CtapInstant::new(0));
+        assert_eq!(response, None);
+    }
+
+    #[test]
+    fn test_process_hid_packet() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
+
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&cid);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+
+        let mut response = ctap_hid.process_hid_packet(
+            &mut env,
+            &ping_packet,
+            CtapInstant::new(0),
+            &mut ctap_state,
+        );
+        assert_eq!(response.next(), Some(ping_packet));
+        assert_eq!(response.next(), None);
+    }
+
+    #[test]
+    fn test_process_hid_packet_empty() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
+
+        let mut cancel_packet = [0x00; 64];
+        cancel_packet[..4].copy_from_slice(&cid);
+        cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
+
+        let mut response = ctap_hid.process_hid_packet(
+            &mut env,
+            &cancel_packet,
+            CtapInstant::new(0),
+            &mut ctap_state,
+        );
+        assert_eq!(response.next(), None);
+    }
+
+    #[test]
+    fn test_wink() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let (mut ctap_hid, cid) = CtapHid::new_initialized();
+        assert!(!ctap_hid.should_wink(CtapInstant::new(0)));
+
+        let mut wink_packet = [0x00; 64];
+        wink_packet[..4].copy_from_slice(&cid);
+        wink_packet[4..7].copy_from_slice(&[0x88, 0x00, 0x00]);
+
+        let mut response = ctap_hid.process_hid_packet(
+            &mut env,
+            &wink_packet,
+            CtapInstant::new(0),
+            &mut ctap_state,
+        );
+        assert_eq!(response.next(), Some(wink_packet));
+        assert_eq!(response.next(), None);
+        assert!(ctap_hid.should_wink(CtapInstant::new(0)));
+    }
+
+    #[test]
+    fn test_split_message() {
+        let message = Message {
+            cid: [0x12, 0x34, 0x56, 0x78],
+            cmd: CtapHidCommand::Ping,
+            payload: vec![0x99, 0x99],
+        };
+        let mut response = CtapHid::split_message(message);
+        let mut expected_packet = [0x00; 64];
+        expected_packet[..9]
+            .copy_from_slice(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x02, 0x99, 0x99]);
+        assert_eq!(response.next(), Some(expected_packet));
+        assert_eq!(response.next(), None);
+    }
+
+    #[test]
+    fn test_split_message_too_large() {
+        let payload = vec![0xFF; 7609 + 1];
+        let message = Message {
+            cid: [0x12, 0x34, 0x56, 0x78],
+            cmd: CtapHidCommand::Cbor,
+            payload,
+        };
+        let mut response = CtapHid::split_message(message);
+        let mut expected_packet = [0x00; 64];
+        expected_packet[..8].copy_from_slice(&[0x12, 0x34, 0x56, 0x78, 0x90, 0x00, 0x01, 0xF2]);
+        assert_eq!(response.next(), Some(expected_packet));
+        assert_eq!(response.next(), None);
+    }
+
+    #[test]
+    fn test_keepalive() {
+        for status in [KeepaliveStatus::Processing, KeepaliveStatus::UpNeeded].iter() {
+            let cid = [0x12, 0x34, 0x56, 0x78];
+            let mut response = CtapHid::keepalive(cid, *status);
+            let mut expected_packet = [0x00; 64];
+            expected_packet[..8].copy_from_slice(&[
+                0x12,
+                0x34,
+                0x56,
+                0x78,
+                0xBB,
+                0x00,
+                0x01,
+                *status as u8,
+            ]);
+            assert_eq!(response.next(), Some(expected_packet));
+            assert_eq!(response.next(), None);
+        }
+    }
+
+    #[test]
+    fn test_process_single_packet() {
+        let cid = [0x12, 0x34, 0x56, 0x78];
+        let mut packet = [0x00; 64];
+        packet[..4].copy_from_slice(&cid);
+        packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+        let (processed_cid, processed_packet) = CtapHid::process_single_packet(&packet);
+        assert_eq!(processed_cid, &cid);
+        let expected_packet = ProcessedPacket::InitPacket {
+            cmd: CtapHidCommand::Ping as u8,
+            len: 2,
+            data: array_ref!(packet, 7, 57),
+        };
+        assert_eq!(processed_packet, expected_packet);
+    }
+
+    #[test]
+    fn test_from_ctap_hid_command() {
+        // 0x3E is unassigned.
+        assert_eq!(CtapHidCommand::from(0x3E), CtapHidCommand::Error);
+        for command in CtapHidCommand::into_enum_iter() {
+            assert_eq!(CtapHidCommand::from(command as u8), command);
+        }
+    }
+
+    #[test]
+    fn test_error_message() {
+        let cid = [0x12, 0x34, 0x56, 0x78];
+        assert_eq!(
+            CtapHid::error_message(cid, CtapHidError::InvalidCmd),
+            Message {
+                cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![0x01],
+            }
         );
     }
 }

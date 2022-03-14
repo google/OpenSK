@@ -45,7 +45,7 @@ impl Iterator for HidPacketIterator {
     }
 }
 
-pub struct MessageSplitter {
+struct MessageSplitter {
     message: Message,
     packet: HidPacket,
     seq: Option<u8>,
@@ -292,6 +292,4 @@ mod test {
         };
         assert!(HidPacketIterator::new(message).is_none());
     }
-
-    // TODO(kaczmarczyck) implement and test limits (maximum bytes and packets)
 }

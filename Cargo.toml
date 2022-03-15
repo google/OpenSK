@@ -31,6 +31,7 @@ std = ["crypto/std", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
+with_vendor_hid = []
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

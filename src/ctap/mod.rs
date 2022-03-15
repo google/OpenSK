@@ -32,6 +32,8 @@ pub mod status_code;
 mod storage;
 mod timed_permission;
 mod token_state;
+#[cfg(feature = "with_vendor_hid")]
+pub mod vendor_hid;
 
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{

@@ -36,6 +36,7 @@ cd ..
 echo "Running Clippy lints..."
 cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
 cargo clippy --all-targets --features std,with_nfc -- -A clippy::new_without_default -D warnings
+cargo clippy --all-targets --features std,with_vendor_hid -- -A clippy::new_without_default -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -47,12 +48,13 @@ cargo test --manifest-path tools/heapviz/Cargo.toml
 echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
+cargo check --release --target=thumbv7em-none-eabi --features with_vendor_hid
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
 cargo check --release --target=thumbv7em-none-eabi --features panic_console
 cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
 cargo check --release --target=thumbv7em-none-eabi --features verbose
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,panic_console,debug_allocations,verbose
+cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,with_vendor_hid,panic_console,debug_allocations,verbose
 
 echo "Checking that examples build properly..."
 cargo check --release --target=thumbv7em-none-eabi --examples
@@ -118,9 +120,9 @@ then
   cd ../..
   cargo test --features std
 
-  echo "Running unit tests on the desktop (release mode + CTAP1)..."
-  cargo test --release --features std,with_ctap1
+  echo "Running unit tests on the desktop (release mode + CTAP1 + Vendor HID)..."
+  cargo test --release --features std,with_ctap1,with_vendor_hid
 
   echo "Running unit tests on the desktop (debug mode + CTAP1)..."
-  cargo test --features std,with_ctap1
+  cargo test --features std,with_ctap1,with_vendor_hid
 fi

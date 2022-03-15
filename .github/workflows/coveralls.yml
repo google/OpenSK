@@ -34,7 +34,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features "with_ctap1,with_vendor_hid,with_nfc,std" --no-fail-fast
+          args: --features "with_ctap1,vendor_hid,with_nfc,std" --no-fail-fast
         env:
           RUSTFLAGS: "-Zinstrument-coverage"
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"

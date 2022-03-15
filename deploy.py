@@ -1058,6 +1058,13 @@ if __name__ == "__main__":
       help=("Compiles the OpenSK application with support for nfc."),
   )
   main_parser.add_argument(
+      "--vendor-hid",
+      action="append_const",
+      const="vendor_hid",
+      dest="features",
+      help=("Compiles the OpenSK application to support two HID usage pages."),
+  )
+  main_parser.add_argument(
       "--regen-keys",
       action="store_true",
       default=False,

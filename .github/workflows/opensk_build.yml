@@ -35,6 +35,6 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target=thumbv7em-none-eabi --features with_ctap1
+          args: --release --target=thumbv7em-none-eabi --features with_ctap1,with_vendor_hid
       - name: Compute SHA-256 sum
         run: ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2

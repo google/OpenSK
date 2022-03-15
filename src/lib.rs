@@ -31,10 +31,10 @@ use clock::CtapInstant;
 // adding either the defmt or log feature and crate dependency.
 #[cfg(feature = "debug_ctap")]
 macro_rules! debug_ctap {
-    ($env: expr, $($rest:tt)*) => {
+    ($env: expr, $($rest:tt)*) => {{
         use core::fmt::Write;
         writeln!($env.write(), $($rest)*).unwrap();
-    };
+    }};
 }
 #[cfg(not(feature = "debug_ctap"))]
 macro_rules! debug_ctap {

@@ -266,9 +266,13 @@ pub enum StatefulCommand {
 /// different commands. Therefore, Reset behaves just like all other stateful
 /// commands and is included here. Please note that the allowed time for Reset
 /// differs from all other stateful commands.
+///
+/// Additionally, state that is held over multiple commands is assigned to a channel. We discard
+/// all state when we receive data on a different channel.
 pub struct StatefulPermission {
     permission: TimedPermission,
     command_type: Option<StatefulCommand>,
+    channel: Option<Channel>,
 }
 
 impl StatefulPermission {
@@ -280,6 +284,7 @@ impl StatefulPermission {
         StatefulPermission {
             permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
             command_type: Some(StatefulCommand::Reset),
+            channel: None,
         }
     }
 
@@ -287,15 +292,32 @@ impl StatefulPermission {
     pub fn clear(&mut self) {
         self.permission = TimedPermission::waiting();
         self.command_type = None;
+        self.channel = None;
     }
 
-    /// Checks the permission timeout.
-    pub fn check_command_permission(&mut self, now: CtapInstant) -> Result<(), Ctap2StatusCode> {
-        if self.permission.is_granted(now) {
-            Ok(())
-        } else {
+    /// Clears all state if communication is coming from a different channel.
+    pub fn clear_old_channels(&mut self, channel: &Channel) {
+        // There are different possible choices for incoming traffic on a different channel:
+        // A) Always reset state (our choice).
+        // B) Only reset state if the new command is stateful.
+        // C) Keep state on all channels until timeout.
+        //
+        // If we wanted to switch to (B) or (C), we'd have to be very careful that the state does
+        // not go stale. For example, we keep credential keys that we expect to still exist.
+        // However, interleaving (stateless) commands could delete credentials or change the PIN,
+        // which chould make invalidate our access. Some read-only commands should be okay to run,
+        // but (A) is the safest and easiest solution.
+        if let Some(c) = self.channel.as_ref() {
+            if c != channel {
+                self.clear();
+            }
+        }
+    }
+
+    /// Clears all state if the permission timed out.
+    pub fn clear_timer(&mut self, now: CtapInstant) {
+        if !self.permission.is_granted(now) {
             self.clear();
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         }
     }
 
@@ -307,13 +329,19 @@ impl StatefulPermission {
     }
 
     /// Sets a new command state, and starts a new clock for timeouts.
-    pub fn set_command(&mut self, now: CtapInstant, new_command_type: StatefulCommand) {
+    pub fn set_command(
+        &mut self,
+        now: CtapInstant,
+        new_command_type: StatefulCommand,
+        channel: Channel,
+    ) {
         match &new_command_type {
             // Reset is only allowed after a power cycle.
             StatefulCommand::Reset => unreachable!(),
             _ => {
                 self.permission = TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
                 self.command_type = Some(new_command_type);
+                self.channel = Some(channel);
             }
         }
     }
@@ -385,10 +413,7 @@ impl CtapState {
     }
 
     pub fn update_timeouts(&mut self, now: CtapInstant) {
-        // Ignore the result, just update.
-        let _ = self
-            .stateful_command_permission
-            .check_command_permission(now);
+        self.stateful_command_permission.clear_timer(now);
         self.client_pin.update_timeouts(now);
     }
 
@@ -486,91 +511,123 @@ impl CtapState {
     ) -> Vec<u8> {
         let cmd = Command::deserialize(command_cbor);
         debug_ctap!(env, "Received command: {:#?}", cmd);
-        match cmd {
-            Ok(command) => {
-                // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
-                #[cfg(feature = "with_ctap1")]
-                {
-                    self.u2f_up_state =
-                        U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
+        let response =
+            cmd.and_then(|command| self.process_parsed_command(env, command, channel, now));
+        debug_ctap!(env, "Sending response: {:#?}", response);
+        match response {
+            Ok(response_data) => {
+                let mut response_vec = vec![Ctap2StatusCode::CTAP2_OK as u8];
+                if let Some(value) = response_data.into() {
+                    if cbor_write(value, &mut response_vec).is_err() {
+                        response_vec = vec![Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8];
+                    }
                 }
-                match (&command, self.stateful_command_permission.get_command()) {
-                    (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
-                    | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
-                    // AuthenticatorGetInfo still allows Reset.
-                    | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
-                    // AuthenticatorSelection still allows Reset.
-                    | (Command::AuthenticatorSelection, Ok(StatefulCommand::Reset))
-                    // AuthenticatorCredentialManagement handles its subcommands later.
-                    | (
-                        Command::AuthenticatorCredentialManagement(_),
-                        Ok(StatefulCommand::EnumerateRps(_)),
-                    )
-                    | (
-                        Command::AuthenticatorCredentialManagement(_),
-                        Ok(StatefulCommand::EnumerateCredentials(_)),
-                    ) => (),
-                    (_, _) => self.stateful_command_permission.clear(),
-                }
-                let response = match command {
-                    Command::AuthenticatorMakeCredential(params) => {
-                        self.process_make_credential(env, params, channel)
-                    }
-                    Command::AuthenticatorGetAssertion(params) => {
-                        self.process_get_assertion(env, params, channel, now)
-                    }
-                    Command::AuthenticatorGetNextAssertion => {
-                        self.process_get_next_assertion(env, now)
-                    }
-                    Command::AuthenticatorGetInfo => self.process_get_info(env),
-                    Command::AuthenticatorClientPin(params) => {
-                        self.client_pin.process_command(env, params, now)
-                    }
-                    Command::AuthenticatorReset => self.process_reset(env, channel, now),
-                    Command::AuthenticatorCredentialManagement(params) => {
-                        process_credential_management(
-                            env,
-                            &mut self.stateful_command_permission,
-                            &mut self.client_pin,
-                            params,
-                            now,
-                        )
-                    }
-                    Command::AuthenticatorSelection => self.process_selection(env, channel),
-                    Command::AuthenticatorLargeBlobs(params) => {
-                        self.large_blobs
-                            .process_command(env, &mut self.client_pin, params)
-                    }
-                    Command::AuthenticatorConfig(params) => {
-                        process_config(env, &mut self.client_pin, params)
-                    }
-                    // Vendor specific commands
-                    Command::AuthenticatorVendorConfigure(params) => {
-                        self.process_vendor_configure(env, params, channel)
-                    }
-                    Command::AuthenticatorVendorUpgrade(params) => {
-                        self.process_vendor_upgrade(env, params)
-                    }
-                    Command::AuthenticatorVendorUpgradeInfo => {
-                        self.process_vendor_upgrade_info(env)
-                    }
-                };
-                debug_ctap!(env, "Sending response: {:#?}", response);
-                match response {
-                    Ok(response_data) => {
-                        let mut response_vec = vec![0x00];
-                        if let Some(value) = response_data.into() {
-                            if cbor_write(value, &mut response_vec).is_err() {
-                                response_vec =
-                                    vec![Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR as u8];
-                            }
-                        }
-                        response_vec
-                    }
-                    Err(error_code) => vec![error_code as u8],
-                }
+                response_vec
             }
             Err(error_code) => vec![error_code as u8],
+        }
+    }
+
+    /// Processed a command after parsing from CBOR, returning its structured output.
+    ///
+    /// This function contains the logic of `parse_command`, minus all CBOR encoding and decoding.
+    /// It should make command parsing easier to test.
+    fn process_parsed_command(
+        &mut self,
+        env: &mut impl Env,
+        command: Command,
+        channel: Channel,
+        now: CtapInstant,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
+        #[cfg(feature = "with_ctap1")]
+        {
+            self.u2f_up_state = U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
+        }
+        self.stateful_command_permission
+            .clear_old_channels(&channel);
+        self.stateful_command_permission.clear_timer(now);
+        match (&command, self.stateful_command_permission.get_command()) {
+            (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
+            | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
+            // AuthenticatorGetInfo still allows Reset.
+            | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
+            // AuthenticatorSelection still allows Reset.
+            | (Command::AuthenticatorSelection, Ok(StatefulCommand::Reset))
+            // AuthenticatorCredentialManagement handles its subcommands later.
+            | (
+                Command::AuthenticatorCredentialManagement(_),
+                Ok(StatefulCommand::EnumerateRps(_)),
+            )
+            | (
+                Command::AuthenticatorCredentialManagement(_),
+                Ok(StatefulCommand::EnumerateCredentials(_)),
+            ) => (),
+            (_, _) => self.stateful_command_permission.clear(),
+        }
+        match &channel {
+            Channel::MainHid(_) => self.process_fido_command(env, command, channel, now),
+            #[cfg(feature = "vendor_hid")]
+            Channel::VendorHid(_) => self.process_vendor_command(env, command, channel),
+        }
+    }
+
+    fn process_fido_command(
+        &mut self,
+        env: &mut impl Env,
+        command: Command,
+        channel: Channel,
+        now: CtapInstant,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        match command {
+            Command::AuthenticatorMakeCredential(params) => {
+                self.process_make_credential(env, params, channel)
+            }
+            Command::AuthenticatorGetAssertion(params) => {
+                self.process_get_assertion(env, params, channel, now)
+            }
+            Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(env),
+            Command::AuthenticatorGetInfo => self.process_get_info(env),
+            Command::AuthenticatorClientPin(params) => {
+                self.client_pin.process_command(env, params, now)
+            }
+            Command::AuthenticatorReset => self.process_reset(env, channel),
+            Command::AuthenticatorCredentialManagement(params) => process_credential_management(
+                env,
+                &mut self.stateful_command_permission,
+                &mut self.client_pin,
+                params,
+                channel,
+                now,
+            ),
+            Command::AuthenticatorSelection => self.process_selection(env, channel),
+            Command::AuthenticatorLargeBlobs(params) => {
+                self.large_blobs
+                    .process_command(env, &mut self.client_pin, params)
+            }
+            Command::AuthenticatorConfig(params) => {
+                process_config(env, &mut self.client_pin, params)
+            }
+            #[cfg(feature = "vendor_hid")]
+            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
+            #[cfg(not(feature = "vendor_hid"))]
+            _ => self.process_vendor_command(env, command, channel),
+        }
+    }
+
+    fn process_vendor_command(
+        &mut self,
+        env: &mut impl Env,
+        command: Command,
+        channel: Channel,
+    ) -> Result<ResponseData, Ctap2StatusCode> {
+        match command {
+            Command::AuthenticatorVendorConfigure(params) => {
+                self.process_vendor_configure(env, params, channel)
+            }
+            Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
+            Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
+            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
     }
 
@@ -851,6 +908,7 @@ impl CtapState {
         mut credential: PublicKeyCredentialSource,
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
+        is_next: bool,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AssertionInput {
             client_data_hash,
@@ -916,16 +974,20 @@ impl CtapState {
         } else {
             None
         };
-        Ok(ResponseData::AuthenticatorGetAssertion(
-            AuthenticatorGetAssertionResponse {
-                credential: Some(cred_desc),
-                auth_data,
-                signature: signature.to_asn1_der(),
-                user,
-                number_of_credentials: number_of_credentials.map(|n| n as u64),
-                large_blob_key,
-            },
-        ))
+        let response_data = AuthenticatorGetAssertionResponse {
+            credential: Some(cred_desc),
+            auth_data,
+            signature: signature.to_asn1_der(),
+            user,
+            number_of_credentials: number_of_credentials.map(|n| n as u64),
+            large_blob_key,
+        };
+        // Only returned for the first GetAssertion, not for Next calls.
+        if is_next {
+            Ok(ResponseData::AuthenticatorGetNextAssertion(response_data))
+        } else {
+            Ok(ResponseData::AuthenticatorGetAssertion(response_data))
+        }
     }
 
     // Returns the first applicable credential from the allow list.
@@ -1078,24 +1140,27 @@ impl CtapState {
                 next_credential_keys,
             }));
             self.stateful_command_permission
-                .set_command(now, assertion_state);
+                .set_command(now, assertion_state, channel);
             number_of_credentials
         };
-        self.assertion_response(env, credential, assertion_input, number_of_credentials)
+        self.assertion_response(
+            env,
+            credential,
+            assertion_input,
+            number_of_credentials,
+            false,
+        )
     }
 
     fn process_get_next_assertion(
         &mut self,
         env: &mut impl Env,
-        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.stateful_command_permission
-            .check_command_permission(now)?;
         let (assertion_input, credential_key) = self
             .stateful_command_permission
             .next_assertion_credential()?;
         let credential = storage::get_credential(env, credential_key)?;
-        self.assertion_response(env, credential, assertion_input, None)
+        self.assertion_response(env, credential, assertion_input, None, true)
     }
 
     fn process_get_info(&self, env: &mut impl Env) -> Result<ResponseData, Ctap2StatusCode> {
@@ -1168,10 +1233,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
         channel: Channel,
-        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        self.stateful_command_permission
-            .check_command_permission(now)?;
         match self.stateful_command_permission.get_command()? {
             StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
@@ -1354,10 +1416,13 @@ impl CtapState {
 #[cfg(test)]
 mod test {
     use super::client_pin::PIN_TOKEN_LENGTH;
-    use super::command::{AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters};
+    use super::command::{
+        AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
+        AuthenticatorCredentialManagementParameters,
+    };
     use super::data_formats::{
-        ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, GetAssertionOptions,
-        MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
+        ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionHmacSecretInput,
+        GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
         PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
@@ -1370,6 +1435,8 @@ mod test {
     // In tests where we define a dummy user-presence check that immediately returns, the channel
     // ID is irrelevant, so we pass this (dummy but valid) value.
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
+    #[cfg(feature = "vendor_hid")]
+    const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
     fn check_make_response(
         make_credential_response: Result<ResponseData, Ctap2StatusCode>,
@@ -1998,31 +2065,31 @@ mod test {
         expected_number_of_credentials: Option<u64>,
         expected_extension_cbor: &[u8],
     ) {
-        match response.unwrap() {
-            ResponseData::AuthenticatorGetAssertion(get_assertion_response) => {
-                let AuthenticatorGetAssertionResponse {
-                    auth_data,
-                    user,
-                    number_of_credentials,
-                    ..
-                } = get_assertion_response;
-                let mut expected_auth_data = vec![
-                    0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
-                    0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00, 0x00,
-                ];
-                let signature_counter_position = expected_auth_data.len() - 4;
-                BigEndian::write_u32(
-                    &mut expected_auth_data[signature_counter_position..],
-                    signature_counter,
-                );
-                expected_auth_data.extend(expected_extension_cbor);
-                assert_eq!(auth_data, expected_auth_data);
-                assert_eq!(user, Some(expected_user));
-                assert_eq!(number_of_credentials, expected_number_of_credentials);
-            }
+        let assertion_response = match response.unwrap() {
+            ResponseData::AuthenticatorGetAssertion(r) => r,
+            ResponseData::AuthenticatorGetNextAssertion(r) => r,
             _ => panic!("Invalid response type"),
-        }
+        };
+        let AuthenticatorGetAssertionResponse {
+            auth_data,
+            user,
+            number_of_credentials,
+            ..
+        } = assertion_response;
+        let mut expected_auth_data = vec![
+            0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80, 0x34,
+            0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2, 0x12, 0x55,
+            0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let signature_counter_position = expected_auth_data.len() - 4;
+        BigEndian::write_u32(
+            &mut expected_auth_data[signature_counter_position..],
+            signature_counter,
+        );
+        expected_auth_data.extend(expected_extension_cbor);
+        assert_eq!(auth_data, expected_auth_data);
+        assert_eq!(user, Some(expected_user));
+        assert_eq!(number_of_credentials, expected_number_of_credentials);
     }
 
     fn check_assertion_response_with_extension(
@@ -2574,8 +2641,7 @@ mod test {
             &[],
         );
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         check_assertion_response_with_user(
             get_assertion_response,
             user1,
@@ -2585,8 +2651,7 @@ mod test {
             &[],
         );
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2659,16 +2724,13 @@ mod test {
             Some(3),
         );
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         check_assertion_response(get_assertion_response, vec![0x02], signature_counter, None);
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         check_assertion_response(get_assertion_response, vec![0x01], signature_counter, None);
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2680,8 +2742,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2733,8 +2794,7 @@ mod test {
         assert!(cbor_write(cbor_value, &mut command_cbor).is_ok());
         ctap_state.process_command(&mut env, &command_cbor, DUMMY_CHANNEL, CtapInstant::new(0));
 
-        let get_assertion_response =
-            ctap_state.process_get_next_assertion(&mut env, CtapInstant::new(0));
+        let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -2779,7 +2839,7 @@ mod test {
             .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL, CtapInstant::new(0));
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);
 
         assert_eq!(
             reset_reponse,
@@ -2795,7 +2855,7 @@ mod test {
         // This is a GetNextAssertion command.
         ctap_state.process_command(&mut env, &[0x08], DUMMY_CHANNEL, CtapInstant::new(0));
 
-        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL, CtapInstant::new(0));
+        let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);
         assert_eq!(reset_reponse, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
     }
 
@@ -3215,5 +3275,278 @@ mod test {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn test_permission_timeout() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        // Write 2 credentials for later assertions.
+        for i in 0..3 {
+            let mut make_credential_params = create_minimal_make_credential_parameters();
+            make_credential_params.user.user_id = vec![i as u8];
+            assert!(ctap_state
+                .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+                .is_ok());
+        }
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetAssertion(get_assertion_params),
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(get_assertion_response.is_ok());
+        let get_next_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetNextAssertion,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION - Milliseconds(1 as ClockInt),
+        );
+        assert!(get_next_assertion_response.is_ok());
+        let get_next_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetNextAssertion,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION + Milliseconds(1 as ClockInt),
+        );
+        assert_eq!(
+            get_next_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn test_reset_timeout() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorReset,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0) + RESET_TIMEOUT_DURATION + Milliseconds(1 as ClockInt),
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
+    }
+
+    #[test]
+    fn test_credential_management_timeout() {
+        let mut env = TestEnv::new();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let client_pin =
+            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+
+        let credential_source = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
+            private_key: crypto::ecdsa::SecKey::gensk(env.rng()),
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x01],
+            user_display_name: Some("display_name".to_string()),
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: Some("name".to_string()),
+            user_icon: Some("icon".to_string()),
+            cred_blob: None,
+            large_blob_key: None,
+        };
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        ctap_state.client_pin = client_pin;
+
+        for i in 0..3 {
+            let mut credential = credential_source.clone();
+            credential.rp_id = i.to_string();
+            storage::store_credential(&mut env, credential).unwrap();
+        }
+
+        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        let pin_uv_auth_param = Some(vec![
+            0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
+            0xD0, 0xD1,
+        ]);
+
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateRpsBegin,
+            sub_command_params: None,
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorCredentialManagement(cred_management_params),
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(matches!(
+            response,
+            Ok(ResponseData::AuthenticatorCredentialManagement(_))
+        ));
+
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
+            sub_command_params: None,
+            pin_uv_auth_protocol: None,
+            pin_uv_auth_param: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorCredentialManagement(cred_management_params),
+            DUMMY_CHANNEL,
+            CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION - Milliseconds(1 as ClockInt),
+        );
+        assert!(matches!(
+            response,
+            Ok(ResponseData::AuthenticatorCredentialManagement(_))
+        ));
+
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateRpsGetNextRp,
+            sub_command_params: None,
+            pin_uv_auth_protocol: None,
+            pin_uv_auth_param: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorCredentialManagement(cred_management_params),
+            DUMMY_CHANNEL,
+            CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION + Milliseconds(1 as ClockInt),
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
+    }
+
+    #[test]
+    fn test_channel_interleaving() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        const NEW_CHANNEL: Channel = Channel::MainHid([0xAA, 0xAA, 0xAA, 0xAA]);
+
+        // Write 3 credentials for later assertions.
+        for i in 0..3 {
+            let mut make_credential_params = create_minimal_make_credential_parameters();
+            make_credential_params.user.user_id = vec![i as u8];
+            assert!(ctap_state
+                .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+                .is_ok());
+        }
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetAssertion(get_assertion_params),
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(matches!(
+            get_assertion_response,
+            Ok(ResponseData::AuthenticatorGetAssertion(_))
+        ));
+        let get_next_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetNextAssertion,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(get_next_assertion_response.is_ok());
+        assert!(matches!(
+            get_next_assertion_response,
+            Ok(ResponseData::AuthenticatorGetNextAssertion(_))
+        ));
+        let get_next_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetNextAssertion,
+            NEW_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_next_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+        let get_next_assertion_response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetNextAssertion,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_next_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_main_hid() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetInfo,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(matches!(
+            response,
+            Ok(ResponseData::AuthenticatorGetInfo(_))
+        ));
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorGetInfo,
+            VENDOR_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_vendor_hid() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorVendorUpgradeInfo,
+            VENDOR_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(matches!(
+            response,
+            Ok(ResponseData::AuthenticatorVendorUpgradeInfo(_))
+        ));
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorVendorUpgradeInfo,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
     }
 }

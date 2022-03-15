@@ -32,6 +32,8 @@ pub mod status_code;
 mod storage;
 mod timed_permission;
 mod token_state;
+#[cfg(feature = "vendor_hid")]
+pub mod vendor_hid;
 
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
@@ -136,6 +138,7 @@ pub enum Transport {
     /// Corresponds to CTAP's USB transport.
     MainHid,
     /// No equivalent in CTAP, used for communication outside the specification.
+    #[cfg(feature = "vendor_hid")]
     VendorHid,
 }
 
@@ -151,6 +154,7 @@ pub enum Channel {
     /// Corresponds to CTAP's USB transport.
     MainHid(ChannelID),
     /// No equivalent in CTAP, used for communication outside the specification.
+    #[cfg(feature = "vendor_hid")]
     VendorHid(ChannelID),
 }
 

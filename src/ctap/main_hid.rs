@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::CtapState;
 use crate::clock::{ClockInt, CtapInstant};
 #[cfg(feature = "with_ctap1")]
 use crate::ctap::ctap1;
@@ -21,7 +20,7 @@ use crate::ctap::hid::ChannelID;
 use crate::ctap::hid::{
     CtapHid, CtapHidCommand, CtapHidError, HidPacket, HidPacketIterator, Message,
 };
-use crate::ctap::{Channel, TimedPermission};
+use crate::ctap::{Channel, CtapState, TimedPermission};
 use crate::env::Env;
 use embedded_time::duration::Milliseconds;
 

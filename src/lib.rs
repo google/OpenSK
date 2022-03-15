@@ -20,6 +20,8 @@ extern crate arrayref;
 
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
+#[cfg(feature = "vendor_hid")]
+use crate::ctap::vendor_hid::VendorHid;
 use crate::ctap::CtapState;
 pub use crate::ctap::Transport;
 use crate::env::Env;
@@ -56,6 +58,8 @@ pub struct Ctap<E: Env> {
     env: E,
     state: CtapState,
     hid: MainHid,
+    #[cfg(feature = "vendor_hid")]
+    vendor_hid: VendorHid,
 }
 
 impl<E: Env> Ctap<E> {
@@ -65,7 +69,15 @@ impl<E: Env> Ctap<E> {
     pub fn new(mut env: E, now: CtapInstant) -> Self {
         let state = CtapState::new(&mut env, now);
         let hid = MainHid::new();
-        Ctap { env, state, hid }
+        #[cfg(feature = "vendor_hid")]
+        let vendor_hid = VendorHid::new();
+        Ctap {
+            env,
+            state,
+            hid,
+            #[cfg(feature = "vendor_hid")]
+            vendor_hid,
+        }
     }
 
     pub fn state(&mut self) -> &mut CtapState {
@@ -87,7 +99,11 @@ impl<E: Env> Ctap<E> {
                 self.hid
                     .process_hid_packet(&mut self.env, packet, now, &mut self.state)
             }
-            Transport::VendorHid => HidPacketIterator::none(),
+            #[cfg(feature = "vendor_hid")]
+            Transport::VendorHid => {
+                self.vendor_hid
+                    .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+            }
         }
     }
 

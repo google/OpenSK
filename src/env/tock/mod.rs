@@ -58,6 +58,7 @@ impl UserPresence for TockEnv {
     fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
         match channel {
             Channel::MainHid(cid) => check_user_presence(self, cid),
+            #[cfg(feature = "vendor_hid")]
             Channel::VendorHid(cid) => check_user_presence(self, cid),
         }
     }

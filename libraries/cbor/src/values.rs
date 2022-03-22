@@ -225,6 +225,12 @@ impl From<&str> for Value {
     }
 }
 
+impl From<Vec<Value>> for Value {
+    fn from(array: Vec<Value>) -> Self {
+        Value::Array(array)
+    }
+}
+
 impl From<Vec<(Value, Value)>> for Value {
     fn from(map: Vec<(Value, Value)>) -> Self {
         Value::Map(map)

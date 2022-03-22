@@ -49,6 +49,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "fuzz_target_process_ctap2_make_credential_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_make_credential_structured.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fuzz_target_split_assemble"
 path = "fuzz_targets/fuzz_target_split_assemble.rs"
 test = false

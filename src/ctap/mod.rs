@@ -532,7 +532,7 @@ impl CtapState {
     ///
     /// This function contains the logic of `parse_command`, minus all CBOR encoding and decoding.
     /// It should make command parsing easier to test.
-    fn process_parsed_command(
+    pub fn process_parsed_command(
         &mut self,
         env: &mut impl Env,
         command: Command,

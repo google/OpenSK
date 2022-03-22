@@ -16,17 +16,18 @@
 // `libtock_alloc_init` symbol.
 extern crate lang_items;
 
+use arbitrary::{Arbitrary, Unstructured};
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use ctap2::clock::CtapInstant;
-use ctap2::ctap::cbor_read;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
-    AuthenticatorMakeCredentialParameters,
+    AuthenticatorMakeCredentialParameters, Command,
 };
 use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
+use ctap2::ctap::{cbor_read, Channel, CtapState};
 use ctap2::env::test::TestEnv;
 use ctap2::{Ctap, Transport};
 
@@ -164,6 +165,39 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
     }
     command.extend(data);
     process_message(&command, &mut ctap);
+}
+
+pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
+    let unstructured = &mut Unstructured::new(data);
+
+    let mut env = TestEnv::new();
+    let mut state = CtapState::new(&mut env, CtapInstant::new(0));
+
+    let command = match input_type {
+        InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(
+            AuthenticatorMakeCredentialParameters::arbitrary(unstructured)?,
+        ),
+        InputType::CborGetAssertionParameter => {
+            unimplemented!()
+        }
+        InputType::CborClientPinParameter => {
+            unimplemented!()
+        }
+        InputType::Ctap1 => {
+            unimplemented!()
+        }
+    };
+
+    state
+        .process_parsed_command(
+            &mut env,
+            command,
+            Channel::MainHid(ChannelID::arbitrary(unstructured)?),
+            CtapInstant::new(0),
+        )
+        .ok();
+
+    Ok(())
 }
 
 // Splits the given data as HID packets and reassembles it, verifying that the original input message is reconstructed.

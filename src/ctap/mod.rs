@@ -542,6 +542,8 @@ impl CtapState {
         // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
         #[cfg(feature = "with_ctap1")]
         {
+            // We create a block statement to wrap this assignment expression, because attributes
+            // (like #[cfg]) are not supported on expressions.
             self.u2f_up_state = U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
         }
         self.stateful_command_permission

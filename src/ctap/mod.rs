@@ -542,6 +542,8 @@ impl CtapState {
         // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
         #[cfg(feature = "with_ctap1")]
         {
+            // We create a block statement to wrap this assignment expression, because attributes
+            // (like #[cfg]) are not supported on expressions.
             self.u2f_up_state = U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
         }
         self.stateful_command_permission
@@ -1173,10 +1175,8 @@ impl CtapState {
             String::from(FIDO2_1_VERSION_STRING),
         ];
         #[cfg(feature = "with_ctap1")]
-        {
-            if !has_always_uv {
-                versions.insert(0, String::from(U2F_VERSION_STRING))
-            }
+        if !has_always_uv {
+            versions.insert(0, String::from(U2F_VERSION_STRING))
         }
         let mut options = vec![];
         if ENTERPRISE_ATTESTATION_MODE.is_some() {
@@ -1246,6 +1246,8 @@ impl CtapState {
         self.client_pin.reset(env.rng());
         #[cfg(feature = "with_ctap1")]
         {
+            // We create a block statement to wrap this assignment expression, because attributes
+            // (like #[cfg]) are not supported on expressions.
             self.u2f_up_state = U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT);
         }
         Ok(ResponseData::AuthenticatorReset)

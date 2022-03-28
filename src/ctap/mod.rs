@@ -307,7 +307,7 @@ impl StatefulPermission {
         // However, interleaving (stateless) commands could delete credentials or change the PIN,
         // which chould make invalidate our access. Some read-only commands should be okay to run,
         // but (A) is the safest and easiest solution.
-        if let Some(c) = self.channel.as_ref() {
+        if let Some(c) = &self.channel {
             if c != channel {
                 self.clear();
             }
@@ -556,6 +556,8 @@ impl CtapState {
             | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
             // AuthenticatorSelection still allows Reset.
             | (Command::AuthenticatorSelection, Ok(StatefulCommand::Reset))
+            // AuthenticatorMakeCredential is used like AuthenticatorSelection in 2.0.
+            | (Command::AuthenticatorMakeCredential(_), Ok(StatefulCommand::Reset))
             // AuthenticatorCredentialManagement handles its subcommands later.
             | (
                 Command::AuthenticatorCredentialManagement(_),

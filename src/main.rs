@@ -82,8 +82,8 @@ fn main() {
         });
         #[cfg(feature = "with_ctap1")]
         let mut buttons = buttons_callback.init().flex_unwrap();
-        #[cfg(feature = "with_ctap1")]
         // At the moment, all buttons are accepted. You can customize your setup here.
+        #[cfg(feature = "with_ctap1")]
         for mut button in &mut buttons {
             button.enable().flex_unwrap();
         }
@@ -168,14 +168,12 @@ fn main() {
             #[cfg(not(feature = "with_ctap1"))]
             switch_off_leds();
             #[cfg(feature = "with_ctap1")]
-            {
-                if ctap.state().u2f_needs_user_presence(now) {
-                    // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
-                    // delay caused by processing and sending of packets.
-                    blink_leds(led_counter);
-                } else {
-                    switch_off_leds();
-                }
+            if ctap.state().u2f_needs_user_presence(now) {
+                // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
+                // delay caused by processing and sending of packets.
+                blink_leds(led_counter);
+            } else {
+                switch_off_leds();
             }
         }
     }

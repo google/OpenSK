@@ -188,10 +188,8 @@ pub fn recv_with_timeout(
     let result = recv_with_timeout_detail(buf, timeout_delay);
 
     #[cfg(feature = "verbose_usb")]
-    {
-        if let Some(SendOrRecvStatus::Received) = result {
-            writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
-        }
+    if let Some(SendOrRecvStatus::Received) = result {
+        writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
     }
 
     result
@@ -216,10 +214,8 @@ pub fn send_or_recv_with_timeout(
     let result = send_or_recv_with_timeout_detail(buf, timeout_delay);
 
     #[cfg(feature = "verbose_usb")]
-    {
-        if let Some(SendOrRecvStatus::Received) = result {
-            writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
-        }
+    if let Some(SendOrRecvStatus::Received) = result {
+        writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
     }
 
     result

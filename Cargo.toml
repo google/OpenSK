@@ -32,7 +32,7 @@ std = ["crypto/std", "lang_items/std", "persistent_store/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
-vendor_hid = []
+vendor_hid = ["libtock_drivers/vendor_hid"]
 fuzz = ["arbitrary", "std"]
 
 [dev-dependencies]

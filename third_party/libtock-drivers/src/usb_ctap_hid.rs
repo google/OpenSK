@@ -100,7 +100,7 @@ pub fn recv_with_timeout(
     if let Some(SendOrRecvStatus::Received(interface)) = result {
         writeln!(
             Console::new(),
-            "Received packet = {:02x?} on interface {:?}",
+            "Received packet = {:02x?} on interface {}",
             buf as &[u8],
             interface as u8,
         )
@@ -143,7 +143,7 @@ pub fn send_or_recv_with_timeout(
     if let Some(SendOrRecvStatus::Received(received_interface)) = result {
         writeln!(
             Console::new(),
-            "Received packet = {:02x?} on interface {:?}",
+            "Received packet = {:02x?} on interface {}",
             buf as &[u8],
             received_interface as u8,
         )

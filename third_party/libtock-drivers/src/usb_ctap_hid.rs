@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,14 +28,14 @@ const DRIVER_NUMBER: usize = 0x20009;
 mod command_nr {
     pub const CHECK: usize = 0;
     pub const CONNECT: usize = 1;
-    pub const TRANSMIT: usize = 2;
+    pub const _TRANSMIT: usize = 2;
     pub const RECEIVE: usize = 3;
     pub const TRANSMIT_OR_RECEIVE: usize = 4;
     pub const CANCEL: usize = 5;
 }
 
 mod subscribe_nr {
-    pub const TRANSMIT: usize = 1;
+    pub const _TRANSMIT: usize = 1;
     pub const RECEIVE: usize = 2;
     pub const TRANSMIT_OR_RECEIVE: usize = 3;
     pub mod callback_status {
@@ -45,7 +45,7 @@ mod subscribe_nr {
 }
 
 mod allow_nr {
-    pub const TRANSMIT: usize = 1;
+    pub const _TRANSMIT: usize = 1;
     pub const RECEIVE: usize = 2;
     pub const TRANSMIT_OR_RECEIVE: usize = 3;
 }
@@ -64,114 +64,23 @@ pub fn setup() -> bool {
     true
 }
 
-#[allow(dead_code)]
-pub fn recv(buf: &mut [u8; 64]) -> bool {
-    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf);
-    if result.is_err() {
-        return false;
-    }
-
-    let done = Cell::new(false);
-    let mut alarm = || done.set(true);
-    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
-        DRIVER_NUMBER,
-        subscribe_nr::RECEIVE,
-        &mut alarm,
-    );
-    if subscription.is_err() {
-        return false;
-    }
-
-    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
-    if result_code.is_err() {
-        return false;
-    }
-
-    util::yieldk_for(|| done.get());
-    true
-}
-
-#[allow(dead_code)]
-pub fn send(buf: &mut [u8; 64]) -> bool {
-    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT, buf);
-    if result.is_err() {
-        return false;
-    }
-
-    let done = Cell::new(false);
-    let mut alarm = || done.set(true);
-    let subscription = syscalls::subscribe::<callback::Identity0Consumer, _>(
-        DRIVER_NUMBER,
-        subscribe_nr::TRANSMIT,
-        &mut alarm,
-    );
-    if subscription.is_err() {
-        return false;
-    }
-
-    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT, 0, 0);
-    if result_code.is_err() {
-        return false;
-    }
-
-    util::yieldk_for(|| done.get());
-    true
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum UsbInterface {
+    MainHid = 0,
+    #[cfg(feature = "vendor_hid")]
+    VendorHid = 1,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SendOrRecvStatus {
     Error,
     Sent,
-    Received,
+    Received(UsbInterface),
 }
 
-// Either sends or receive a packet.
-// Because USB transactions are initiated by the host, we don't decide whether an IN transaction
-// (send for us), an OUT transaction (receive for us), or no transaction at all will happen next.
-//
-// - If an IN transaction happens first, the initial content of buf is sent to the host and the
-// Sent status is returned.
-// - If an OUT transaction happens first, the content of buf is replaced by the packet received
-// from the host and Received status is returned. In that case, the original content of buf is not
-// sent to the host, and it's up to the caller to retry sending or to handle the packet received
-// from the host.
-#[allow(dead_code)]
-pub fn send_or_recv(buf: &mut [u8; 64]) -> SendOrRecvStatus {
-    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf);
-    if result.is_err() {
-        return SendOrRecvStatus::Error;
-    }
-
-    let status = Cell::new(None);
-    let mut alarm = |direction| {
-        status.set(Some(match direction {
-            subscribe_nr::callback_status::TRANSMITTED => SendOrRecvStatus::Sent,
-            subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
-            // Unknown direction sent by the kernel.
-            _ => SendOrRecvStatus::Error,
-        }));
-    };
-
-    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
-        DRIVER_NUMBER,
-        subscribe_nr::TRANSMIT_OR_RECEIVE,
-        &mut alarm,
-    );
-    if subscription.is_err() {
-        return SendOrRecvStatus::Error;
-    }
-
-    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0);
-    if result_code.is_err() {
-        return SendOrRecvStatus::Error;
-    }
-
-    util::yieldk_for(|| status.get().is_some());
-    status.get().unwrap()
-}
-
-// Same as recv, but with a timeout.
-// If the timeout elapses, return None.
+/// Waits to receive a packet.
+///
+/// Returns None if the transaction timed out, else its status.
 #[allow(clippy::let_and_return)]
 pub fn recv_with_timeout(
     buf: &mut [u8; 64],
@@ -188,19 +97,36 @@ pub fn recv_with_timeout(
     let result = recv_with_timeout_detail(buf, timeout_delay);
 
     #[cfg(feature = "verbose_usb")]
-    if let Some(SendOrRecvStatus::Received) = result {
-        writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
+    if let Some(SendOrRecvStatus::Received(interface)) = result {
+        writeln!(
+            Console::new(),
+            "Received packet = {:02x?} on interface {}",
+            buf as &[u8],
+            interface as u8,
+        )
+        .unwrap();
     }
 
     result
 }
 
-// Same as send_or_recv, but with a timeout.
-// If the timeout elapses, return None.
+/// Either sends or receives a packet within a given time.
+///
+/// Because USB transactions are initiated by the host, we don't decide whether an IN transaction
+/// (send for us), an OUT transaction (receive for us), or no transaction at all will happen next.
+///
+/// - If an IN transaction happens first, the initial content of buf is sent to the host and the
+/// Sent status is returned.
+/// - If an OUT transaction happens first, the content of buf is replaced by the packet received
+/// from the host and Received status is returned. In that case, the original content of buf is not
+/// sent to the host, and it's up to the caller to retry sending or to handle the packet received
+/// from the host.
+/// If the timeout elapses, return None.
 #[allow(clippy::let_and_return)]
 pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
+    interface: UsbInterface,
 ) -> Option<SendOrRecvStatus> {
     #[cfg(feature = "verbose_usb")]
     writeln!(
@@ -211,11 +137,17 @@ pub fn send_or_recv_with_timeout(
     )
     .unwrap();
 
-    let result = send_or_recv_with_timeout_detail(buf, timeout_delay);
+    let result = send_or_recv_with_timeout_detail(buf, timeout_delay, interface);
 
     #[cfg(feature = "verbose_usb")]
-    if let Some(SendOrRecvStatus::Received) = result {
-        writeln!(Console::new(), "Received packet = {:02x?}", buf as &[u8]).unwrap();
+    if let Some(SendOrRecvStatus::Received(received_interface)) = result {
+        writeln!(
+            Console::new(),
+            "Received packet = {:02x?} on interface {}",
+            buf as &[u8],
+            received_interface as u8,
+        )
+        .unwrap();
     }
 
     result
@@ -233,7 +165,10 @@ fn recv_with_timeout_detail(
     let status = Cell::new(None);
     let mut alarm = |direction| {
         status.set(Some(match direction {
-            subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
+            subscribe_nr::callback_status::RECEIVED => {
+                // TODO: set the correct interface
+                SendOrRecvStatus::Received(UsbInterface::MainHid)
+            }
             // Unknown direction or "transmitted" sent by the kernel.
             _ => SendOrRecvStatus::Error,
         }));
@@ -324,6 +259,8 @@ fn recv_with_timeout_detail(
 fn send_or_recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
+    // TODO: To be used as part of the syscall.
+    _interface: UsbInterface,
 ) -> Option<SendOrRecvStatus> {
     let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf);
     if result.is_err() {
@@ -334,7 +271,10 @@ fn send_or_recv_with_timeout_detail(
     let mut alarm = |direction| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::TRANSMITTED => SendOrRecvStatus::Sent,
-            subscribe_nr::callback_status::RECEIVED => SendOrRecvStatus::Received,
+            subscribe_nr::callback_status::RECEIVED => {
+                // TODO: set the correct interface
+                SendOrRecvStatus::Received(UsbInterface::MainHid)
+            }
             // Unknown direction sent by the kernel.
             _ => SendOrRecvStatus::Error,
         }));

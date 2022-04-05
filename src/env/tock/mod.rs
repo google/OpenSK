@@ -1,6 +1,6 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::ctap::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
+use crate::ctap::hid::{CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
@@ -56,11 +56,7 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 
 impl UserPresence for TockEnv {
     fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
-        match channel {
-            Channel::MainHid(cid) => check_user_presence(self, cid),
-            #[cfg(feature = "vendor_hid")]
-            Channel::VendorHid(cid) => check_user_presence(self, cid),
-        }
+        check_user_presence(self, channel)
     }
 }
 
@@ -113,12 +109,17 @@ impl Env for TockEnv {
 // Returns whether the keepalive was sent, or false if cancelled.
 fn send_keepalive_up_needed(
     env: &mut TockEnv,
-    cid: ChannelID,
+    channel: Channel,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
+    let (interface, cid) = match channel {
+        Channel::MainHid(cid) => (usb_ctap_hid::UsbInterface::MainHid, cid),
+        #[cfg(feature = "vendor_hid")]
+        Channel::VendorHid(cid) => (usb_ctap_hid::UsbInterface::VendorHid, cid),
+    };
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
-        let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout);
+        let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, interface);
         match status {
             None => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
@@ -128,10 +129,10 @@ fn send_keepalive_up_needed(
             Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+            Some(usb_ctap_hid::SendOrRecvStatus::Received(received_interface)) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
-                if received_cid != &cid {
+                if received_interface != interface || received_cid != &cid {
                     debug_ctap!(
                         env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
@@ -218,13 +219,13 @@ pub fn switch_off_leds() {
 const KEEPALIVE_DELAY_MS: isize = 100;
 pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 
-fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+fn check_user_presence(env: &mut TockEnv, channel: Channel) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize =
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
-    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK)?;
+    send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK)?;
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -274,7 +275,7 @@ fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2Sta
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK);
+            keepalive_response = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK);
         }
 
         if button_touched.get() || keepalive_response.is_err() {

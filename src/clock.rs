@@ -4,6 +4,8 @@ use embedded_time::duration::Milliseconds;
 pub use embedded_time::Clock;
 #[cfg(not(feature = "std"))]
 use libtock_drivers::result::FlexUnwrap;
+#[cfg(target_pointer_width = "32")]
+use super::api::clock::U24;
 
 #[cfg(not(feature = "std"))]
 pub struct LibtockClock<const CLOCK_FREQUENCY: u32>(libtock_drivers::timer::Timer<'static>);
@@ -28,7 +30,7 @@ const KEEPALIVE_DELAY_MS: ClockInt = 100;
 pub const KEEPALIVE_DELAY: Milliseconds<ClockInt> = Milliseconds(KEEPALIVE_DELAY_MS);
 
 #[cfg(target_pointer_width = "32")]
-pub type ClockInt = u32;
+pub type ClockInt = U24;
 #[cfg(target_pointer_width = "64")]
 pub type ClockInt = u64;
 

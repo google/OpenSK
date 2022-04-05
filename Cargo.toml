@@ -23,6 +23,7 @@ subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 embedded-time = "0.12.1"
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
+num = { version = "0.4.0", default-features = false }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]

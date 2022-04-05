@@ -89,15 +89,15 @@ fn main() {
         }
 
         let mut pkt_request = [0; 64];
-        let has_packet =
+        let usb_interface =
             match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK) {
-                Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+                Some(usb_ctap_hid::SendOrRecvStatus::Received(interface)) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice("Received packet", &clock);
-                    true
+                    Some(interface)
                 }
                 Some(_) => panic!("Error receiving packet"),
-                None => false,
+                None => None,
             };
 
         let now = clock.try_now().unwrap();
@@ -120,11 +120,20 @@ fn main() {
         // don't cause problems with timers.
         ctap.update_timeouts(now);
 
-        if has_packet {
-            let reply = ctap.process_hid_packet(&pkt_request, Transport::MainHid, now);
+        if let Some(interface) = usb_interface {
+            let transport = match interface {
+                usb_ctap_hid::UsbInterface::MainHid => Transport::MainHid,
+                #[cfg(feature = "vendor_hid")]
+                usb_ctap_hid::UsbInterface::VendorHid => Transport::VendorHid,
+            };
+            let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT);
+                let status = usb_ctap_hid::send_or_recv_with_timeout(
+                    &mut pkt_reply,
+                    SEND_TIMEOUT,
+                    interface,
+                );
                 match status {
                     None => {
                         #[cfg(feature = "debug_ctap")]
@@ -138,7 +147,7 @@ fn main() {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sent packet", &clock);
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
+                    Some(usb_ctap_hid::SendOrRecvStatus::Received(_)) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Received an UNEXPECTED packet", &clock);
                         // TODO: handle this unexpected packet.

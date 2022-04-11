@@ -14,6 +14,8 @@
 # limitations under the License.
 
 generate_crypto_materials () {
+  # OpenSSL ext file location
+  local openssl_ext_file=tools/openssl.ext
   # OpenSK AAGUID
   local aaguid_file=crypto_data/aaguid.txt
 
@@ -80,12 +82,13 @@ generate_crypto_materials () {
       -new \
       -key "${opensk_key}" \
       -out "${opensk_cert_name}.csr" \
-      -subj "/CN=OpenSK Hacker Edition"
+      -subj "/C=US/O=OpenSK/OU=Authenticator Attestation/CN=OpenSK Hacker Edition"
     "${openssl}" x509 \
       -req \
       -days 3652 \
       -in "${opensk_cert_name}.csr" \
       -CA "${ca_cert_name}.pem" \
+      -extfile "${openssl_ext_file}" \
       -CAkey "${ca_priv_key}" \
       -CAcreateserial \
       -outform pem \

@@ -1,4 +1,5 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
+use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::hid::{CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
@@ -80,6 +81,7 @@ impl Env for TockEnv {
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
+    type Customization = CustomizationImpl;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -103,6 +105,10 @@ impl Env for TockEnv {
 
     fn write(&mut self) -> Self::Write {
         Console::new()
+    }
+
+    fn customization(&self) -> &Self::Customization {
+        &DEFAULT_CUSTOMIZATION
     }
 }
 

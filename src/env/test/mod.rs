@@ -1,4 +1,5 @@
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
@@ -13,6 +14,7 @@ pub struct TestEnv {
     user_presence: TestUserPresence,
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
+    customization: CustomizationImpl,
 }
 
 pub struct TestUserPresence {
@@ -51,16 +53,22 @@ impl TestEnv {
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
+        let customization = DEFAULT_CUSTOMIZATION.clone();
         TestEnv {
             rng,
             user_presence,
             store,
             upgrade_storage,
+            customization,
         }
     }
 
     pub fn disable_upgrade_storage(&mut self) {
         self.upgrade_storage = None;
+    }
+
+    pub fn customization_mut(&mut self) -> &mut CustomizationImpl {
+        &mut self.customization
     }
 }
 
@@ -89,6 +97,7 @@ impl Env for TestEnv {
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
+    type Customization = CustomizationImpl;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -112,5 +121,9 @@ impl Env for TestEnv {
 
     fn write(&mut self) -> Self::Write {
         TestWrite
+    }
+
+    fn customization(&self) -> &Self::Customization {
+        &self.customization
     }
 }

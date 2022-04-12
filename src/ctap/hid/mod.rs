@@ -235,7 +235,7 @@ impl CtapHid {
         packet: &HidPacket,
         clock_value: CtapInstant,
     ) -> Option<Message> {
-        match self.assembler.parse_packet(packet, clock_value) {
+        match self.assembler.parse_packet(env, packet, clock_value) {
             Ok(Some(message)) => {
                 debug_ctap!(env, "Received message: {:02x?}", message);
                 self.preprocess_message(message)
@@ -420,6 +420,7 @@ mod test {
 
     #[test]
     fn test_split_assemble() {
+        let mut env = TestEnv::new();
         for payload_len in 0..7609 {
             let message = Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -430,7 +431,7 @@ mod test {
             let mut messages = Vec::new();
             let mut assembler = MessageAssembler::new();
             for packet in HidPacketIterator::new(message.clone()).unwrap() {
-                match assembler.parse_packet(&packet, CtapInstant::new(0)) {
+                match assembler.parse_packet(&mut env, &packet, CtapInstant::new(0)) {
                     Ok(Some(msg)) => messages.push(msg),
                     Ok(None) => (),
                     Err(_) => panic!("Couldn't assemble packet: {:02x?}", &packet as &[u8]),

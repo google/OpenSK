@@ -76,7 +76,8 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
         for pkt_reply in
             ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
         {
-            if let Ok(Some(result)) = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0))
+            if let Ok(Some(result)) =
+                assembler_reply.parse_packet(ctap.env(), &pkt_reply, CtapInstant::new(0))
             {
                 result_cid.copy_from_slice(&result.payload[8..12]);
             }
@@ -118,7 +119,7 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
                 ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
             {
                 // Only checks for assembling crashes, not for semantics.
-                let _ = assembler_reply.parse_packet(&pkt_reply, CtapInstant::new(0));
+                let _ = assembler_reply.parse_packet(ctap.env(), &pkt_reply, CtapInstant::new(0));
             }
         }
     }
@@ -202,6 +203,7 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
 
 // Splits the given data as HID packets and reassembles it, verifying that the original input message is reconstructed.
 pub fn split_assemble_hid_packets(data: &[u8]) {
+    let mut env = TestEnv::new();
     let message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message.clone()) {
         let mut assembler = MessageAssembler::new();
@@ -209,12 +211,12 @@ pub fn split_assemble_hid_packets(data: &[u8]) {
         if let Some((last_packet, first_packets)) = packets.split_last() {
             for packet in first_packets {
                 assert_eq!(
-                    assembler.parse_packet(packet, CtapInstant::new(0)),
+                    assembler.parse_packet(&mut env, packet, CtapInstant::new(0)),
                     Ok(None)
                 );
             }
             assert_eq!(
-                assembler.parse_packet(last_packet, CtapInstant::new(0)),
+                assembler.parse_packet(&mut env, last_packet, CtapInstant::new(0)),
                 Ok(Some(message))
             );
         }

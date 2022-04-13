@@ -230,6 +230,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
             .transpose()?;
+        // We don't convert into EnterpriseAttestationMode to maintain the correct order of errors.
         let enterprise_attestation = enterprise_attestation.map(extract_unsigned).transpose()?;
 
         Ok(AuthenticatorMakeCredentialParameters {

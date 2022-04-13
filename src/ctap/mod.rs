@@ -697,8 +697,8 @@ impl CtapState {
                 (
                     EnterpriseAttestationMode::PlatformManaged,
                     EnterpriseAttestationMode::PlatformManaged,
-                ) => env.customization().is_enterprise_rp_id(&rp_id),
-                _ => true,
+                ) => true,
+                _ => env.customization().is_enterprise_rp_id(&rp_id),
             }
         } else {
             false
@@ -2045,6 +2045,138 @@ mod test {
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+    }
+
+    fn check_ep(make_credential_response: Result<ResponseData, Ctap2StatusCode>, has_ep: bool) {
+        let ep_att = if has_ep { Some(true) } else { None };
+        match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                assert_eq!(make_credential_response.ep_att, ep_att);
+            }
+            _ => panic!("Invalid response type"),
+        }
+    }
+
+    #[test]
+    fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
+        let mut env = TestEnv::new();
+        env.customization_mut().enterprise_attestation_mode =
+            Some(EnterpriseAttestationMode::VendorFacilitated);
+        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let mut key_bytes = [0; 32];
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
+        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
+        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
+        storage::enable_enterprise_attestation(&mut env).unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(1);
+        make_credential_params.rp = PublicKeyCredentialRpEntity {
+            rp_id: "counter-example.com".to_string(),
+            rp_name: None,
+            rp_icon: None,
+        };
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, false);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(2);
+        make_credential_params.rp = PublicKeyCredentialRpEntity {
+            rp_id: "counter-example.com".to_string(),
+            rp_name: None,
+            rp_icon: None,
+        };
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, false);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(1);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, true);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(2);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, true);
+    }
+
+    #[test]
+    fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
+        let mut env = TestEnv::new();
+        env.customization_mut().enterprise_attestation_mode =
+            Some(EnterpriseAttestationMode::PlatformManaged);
+        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let mut key_bytes = [0; 32];
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
+        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
+        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
+        storage::enable_enterprise_attestation(&mut env).unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(1);
+        make_credential_params.rp = PublicKeyCredentialRpEntity {
+            rp_id: "counter-example.com".to_string(),
+            rp_name: None,
+            rp_icon: None,
+        };
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, false);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(1);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, true);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(2);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_ep(make_credential_response, true);
+    }
+
+    #[test]
+    fn test_process_make_credential_with_enterprise_attestation_invalid() {
+        let mut env = TestEnv::new();
+        env.customization_mut().enterprise_attestation_mode =
+            Some(EnterpriseAttestationMode::PlatformManaged);
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(2);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        let mut key_bytes = [0; 32];
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
+        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
+        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
+        storage::enable_enterprise_attestation(&mut env).unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.enterprise_attestation = Some(3);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION)
         );
     }
 

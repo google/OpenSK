@@ -118,12 +118,11 @@ pub trait Customization {
     ///
     /// - If the mode is VendorFacilitated, enterprise_attestation_mode() must be non-empty.
     ///
-    /// This list is only considered if the enterprise attestation mode is
-    /// VendorFacilitated.
+    /// This list is only considered if enterprise attestation is used.
     #[cfg(feature = "std")]
     fn enterprise_rp_id_list(&self) -> Vec<String>;
 
-    // Returns whether the rp_id is contained in enterprise_rp_id_list().
+    /// Returns whether the rp_id is contained in enterprise_rp_id_list().
     fn is_enterprise_rp_id(&self, rp_id: &str) -> bool;
 
     /// Maximum message size send for CTAP commands.
@@ -303,11 +302,18 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
-    // enterprise_rp_id_list() should be non-empty in vendor facilitated mode, and empty otherwise.
+    // enterprise_rp_id_list() should be non-empty in vendor facilitated mode.
     if matches!(
         customization.enterprise_attestation_mode(),
         Some(EnterpriseAttestationMode::VendorFacilitated)
-    ) == customization.enterprise_rp_id_list().is_empty()
+    ) && customization.enterprise_rp_id_list().is_empty()
+    {
+        return false;
+    }
+
+    // enterprise_rp_id_list() should be empty without an enterprise attestation mode.
+    if customization.enterprise_attestation_mode().is_none()
+        && !customization.enterprise_rp_id_list().is_empty()
     {
         return false;
     }

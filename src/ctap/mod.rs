@@ -20,7 +20,7 @@ mod credential_management;
 mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
-mod customization;
+pub mod customization;
 pub mod data_formats;
 pub mod hid;
 mod key_material;
@@ -45,7 +45,7 @@ use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
     DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
-    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_MSG_SIZE,
+    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
     MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
 };
 use self::data_formats::{
@@ -66,6 +66,7 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::clock::{ClockInt, CtapInstant};
@@ -1207,7 +1208,7 @@ impl CtapState {
                 ]),
                 aaguid: storage::aaguid(env)?,
                 options: Some(options),
-                max_msg_size: Some(MAX_MSG_SIZE as u64),
+                max_msg_size: Some(env.customization().max_msg_size() as u64),
                 // The order implies preference. We favor the new V2.
                 pin_protocols: Some(vec![
                     PinUvAuthProtocol::V2 as u64,
@@ -1519,7 +1520,7 @@ mod test {
                 "setMinPINLength" => true,
                 "makeCredUvNotRqd" => true,
             },
-            0x05 => MAX_MSG_SIZE as u64,
+            0x05 => env.customization().max_msg_size() as u64,
             0x06 => cbor_array![2, 1],
             0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
             0x08 => CREDENTIAL_ID_SIZE as u64,

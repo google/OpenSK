@@ -14,9 +14,9 @@
 
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
-use super::customization::MAX_MSG_SIZE;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
+use crate::api::customization::Customization;
 use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec;
@@ -60,10 +60,10 @@ impl LargeBlobs {
             pin_uv_auth_protocol,
         } = large_blobs_params;
 
-        const MAX_FRAGMENT_LENGTH: usize = MAX_MSG_SIZE - 64;
+        let max_fragment_size = env.customization().max_msg_size() - 64;
 
         if let Some(get) = get {
-            if get > MAX_FRAGMENT_LENGTH || offset.checked_add(get).is_none() {
+            if get > max_fragment_size || offset.checked_add(get).is_none() {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
             let config = storage::get_large_blob_array(env, offset, get)?;
@@ -73,7 +73,7 @@ impl LargeBlobs {
         }
 
         if let Some(mut set) = set {
-            if set.len() > MAX_FRAGMENT_LENGTH {
+            if set.len() > max_fragment_size {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
             if offset == 0 {

@@ -95,8 +95,14 @@ mod test {
         assert!(customization.default_min_pin_length_rp_ids().is_empty());
         customization
             .set_default_min_pin_length_rp_ids(vec!["abc.com".to_owned(), "def.com".to_owned()]);
-        assert!(customization.default_min_pin_length_rp_ids() == ["abc.com", "def.com"]);
+        assert_eq!(
+            customization.default_min_pin_length_rp_ids(),
+            ["abc.com", "def.com"]
+        );
         customization.set_default_min_pin_length_rp_ids(vec!["example.com".to_owned()]);
-        assert!(customization.default_min_pin_length_rp_ids() == ["example.com"]);
+        assert_eq!(
+            customization.default_min_pin_length_rp_ids(),
+            ["example.com"]
+        );
     }
 }

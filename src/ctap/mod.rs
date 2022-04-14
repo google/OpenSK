@@ -45,8 +45,7 @@ use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
     ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST, MAX_CREDENTIAL_COUNT_IN_LIST,
-    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION,
-    USE_SIGNATURE_COUNTER,
+    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
 };
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
@@ -1224,7 +1223,9 @@ impl CtapState {
                 min_pin_length: storage::min_pin_length(env)?,
                 firmware_version: None,
                 max_cred_blob_length: Some(MAX_CRED_BLOB_LENGTH as u64),
-                max_rp_ids_for_set_min_pin_length: Some(MAX_RP_IDS_LENGTH as u64),
+                max_rp_ids_for_set_min_pin_length: Some(
+                    env.customization().max_rp_ids_length() as u64
+                ),
                 certifications: None,
                 remaining_discoverable_credentials: Some(
                     storage::remaining_credentials(env)? as u64
@@ -1531,7 +1532,7 @@ mod test {
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
             0x0F => MAX_CRED_BLOB_LENGTH as u64,
-            0x10 => MAX_RP_IDS_LENGTH as u64,
+            0x10 => env.customization().max_rp_ids_length() as u64,
             0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
         };
 

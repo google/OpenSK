@@ -42,6 +42,32 @@ pub trait Customization {
     /// This can improve privacy, but can make usage less comfortable.
     fn default_cred_protect(&self) -> Option<CredentialProtectionPolicy>;
 
+    /// Sets the initial minimum PIN length in code points.
+    ///
+    /// # Invariant
+    ///
+    /// - The minimum PIN length must be at least 4.
+    /// - The minimum PIN length must be at most 63.
+    /// - default_min_pin_length_rp_ids() must be non-empty if MAX_RP_IDS_LENGTH is 0.
+    ///
+    /// Requiring longer PINs can help establish trust between users and relying
+    /// parties. It makes user verification harder to break, but less convenient.
+    /// NIST recommends at least 6-digit PINs in section 5.1.9.1:
+    /// https://pages.nist.gov/800-63-3/sp800-63b.html
+    ///
+    /// Reset reverts the minimum PIN length to this DEFAULT_MIN_PIN_LENGTH.
+    fn default_min_pin_length(&self) -> u8;
+
+    /// Lists relying parties that can read the minimum PIN length.
+    ///
+    /// # Invariant
+    ///
+    /// - default_min_pin_length_rp_ids() must be non-empty if MAX_RP_IDS_LENGTH is 0
+    ///
+    /// Only the RP IDs listed in default_min_pin_length_rp_ids are allowed to read
+    /// the minimum PIN length with the minPinLength extension.
+    fn default_min_pin_length_rp_ids(&self) -> &[&str];
+
     /// Maximum message size send for CTAP commands.
     ///
     /// The maximum value is 7609, as HID packets can not encode longer messages.
@@ -50,17 +76,45 @@ pub trait Customization {
     /// If long commands are too unreliable on your hardware, consider decreasing
     /// this value.
     fn max_msg_size(&self) -> usize;
+
+    // ###########################################################################
+    // Constants for performance optimization or adapting to different hardware.
+    //
+    // Those constants may be modified before compilation to tune the behavior of
+    // the key.
+    // ###########################################################################
+
+    /// Limits the number of RP IDs that can change the minimum PIN length.
+    ///
+    /// # Invariant
+    ///
+    /// - If this value is 0, default_min_pin_length_rp_ids() must be non-empty.
+    ///
+    /// You can use this constant to have an upper limit in storage requirements.
+    /// This might be useful if you want to more reliably predict the remaining
+    /// storage. Stored string can still be of arbitrary length though, until RP ID
+    /// truncation is implemented.
+    /// Outside of memory considerations, you can set this value to 0 if only RP IDs
+    /// in default_min_pin_length_rp_ids() should be allowed to change the minimum
+    /// PIN length.
+    fn max_rp_ids_length(&self) -> usize;
 }
 
 #[derive(Clone)]
 pub struct CustomizationImpl {
+    pub default_min_pin_length: u8,
+    pub default_min_pin_length_rp_ids: &'static [&'static str],
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub max_msg_size: usize,
+    pub max_rp_ids_length: usize,
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
+    default_min_pin_length: 4,
+    default_min_pin_length_rp_ids: &[],
     default_cred_protect: None,
     max_msg_size: 7609,
+    max_rp_ids_length: 8,
 };
 
 impl Customization for CustomizationImpl {
@@ -68,8 +122,20 @@ impl Customization for CustomizationImpl {
         self.default_cred_protect
     }
 
+    fn default_min_pin_length(&self) -> u8 {
+        self.default_min_pin_length
+    }
+
+    fn default_min_pin_length_rp_ids(&self) -> &[&str] {
+        self.default_min_pin_length_rp_ids
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
+    }
+
+    fn max_rp_ids_length(&self) -> usize {
+        self.max_rp_ids_length
     }
 }
 
@@ -79,6 +145,19 @@ pub fn is_valid(customization: &impl Customization) -> bool {
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
         return false;
     }
+
+    // Default min pin length must be between 4 and 63.
+    if customization.default_min_pin_length() < 4 || customization.default_min_pin_length() > 63 {
+        return false;
+    }
+
+    // Default min pin length rp ids must be non-empty if max rp ids length is 0.
+    if customization.max_rp_ids_length() == 0
+        && customization.default_min_pin_length_rp_ids().is_empty()
+    {
+        return false;
+    }
+
     true
 }
 

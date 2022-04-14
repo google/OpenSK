@@ -14,10 +14,10 @@
 
 mod key;
 
+use crate::api::customization::Customization;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::customization::{
-    DEFAULT_MIN_PIN_LENGTH, DEFAULT_MIN_PIN_LENGTH_RP_IDS, ENFORCE_ALWAYS_UV,
-    MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_RP_IDS_LENGTH, MAX_SUPPORTED_RESIDENT_KEYS,
+    ENFORCE_ALWAYS_UV, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_SUPPORTED_RESIDENT_KEYS,
 };
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
@@ -384,7 +384,7 @@ pub fn reset_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 /// Returns the minimum PIN length.
 pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
     match env.store().find(key::MIN_PIN_LENGTH)? {
-        None => Ok(DEFAULT_MIN_PIN_LENGTH),
+        None => Ok(env.customization().default_min_pin_length()),
         Some(value) if value.len() == 1 => Ok(value[0]),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
     }
@@ -401,7 +401,8 @@ pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2Sta
     let rp_ids = env.store().find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
         || {
             Some(
-                DEFAULT_MIN_PIN_LENGTH_RP_IDS
+                env.customization()
+                    .default_min_pin_length_rp_ids()
                     .iter()
                     .map(|&s| String::from(s))
                     .collect(),
@@ -419,13 +420,13 @@ pub fn set_min_pin_length_rp_ids(
     min_pin_length_rp_ids: Vec<String>,
 ) -> Result<(), Ctap2StatusCode> {
     let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-    for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+    for &rp_id in env.customization().default_min_pin_length_rp_ids().iter() {
         let rp_id = String::from(rp_id);
         if !min_pin_length_rp_ids.contains(&rp_id) {
             min_pin_length_rp_ids.push(rp_id);
         }
     }
-    if min_pin_length_rp_ids.len() > MAX_RP_IDS_LENGTH {
+    if min_pin_length_rp_ids.len() > env.customization().max_rp_ids_length() {
         return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
     }
     Ok(env.store().insert(
@@ -1111,7 +1112,10 @@ mod test {
         let mut env = TestEnv::new();
 
         // The minimum PIN length is initially at the default.
-        assert_eq!(min_pin_length(&mut env).unwrap(), DEFAULT_MIN_PIN_LENGTH);
+        assert_eq!(
+            min_pin_length(&mut env).unwrap(),
+            env.customization().default_min_pin_length()
+        );
 
         // Changes by the setter are reflected by the getter..
         let new_min_pin_length = 8;
@@ -1126,13 +1130,13 @@ mod test {
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
             min_pin_length_rp_ids(&mut env).unwrap(),
-            DEFAULT_MIN_PIN_LENGTH_RP_IDS
+            env.customization().default_min_pin_length_rp_ids()
         );
 
         // Changes by the setter are reflected by the getter.
         let mut rp_ids = vec![String::from("example.com")];
         assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
-        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
+        for &rp_id in env.customization().default_min_pin_length_rp_ids().iter() {
             let rp_id = String::from(rp_id);
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);

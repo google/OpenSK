@@ -17,29 +17,11 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
-use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
+use crate::ctap::data_formats::EnterpriseAttestationMode;
 
 // ###########################################################################
 // Constants for adjusting privacy and protection levels.
 // ###########################################################################
-
-/// Changes the default level for the credProtect extension.
-///
-/// You can change this value to one of the following for more privacy:
-/// - CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
-/// - CredentialProtectionPolicy::UserVerificationRequired
-///
-/// UserVerificationOptionalWithCredentialIdList
-/// Resident credentials are discoverable with
-/// - an allowList,
-/// - an excludeList,
-/// - user verification.
-///
-/// UserVerificationRequired
-/// Resident credentials are discoverable with user verification only.
-///
-/// This can improve privacy, but can make usage less comfortable.
-pub const DEFAULT_CRED_PROTECT: Option<CredentialProtectionPolicy> = None;
 
 /// Sets the initial minimum PIN length in code points.
 ///

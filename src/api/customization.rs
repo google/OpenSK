@@ -17,7 +17,31 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+use crate::ctap::data_formats::CredentialProtectionPolicy;
+
 pub trait Customization {
+    // ###########################################################################
+    // Constants for adjusting privacy and protection levels.
+    // ###########################################################################
+
+    /// Changes the default level for the credProtect extension.
+    ///
+    /// You can change this value to one of the following for more privacy:
+    /// - CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList
+    /// - CredentialProtectionPolicy::UserVerificationRequired
+    ///
+    /// UserVerificationOptionalWithCredentialIdList
+    /// Resident credentials are discoverable with
+    /// - an allowList,
+    /// - an excludeList,
+    /// - user verification.
+    ///
+    /// UserVerificationRequired
+    /// Resident credentials are discoverable with user verification only.
+    ///
+    /// This can improve privacy, but can make usage less comfortable.
+    fn default_cred_protect(&self) -> Option<CredentialProtectionPolicy>;
+
     /// Maximum message size send for CTAP commands.
     ///
     /// The maximum value is 7609, as HID packets can not encode longer messages.
@@ -30,12 +54,20 @@ pub trait Customization {
 
 #[derive(Clone)]
 pub struct CustomizationImpl {
+    pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub max_msg_size: usize,
 }
 
-pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl { max_msg_size: 7609 };
+pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
+    default_cred_protect: None,
+    max_msg_size: 7609,
+};
 
 impl Customization for CustomizationImpl {
+    fn default_cred_protect(&self) -> Option<CredentialProtectionPolicy> {
+        self.default_cred_protect
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
     }

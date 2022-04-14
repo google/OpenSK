@@ -44,9 +44,9 @@ use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
-    DEFAULT_CRED_PROTECT, ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST,
-    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
-    MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
+    ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST, MAX_CREDENTIAL_COUNT_IN_LIST,
+    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_RP_IDS_LENGTH, USE_BATCH_ATTESTATION,
+    USE_SIGNATURE_COUNTER,
 };
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
@@ -763,11 +763,12 @@ impl CtapState {
         env.user_presence().check(channel)?;
         self.client_pin.clear_token_flags();
 
+        let default_cred_protect = env.customization().default_cred_protect();
         let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
-            < DEFAULT_CRED_PROTECT.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
+            < default_cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
         {
-            cred_protect_policy = DEFAULT_CRED_PROTECT;
+            cred_protect_policy = default_cred_protect;
         }
         let min_pin_length =
             extensions.min_pin_length && storage::min_pin_length_rp_ids(env)?.contains(&rp_id);

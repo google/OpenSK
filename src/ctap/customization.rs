@@ -17,13 +17,11 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
-use crate::ctap::data_formats::{EnterpriseAttestationMode};
+use crate::ctap::data_formats::EnterpriseAttestationMode;
 
 // ###########################################################################
 // Constants for adjusting privacy and protection levels.
 // ###########################################################################
-
-
 
 /// Sets the initial minimum PIN length in code points.
 ///

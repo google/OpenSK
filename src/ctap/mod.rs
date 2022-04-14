@@ -763,14 +763,13 @@ impl CtapState {
         env.user_presence().check(channel)?;
         self.client_pin.clear_token_flags();
 
+        let default_cred_protect = env.customization().default_cred_protect();
+
         let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
-            < env
-                .customization()
-                .default_cred_protect()
-                .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
+            < default_cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
         {
-            cred_protect_policy = env.customization().default_cred_protect();
+            cred_protect_policy = default_cred_protect;
         }
         let min_pin_length =
             extensions.min_pin_length && storage::min_pin_length_rp_ids(env)?.contains(&rp_id);

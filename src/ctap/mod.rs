@@ -764,7 +764,6 @@ impl CtapState {
         self.client_pin.clear_token_flags();
 
         let default_cred_protect = env.customization().default_cred_protect();
-
         let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             < default_cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)

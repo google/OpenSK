@@ -4,11 +4,14 @@ use crate::api::customization::{Customization, CustomizationImpl};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 
 pub struct TestCustomization {
+    pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub default_min_pin_length: u8,
     default_min_pin_length_rp_ids_backing_store: Vec<String>,
     default_min_pin_length_rp_ids: Vec<*const str>,
-    pub default_cred_protect: Option<CredentialProtectionPolicy>,
+    pub enforce_always_uv: bool,
     pub max_msg_size: usize,
+    pub max_pin_retries: u8,
+    pub use_signature_counter: bool,
     pub max_rp_ids_length: usize,
 }
 
@@ -38,8 +41,20 @@ impl Customization for TestCustomization {
         unsafe { from_raw_parts(rp_ids, length) }
     }
 
+    fn enforce_always_uv(&self) -> bool {
+        self.enforce_always_uv
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
+    }
+
+    fn max_pin_retries(&self) -> u8 {
+        self.max_pin_retries
+    }
+
+    fn use_signature_counter(&self) -> bool {
+        self.use_signature_counter
     }
 
     fn max_rp_ids_length(&self) -> usize {
@@ -50,10 +65,13 @@ impl Customization for TestCustomization {
 impl From<CustomizationImpl> for TestCustomization {
     fn from(c: CustomizationImpl) -> Self {
         let CustomizationImpl {
+            default_cred_protect,
             default_min_pin_length,
             default_min_pin_length_rp_ids,
-            default_cred_protect,
+            enforce_always_uv,
             max_msg_size,
+            max_pin_retries,
+            use_signature_counter,
             max_rp_ids_length,
         } = c;
 
@@ -63,11 +81,14 @@ impl From<CustomizationImpl> for TestCustomization {
             .collect::<Vec<_>>();
 
         let mut ret = Self {
+            default_cred_protect,
             default_min_pin_length,
             default_min_pin_length_rp_ids_backing_store,
             default_min_pin_length_rp_ids: vec![],
-            default_cred_protect,
+            enforce_always_uv,
             max_msg_size,
+            max_pin_retries,
+            use_signature_counter,
             max_rp_ids_length,
         };
 

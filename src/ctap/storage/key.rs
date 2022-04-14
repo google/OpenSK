@@ -115,7 +115,7 @@ make_partition! {
 
     /// The number of PIN retries.
     ///
-    /// If the entry is absent, the number of PIN retries is `MAX_PIN_RETRIES`.
+    /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
     PIN_RETRIES = 2044;
 
     /// The PIN hash and length.

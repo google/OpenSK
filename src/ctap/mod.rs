@@ -45,7 +45,7 @@ use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
     ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST, MAX_CREDENTIAL_COUNT_IN_LIST,
-    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, USE_BATCH_ATTESTATION, USE_SIGNATURE_COUNTER,
+    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, USE_BATCH_ATTESTATION,
 };
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
@@ -421,7 +421,7 @@ impl CtapState {
         &mut self,
         env: &mut impl Env,
     ) -> Result<(), Ctap2StatusCode> {
-        if USE_SIGNATURE_COUNTER {
+        if env.customization().use_signature_counter() {
             let increment = env.rng().gen_uniform_u32x8()[0] % 8 + 1;
             storage::incr_global_signature_counter(env, increment)?;
         }
@@ -1398,7 +1398,7 @@ impl CtapState {
         let mut auth_data = vec![];
         auth_data.extend(rp_id_hash);
         auth_data.push(flag_byte);
-        // The global counter is only increased if USE_SIGNATURE_COUNTER is true.
+        // The global counter is only increased if use_signature_counter() is true.
         // It uses a big-endian representation.
         let mut signature_counter = [0u8; 4];
         BigEndian::write_u32(

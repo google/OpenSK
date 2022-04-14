@@ -16,9 +16,7 @@ mod key;
 
 use crate::api::customization::Customization;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
-use crate::ctap::customization::{
-    ENFORCE_ALWAYS_UV, MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_SUPPORTED_RESIDENT_KEYS,
-};
+use crate::ctap::customization::{MAX_LARGE_BLOB_ARRAY_SIZE, MAX_SUPPORTED_RESIDENT_KEYS};
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
@@ -360,7 +358,7 @@ pub fn set_pin(
 /// Returns the number of remaining PIN retries.
 pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
     match env.store().find(key::PIN_RETRIES)? {
-        None => Ok(MAX_PIN_RETRIES),
+        None => Ok(env.customization().max_pin_retries()),
         Some(value) if value.len() == 1 => Ok(value[0]),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
     }
@@ -596,7 +594,7 @@ pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2Stat
 
 /// Returns whether alwaysUv is enabled.
 pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    if ENFORCE_ALWAYS_UV {
+    if env.customization().enforce_always_uv() {
         return Ok(true);
     }
     match env.store().find(key::ALWAYS_UV)? {
@@ -608,7 +606,7 @@ pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
 
 /// Enables alwaysUv, when disabled, and vice versa.
 pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if ENFORCE_ALWAYS_UV {
+    if env.customization().enforce_always_uv() {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
     if has_always_uv(env)? {
@@ -1061,10 +1059,13 @@ mod test {
         let mut env = TestEnv::new();
 
         // The pin retries is initially at the maximum.
-        assert_eq!(pin_retries(&mut env), Ok(MAX_PIN_RETRIES));
+        assert_eq!(
+            pin_retries(&mut env),
+            Ok(env.customization().max_pin_retries())
+        );
 
         // Decrementing the pin retries decrements the pin retries.
-        for retries in (0..MAX_PIN_RETRIES).rev() {
+        for retries in (0..env.customization().max_pin_retries()).rev() {
             decr_pin_retries(&mut env).unwrap();
             assert_eq!(pin_retries(&mut env), Ok(retries));
         }
@@ -1075,7 +1076,10 @@ mod test {
 
         // Resetting the pin retries resets the pin retries.
         reset_pin_retries(&mut env).unwrap();
-        assert_eq!(pin_retries(&mut env), Ok(MAX_PIN_RETRIES));
+        assert_eq!(
+            pin_retries(&mut env),
+            Ok(env.customization().max_pin_retries())
+        );
     }
 
     #[test]
@@ -1250,7 +1254,7 @@ mod test {
     fn test_always_uv() {
         let mut env = TestEnv::new();
 
-        if ENFORCE_ALWAYS_UV {
+        if env.customization().enforce_always_uv() {
             assert!(has_always_uv(&mut env).unwrap());
             assert_eq!(
                 toggle_always_uv(&mut env),

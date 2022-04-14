@@ -19,16 +19,6 @@
 
 use crate::ctap::data_formats::EnterpriseAttestationMode;
 
-/// Enforces the alwaysUv option.
-///
-/// When setting to true, commands require a PIN.
-/// Also, alwaysUv can not be disabled by commands.
-///
-/// A certification (additional to FIDO Alliance's) might require enforcing
-/// alwaysUv. Otherwise, users should have the choice to configure alwaysUv.
-/// Calling toggleAlwaysUv is preferred over enforcing alwaysUv here.
-pub const ENFORCE_ALWAYS_UV: bool = false;
-
 /// Allows usage of enterprise attestation.
 ///
 /// # Invariant
@@ -71,16 +61,6 @@ pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
 /// VendorFacilitated.
 pub const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 
-/// Sets the number of consecutive failed PINs before blocking interaction.
-///
-/// # Invariant
-///
-/// - CTAP2.0: Maximum PIN retries must be 8.
-/// - CTAP2.1: Maximum PIN retries must be 8 at most.
-///
-/// The fail retry counter is reset after entering the correct PIN.
-pub const MAX_PIN_RETRIES: u8 = 8;
-
 /// Enables or disables basic attestation for FIDO2.
 ///
 /// # Invariant
@@ -96,18 +76,6 @@ pub const MAX_PIN_RETRIES: u8 = 8;
 ///
 /// https://www.w3.org/TR/webauthn/#attestation
 pub const USE_BATCH_ATTESTATION: bool = false;
-
-/// Enables or disables signature counters.
-///
-/// The signature counter is currently implemented as a global counter.
-/// The specification strongly suggests to have per-credential counters.
-/// Implementing those means you can't have an infinite amount of server-side
-/// credentials anymore. Also, since counters need frequent writes on the
-/// persistent storage, we might need a flash friendly implementation. This
-/// solution is a compromise to be compatible with U2F and not wasting storage.
-///
-/// https://www.w3.org/TR/webauthn/#signature-counter
-pub const USE_SIGNATURE_COUNTER: bool = true;
 
 // ###########################################################################
 // Constants for performance optimization or adapting to different hardware.
@@ -178,7 +146,6 @@ mod test {
         } else {
             assert!(ENTERPRISE_RP_ID_LIST.is_empty());
         }
-        assert!(MAX_PIN_RETRIES <= 8);
         assert!(MAX_CRED_BLOB_LENGTH >= 32);
         if let Some(count) = MAX_CREDENTIAL_COUNT_IN_LIST {
             assert!(count >= 1);

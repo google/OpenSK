@@ -473,8 +473,6 @@ class OpenSKInstaller:
     print("Testing invariants in customization.rs...")
     self.checked_command_output(
         ["cargo", "test", "--features=std", "--lib", "customization"])
-    self.checked_command_output(
-        ["cargo", "test", "--features=std", "--lib", "api::customization"])
 
   def generate_crypto_materials(self, force_regenerate: bool):
     """Calls a shell script that generates cryptographic material."""

@@ -41,8 +41,8 @@ impl Customization for CustomizationImpl {
     }
 }
 
-#[cfg(test)]
-fn is_valid(customization: &impl Customization) -> bool {
+#[cfg(feature = "std")]
+pub fn is_valid(customization: &impl Customization) -> bool {
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
         return false;

@@ -80,3 +80,23 @@ impl From<CustomizationImpl> for TestCustomization {
         ret
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::api::customization::{is_valid, DEFAULT_CUSTOMIZATION};
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn test_invariants() {
+        let mut customization = TestCustomization::from(DEFAULT_CUSTOMIZATION.clone());
+        assert!(is_valid(&customization));
+
+        assert!(customization.default_min_pin_length_rp_ids().is_empty());
+        customization
+            .set_default_min_pin_length_rp_ids(vec!["abc.com".to_owned(), "def.com".to_owned()]);
+        assert!(customization.default_min_pin_length_rp_ids() == ["abc.com", "def.com"]);
+        customization.set_default_min_pin_length_rp_ids(vec!["example.com".to_owned()]);
+        assert!(customization.default_min_pin_length_rp_ids() == ["example.com"]);
+    }
+}

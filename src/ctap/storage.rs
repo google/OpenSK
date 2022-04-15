@@ -726,10 +726,10 @@ mod test {
     use super::*;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
     use crate::env::test::TestEnv;
-    use crypto::rng256::{Rng256, ThreadRng256};
+    use crypto::rng256::Rng256;
 
     fn create_credential_source(
-        rng: &mut ThreadRng256,
+        rng: &mut impl Rng256,
         rp_id: &str,
         user_handle: Vec<u8>,
     ) -> PublicKeyCredentialSource {

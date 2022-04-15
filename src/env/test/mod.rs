@@ -4,19 +4,33 @@ use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
-use crypto::rng256::ThreadRng256;
+use crypto::rng256::Rng256;
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 mod customization;
 mod upgrade_storage;
 
 pub struct TestEnv {
-    rng: ThreadRng256,
+    rng: TestRng256,
     user_presence: TestUserPresence,
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
     customization: TestCustomization,
+}
+
+pub struct TestRng256 {
+    rng: StdRng,
+}
+
+impl Rng256 for TestRng256 {
+    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
+        let mut result = [Default::default(); 32];
+        self.rng.fill(&mut result);
+        result
+    }
 }
 
 pub struct TestUserPresence {
@@ -48,7 +62,9 @@ fn new_storage() -> BufferStorage {
 
 impl TestEnv {
     pub fn new() -> Self {
-        let rng = ThreadRng256 {};
+        let rng = TestRng256 {
+            rng: StdRng::seed_from_u64(0),
+        };
         let user_presence = TestUserPresence {
             check: Box::new(|_| Ok(())),
         };
@@ -72,6 +88,12 @@ impl TestEnv {
     pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }
+
+    pub fn seed_rng_from_u64(&mut self, state: u64) {
+        self.rng = TestRng256 {
+            rng: StdRng::seed_from_u64(state),
+        };
+    }
 }
 
 impl TestUserPresence {
@@ -93,7 +115,7 @@ impl FirmwareProtection for TestEnv {
 }
 
 impl Env for TestEnv {
-    type Rng = ThreadRng256;
+    type Rng = TestRng256;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
     type UpgradeStorage = BufferUpgradeStorage;

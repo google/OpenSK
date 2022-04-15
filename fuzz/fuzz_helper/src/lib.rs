@@ -189,6 +189,8 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
         }
     };
 
+    env.seed_rng_from_u64(u64::arbitrary(unstructured)?);
+
     state
         .process_parsed_command(
             &mut env,

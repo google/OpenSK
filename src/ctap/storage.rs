@@ -397,15 +397,7 @@ pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> Result<(), 
 /// allowed.
 pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2StatusCode> {
     let rp_ids = env.store().find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
-        || {
-            Some(
-                env.customization()
-                    .default_min_pin_length_rp_ids()
-                    .iter()
-                    .map(|&s| String::from(s))
-                    .collect(),
-            )
-        },
+        || Some(env.customization().default_min_pin_length_rp_ids()),
         |value| deserialize_min_pin_length_rp_ids(&value),
     );
     debug_assert!(rp_ids.is_some());
@@ -418,8 +410,7 @@ pub fn set_min_pin_length_rp_ids(
     min_pin_length_rp_ids: Vec<String>,
 ) -> Result<(), Ctap2StatusCode> {
     let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-    for &rp_id in env.customization().default_min_pin_length_rp_ids().iter() {
-        let rp_id = String::from(rp_id);
+    for rp_id in env.customization().default_min_pin_length_rp_ids() {
         if !min_pin_length_rp_ids.contains(&rp_id) {
             min_pin_length_rp_ids.push(rp_id);
         }
@@ -1140,8 +1131,7 @@ mod test {
         // Changes by the setter are reflected by the getter.
         let mut rp_ids = vec![String::from("example.com")];
         assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
-        for &rp_id in env.customization().default_min_pin_length_rp_ids().iter() {
-            let rp_id = String::from(rp_id);
+        for rp_id in env.customization().default_min_pin_length_rp_ids() {
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }

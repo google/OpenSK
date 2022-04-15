@@ -18,6 +18,8 @@
 //! Our deploy script enforces the invariants.
 
 use crate::ctap::data_formats::CredentialProtectionPolicy;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 pub trait Customization {
     // ###########################################################################
@@ -66,7 +68,7 @@ pub trait Customization {
     ///
     /// Only the RP IDs listed in default_min_pin_length_rp_ids are allowed to read
     /// the minimum PIN length with the minPinLength extension.
-    fn default_min_pin_length_rp_ids(&self) -> &[&str];
+    fn default_min_pin_length_rp_ids(&self) -> Vec<String>;
 
     /// Enforces the alwaysUv option.
     ///
@@ -164,8 +166,11 @@ impl Customization for CustomizationImpl {
         self.default_min_pin_length
     }
 
-    fn default_min_pin_length_rp_ids(&self) -> &[&str] {
+    fn default_min_pin_length_rp_ids(&self) -> Vec<String> {
         self.default_min_pin_length_rp_ids
+            .iter()
+            .map(|s| String::from(*s))
+            .collect()
     }
 
     fn enforce_always_uv(&self) -> bool {
@@ -221,7 +226,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
     }

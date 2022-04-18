@@ -23,6 +23,12 @@ pub struct TestRng256 {
     rng: StdRng,
 }
 
+impl TestRng256 {
+    pub fn seed_rng_from_u64(&mut self, state: u64) {
+        self.rng = StdRng::seed_from_u64(state);
+    }
+}
+
 impl Rng256 for TestRng256 {
     fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
         let mut result = [Default::default(); 32];
@@ -87,10 +93,8 @@ impl TestEnv {
         &mut self.customization
     }
 
-    pub fn seed_rng_from_u64(&mut self, state: u64) {
-        self.rng = TestRng256 {
-            rng: StdRng::seed_from_u64(state),
-        };
+    pub fn rng(&mut self) -> &mut TestRng256 {
+        &mut self.rng
     }
 }
 

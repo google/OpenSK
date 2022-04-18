@@ -174,6 +174,8 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
     let mut env = TestEnv::new();
     let mut state = CtapState::new(&mut env, CtapInstant::new(0));
 
+    env.rng().seed_rng_from_u64(u64::arbitrary(unstructured)?);
+
     let command = match input_type {
         InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(
             AuthenticatorMakeCredentialParameters::arbitrary(unstructured)?,
@@ -188,8 +190,6 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
             unimplemented!()
         }
     };
-
-    env.seed_rng_from_u64(u64::arbitrary(unstructured)?);
 
     state
         .process_parsed_command(

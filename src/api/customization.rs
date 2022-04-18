@@ -50,7 +50,7 @@ pub trait Customization {
     ///
     /// - The minimum PIN length must be at least 4.
     /// - The minimum PIN length must be at most 63.
-    /// - default_min_pin_length_rp_ids() must be non-empty if MAX_RP_IDS_LENGTH is 0.
+    /// - default_min_pin_length_rp_ids() must be non-empty if max_rp_ids_length() is 0.
     ///
     /// Requiring longer PINs can help establish trust between users and relying
     /// parties. It makes user verification harder to break, but less convenient.
@@ -64,7 +64,7 @@ pub trait Customization {
     ///
     /// # Invariant
     ///
-    /// - default_min_pin_length_rp_ids() must be non-empty if MAX_RP_IDS_LENGTH is 0
+    /// - default_min_pin_length_rp_ids() must be non-empty if max_rp_ids_length() is 0
     ///
     /// Only the RP IDs listed in default_min_pin_length_rp_ids are allowed to read
     /// the minimum PIN length with the minPinLength extension.

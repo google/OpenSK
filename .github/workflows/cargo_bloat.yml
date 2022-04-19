@@ -1,0 +1,57 @@
+name: Binary size report
+on: pull_request
+
+jobs:
+  cargo_bloat:
+    permissions:
+      contents: write 
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      # Setup
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+      - uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-bloat
+
+      # First run: PR
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Set up OpenSK
+        run: ./setup.sh
+      - name: Run bloat on the PR
+        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> .github/workflows/bloat_output_new.txt
+
+      # Second run: PR
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+          ref: ${{ github.base_ref }}
+          path: OpenSK_base
+      - name: Install old Rust toolchain
+        working-directory: ./OpenSK_base
+        run: rustup show
+      - name: Set up OpenSK
+        working-directory: ./OpenSK_base
+        run: ./setup.sh
+      - name: Run bloat on base
+        working-directory: ./OpenSK_base
+        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
+
+      - name: Run output formatter
+        run: ./.github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt comment.txt
+      - name: Comment bloat output
+        uses: NejcZdovc/comment-pr@v1
+        with:
+          file: "comment.txt"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

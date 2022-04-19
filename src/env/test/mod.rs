@@ -1,12 +1,14 @@
 use self::upgrade_storage::BufferUpgradeStorage;
-use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
+use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
 use crypto::rng256::ThreadRng256;
+use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 
+mod customization;
 mod upgrade_storage;
 
 pub struct TestEnv {
@@ -14,7 +16,7 @@ pub struct TestEnv {
     user_presence: TestUserPresence,
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
-    customization: CustomizationImpl,
+    customization: TestCustomization,
 }
 
 pub struct TestUserPresence {
@@ -53,7 +55,7 @@ impl TestEnv {
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
-        let customization = DEFAULT_CUSTOMIZATION.clone();
+        let customization = DEFAULT_CUSTOMIZATION.into();
         TestEnv {
             rng,
             user_presence,
@@ -67,7 +69,7 @@ impl TestEnv {
         self.upgrade_storage = None;
     }
 
-    pub fn customization_mut(&mut self) -> &mut CustomizationImpl {
+    pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }
 }
@@ -97,7 +99,7 @@ impl Env for TestEnv {
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
-    type Customization = CustomizationImpl;
+    type Customization = TestCustomization;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

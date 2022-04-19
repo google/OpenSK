@@ -123,7 +123,7 @@ pub fn process_config(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ctap::customization::ENFORCE_ALWAYS_UV;
+    use crate::api::customization::Customization;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
     use crate::env::test::TestEnv;
@@ -180,7 +180,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let config_response = process_config(&mut env, &mut client_pin, config_params);
-        if ENFORCE_ALWAYS_UV {
+        if env.customization().enforce_always_uv() {
             assert_eq!(
                 config_response,
                 Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
@@ -210,7 +210,7 @@ mod test {
             pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let config_response = process_config(&mut env, &mut client_pin, config_params);
-        if ENFORCE_ALWAYS_UV {
+        if env.customization().enforce_always_uv() {
             assert_eq!(
                 config_response,
                 Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)

@@ -344,8 +344,9 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::{key_material, CREDENTIAL_ID_SIZE, USE_SIGNATURE_COUNTER};
+    use super::super::{key_material, CREDENTIAL_ID_SIZE};
     use super::*;
+    use crate::api::customization::Customization;
     use crate::clock::TEST_CLOCK_FREQUENCY_HZ;
     use crate::env::test::TestEnv;
     use crypto::Hash256;
@@ -643,8 +644,8 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
-    fn check_signature_counter(response: &[u8; 4], signature_counter: u32) {
-        if USE_SIGNATURE_COUNTER {
+    fn check_signature_counter(env: &mut impl Env, response: &[u8; 4], signature_counter: u32) {
+        if env.customization().use_signature_counter() {
             assert_eq!(u32::from_be_bytes(*response), signature_counter);
         } else {
             assert_eq!(response, &[0x00, 0x00, 0x00, 0x00]);
@@ -673,9 +674,11 @@ mod test {
             Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
                 .unwrap();
         assert_eq!(response[0], 0x01);
+        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_signature_counter(
+            &mut env,
             array_ref!(response, 1, 4),
-            storage::global_signature_counter(&mut env).unwrap(),
+            global_signature_counter,
         );
     }
 
@@ -706,9 +709,11 @@ mod test {
         )
         .unwrap();
         assert_eq!(response[0], 0x01);
+        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_signature_counter(
+            &mut env,
             array_ref!(response, 1, 4),
-            storage::global_signature_counter(&mut env).unwrap(),
+            global_signature_counter,
         );
     }
 

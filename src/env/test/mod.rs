@@ -39,6 +39,24 @@ impl Rng256 for TestRng256 {
     }
 }
 
+pub struct TestRng256 {
+    rng: StdRng,
+}
+
+impl TestRng256 {
+    pub fn seed_rng_from_u64(&mut self, state: u64) {
+        self.rng = StdRng::seed_from_u64(state);
+    }
+}
+
+impl Rng256 for TestRng256 {
+    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
+        let mut result = [Default::default(); 32];
+        self.rng.fill(&mut result);
+        result
+    }
+}
+
 pub struct TestUserPresence {
     check: Box<dyn Fn(Channel) -> Result<(), Ctap2StatusCode>>,
 }

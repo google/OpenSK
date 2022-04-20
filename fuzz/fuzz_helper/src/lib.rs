@@ -128,25 +128,40 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
 // Interprets the raw data as any ctap command (including the command byte) and
 // invokes message splitting, packet processing at CTAP HID level and response assembling
 // using an initialized and allocated channel.
-pub fn process_ctap_any_type(data: &[u8]) {
+pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
+    let mut unstructured = Unstructured::new(data);
+
+    let mut env = TestEnv::new();
+    env.rng()
+        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+
+    let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(TestEnv::new(), CtapInstant::new(0));
+    let mut ctap = Ctap::new(env, CtapInstant::new(0));
     let cid = initialize(&mut ctap);
     // Wrap input as message with the allocated cid.
     let mut command = cid.to_vec();
     command.extend(data);
     process_message(&command, &mut ctap);
+    Ok(())
 }
 
 // Interprets the raw data as of the given input type and
 // invokes message splitting, packet processing at CTAP HID level and response assembling
 // using an initialized and allocated channel.
-pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
+pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
+    let mut unstructured = Unstructured::new(data);
+
+    let mut env = TestEnv::new();
+    env.rng()
+        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+
+    let data = unstructured.take_rest();
     if !is_type(data, input_type) {
-        return;
+        return Ok(());
     }
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(TestEnv::new(), CtapInstant::new(0));
+    let mut ctap = Ctap::new(env, CtapInstant::new(0));
     let cid = initialize(&mut ctap);
     // Wrap input as message with allocated cid and command type.
     let mut command = cid.to_vec();
@@ -166,6 +181,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) {
     }
     command.extend(data);
     process_message(&command, &mut ctap);
+    Ok(())
 }
 
 pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
@@ -204,8 +220,14 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
 }
 
 // Splits the given data as HID packets and reassembles it, verifying that the original input message is reconstructed.
-pub fn split_assemble_hid_packets(data: &[u8]) {
+pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
+    let mut unstructured = Unstructured::new(data);
+
     let mut env = TestEnv::new();
+    env.rng()
+        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+
+    let data = unstructured.take_rest();
     let message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message.clone()) {
         let mut assembler = MessageAssembler::new();
@@ -223,4 +245,5 @@ pub fn split_assemble_hid_packets(data: &[u8]) {
             );
         }
     }
+    Ok(())
 }

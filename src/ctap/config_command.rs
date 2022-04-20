@@ -14,10 +14,10 @@
 
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorConfigParameters;
-use super::customization::ENTERPRISE_ATTESTATION_MODE;
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
+use crate::api::customization::Customization;
 use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec;
@@ -26,7 +26,7 @@ use alloc::vec;
 fn process_enable_enterprise_attestation(
     env: &mut impl Env,
 ) -> Result<ResponseData, Ctap2StatusCode> {
-    if ENTERPRISE_ATTESTATION_MODE.is_some() {
+    if env.customization().enterprise_attestation_mode().is_some() {
         storage::enable_enterprise_attestation(env)?;
         Ok(ResponseData::AuthenticatorConfig)
     } else {
@@ -144,7 +144,7 @@ mod test {
         };
         let config_response = process_config(&mut env, &mut client_pin, config_params);
 
-        if ENTERPRISE_ATTESTATION_MODE.is_some() {
+        if env.customization().enterprise_attestation_mode().is_some() {
             assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
             assert_eq!(storage::enterprise_attestation(&mut env), Ok(true));
         } else {

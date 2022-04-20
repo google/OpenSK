@@ -44,8 +44,7 @@ use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use self::customization::{
-    ENTERPRISE_ATTESTATION_MODE, ENTERPRISE_RP_ID_LIST, MAX_CREDENTIAL_COUNT_IN_LIST,
-    MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE, USE_BATCH_ATTESTATION,
+    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
 };
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
@@ -684,8 +683,10 @@ impl CtapState {
 
         let rp_id = rp.rp_id;
         let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
-            let authenticator_mode =
-                ENTERPRISE_ATTESTATION_MODE.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+            let authenticator_mode = env
+                .customization()
+                .enterprise_attestation_mode()
+                .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
             if !storage::enterprise_attestation(env)? {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
@@ -696,7 +697,7 @@ impl CtapState {
                 (
                     EnterpriseAttestationMode::PlatformManaged,
                     EnterpriseAttestationMode::PlatformManaged,
-                ) => ENTERPRISE_RP_ID_LIST.contains(&rp_id.as_str()),
+                ) => env.customization().enterprise_rp_id_list().contains(&rp_id),
                 _ => true,
             }
         } else {
@@ -859,7 +860,7 @@ impl CtapState {
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
 
-        let (signature, x5c) = if USE_BATCH_ATTESTATION || ep_att {
+        let (signature, x5c) = if env.customization().use_batch_attestation() || ep_att {
             let attestation_private_key = storage::attestation_private_key(env)?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             let attestation_key =
@@ -1180,7 +1181,7 @@ impl CtapState {
             versions.insert(0, String::from(U2F_VERSION_STRING))
         }
         let mut options = vec![];
-        if ENTERPRISE_ATTESTATION_MODE.is_some() {
+        if env.customization().enterprise_attestation_mode().is_some() {
             options.push((String::from("ep"), storage::enterprise_attestation(env)?));
         }
         options.append(&mut vec![
@@ -1323,7 +1324,7 @@ impl CtapState {
             #[cfg(feature = "with_ctap1")]
             let need_certificate = true;
             #[cfg(not(feature = "with_ctap1"))]
-            let need_certificate = USE_BATCH_ATTESTATION;
+            let need_certificate = env.customization().use_batch_attestation();
 
             if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
                 || !env.firmware_protection().lock()
@@ -1510,7 +1511,7 @@ mod test {
                 ],
             0x03 => storage::aaguid(&mut env).unwrap(),
             0x04 => cbor_map_options! {
-                "ep" => ENTERPRISE_ATTESTATION_MODE.map(|_| false),
+                "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
                 "up" => true,
                 "alwaysUv" => false,

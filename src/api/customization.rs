@@ -301,10 +301,8 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         if customization.enterprise_rp_id_list().is_empty() {
             return false;
         }
-    } else {
-        if !customization.enterprise_rp_id_list().is_empty() {
-            return false;
-        }
+    } else if !customization.enterprise_rp_id_list().is_empty() {
+        return false;
     }
 
     // Max pin retries must be less or equal than 8.

@@ -110,12 +110,12 @@ make_partition! {
 
     /// The minimum PIN length.
     ///
-    /// If the entry is absent, the minimum PIN length is `DEFAULT_MIN_PIN_LENGTH`.
+    /// If the entry is absent, the minimum PIN length is `Customization::default_min_pin_length()`.
     MIN_PIN_LENGTH = 2043;
 
     /// The number of PIN retries.
     ///
-    /// If the entry is absent, the number of PIN retries is `MAX_PIN_RETRIES`.
+    /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
     PIN_RETRIES = 2044;
 
     /// The PIN hash and length.

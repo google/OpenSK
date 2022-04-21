@@ -14,11 +14,9 @@
 
 mod key;
 
+use crate::api::customization::Customization;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
-use crate::ctap::customization::{
-    DEFAULT_MIN_PIN_LENGTH, DEFAULT_MIN_PIN_LENGTH_RP_IDS, ENFORCE_ALWAYS_UV,
-    MAX_LARGE_BLOB_ARRAY_SIZE, MAX_PIN_RETRIES, MAX_RP_IDS_LENGTH, MAX_SUPPORTED_RESIDENT_KEYS,
-};
+use crate::ctap::customization::{MAX_LARGE_BLOB_ARRAY_SIZE, MAX_SUPPORTED_RESIDENT_KEYS};
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
@@ -360,7 +358,7 @@ pub fn set_pin(
 /// Returns the number of remaining PIN retries.
 pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
     match env.store().find(key::PIN_RETRIES)? {
-        None => Ok(MAX_PIN_RETRIES),
+        None => Ok(env.customization().max_pin_retries()),
         Some(value) if value.len() == 1 => Ok(value[0]),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
     }
@@ -384,7 +382,7 @@ pub fn reset_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 /// Returns the minimum PIN length.
 pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
     match env.store().find(key::MIN_PIN_LENGTH)? {
-        None => Ok(DEFAULT_MIN_PIN_LENGTH),
+        None => Ok(env.customization().default_min_pin_length()),
         Some(value) if value.len() == 1 => Ok(value[0]),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
     }
@@ -399,14 +397,7 @@ pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> Result<(), 
 /// allowed.
 pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2StatusCode> {
     let rp_ids = env.store().find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
-        || {
-            Some(
-                DEFAULT_MIN_PIN_LENGTH_RP_IDS
-                    .iter()
-                    .map(|&s| String::from(s))
-                    .collect(),
-            )
-        },
+        || Some(env.customization().default_min_pin_length_rp_ids()),
         |value| deserialize_min_pin_length_rp_ids(&value),
     );
     debug_assert!(rp_ids.is_some());
@@ -419,13 +410,12 @@ pub fn set_min_pin_length_rp_ids(
     min_pin_length_rp_ids: Vec<String>,
 ) -> Result<(), Ctap2StatusCode> {
     let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
-    for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
-        let rp_id = String::from(rp_id);
+    for rp_id in env.customization().default_min_pin_length_rp_ids() {
         if !min_pin_length_rp_ids.contains(&rp_id) {
             min_pin_length_rp_ids.push(rp_id);
         }
     }
-    if min_pin_length_rp_ids.len() > MAX_RP_IDS_LENGTH {
+    if min_pin_length_rp_ids.len() > env.customization().max_rp_ids_length() {
         return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
     }
     Ok(env.store().insert(
@@ -595,7 +585,7 @@ pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2Stat
 
 /// Returns whether alwaysUv is enabled.
 pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    if ENFORCE_ALWAYS_UV {
+    if env.customization().enforce_always_uv() {
         return Ok(true);
     }
     match env.store().find(key::ALWAYS_UV)? {
@@ -607,7 +597,7 @@ pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
 
 /// Enables alwaysUv, when disabled, and vice versa.
 pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if ENFORCE_ALWAYS_UV {
+    if env.customization().enforce_always_uv() {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
     if has_always_uv(env)? {
@@ -736,10 +726,10 @@ mod test {
     use super::*;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
     use crate::env::test::TestEnv;
-    use crypto::rng256::{Rng256, ThreadRng256};
+    use crypto::rng256::Rng256;
 
     fn create_credential_source(
-        rng: &mut ThreadRng256,
+        rng: &mut impl Rng256,
         rp_id: &str,
         user_handle: Vec<u8>,
     ) -> PublicKeyCredentialSource {
@@ -1060,10 +1050,13 @@ mod test {
         let mut env = TestEnv::new();
 
         // The pin retries is initially at the maximum.
-        assert_eq!(pin_retries(&mut env), Ok(MAX_PIN_RETRIES));
+        assert_eq!(
+            pin_retries(&mut env),
+            Ok(env.customization().max_pin_retries())
+        );
 
         // Decrementing the pin retries decrements the pin retries.
-        for retries in (0..MAX_PIN_RETRIES).rev() {
+        for retries in (0..env.customization().max_pin_retries()).rev() {
             decr_pin_retries(&mut env).unwrap();
             assert_eq!(pin_retries(&mut env), Ok(retries));
         }
@@ -1074,7 +1067,10 @@ mod test {
 
         // Resetting the pin retries resets the pin retries.
         reset_pin_retries(&mut env).unwrap();
-        assert_eq!(pin_retries(&mut env), Ok(MAX_PIN_RETRIES));
+        assert_eq!(
+            pin_retries(&mut env),
+            Ok(env.customization().max_pin_retries())
+        );
     }
 
     #[test]
@@ -1111,7 +1107,10 @@ mod test {
         let mut env = TestEnv::new();
 
         // The minimum PIN length is initially at the default.
-        assert_eq!(min_pin_length(&mut env).unwrap(), DEFAULT_MIN_PIN_LENGTH);
+        assert_eq!(
+            min_pin_length(&mut env).unwrap(),
+            env.customization().default_min_pin_length()
+        );
 
         // Changes by the setter are reflected by the getter..
         let new_min_pin_length = 8;
@@ -1126,14 +1125,13 @@ mod test {
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
             min_pin_length_rp_ids(&mut env).unwrap(),
-            DEFAULT_MIN_PIN_LENGTH_RP_IDS
+            env.customization().default_min_pin_length_rp_ids()
         );
 
         // Changes by the setter are reflected by the getter.
         let mut rp_ids = vec![String::from("example.com")];
         assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
-        for &rp_id in DEFAULT_MIN_PIN_LENGTH_RP_IDS.iter() {
-            let rp_id = String::from(rp_id);
+        for rp_id in env.customization().default_min_pin_length_rp_ids() {
             if !rp_ids.contains(&rp_id) {
                 rp_ids.push(rp_id);
             }
@@ -1246,7 +1244,7 @@ mod test {
     fn test_always_uv() {
         let mut env = TestEnv::new();
 
-        if ENFORCE_ALWAYS_UV {
+        if env.customization().enforce_always_uv() {
             assert!(has_always_uv(&mut env).unwrap());
             assert_eq!(
                 toggle_always_uv(&mut env),

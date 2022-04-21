@@ -19,46 +19,6 @@
 
 use crate::ctap::data_formats::EnterpriseAttestationMode;
 
-// ###########################################################################
-// Constants for adjusting privacy and protection levels.
-// ###########################################################################
-
-/// Sets the initial minimum PIN length in code points.
-///
-/// # Invariant
-///
-/// - The minimum PIN length must be at least 4.
-/// - The minimum PIN length must be at most 63.
-/// - DEFAULT_MIN_PIN_LENGTH_RP_IDS must be non-empty if MAX_RP_IDS_LENGTH is 0.
-///
-/// Requiring longer PINs can help establish trust between users and relying
-/// parties. It makes user verification harder to break, but less convenient.
-/// NIST recommends at least 6-digit PINs in section 5.1.9.1:
-/// https://pages.nist.gov/800-63-3/sp800-63b.html
-///
-/// Reset reverts the minimum PIN length to this DEFAULT_MIN_PIN_LENGTH.
-pub const DEFAULT_MIN_PIN_LENGTH: u8 = 4;
-
-/// Lists relying parties that can read the minimum PIN length.
-///
-/// # Invariant
-///
-/// - DEFAULT_MIN_PIN_LENGTH_RP_IDS must be non-empty if MAX_RP_IDS_LENGTH is 0
-///
-/// Only the RP IDs listed in DEFAULT_MIN_PIN_LENGTH_RP_IDS are allowed to read
-/// the minimum PIN length with the minPinLength extension.
-pub const DEFAULT_MIN_PIN_LENGTH_RP_IDS: &[&str] = &[];
-
-/// Enforces the alwaysUv option.
-///
-/// When setting to true, commands require a PIN.
-/// Also, alwaysUv can not be disabled by commands.
-///
-/// A certification (additional to FIDO Alliance's) might require enforcing
-/// alwaysUv. Otherwise, users should have the choice to configure alwaysUv.
-/// Calling toggleAlwaysUv is preferred over enforcing alwaysUv here.
-pub const ENFORCE_ALWAYS_UV: bool = false;
-
 /// Allows usage of enterprise attestation.
 ///
 /// # Invariant
@@ -101,16 +61,6 @@ pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
 /// VendorFacilitated.
 pub const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
 
-/// Sets the number of consecutive failed PINs before blocking interaction.
-///
-/// # Invariant
-///
-/// - CTAP2.0: Maximum PIN retries must be 8.
-/// - CTAP2.1: Maximum PIN retries must be 8 at most.
-///
-/// The fail retry counter is reset after entering the correct PIN.
-pub const MAX_PIN_RETRIES: u8 = 8;
-
 /// Enables or disables basic attestation for FIDO2.
 ///
 /// # Invariant
@@ -126,18 +76,6 @@ pub const MAX_PIN_RETRIES: u8 = 8;
 ///
 /// https://www.w3.org/TR/webauthn/#attestation
 pub const USE_BATCH_ATTESTATION: bool = false;
-
-/// Enables or disables signature counters.
-///
-/// The signature counter is currently implemented as a global counter.
-/// The specification strongly suggests to have per-credential counters.
-/// Implementing those means you can't have an infinite amount of server-side
-/// credentials anymore. Also, since counters need frequent writes on the
-/// persistent storage, we might need a flash friendly implementation. This
-/// solution is a compromise to be compatible with U2F and not wasting storage.
-///
-/// https://www.w3.org/TR/webauthn/#signature-counter
-pub const USE_SIGNATURE_COUNTER: bool = true;
 
 // ###########################################################################
 // Constants for performance optimization or adapting to different hardware.
@@ -171,21 +109,6 @@ pub const MAX_CREDENTIAL_COUNT_IN_LIST: Option<usize> = None;
 /// - The array must fit into the shards reserved in storage/key.rs.
 pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize = 2048;
 
-/// Limits the number of RP IDs that can change the minimum PIN length.
-///
-/// # Invariant
-///
-/// - If this value is 0, DEFAULT_MIN_PIN_LENGTH_RP_IDS must be non-empty.
-///
-/// You can use this constant to have an upper limit in storage requirements.
-/// This might be useful if you want to more reliably predict the remaining
-/// storage. Stored string can still be of arbitrary length though, until RP ID
-/// truncation is implemented.
-/// Outside of memory considerations, you can set this value to 0 if only RP IDs
-/// in DEFAULT_MIN_PIN_LENGTH_RP_IDS should be allowed to change the minimum PIN
-/// length.
-pub const MAX_RP_IDS_LENGTH: usize = 8;
-
 /// Sets the number of resident keys you can store.
 ///
 /// # Invariant
@@ -217,22 +140,16 @@ mod test {
         // Two invariants are currently tested in different files:
         // - storage.rs: if MAX_LARGE_BLOB_ARRAY_SIZE fits the shards
         // - storage/key.rs: if MAX_SUPPORTED_RESIDENT_KEYS fits CREDENTIALS
-        assert!(DEFAULT_MIN_PIN_LENGTH >= 4);
-        assert!(DEFAULT_MIN_PIN_LENGTH <= 63);
         assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
         if let Some(EnterpriseAttestationMode::VendorFacilitated) = ENTERPRISE_ATTESTATION_MODE {
             assert!(!ENTERPRISE_RP_ID_LIST.is_empty());
         } else {
             assert!(ENTERPRISE_RP_ID_LIST.is_empty());
         }
-        assert!(MAX_PIN_RETRIES <= 8);
         assert!(MAX_CRED_BLOB_LENGTH >= 32);
         if let Some(count) = MAX_CREDENTIAL_COUNT_IN_LIST {
             assert!(count >= 1);
         }
         assert!(MAX_LARGE_BLOB_ARRAY_SIZE >= 1024);
-        if MAX_RP_IDS_LENGTH == 0 {
-            assert!(!DEFAULT_MIN_PIN_LENGTH_RP_IDS.is_empty());
-        }
     }
 }

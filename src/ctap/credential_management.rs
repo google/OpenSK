@@ -364,7 +364,6 @@ mod test {
     use super::super::CtapState;
     use super::*;
     use crate::env::test::TestEnv;
-    use crate::env::Env;
     use crypto::rng256::Rng256;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);

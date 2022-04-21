@@ -50,5 +50,5 @@ lto = true # Link Time Optimization usually reduces size of binaries and static 
 [profile.release]
 panic = "abort"
 lto = true # Link Time Optimization usually reduces size of binaries and static libraries
-opt-level = 3
+opt-level = "z"
 codegen-units = 1

@@ -20,25 +20,22 @@ cd "$(dirname "$0")"
 # Result file is $3
 
 WARNING="Note: numbers above are a result of guesswork. They are not 100% correct and never will be."
-
 NEW_SIZE=$(cat "$1" | sed -nr 's/.*100.0% (.*)KiB .text.*/\1/p')
 OLD_SIZE=$(cat "$2" | sed -nr 's/.*100.0% (.*)KiB .text.*/\1/p')
-echo "Binary size:
-\`\`\`diff
-- $OLD_SIZE kiB
-+ $NEW_SIZE kiB
-\`\`\`" > "$3"
-
-echo "<details>
-<summary>Output for cargo bloat</summary>
-<br>
-<pre>" >> "$3"
-
-echo "<h3>Including PR</h3>" >> "$3"
-cat "$1" | sed "s/$WARNING//" >> "$3"
-echo "<h3>Base branch</h3>" >> "$3"
-cat "$2" | sed "s/$WARNING//" >> "$3"
 
 echo "
-</pre>
-</details>" >> "$3"
+OLD $OLD_SIZE kiB
+NEW $NEW_SIZE kiB" > "$3"
+
+echo "
+Output of cargo bloat
+======================
+" >> "$3"
+
+echo "Including PR" >> "$3"
+cat "$1" >> "$3"
+echo "Base branch" >> "$3"
+cat "$2" >> "$3"
+
+COMMENT="$(cat $3 | sed "s/$WARNING//g" | sed 's/%/%25/g' | sed -z 's/\n/%0A/g')"
+echo "$COMMENT" > "$3"

@@ -3,10 +3,6 @@ on: pull_request
 
 jobs:
   cargo_bloat:
-    permissions:
-      contents: write 
-      issues: write
-      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       # Setup
@@ -48,10 +44,6 @@ jobs:
         run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
 
       - name: Run output formatter
-        run: ./.github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt comment.txt
-      - name: Comment bloat output
-        uses: NejcZdovc/comment-pr@v1
-        with:
-          file: "comment.txt"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./.github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt bloat_comment.md
+      - name: Run workflow command
+        run: echo "::notice file=.github/workflows/cargo_bloat.yml,title=Binary size::$(cat .github/workflows/bloat_comment.md)"

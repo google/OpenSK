@@ -122,6 +122,9 @@ pub trait Customization {
     /// VendorFacilitated.
     fn enterprise_rp_id_list(&self) -> Vec<String>;
 
+    // Returns whether the rp_id is contained in enterprise_rp_id_list().
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool;
+
     /// Maximum message size send for CTAP commands.
     ///
     /// The maximum value is 7609, as HID packets can not encode longer messages.
@@ -252,6 +255,10 @@ impl Customization for CustomizationImpl {
             .collect()
     }
 
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool {
+        self.enterprise_rp_id_list.contains(&rp_id)
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
     }
@@ -295,13 +302,11 @@ pub fn is_valid(customization: &impl Customization) -> bool {
     }
 
     // enterprise_rp_id_list() should be non-empty in vendor facilitated mode, and empty otherwise.
-    if let Some(EnterpriseAttestationMode::VendorFacilitated) =
-        customization.enterprise_attestation_mode()
+    if matches!(
+        customization.enterprise_attestation_mode(),
+        Some(EnterpriseAttestationMode::VendorFacilitated)
+    ) == customization.enterprise_rp_id_list().is_empty()
     {
-        if customization.enterprise_rp_id_list().is_empty() {
-            return false;
-        }
-    } else if !customization.enterprise_rp_id_list().is_empty() {
         return false;
     }
 

@@ -697,7 +697,7 @@ impl CtapState {
                 (
                     EnterpriseAttestationMode::PlatformManaged,
                     EnterpriseAttestationMode::PlatformManaged,
-                ) => env.customization().enterprise_rp_id_list().contains(&rp_id),
+                ) => env.customization().is_enterprise_rp_id(&rp_id),
                 _ => true,
             }
         } else {

@@ -42,6 +42,10 @@ impl Customization for TestCustomization {
         self.enterprise_rp_id_list.clone()
     }
 
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool {
+        self.enterprise_rp_id_list.iter().any(|id| id == rp_id)
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
     }

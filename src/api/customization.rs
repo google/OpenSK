@@ -120,6 +120,7 @@ pub trait Customization {
     ///
     /// This list is only considered if the enterprise attestation mode is
     /// VendorFacilitated.
+    #[cfg(feature = "std")]
     fn enterprise_rp_id_list(&self) -> Vec<String>;
 
     // Returns whether the rp_id is contained in enterprise_rp_id_list().
@@ -248,6 +249,7 @@ impl Customization for CustomizationImpl {
         self.enterprise_attestation_mode
     }
 
+    #[cfg(feature = "std")]
     fn enterprise_rp_id_list(&self) -> Vec<String> {
         self.enterprise_rp_id_list
             .iter()

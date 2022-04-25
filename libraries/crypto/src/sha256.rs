@@ -266,8 +266,8 @@ mod test {
         let hash = hex::decode("32beecb58a128af8248504600bd203dcc676adf41045300485655e6b8780a01d")
             .unwrap();
 
-        for i in 0..512 {
-            for j in i..512 {
+        for i in (0..512).step_by(16) {
+            for j in (i..512).step_by(16) {
                 let mut h = Sha256::new();
                 h.update(&input[..i]);
                 h.update(&input[i..j]);

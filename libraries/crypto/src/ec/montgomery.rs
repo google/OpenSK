@@ -781,6 +781,8 @@ pub mod test {
             .iter()
             .flatten()
             .flatten()
+            // The original array is 2x15x2, we try to skip irregularly.
+            .step_by(7)
             .cloned()
             .collect();
         values.push(Montgomery::ONE);

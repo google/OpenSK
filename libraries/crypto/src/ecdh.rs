@@ -101,11 +101,7 @@ mod test {
     use super::super::rng256::ThreadRng256;
     use super::*;
 
-    // Run more test iterations in release mode, as the code should be faster.
-    #[cfg(not(debug_assertions))]
-    const ITERATIONS: u32 = 10000;
-    #[cfg(debug_assertions)]
-    const ITERATIONS: u32 = 500;
+    const ITERATIONS: u32 = 10;
 
     /** Test that key generation creates valid keys **/
     #[test]

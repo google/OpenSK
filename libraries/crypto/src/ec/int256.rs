@@ -664,31 +664,13 @@ pub mod test {
         ],
     };
 
-    // Generate all 256-bit integers that have exactly one bit set to 1.
+    /// Generates some 256-bit integers that have exactly one bit set to 1.
     pub fn get_1bit_one_test_values() -> Vec<Int256> {
         let mut values = Vec::new();
-        for &byte in &[0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80] {
+        for &byte in &[0x01, 0x80] {
             for &int in &[byte, byte << 8, byte << 16, byte << 24] {
                 values.push(Int256 {
                     digits: [int, 0, 0, 0, 0, 0, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, int, 0, 0, 0, 0, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, 0, int, 0, 0, 0, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, 0, 0, int, 0, 0, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, 0, 0, 0, int, 0, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, 0, 0, 0, 0, int, 0, 0],
-                });
-                values.push(Int256 {
-                    digits: [0, 0, 0, 0, 0, 0, int, 0],
                 });
                 values.push(Int256 {
                     digits: [0, 0, 0, 0, 0, 0, 0, int],
@@ -698,7 +680,7 @@ pub mod test {
         values
     }
 
-    // Generate all 256-bit integers that have exactly one bit set to 0.
+    /// Generates some 256-bit integers that have exactly one bit set to 0.
     pub fn get_1bit_zero_test_values() -> Vec<Int256> {
         let values: Vec<Int256> = get_1bit_one_test_values()
             .iter()
@@ -718,6 +700,8 @@ pub mod test {
             .iter()
             .flatten()
             .flatten()
+            // The original array is 2x15x2, we try to skip irregularly.
+            .step_by(7)
             .map(|x| x.montgomery_to_field().to_int())
             .collect();
         values.append(&mut get_1bit_one_test_values());
@@ -737,7 +721,6 @@ pub mod test {
     #[test]
     fn test_1bit_one() {
         let values = get_1bit_one_test_values();
-        assert_eq!(values.len(), 256);
         for x in &values {
             assert_eq!(x.hamming_weight(), 1);
         }
@@ -746,7 +729,6 @@ pub mod test {
     #[test]
     fn test_1bit_zero() {
         let values = get_1bit_zero_test_values();
-        assert_eq!(values.len(), 256);
         for x in &values {
             assert_eq!(x.hamming_weight(), 255);
         }
@@ -1021,11 +1003,7 @@ pub mod test {
             let mut result = Int256::ONE;
             let mut power = Int256::ZERO;
 
-            // This test is super slow with debug assertions enabled.
-            #[cfg(not(debug_assertions))]
-            const ITERATIONS: u32 = 100;
-            #[cfg(debug_assertions)]
-            const ITERATIONS: u32 = 5;
+            const ITERATIONS: u32 = 3;
 
             for _ in 0..ITERATIONS {
                 assert_eq!(x.modpow(&power, &MODULUS), result);
@@ -1103,10 +1081,6 @@ pub mod test {
                 let mut result = *x;
                 let mut carries = 0;
 
-                // This test is super slow with debug assertions enabled.
-                #[cfg(not(debug_assertions))]
-                const ITERATIONS: u32 = 1000;
-                #[cfg(debug_assertions)]
                 const ITERATIONS: u32 = 5;
 
                 for factor in 0..ITERATIONS {

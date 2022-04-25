@@ -601,7 +601,7 @@ pub mod test {
     fn get_test_values_affine() -> Vec<PointAffine> {
         let mut values = Vec::new();
         for table in 0..2 {
-            for index in 0..15 {
+            for index in (0..15).step_by(3) {
                 values.push(precomputed(table, index));
             }
         }
@@ -1005,7 +1005,10 @@ pub mod test {
     fn test_scalar_base_mul_is_scalar_mul_generator() {
         let gen = precomputed(0, 0);
         // TODO: more scalars
-        for scalar in &super::super::exponent256::test::get_test_values() {
+        for scalar in super::super::exponent256::test::get_test_values()
+            .iter()
+            .step_by(3)
+        {
             assert_eq!(
                 PointProjective::scalar_base_mul(scalar),
                 gen.scalar_mul(scalar)
@@ -1017,7 +1020,10 @@ pub mod test {
     fn test_base_point_mul_is_mul_generator() {
         let gen = precomputed(0, 0);
         // TODO: more scalars
-        for scalar in &super::super::exponent256::test::get_test_values() {
+        for scalar in super::super::exponent256::test::get_test_values()
+            .iter()
+            .step_by(3)
+        {
             assert_eq!(
                 PointP256::base_point_mul(scalar),
                 PointP256::from_affine(&gen).mul(scalar)

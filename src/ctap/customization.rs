@@ -17,66 +17,6 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
-use crate::ctap::data_formats::EnterpriseAttestationMode;
-
-/// Allows usage of enterprise attestation.
-///
-/// # Invariant
-///
-/// - Enterprise and batch attestation can not both be active.
-/// - If the mode is VendorFacilitated, ENTERPRISE_RP_ID_LIST must be non-empty.
-///
-/// For privacy reasons, it is disabled by default. You can choose between:
-/// - EnterpriseAttestationMode::VendorFacilitated
-/// - EnterpriseAttestationMode::PlatformManaged
-///
-/// VendorFacilitated
-/// Enterprise attestation is restricted to ENTERPRISE_RP_ID_LIST. Add your
-/// enterprises domain, e.g. "example.com", to the list below.
-///
-/// PlatformManaged
-/// All relying parties can request an enterprise attestation. The authenticator
-/// trusts the platform to filter requests.
-///
-/// To enable the feature, send the subcommand enableEnterpriseAttestation in
-/// AuthenticatorConfig. An enterprise might want to customize the type of
-/// attestation that is used. OpenSK defaults to batch attestation. Configuring
-/// individual certificates then makes authenticators identifiable.
-///
-/// OpenSK prevents activating batch and enterprise attestation together. The
-/// current implementation uses the same key material at the moment, and these
-/// two modes have conflicting privacy guarantees.
-/// If you implement your own enterprise attestation mechanism, and you want
-/// batch attestation at the same time, proceed carefully and remove the
-/// assertion.
-pub const ENTERPRISE_ATTESTATION_MODE: Option<EnterpriseAttestationMode> = None;
-
-/// Lists relying party IDs that can perform enterprise attestation.
-///
-/// # Invariant
-///
-/// - If the mode is VendorFacilitated, ENTERPRISE_RP_ID_LIST must be non-empty.
-///
-/// This list is only considered if the enterprise attestation mode is
-/// VendorFacilitated.
-pub const ENTERPRISE_RP_ID_LIST: &[&str] = &[];
-
-/// Enables or disables basic attestation for FIDO2.
-///
-/// # Invariant
-///
-/// - Enterprise and batch attestation can not both be active (see above).
-///
-/// The basic attestation uses the signing key configured with a vendor command
-/// as a batch key. If you turn batch attestation on, be aware that it is your
-/// responsibility to safely generate and store the key material. Also, the
-/// batches must have size of at least 100k authenticators before using new key
-/// material.
-/// U2F is unaffected by this setting.
-///
-/// https://www.w3.org/TR/webauthn/#attestation
-pub const USE_BATCH_ATTESTATION: bool = false;
-
 // ###########################################################################
 // Constants for performance optimization or adapting to different hardware.
 //
@@ -140,12 +80,6 @@ mod test {
         // Two invariants are currently tested in different files:
         // - storage.rs: if MAX_LARGE_BLOB_ARRAY_SIZE fits the shards
         // - storage/key.rs: if MAX_SUPPORTED_RESIDENT_KEYS fits CREDENTIALS
-        assert!(!USE_BATCH_ATTESTATION || ENTERPRISE_ATTESTATION_MODE.is_none());
-        if let Some(EnterpriseAttestationMode::VendorFacilitated) = ENTERPRISE_ATTESTATION_MODE {
-            assert!(!ENTERPRISE_RP_ID_LIST.is_empty());
-        } else {
-            assert!(ENTERPRISE_RP_ID_LIST.is_empty());
-        }
         assert!(MAX_CRED_BLOB_LENGTH >= 32);
         if let Some(count) = MAX_CREDENTIAL_COUNT_IN_LIST {
             assert!(count >= 1);

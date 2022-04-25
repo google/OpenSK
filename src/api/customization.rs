@@ -17,7 +17,7 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
-use crate::ctap::data_formats::CredentialProtectionPolicy;
+use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -80,6 +80,52 @@ pub trait Customization {
     /// Calling toggleAlwaysUv is preferred over enforcing alwaysUv here.
     fn enforce_always_uv(&self) -> bool;
 
+    /// Allows usage of enterprise attestation.
+    ///
+    /// # Invariant
+    ///
+    /// - Enterprise and batch attestation can not both be active.
+    /// - If the mode is VendorFacilitated, enterprise_attestation_mode() must be non-empty.
+    ///
+    /// For privacy reasons, it is disabled by default. You can choose between:
+    /// - EnterpriseAttestationMode::VendorFacilitated
+    /// - EnterpriseAttestationMode::PlatformManaged
+    ///
+    /// VendorFacilitated
+    /// Enterprise attestation is restricted to enterprise_attestation_mode(). Add your
+    /// enterprises domain, e.g. "example.com", to the list below.
+    ///
+    /// PlatformManaged
+    /// All relying parties can request an enterprise attestation. The authenticator
+    /// trusts the platform to filter requests.
+    ///
+    /// To enable the feature, send the subcommand enableEnterpriseAttestation in
+    /// AuthenticatorConfig. An enterprise might want to customize the type of
+    /// attestation that is used. OpenSK defaults to batch attestation. Configuring
+    /// individual certificates then makes authenticators identifiable.
+    ///
+    /// OpenSK prevents activating batch and enterprise attestation together. The
+    /// current implementation uses the same key material at the moment, and these
+    /// two modes have conflicting privacy guarantees.
+    /// If you implement your own enterprise attestation mechanism, and you want
+    /// batch attestation at the same time, proceed carefully and remove the
+    /// assertion.
+    fn enterprise_attestation_mode(&self) -> Option<EnterpriseAttestationMode>;
+
+    /// Lists relying party IDs that can perform enterprise attestation.
+    ///
+    /// # Invariant
+    ///
+    /// - If the mode is VendorFacilitated, enterprise_attestation_mode() must be non-empty.
+    ///
+    /// This list is only considered if the enterprise attestation mode is
+    /// VendorFacilitated.
+    #[cfg(feature = "std")]
+    fn enterprise_rp_id_list(&self) -> Vec<String>;
+
+    // Returns whether the rp_id is contained in enterprise_rp_id_list().
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool;
+
     /// Maximum message size send for CTAP commands.
     ///
     /// The maximum value is 7609, as HID packets can not encode longer messages.
@@ -98,6 +144,22 @@ pub trait Customization {
     ///
     /// The fail retry counter is reset after entering the correct PIN.
     fn max_pin_retries(&self) -> u8;
+
+    /// Enables or disables basic attestation for FIDO2.
+    ///
+    /// # Invariant
+    ///
+    /// - Enterprise and batch attestation can not both be active (see above).
+    ///
+    /// The basic attestation uses the signing key configured with a vendor command
+    /// as a batch key. If you turn batch attestation on, be aware that it is your
+    /// responsibility to safely generate and store the key material. Also, the
+    /// batches must have size of at least 100k authenticators before using new key
+    /// material.
+    /// U2F is unaffected by this setting.
+    ///
+    /// https://www.w3.org/TR/webauthn/#attestation
+    fn use_batch_attestation(&self) -> bool;
 
     /// Enables or disables signature counters.
     ///
@@ -140,19 +202,25 @@ pub struct CustomizationImpl {
     pub default_min_pin_length: u8,
     pub default_min_pin_length_rp_ids: &'static [&'static str],
     pub enforce_always_uv: bool,
+    pub enterprise_attestation_mode: Option<EnterpriseAttestationMode>,
+    pub enterprise_rp_id_list: &'static [&'static str],
     pub max_msg_size: usize,
     pub max_pin_retries: u8,
+    pub use_batch_attestation: bool,
     pub use_signature_counter: bool,
     pub max_rp_ids_length: usize,
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
+    default_cred_protect: None,
     default_min_pin_length: 4,
     default_min_pin_length_rp_ids: &[],
     enforce_always_uv: false,
-    default_cred_protect: None,
+    enterprise_attestation_mode: None,
+    enterprise_rp_id_list: &[],
     max_msg_size: 7609,
     max_pin_retries: 8,
+    use_batch_attestation: false,
     use_signature_counter: true,
     max_rp_ids_length: 8,
 };
@@ -177,12 +245,32 @@ impl Customization for CustomizationImpl {
         self.enforce_always_uv
     }
 
+    fn enterprise_attestation_mode(&self) -> Option<EnterpriseAttestationMode> {
+        self.enterprise_attestation_mode
+    }
+
+    #[cfg(feature = "std")]
+    fn enterprise_rp_id_list(&self) -> Vec<String> {
+        self.enterprise_rp_id_list
+            .iter()
+            .map(|s| String::from(*s))
+            .collect()
+    }
+
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool {
+        self.enterprise_rp_id_list.contains(&rp_id)
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
     }
 
     fn max_pin_retries(&self) -> u8 {
         self.max_pin_retries
+    }
+
+    fn use_batch_attestation(&self) -> bool {
+        self.use_batch_attestation
     }
 
     fn use_signature_counter(&self) -> bool {
@@ -203,6 +291,24 @@ pub fn is_valid(customization: &impl Customization) -> bool {
 
     // Default min pin length must be between 4 and 63.
     if customization.default_min_pin_length() < 4 || customization.default_min_pin_length() > 63 {
+        return false;
+    }
+
+    // OpenSK prevents activating batch and enterprise attestation together. The
+    // current implementation uses the same key material at the moment, and these
+    // two modes have conflicting privacy guarantees.
+    if customization.use_batch_attestation()
+        && customization.enterprise_attestation_mode().is_some()
+    {
+        return false;
+    }
+
+    // enterprise_rp_id_list() should be non-empty in vendor facilitated mode, and empty otherwise.
+    if matches!(
+        customization.enterprise_attestation_mode(),
+        Some(EnterpriseAttestationMode::VendorFacilitated)
+    ) == customization.enterprise_rp_id_list().is_empty()
+    {
         return false;
     }
 

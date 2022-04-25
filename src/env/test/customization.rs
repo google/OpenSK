@@ -1,5 +1,5 @@
 use crate::api::customization::{Customization, CustomizationImpl};
-use crate::ctap::data_formats::CredentialProtectionPolicy;
+use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -8,8 +8,11 @@ pub struct TestCustomization {
     pub default_min_pin_length: u8,
     pub default_min_pin_length_rp_ids: Vec<String>,
     pub enforce_always_uv: bool,
+    pub enterprise_attestation_mode: Option<EnterpriseAttestationMode>,
+    pub enterprise_rp_id_list: Vec<String>,
     pub max_msg_size: usize,
     pub max_pin_retries: u8,
+    pub use_batch_attestation: bool,
     pub use_signature_counter: bool,
     pub max_rp_ids_length: usize,
 }
@@ -31,12 +34,28 @@ impl Customization for TestCustomization {
         self.enforce_always_uv
     }
 
+    fn enterprise_attestation_mode(&self) -> Option<EnterpriseAttestationMode> {
+        self.enterprise_attestation_mode
+    }
+
+    fn enterprise_rp_id_list(&self) -> Vec<String> {
+        self.enterprise_rp_id_list.clone()
+    }
+
+    fn is_enterprise_rp_id(&self, rp_id: &str) -> bool {
+        self.enterprise_rp_id_list.iter().any(|id| id == rp_id)
+    }
+
     fn max_msg_size(&self) -> usize {
         self.max_msg_size
     }
 
     fn max_pin_retries(&self) -> u8 {
         self.max_pin_retries
+    }
+
+    fn use_batch_attestation(&self) -> bool {
+        self.use_batch_attestation
     }
 
     fn use_signature_counter(&self) -> bool {
@@ -55,8 +74,11 @@ impl From<CustomizationImpl> for TestCustomization {
             default_min_pin_length,
             default_min_pin_length_rp_ids,
             enforce_always_uv,
+            enterprise_attestation_mode,
+            enterprise_rp_id_list,
             max_msg_size,
             max_pin_retries,
+            use_batch_attestation,
             use_signature_counter,
             max_rp_ids_length,
         } = c;
@@ -66,13 +88,21 @@ impl From<CustomizationImpl> for TestCustomization {
             .map(|s| String::from(*s))
             .collect::<Vec<_>>();
 
+        let enterprise_rp_id_list = enterprise_rp_id_list
+            .iter()
+            .map(|s| String::from(*s))
+            .collect::<Vec<_>>();
+
         Self {
             default_cred_protect,
             default_min_pin_length,
             default_min_pin_length_rp_ids,
             enforce_always_uv,
+            enterprise_attestation_mode,
+            enterprise_rp_id_list,
             max_msg_size,
             max_pin_retries,
+            use_batch_attestation,
             use_signature_counter,
             max_rp_ids_length,
         }

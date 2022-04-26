@@ -17,6 +17,8 @@
 extern crate alloc;
 #[macro_use]
 extern crate arrayref;
+#[macro_use]
+extern crate lazy_static;
 
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
@@ -46,6 +48,7 @@ macro_rules! debug_ctap {
 
 pub mod api;
 pub mod clock;
+pub mod timer;
 // Implementation details must be public for testing (in particular fuzzing).
 #[cfg(feature = "std")]
 pub mod ctap;

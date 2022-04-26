@@ -100,9 +100,6 @@ then
   cd libraries/cbor
   cargo test --release
   cd ../..
-  cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --release --features std
-  cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
   cd ../..
@@ -111,9 +108,6 @@ then
   echo "Running unit tests on the desktop (debug mode)..."
   cd libraries/cbor
   cargo test
-  cd ../..
-  cd libraries/crypto
-  RUSTFLAGS='-C target-feature=+aes' cargo test --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --features std

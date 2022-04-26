@@ -577,9 +577,7 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 
 /// Marks enterprise attestation as enabled.
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if attestation_private_key(env).unwrap_or(None).is_none()
-        || attestation_certificate(env).unwrap_or(None).is_none()
-    {
+    if attestation_private_key(env)?.is_none() || attestation_certificate(env)?.is_none() {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     if !enterprise_attestation(env)? {

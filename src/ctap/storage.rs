@@ -577,6 +577,9 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 
 /// Marks enterprise attestation as enabled.
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    if attestation_private_key(env)?.is_none() || attestation_certificate(env)?.is_none() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
     if !enterprise_attestation(env)? {
         env.store().insert(key::ENTERPRISE_ATTESTATION, &[])?;
     }
@@ -1079,8 +1082,8 @@ mod test {
         init(&mut env).unwrap();
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
-        assert!(attestation_private_key(&mut env,).unwrap().is_none());
-        assert!(attestation_certificate(&mut env,).unwrap().is_none());
+        assert!(attestation_private_key(&mut env).unwrap().is_none());
+        assert!(attestation_certificate(&mut env).unwrap().is_none());
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
@@ -1232,6 +1235,18 @@ mod test {
     #[test]
     fn test_enterprise_attestation() {
         let mut env = TestEnv::new();
+
+        assert!(!enterprise_attestation(&mut env).unwrap());
+        assert_eq!(
+            enable_enterprise_attestation(&mut env),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        assert!(!enterprise_attestation(&mut env).unwrap());
+
+        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_cert = [0xddu8; 20];
+        set_attestation_private_key(&mut env, &dummy_key).unwrap();
+        set_attestation_certificate(&mut env, &dummy_cert).unwrap();
 
         assert!(!enterprise_attestation(&mut env).unwrap());
         assert_eq!(enable_enterprise_attestation(&mut env), Ok(()));

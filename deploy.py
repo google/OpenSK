@@ -371,6 +371,8 @@ class OpenSKInstaller:
     env = os.environ.copy()
     if self.args.verbose_build:
       env["V"] = "1"
+    if "vendor_hid" in self.args.features:
+      env["CARGO_FLAGS"] = "--features=vendor_hid"
     self.checked_command(["make"], cwd=props.path, env=env)
 
   def build_example(self):
@@ -864,6 +866,11 @@ class OpenSKInstaller:
         fatal("Unexpected arguments to configure your device. Since you "
               "selected the programmer \"none\", the device is not ready to be "
               "configured yet.")
+      return 0
+
+    if "vendor_hid" in self.args.features:
+      # vendor_hid as a work in progress and is not compatible with configure
+      # mode.
       return 0
 
     # Perform checks if OpenSK was flashed.

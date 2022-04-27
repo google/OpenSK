@@ -98,8 +98,8 @@ impl PubKey {
 
 #[cfg(test)]
 mod test {
-    use rng256::ThreadRng256;
     use super::*;
+    use rng256::ThreadRng256;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]

@@ -347,7 +347,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::super::rng256::ThreadRng256;
+    use rng256::ThreadRng256;
     use super::super::sha256::Sha256;
     use super::*;
 

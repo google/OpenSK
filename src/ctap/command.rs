@@ -636,8 +636,8 @@ mod test {
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
+    use crate::env::test::TestEnv;
     use cbor::{cbor_array, cbor_map};
-    use crypto::rng256::ThreadRng256;
 
     #[test]
     fn test_from_cbor_make_credential_parameters() {
@@ -749,8 +749,8 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
 

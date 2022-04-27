@@ -230,34 +230,34 @@ impl SharedSecret for SharedSecretV2 {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crypto::rng256::ThreadRng256;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn test_pin_protocol_public_key() {
-        let mut rng = ThreadRng256 {};
-        let mut pin_protocol = PinProtocol::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut pin_protocol = PinProtocol::new(env.rng());
         let public_key = pin_protocol.get_public_key();
-        pin_protocol.regenerate(&mut rng);
+        pin_protocol.regenerate(env.rng());
         let new_public_key = pin_protocol.get_public_key();
         assert_ne!(public_key, new_public_key);
     }
 
     #[test]
     fn test_pin_protocol_pin_uv_auth_token() {
-        let mut rng = ThreadRng256 {};
-        let mut pin_protocol = PinProtocol::new(&mut rng);
+        let mut env = TestEnv::new();
+        let mut pin_protocol = PinProtocol::new(env.rng());
         let token = *pin_protocol.get_pin_uv_auth_token();
-        pin_protocol.reset_pin_uv_auth_token(&mut rng);
+        pin_protocol.reset_pin_uv_auth_token(env.rng());
         let new_token = pin_protocol.get_pin_uv_auth_token();
         assert_ne!(&token, new_token);
     }
 
     #[test]
     fn test_shared_secret_v1_encrypt_decrypt() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let shared_secret = SharedSecretV1::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = shared_secret.encrypt(&mut rng, &plaintext).unwrap();
+        let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
@@ -290,10 +290,10 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_encrypt_decrypt() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let shared_secret = SharedSecretV2::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = shared_secret.encrypt(&mut rng, &plaintext).unwrap();
+        let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
@@ -327,9 +327,9 @@ mod test {
 
     #[test]
     fn test_decapsulate_symmetric() {
-        let mut rng = ThreadRng256 {};
-        let pin_protocol1 = PinProtocol::new(&mut rng);
-        let pin_protocol2 = PinProtocol::new(&mut rng);
+        let mut env = TestEnv::new();
+        let pin_protocol1 = PinProtocol::new(env.rng());
+        let pin_protocol2 = PinProtocol::new(env.rng());
         for &protocol in &[PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
             let shared_secret1 = pin_protocol1
                 .decapsulate(pin_protocol2.get_public_key(), protocol)
@@ -338,7 +338,7 @@ mod test {
                 .decapsulate(pin_protocol1.get_public_key(), protocol)
                 .unwrap();
             let plaintext = vec![0xAA; 64];
-            let ciphertext = shared_secret1.encrypt(&mut rng, &plaintext).unwrap();
+            let ciphertext = shared_secret1.encrypt(env.rng(), &plaintext).unwrap();
             assert_eq!(plaintext, shared_secret2.decrypt(&ciphertext).unwrap());
         }
     }

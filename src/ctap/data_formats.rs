@@ -1221,11 +1221,12 @@ pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2Status
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
+    use crate::env::test::TestEnv;
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
     };
-    use crypto::rng256::{Rng256, ThreadRng256};
+    use crypto::rng256::Rng256;
     use crypto::sha256::Sha256;
 
     #[test]
@@ -1672,8 +1673,8 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_default_protocol() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
@@ -1702,8 +1703,8 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_with_protocol() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         let cbor_extensions = cbor_map! {
@@ -1877,8 +1878,8 @@ mod test {
 
     #[test]
     fn test_from_into_cose_key_ecdh() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk.clone());
         let created_pk = ecdh::PubKey::try_from(cose_key);
@@ -1887,8 +1888,8 @@ mod test {
 
     #[test]
     fn test_into_cose_key_ecdsa() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
@@ -1896,8 +1897,8 @@ mod test {
 
     #[test]
     fn test_from_into_cose_signature() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
         let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         dummy_signature.to_bytes(&mut bytes);
@@ -1914,8 +1915,8 @@ mod test {
 
     #[test]
     fn test_cose_signature_wrong_algorithm() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdsa::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
         let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         dummy_signature.to_bytes(&mut bytes);
@@ -2105,11 +2106,11 @@ mod test {
 
     #[test]
     fn test_credential_source_cbor_round_trip() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key: crypto::ecdsa::SecKey::gensk(&mut rng),
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
+            private_key: crypto::ecdsa::SecKey::gensk(env.rng()),
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,

@@ -23,9 +23,9 @@ use crypto::hkdf::hkdf_empty_salt_256;
 #[cfg(test)]
 use crypto::hmac::hmac_256;
 use crypto::hmac::{verify_hmac_256, verify_hmac_256_first_128bits};
-use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
+use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
 pub struct PinProtocol {

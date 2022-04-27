@@ -15,6 +15,7 @@ libtock_drivers = { path = "third_party/libtock-drivers" }
 lang_items = { path = "third_party/lang-items" }
 sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
+rng256 = { path = "libraries/rng256" }
 persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
@@ -29,7 +30,7 @@ rand = { version = "0.8.4", optional = true }
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["crypto/std", "lang_items/std", "persistent_store/std", "rand"]
+std = ["crypto/std", "lang_items/std", "persistent_store/std", "rng256/std", "rand"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]

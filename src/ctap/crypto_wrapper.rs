@@ -15,7 +15,7 @@
 use crate::ctap::status_code::Ctap2StatusCode;
 use alloc::vec::Vec;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
-use crypto::rng256::Rng256;
+use rng256::Rng256;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt(

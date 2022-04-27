@@ -7,7 +7,6 @@ use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
-use crypto::rng256::TockRng256;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
@@ -15,6 +14,7 @@ use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::{crp, led, timer, usb_ctap_hid};
 use persistent_store::{StorageResult, Store};
+use rng256::TockRng256;
 
 mod storage;
 

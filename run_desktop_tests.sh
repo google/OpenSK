@@ -23,6 +23,9 @@ cd ../..
 cd libraries/crypto
 cargo fmt --all -- --check
 cd ../..
+cd libraries/rng256
+cargo fmt --all -- --check
+cd ../..
 cd libraries/persistent_store
 cargo fmt --all -- --check
 cd ../..
@@ -100,6 +103,9 @@ then
   cd libraries/cbor
   cargo test --release
   cd ../..
+  cd libraries/rng256
+  cargo test --release --features std
+  cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
   cd ../..
@@ -108,6 +114,9 @@ then
   echo "Running unit tests on the desktop (debug mode)..."
   cd libraries/cbor
   cargo test
+  cd ../..
+  cd libraries/rng256
+  cargo test --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --features std

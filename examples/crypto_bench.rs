@@ -20,11 +20,12 @@ extern crate lang_items;
 use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
-use crypto::{aes256, cbc, ecdsa, rng256, sha256, Hash256};
+use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
+use rng256::TockRng256;
 
 libtock_core::stack_size! {0x800}
 
@@ -35,7 +36,7 @@ fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().flex_unwrap();
 
-    let mut rng = rng256::TockRng256 {};
+    let mut rng = TockRng256 {};
 
     writeln!(console, "****************************************").unwrap();
     writeln!(

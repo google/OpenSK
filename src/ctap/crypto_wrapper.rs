@@ -65,35 +65,35 @@ pub fn aes256_cbc_decrypt(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crypto::rng256::ThreadRng256;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn test_encrypt_decrypt_with_iv() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
         let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, true).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_encrypt_decrypt_without_iv() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, false).unwrap();
+        let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, false).unwrap();
         let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, false).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_correct_iv_usage() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let mut ciphertext_no_iv =
-            aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, false).unwrap();
+            aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, false).unwrap();
         let mut ciphertext_with_iv = vec![0u8; 16];
         ciphertext_with_iv.append(&mut ciphertext_no_iv);
         let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext_with_iv, true).unwrap();
@@ -102,10 +102,10 @@ mod test {
 
     #[test]
     fn test_iv_manipulation_property() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let mut ciphertext = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        let mut ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
         let mut expected_plaintext = plaintext;
         for i in 0..16 {
             ciphertext[i] ^= 0xBB;
@@ -117,11 +117,11 @@ mod test {
 
     #[test]
     fn test_chaining() {
-        let mut rng = ThreadRng256 {};
+        let mut env = TestEnv::new();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext1 = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
-        let ciphertext2 = aes256_cbc_encrypt(&mut rng, &aes_enc_key, &plaintext, true).unwrap();
+        let ciphertext1 = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
+        let ciphertext2 = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
         assert_eq!(ciphertext1.len(), 80);
         assert_eq!(ciphertext2.len(), 80);
         // The ciphertext should mutate in all blocks with a different IV.

@@ -343,8 +343,8 @@ mod test {
     use super::super::data_formats::{PackedAttestationStatement, PublicKeyCredentialType};
     use super::super::ES256_CRED_PARAM;
     use super::*;
+    use crate::env::test::TestEnv;
     use cbor::{cbor_array, cbor_bytes, cbor_map};
-    use crypto::rng256::ThreadRng256;
 
     #[test]
     fn test_make_credential_into_cbor() {
@@ -506,8 +506,8 @@ mod test {
 
     #[test]
     fn test_used_client_pin_into_cbor() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         let client_pin_response = AuthenticatorClientPinResponse {
@@ -550,8 +550,8 @@ mod test {
 
     #[test]
     fn test_used_credential_management_optionals_into_cbor() {
-        let mut rng = ThreadRng256 {};
-        let sk = crypto::ecdh::SecKey::gensk(&mut rng);
+        let mut env = TestEnv::new();
+        let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let rp = PublicKeyCredentialRpEntity {
             rp_id: String::from("example.com"),
             rp_name: None,

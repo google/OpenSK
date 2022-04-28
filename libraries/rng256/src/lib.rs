@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use arrayref::array_ref;
 use libtock_drivers::rng;
+#[cfg(feature = "std")]
+use rand::Rng;
 
 // Lightweight RNG trait to generate uniformly distributed 256 bits.
 pub trait Rng256 {
@@ -55,8 +59,6 @@ pub struct ThreadRng256 {}
 #[cfg(feature = "std")]
 impl Rng256 for ThreadRng256 {
     fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
-        use rand::Rng;
-
         let mut rng = rand::thread_rng();
         let mut result = [Default::default(); 32];
         rng.fill(&mut result);

@@ -3,8 +3,8 @@ use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
-use crypto::rng256::Rng256;
 use persistent_store::{Storage, Store};
+use rng256::Rng256;
 
 #[cfg(feature = "std")]
 pub mod test;

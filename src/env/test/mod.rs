@@ -4,11 +4,11 @@ use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
 use crate::env::{Env, UserPresence};
-use crypto::rng256::Rng256;
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rng256::Rng256;
 
 mod customization;
 mod upgrade_storage;

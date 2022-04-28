@@ -1226,8 +1226,8 @@ mod test {
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
     };
-    use crypto::rng256::Rng256;
     use crypto::sha256::Sha256;
+    use rng256::Rng256;
 
     #[test]
     fn test_extract_unsigned() {

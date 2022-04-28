@@ -16,7 +16,7 @@ use super::ec::exponent256::NonZeroExponentP256;
 use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
-use super::rng256::Rng256;
+use rng256::Rng256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -98,8 +98,8 @@ impl PubKey {
 
 #[cfg(test)]
 mod test {
-    use super::super::rng256::ThreadRng256;
     use super::*;
+    use rng256::ThreadRng256;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]

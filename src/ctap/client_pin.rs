@@ -28,11 +28,11 @@ use alloc::str;
 use alloc::string::String;
 use alloc::vec::Vec;
 use crypto::hmac::hmac_256;
-use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
+use rng256::Rng256;
 use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.

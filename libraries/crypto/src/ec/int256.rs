@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::rng256::Rng256;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
+use rng256::Rng256;
 use subtle::{self, Choice, ConditionallySelectable, ConstantTimeEq};
 
 const BITS_PER_DIGIT: usize = 32;

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::customization::{MAX_CREDENTIAL_COUNT_IN_LIST, MAX_LARGE_BLOB_ARRAY_SIZE};
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
@@ -205,10 +204,8 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         let exclude_list = match exclude_list {
             Some(entry) => {
                 let exclude_list_vec = extract_array(entry)?;
-                let list_len = MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(exclude_list_vec.len());
                 let exclude_list = exclude_list_vec
                     .into_iter()
-                    .take(list_len)
                     .map(PublicKeyCredentialDescriptor::try_from)
                     .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(exclude_list)
@@ -283,10 +280,8 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
         let allow_list = match allow_list {
             Some(entry) => {
                 let allow_list_vec = extract_array(entry)?;
-                let list_len = MAX_CREDENTIAL_COUNT_IN_LIST.unwrap_or(allow_list_vec.len());
                 let allow_list = allow_list_vec
                     .into_iter()
-                    .take(list_len)
                     .map(PublicKeyCredentialDescriptor::try_from)
                     .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
                 Some(allow_list)
@@ -431,9 +426,6 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
         if set.is_some() && offset == 0 {
             match length {
                 None => return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
-                Some(len) if len > MAX_LARGE_BLOB_ARRAY_SIZE => {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
-                }
                 Some(len) if len < MIN_LARGE_BLOB_LEN => {
                     return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
                 }

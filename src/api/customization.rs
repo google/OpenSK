@@ -179,6 +179,31 @@ pub trait Customization {
     // the key.
     // ###########################################################################
 
+    /// Sets the maximum blob size stored with the credBlob extension.
+    ///
+    /// # Invariant
+    ///
+    /// - The length must be at least 32.
+    fn max_cred_blob_length(&self) -> usize;
+
+    /// Limits the number of considered entries in credential lists.
+    ///
+    /// # Invariant
+    ///
+    /// - This value, if present, must be at least 1 (more is preferred).
+    ///
+    /// Depending on your memory, you can use Some(n) to limit request sizes in
+    /// MakeCredential and GetAssertion. This affects allowList and excludeList.
+    fn max_credential_count_in_list(&self) -> Option<usize>;
+
+    /// Limits the size of largeBlobs the authenticator stores.
+    ///
+    /// # Invariant
+    ///
+    /// - The allowed size must be at least 1024.
+    /// - The array must fit into the shards reserved in storage/key.rs.
+    fn max_large_blob_array_size(&self) -> usize;
+
     /// Limits the number of RP IDs that can change the minimum PIN length.
     ///
     /// # Invariant
@@ -193,6 +218,27 @@ pub trait Customization {
     /// in default_min_pin_length_rp_ids() should be allowed to change the minimum
     /// PIN length.
     fn max_rp_ids_length(&self) -> usize;
+
+    /// Sets the number of resident keys you can store.
+    ///
+    /// # Invariant
+    ///
+    /// - The storage key CREDENTIALS must fit at least this number of credentials.
+    ///
+    /// Limiting the number of resident keys permits to ensure a minimum number of
+    /// counter increments.
+    /// Let:
+    /// - P the number of pages (NUM_PAGES in the board definition)
+    /// - K the maximum number of resident keys (max_supported_resident_keys())
+    /// - S the maximum size of a resident key (about 500)
+    /// - C the number of erase cycles (10000)
+    /// - I the minimum number of counter increments
+    ///
+    /// We have: I = (P * 4084 - 5107 - K * S) / 8 * C
+    ///
+    /// With P=20 and K=150, we have I=2M which is enough for 500 increments per day
+    /// for 10 years.
+    fn max_supported_resident_keys(&self) -> usize;
 }
 
 #[derive(Clone)]
@@ -207,7 +253,11 @@ pub struct CustomizationImpl {
     pub max_pin_retries: u8,
     pub use_batch_attestation: bool,
     pub use_signature_counter: bool,
+    pub max_cred_blob_length: usize,
+    pub max_credential_count_in_list: Option<usize>,
+    pub max_large_blob_array_size: usize,
     pub max_rp_ids_length: usize,
+    pub max_supported_resident_keys: usize,
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
@@ -221,7 +271,11 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     max_pin_retries: 8,
     use_batch_attestation: false,
     use_signature_counter: true,
+    max_cred_blob_length: 32,
+    max_credential_count_in_list: None,
+    max_large_blob_array_size: 2048,
     max_rp_ids_length: 8,
+    max_supported_resident_keys: 150,
 };
 
 impl Customization for CustomizationImpl {
@@ -276,13 +330,33 @@ impl Customization for CustomizationImpl {
         self.use_signature_counter
     }
 
+    fn max_cred_blob_length(&self) -> usize {
+        self.max_cred_blob_length
+    }
+
+    fn max_credential_count_in_list(&self) -> Option<usize> {
+        self.max_credential_count_in_list
+    }
+
+    fn max_large_blob_array_size(&self) -> usize {
+        self.max_large_blob_array_size
+    }
+
     fn max_rp_ids_length(&self) -> usize {
         self.max_rp_ids_length
+    }
+
+    fn max_supported_resident_keys(&self) -> usize {
+        self.max_supported_resident_keys
     }
 }
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
+    // Two invariants are currently tested in different files:
+    // - storage.rs: if max_large_blob_array_size() fits the shards
+    // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
+
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
         return false;
@@ -320,6 +394,23 @@ pub fn is_valid(customization: &impl Customization) -> bool {
 
     // Max pin retries must be less or equal than 8.
     if customization.max_pin_retries() > 8 {
+        return false;
+    }
+
+    // Max cred blob length should be at least 32.
+    if customization.max_cred_blob_length() < 32 {
+        return false;
+    }
+
+    // Max credential count in list should be positive if exists.
+    if let Some(count) = customization.max_credential_count_in_list() {
+        if count < 1 {
+            return false;
+        }
+    }
+
+    // Max large blob array size should not be less than 1024.
+    if customization.max_large_blob_array_size() < 1024 {
         return false;
     }
 

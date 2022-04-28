@@ -20,7 +20,6 @@ mod credential_management;
 mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
-pub mod customization;
 pub mod data_formats;
 pub mod hid;
 mod key_material;
@@ -43,9 +42,6 @@ use self::command::{
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
-use self::customization::{
-    MAX_CREDENTIAL_COUNT_IN_LIST, MAX_CRED_BLOB_LENGTH, MAX_LARGE_BLOB_ARRAY_SIZE,
-};
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
     EnterpriseAttestationMode, GetAssertionExtensions, PackedAttestationStatement,
@@ -776,7 +772,7 @@ impl CtapState {
         let has_cred_blob_output = extensions.cred_blob.is_some();
         let cred_blob = extensions
             .cred_blob
-            .filter(|c| options.rk && c.len() <= MAX_CRED_BLOB_LENGTH);
+            .filter(|c| options.rk && c.len() <= env.customization().max_cred_blob_length());
         let cred_blob_output = if has_cred_blob_output {
             Some(cred_blob.is_some())
         } else {
@@ -1215,15 +1211,20 @@ impl CtapState {
                     PinUvAuthProtocol::V2 as u64,
                     PinUvAuthProtocol::V1 as u64,
                 ]),
-                max_credential_count_in_list: MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
+                max_credential_count_in_list: env
+                    .customization()
+                    .max_credential_count_in_list()
+                    .map(|c| c as u64),
                 max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 algorithms: Some(vec![ES256_CRED_PARAM]),
-                max_serialized_large_blob_array: Some(MAX_LARGE_BLOB_ARRAY_SIZE as u64),
+                max_serialized_large_blob_array: Some(
+                    env.customization().max_large_blob_array_size() as u64,
+                ),
                 force_pin_change: Some(storage::has_force_pin_change(env)?),
                 min_pin_length: storage::min_pin_length(env)?,
                 firmware_version: None,
-                max_cred_blob_length: Some(MAX_CRED_BLOB_LENGTH as u64),
+                max_cred_blob_length: Some(env.customization().max_cred_blob_length() as u64),
                 max_rp_ids_for_set_min_pin_length: Some(
                     env.customization().max_rp_ids_length() as u64
                 ),
@@ -1525,14 +1526,14 @@ mod test {
             },
             0x05 => env.customization().max_msg_size() as u64,
             0x06 => cbor_array![2, 1],
-            0x07 => MAX_CREDENTIAL_COUNT_IN_LIST.map(|c| c as u64),
+            0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
             0x08 => CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
             0x0A => cbor_array![ES256_CRED_PARAM],
-            0x0B => MAX_LARGE_BLOB_ARRAY_SIZE as u64,
+            0x0B => env.customization().max_large_blob_array_size() as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
-            0x0F => MAX_CRED_BLOB_LENGTH as u64,
+            0x0F => env.customization().max_cred_blob_length() as u64,
             0x10 => env.customization().max_rp_ids_length() as u64,
             0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
         };
@@ -1877,7 +1878,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let extensions = MakeCredentialExtensions {
-            cred_blob: Some(vec![0xCB; MAX_CRED_BLOB_LENGTH + 1]),
+            cred_blob: Some(vec![0xCB; env.customization().max_cred_blob_length() + 1]),
             ..Default::default()
         };
         let mut make_credential_params = create_minimal_make_credential_parameters();

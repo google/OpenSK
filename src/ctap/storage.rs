@@ -16,7 +16,6 @@ mod key;
 
 use crate::api::customization::Customization;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
-use crate::ctap::customization::{MAX_LARGE_BLOB_ARRAY_SIZE, MAX_SUPPORTED_RESIDENT_KEYS};
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
@@ -90,7 +89,7 @@ pub fn get_credential(
     key: usize,
 ) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
     let min_key = key::CREDENTIALS.start;
-    if key < min_key || key >= min_key + MAX_SUPPORTED_RESIDENT_KEYS {
+    if key < min_key || key >= min_key + env.customization().max_supported_resident_keys() {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     let credential_entry = env
@@ -154,15 +153,16 @@ pub fn store_credential(
     env: &mut impl Env,
     new_credential: PublicKeyCredentialSource,
 ) -> Result<(), Ctap2StatusCode> {
+    let max_supported_resident_keys = env.customization().max_supported_resident_keys();
     // Holds the key of the existing credential if this is an update.
     let mut old_key = None;
     let min_key = key::CREDENTIALS.start;
     // Holds whether a key is used (indices are shifted by min_key).
-    let mut keys = vec![false; MAX_SUPPORTED_RESIDENT_KEYS];
+    let mut keys = vec![false; max_supported_resident_keys];
     let mut iter_result = Ok(());
     let iter = iter_credentials(env, &mut iter_result)?;
     for (key, credential) in iter {
-        if key < min_key || key - min_key >= MAX_SUPPORTED_RESIDENT_KEYS || keys[key - min_key] {
+        if key < min_key || key - min_key >= max_supported_resident_keys || keys[key - min_key] {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         keys[key - min_key] = true;
@@ -176,14 +176,14 @@ pub fn store_credential(
         }
     }
     iter_result?;
-    if old_key.is_none() && keys.iter().filter(|&&x| x).count() >= MAX_SUPPORTED_RESIDENT_KEYS {
+    if old_key.is_none() && keys.iter().filter(|&&x| x).count() >= max_supported_resident_keys {
         return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
     }
     let key = match old_key {
         // This is a new credential being added, we need to allocate a free key. We choose the
         // first available key.
         None => key::CREDENTIALS
-            .take(MAX_SUPPORTED_RESIDENT_KEYS)
+            .take(max_supported_resident_keys)
             .find(|key| !keys[key - min_key])
             .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
         // This is an existing credential being updated, we reuse its key.
@@ -233,7 +233,8 @@ pub fn count_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCode> {
 
 /// Returns the estimated number of credentials that can still be stored.
 pub fn remaining_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCode> {
-    MAX_SUPPORTED_RESIDENT_KEYS
+    env.customization()
+        .max_supported_resident_keys()
         .checked_sub(count_credentials(env)?)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
@@ -459,7 +460,7 @@ pub fn commit_large_blob_array(
     large_blob_array: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
     // This input should have been caught at caller level.
-    if large_blob_array.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
+    if large_blob_array.len() > env.customization().max_large_blob_array_size() {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     Ok(fragment::write(
@@ -768,7 +769,7 @@ mod test {
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
 
         let mut credential_ids = vec![];
-        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
+        for i in 0..env.customization().max_supported_resident_keys() {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
@@ -835,7 +836,8 @@ mod test {
         let mut env = TestEnv::new();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
 
-        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
+        let max_supported_resident_keys = env.customization().max_supported_resident_keys();
+        for i in 0..max_supported_resident_keys {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             assert!(store_credential(&mut env, credential_source).is_ok());
@@ -844,7 +846,7 @@ mod test {
         let credential_source = create_credential_source(
             env.rng(),
             "example.com",
-            vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
+            vec![max_supported_resident_keys as u8],
         );
         assert_eq!(
             store_credential(&mut env, credential_source),
@@ -852,7 +854,7 @@ mod test {
         );
         assert_eq!(
             count_credentials(&mut env).unwrap(),
-            MAX_SUPPORTED_RESIDENT_KEYS
+            max_supported_resident_keys
         );
     }
 
@@ -883,7 +885,8 @@ mod test {
         );
 
         reset(&mut env).unwrap();
-        for i in 0..MAX_SUPPORTED_RESIDENT_KEYS {
+        let max_supported_resident_keys = env.customization().max_supported_resident_keys();
+        for i in 0..max_supported_resident_keys {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
             let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
             assert!(store_credential(&mut env, credential_source).is_ok());
@@ -892,7 +895,7 @@ mod test {
         let credential_source = create_credential_source(
             env.rng(),
             "example.com",
-            vec![MAX_SUPPORTED_RESIDENT_KEYS as u8],
+            vec![max_supported_resident_keys as u8],
         );
         assert_eq!(
             store_credential(&mut env, credential_source),
@@ -900,7 +903,7 @@ mod test {
         );
         assert_eq!(
             count_credentials(&mut env).unwrap(),
-            MAX_SUPPORTED_RESIDENT_KEYS
+            max_supported_resident_keys
         );
     }
 
@@ -1147,7 +1150,7 @@ mod test {
         let mut env = TestEnv::new();
 
         assert!(
-            MAX_LARGE_BLOB_ARRAY_SIZE
+            env.customization().max_large_blob_array_size()
                 <= env.store().max_value_length()
                     * (key::LARGE_BLOB_SHARDS.end - key::LARGE_BLOB_SHARDS.start)
         );

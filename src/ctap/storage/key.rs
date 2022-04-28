@@ -84,8 +84,9 @@ make_partition! {
 
     /// The credentials.
     ///
-    /// Depending on `MAX_SUPPORTED_RESIDENT_KEYS`, only a prefix of those keys is used. Each
-    /// board may configure `MAX_SUPPORTED_RESIDENT_KEYS` depending on the storage size.
+    /// Depending on `Customization::max_supported_resident_keys()`, only a prefix of those keys is used.
+    /// Each board may configure `Customization::max_supported_resident_keys()` depending on the
+    /// storage size.
     CREDENTIALS = 1700..2000;
 
     /// Storage for the serialized large blob array.
@@ -138,11 +139,17 @@ make_partition! {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::api::customization::Customization;
+    use crate::env::test::TestEnv;
+    use crate::env::Env;
 
     #[test]
     fn enough_credentials() {
-        use crate::ctap::customization::MAX_SUPPORTED_RESIDENT_KEYS;
-        assert!(MAX_SUPPORTED_RESIDENT_KEYS <= CREDENTIALS.end - CREDENTIALS.start);
+        let env = TestEnv::new();
+        assert!(
+            env.customization().max_supported_resident_keys()
+                <= CREDENTIALS.end - CREDENTIALS.start
+        );
     }
 
     #[test]

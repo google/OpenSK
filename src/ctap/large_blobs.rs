@@ -77,9 +77,11 @@ impl LargeBlobs {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
             if offset == 0 {
-                // Checks for offset and length are already done in command.
                 self.expected_length =
                     length.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+                if self.expected_length > env.customization().max_large_blob_array_size() {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
+                }
                 self.expected_next_offset = 0;
             }
             if offset != self.expected_next_offset {

@@ -73,10 +73,10 @@ use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 use crypto::hmac::{hmac_256, verify_hmac_256};
-use crypto::rng256::Rng256;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use embedded_time::duration::Milliseconds;
+use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 

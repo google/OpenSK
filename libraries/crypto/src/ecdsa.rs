@@ -17,7 +17,6 @@ use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
 use super::hmac::hmac_256;
-use super::rng256::Rng256;
 use super::Hash256;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -25,6 +24,7 @@ use alloc::vec::Vec;
 use arrayref::array_mut_ref;
 use arrayref::{array_ref, mut_array_refs};
 use core::marker::PhantomData;
+use rng256::Rng256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -347,9 +347,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::super::rng256::ThreadRng256;
     use super::super::sha256::Sha256;
     use super::*;
+    use rng256::ThreadRng256;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]

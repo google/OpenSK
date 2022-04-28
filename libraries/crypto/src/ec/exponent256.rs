@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::rng256::Rng256;
 use super::int256::{Digit, Int256};
 use core::ops::Mul;
+use rng256::Rng256;
 use subtle::{self, Choice, ConditionallySelectable, CtOption};
 
 // An exponent on the elliptic curve, that is an element modulo the curve order N.

@@ -29,8 +29,8 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::cmp;
 use core::convert::TryInto;
-use crypto::rng256::Rng256;
 use persistent_store::{fragment, StoreUpdate};
+use rng256::Rng256;
 use sk_cbor::cbor_array_vec;
 
 /// Wrapper for master keys.
@@ -730,7 +730,7 @@ mod test {
     use super::*;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
     use crate::env::test::TestEnv;
-    use crypto::rng256::Rng256;
+    use rng256::Rng256;
 
     fn create_credential_source(
         rng: &mut impl Rng256,

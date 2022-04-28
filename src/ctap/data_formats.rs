@@ -1053,6 +1053,7 @@ impl From<SetMinPinLengthParams> for cbor::Value {
 
 /// The level of enterprise attestation allowed in MakeCredential.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum EnterpriseAttestationMode {
     /// Enterprise attestation is restricted to a list of RP IDs. Add your
     /// enterprises domain, e.g. "example.com", to the list below.

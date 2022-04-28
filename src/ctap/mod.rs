@@ -28,7 +28,7 @@ pub mod main_hid;
 mod pin_protocol;
 pub mod response;
 pub mod status_code;
-mod storage;
+pub mod storage;
 mod timed_permission;
 mod token_state;
 #[cfg(feature = "vendor_hid")]
@@ -2067,12 +2067,7 @@ mod test {
         env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        env.set_enterprise_attestation();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2117,12 +2112,7 @@ mod test {
         env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        env.set_enterprise_attestation();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2164,12 +2154,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        env.set_enterprise_attestation();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(3);

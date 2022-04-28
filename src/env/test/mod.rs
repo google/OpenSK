@@ -2,7 +2,7 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
+use crate::ctap::{storage, Channel};
 use crate::env::{Env, UserPresence};
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
@@ -97,6 +97,16 @@ impl TestEnv {
 
     pub fn rng(&mut self) -> &mut TestRng256 {
         &mut self.rng
+    }
+
+    pub fn set_enterprise_attestation(&mut self) {
+        storage::init(self).ok().unwrap();
+        let mut key_bytes = [0; 32];
+        let private_key = crypto::ecdsa::SecKey::gensk(self.rng());
+        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
+        storage::set_attestation_certificate(self, &[0xCC]).unwrap();
+        storage::set_attestation_private_key(self, &key_bytes).unwrap();
+        storage::enable_enterprise_attestation(self).unwrap();
     }
 }
 

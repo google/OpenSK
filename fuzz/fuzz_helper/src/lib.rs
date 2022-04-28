@@ -24,6 +24,7 @@ use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, Command,
 };
+use ctap2::ctap::data_formats::EnterpriseAttestationMode;
 use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
@@ -146,6 +147,22 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     Ok(())
 }
 
+fn setup_storage(unstructured: &mut Unstructured, env: &mut TestEnv) -> arbitrary::Result<()> {
+    if bool::arbitrary(unstructured)? {
+        env.set_enterprise_attestation();
+    }
+    Ok(())
+}
+
+fn setup_customization(
+    unstructured: &mut Unstructured,
+    env: &mut TestEnv,
+) -> arbitrary::Result<()> {
+    env.customization_mut().enterprise_attestation_mode =
+        Option::<EnterpriseAttestationMode>::arbitrary(unstructured)?;
+    Ok(())
+}
+
 // Interprets the raw data as of the given input type and
 // invokes message splitting, packet processing at CTAP HID level and response assembling
 // using an initialized and allocated channel.
@@ -155,6 +172,9 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     let mut env = TestEnv::new();
     env.rng()
         .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+
+    setup_storage(&mut unstructured, &mut env)?;
+    setup_customization(&mut unstructured, &mut env)?;
 
     let data = unstructured.take_rest();
     if !is_type(data, input_type) {

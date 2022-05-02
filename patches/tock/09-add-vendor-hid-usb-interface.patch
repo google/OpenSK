@@ -21,7 +21,7 @@ index 680fe32b2..4f757b93d 100644
 +[features]
 +vendor_hid = []
 diff --git a/capsules/src/usb/descriptors.rs b/capsules/src/usb/descriptors.rs
-index dea2dfed9..8aac509c8 100644
+index dea2dfed9..5dc6b81a6 100644
 --- a/capsules/src/usb/descriptors.rs
 +++ b/capsules/src/usb/descriptors.rs
 @@ -420,7 +420,7 @@ pub fn create_descriptor_buffers(
@@ -45,7 +45,7 @@ index dea2dfed9..8aac509c8 100644
              + cdc_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>());
  
      // Set the number of endpoints for each interface descriptor.
-@@ -521,13 +524,13 @@ pub fn create_descriptor_buffers(
+@@ -521,12 +524,12 @@ pub fn create_descriptor_buffers(
          // Add the interface descriptor.
          len += d.write_to(&other_buf.buf[len..]);
  
@@ -57,16 +57,15 @@ index dea2dfed9..8aac509c8 100644
 -                len += dh.write_to(&other_buf.buf[len..]);
 +        // HID descriptor, if any.
 +        if let Some(dh) = hid_descriptor {
-+          if let Some(hids) = dh.get(0) {
-+            if let Some(d) = hids.get(i) {
-+              len += d.write_to(&other_buf.buf[len..]);
++            if let Some(hids) = dh.get(0) {
++                if let Some(d) = hids.get(i) {
++                    len += d.write_to(&other_buf.buf[len..]);
++                }
              }
-+          }
          }
  
-         // If there is a CDC descriptor array, we include
 diff --git a/capsules/src/usb/usbc_client_ctrl.rs b/capsules/src/usb/usbc_client_ctrl.rs
-index f7899d8c5..d66e88f08 100644
+index f7899d8c5..6956523c6 100644
 --- a/capsules/src/usb/usbc_client_ctrl.rs
 +++ b/capsules/src/usb/usbc_client_ctrl.rs
 @@ -38,6 +38,12 @@ const DESCRIPTOR_BUFLEN: usize = 128;
@@ -97,7 +96,7 @@ index f7899d8c5..d66e88f08 100644
  
      /// Supported language (only one for now).
      language: &'b [u16; 1],
-@@ -104,13 +110,13 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
+@@ -104,8 +110,8 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
          controller: &'a U,
          device_descriptor_buffer: DeviceBuffer,
          other_descriptor_buffer: DescriptorBuffer,
@@ -108,12 +107,6 @@ index f7899d8c5..d66e88f08 100644
          language: &'b [u16; 1],
          strings: &'b [&'b str],
      ) -> Self {
-         ClientCtrl {
--            controller: controller,
-+          controller: controller,
-             state: Default::default(),
-             // For the moment, the Default trait is not implemented for arrays
-             // of length > 32, and the Cell type is not Copy, so we have to
 @@ -331,28 +337,39 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
                  descriptor_type,
                  // TODO: use the descriptor index
@@ -169,7 +162,7 @@ index f7899d8c5..d66e88f08 100644
                          hil::usb::CtrlSetupResult::ErrGeneric
                      }
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 642039120..53fbc7719 100644
+index 642039120..ee55cf6b7 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -44,21 +44,59 @@ static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[
@@ -232,18 +225,17 @@ index 642039120..53fbc7719 100644
  pub struct ClientCtapHID<'a, 'b, C: 'a> {
      client_ctrl: ClientCtrl<'a, 'static, C>,
  
-@@ -82,6 +120,10 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -82,6 +120,9 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
          product_id: u16,
          strings: &'static [&'static str],
      ) -> Self {
-+        if cfg!(feature = "vendor_hid") {
-+            debug!("vendor_hid enabled.");
-+        }
++        #[cfg(feature = "vendor_hid")]
++        debug!("vendor_hid enabled.");
 +
          let interfaces: &mut [InterfaceDescriptor] = &mut [
              // Interface declared in the FIDO2 specification, section 8.1.8.1
              InterfaceDescriptor {
-@@ -90,9 +132,19 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -90,9 +131,19 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  interface_protocol: 0x00,
                  ..InterfaceDescriptor::default()
              },
@@ -263,7 +255,7 @@ index 642039120..53fbc7719 100644
              EndpointDescriptor {
                  endpoint_address: EndpointAddress::new_const(
                      ENDPOINT_NUM,
-@@ -110,8 +162,30 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -110,8 +161,30 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  transfer_type: TransferType::Interrupt,
                  max_packet_size: 64,
                  interval: 5,
@@ -296,7 +288,7 @@ index 642039120..53fbc7719 100644
  
          let (device_descriptor_buffer, other_descriptor_buffer) =
              descriptors::create_descriptor_buffers(
-@@ -130,17 +204,28 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -130,17 +203,28 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  },
                  interfaces,
                  endpoints,

@@ -10,7 +10,7 @@ index 680fe32b2..4f757b93d 100644
 +[features]
 +vendor_hid = []
 diff --git a/capsules/src/usb/descriptors.rs b/capsules/src/usb/descriptors.rs
-index dea2dfed9..5dc6b81a6 100644
+index dea2dfed9..25119878b 100644
 --- a/capsules/src/usb/descriptors.rs
 +++ b/capsules/src/usb/descriptors.rs
 @@ -420,7 +420,7 @@ pub fn create_descriptor_buffers(
@@ -18,23 +18,20 @@ index dea2dfed9..5dc6b81a6 100644
      interface_descriptor: &mut [InterfaceDescriptor],
      endpoint_descriptors: &[&[EndpointDescriptor]],
 -    hid_descriptor: Option<&HIDDescriptor>,
-+    hid_descriptor: Option<&[&[&HIDDescriptor<'static>]]>,
++    hid_descriptor: Option<&[&HIDDescriptor<'static>]>,
      cdc_descriptor: Option<&[CdcInterfaceDescriptor]>,
  ) -> (DeviceBuffer, DescriptorBuffer) {
      // Create device descriptor buffer and fill.
-@@ -504,7 +504,10 @@ pub fn create_descriptor_buffers(
+@@ -504,7 +504,7 @@ pub fn create_descriptor_buffers(
                  .iter()
                  .map(|descs| descs.iter().map(|d| d.size()).sum::<usize>())
                  .sum::<usize>()
 -            + hid_descriptor.map_or(0, |d| d.size())
-+            + hid_descriptor.map_or(0, |hids| {
-+              hids.iter()
-+                  .map(|descs| descs.iter().map(|d| d.size()).sum::<usize>())
-+                  .sum::<usize>()})
++            + hid_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>())
              + cdc_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>());
  
      // Set the number of endpoints for each interface descriptor.
-@@ -521,12 +524,12 @@ pub fn create_descriptor_buffers(
+@@ -521,13 +521,11 @@ pub fn create_descriptor_buffers(
          // Add the interface descriptor.
          len += d.write_to(&other_buf.buf[len..]);
  
@@ -44,15 +41,15 @@ index dea2dfed9..5dc6b81a6 100644
 -            // HID descriptor, if any.
 -            if let Some(dh) = hid_descriptor {
 -                len += dh.write_to(&other_buf.buf[len..]);
+-            }
 +        // HID descriptor, if any.
 +        if let Some(dh) = hid_descriptor {
-+            if let Some(hids) = dh.get(0) {
-+                if let Some(d) = hids.get(i) {
-+                    len += d.write_to(&other_buf.buf[len..]);
-+                }
-             }
++              if let Some(d) = dh.get(i) {
++                  len += d.write_to(&other_buf.buf[len..]);
++              }
          }
  
+         // If there is a CDC descriptor array, we include
 diff --git a/capsules/src/usb/usbc_client_ctrl.rs b/capsules/src/usb/usbc_client_ctrl.rs
 index f7899d8c5..6956523c6 100644
 --- a/capsules/src/usb/usbc_client_ctrl.rs
@@ -151,7 +148,7 @@ index f7899d8c5..6956523c6 100644
                          hil::usb::CtrlSetupResult::ErrGeneric
                      }
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 642039120..ee55cf6b7 100644
+index 642039120..41d69752c 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -44,21 +44,59 @@ static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[
@@ -282,11 +279,11 @@ index 642039120..ee55cf6b7 100644
                  interfaces,
                  endpoints,
 -                Some(&HID),
-+                Some(&[&[
++                Some(&[
 +                    &HID,
 +                    #[cfg(feature = "vendor_hid")]
 +                    &HID,
-+                ]]),
++                ]),
                  None, // No CDC descriptor array
              );
 -

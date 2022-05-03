@@ -1,8 +1,6 @@
-trait Timer {
+trait Timer: Sized {
     fn start(milliseconds: u32) -> Self;
-    fn has_elapsed(self) -> Option<Self>
-    where
-        Self: Sized;
+    fn has_elapsed(self) -> Option<Self>;
 }
 
 use libtock_core::syscalls;
@@ -17,37 +15,37 @@ mod command_nr {
 }
 const DRIVER_NUMBER: usize = 0x00000;
 
-lazy_static! {
-    static ref CLOCK_FREQUENCY: usize =
-        syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0).unwrap_or(0);
-}
-
 struct LibtockAlarmTimer {
-    start_tick: usize,
-    milliseconds: u32,
+    end_tick: usize,
 }
 
+fn wrapping_add_u24(lhs: usize, rhs: usize) -> usize {
+    lhs.wrapping_add(rhs) & 0xffffff
+}
 fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
     lhs.wrapping_sub(rhs) & 0xffffff
 }
 
 impl Timer for LibtockAlarmTimer {
     fn start(milliseconds: u32) -> Self {
+        let clock_frequency =
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0).unwrap_or(0);
         let start_tick =
             syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).unwrap_or(0);
-        Self {
-            start_tick,
-            milliseconds,
-        }
+        // 32 bits inverted divisor for 1/1000 ( ceil((2^32) / 1000) ), so that (x * INV_DIV) >> 32 ≈ x / 1000
+        const INV_DIV: u64 = 4294968;
+        let delta_tick = ((clock_frequency as u64 * milliseconds as u64 * INV_DIV) >> 32) as usize;
+        // this invariant is necessary for the test in has_elapsed to be correct
+        assert!(delta_tick < 0x800000);
+        let end_tick = wrapping_add_u24(start_tick, delta_tick);
+        Self { end_tick }
     }
 
     fn has_elapsed(self) -> Option<Self> {
         let cur_tick =
             syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).unwrap_or(0);
 
-        // TODO: handle 24 bits magic
-        let delta_tick = wrapping_sub_u24(cur_tick, self.start_tick);
-        if (delta_tick * 1000) / *CLOCK_FREQUENCY > self.milliseconds as usize {
+        if wrapping_sub_u24(self.end_tick, cur_tick) < 0x800000 {
             None
         } else {
             Some(self)

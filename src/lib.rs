@@ -17,8 +17,6 @@
 extern crate alloc;
 #[macro_use]
 extern crate arrayref;
-#[macro_use]
-extern crate lazy_static;
 
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;

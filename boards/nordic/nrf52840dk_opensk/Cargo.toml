@@ -12,3 +12,6 @@ capsules = { path = "../../../capsules" }
 kernel = { path = "../../../kernel" }
 nrf52840 = { path = "../../../chips/nrf52840" }
 nrf52_components = { path = "../nrf52_components" }
+
+[features]
+vendor_hid = ["capsules/vendor_hid"]

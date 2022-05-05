@@ -33,18 +33,11 @@ use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
 
 // Legacy credential IDs consist of
-// - 16 byte initialization vector for AES-256,
-// - 32 byte ECDSA private key for the credential,
-// - 32 byte relying party ID hashed with SHA256,
-// - 32 byte HMAC-SHA256 over everything else.
+// - 16 bytes: initialization vector for AES-256,
+// - 32 bytes: ECDSA private key for the credential,
+// - 32 bytes: relying party ID hashed with SHA256,
+// - 32 bytes: HMAC-SHA256 over everything else.
 pub const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
-// New credential IDs are still ECDSA only, and consist of
-// - 16 byte initialization vector for AES-256,
-// -  4 byte algorithm,
-// - 12 byte reserved,
-// - 32 byte ECDSA private key for the credential,
-// - 32 byte relying party ID hashed with SHA256,
-// - 32 byte HMAC-SHA256 over everything else.
 #[cfg(test)]
 pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 128;
 pub const MAX_CREDENTIAL_ID_SIZE: usize = 128;
@@ -95,18 +88,20 @@ pub fn aes256_cbc_decrypt(
 }
 
 /// An asymmetric private key that can sign messages.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrivateKey {
-    EcdsaKey(ecdsa::SecKey),
+    Ecdsa(ecdsa::SecKey),
 }
 
 impl PrivateKey {
     /// Creates a new private key for the given algorithm.
     ///
-    /// Calling new with the unknown is invalid.
+    /// # Panics
+    ///
+    /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
     pub fn new(rng: &mut impl Rng256, alg: SignatureAlgorithm) -> Self {
         match alg {
-            SignatureAlgorithm::ES256 => PrivateKey::EcdsaKey(crypto::ecdsa::SecKey::gensk(rng)),
+            SignatureAlgorithm::ES256 => PrivateKey::Ecdsa(crypto::ecdsa::SecKey::gensk(rng)),
             SignatureAlgorithm::Unknown => unreachable!(),
         }
     }
@@ -124,30 +119,28 @@ impl PrivateKey {
     /// Returns the corresponding public key.
     pub fn get_pub_key(&self) -> CoseKey {
         match self {
-            PrivateKey::EcdsaKey(ecdsa_key) => CoseKey::from(ecdsa_key.genpk()),
+            PrivateKey::Ecdsa(ecdsa_key) => CoseKey::from(ecdsa_key.genpk()),
         }
     }
 
     /// Returns the encoded signature for a given message.
     pub fn sign_and_encode(&self, message: &[u8]) -> Vec<u8> {
         match self {
-            PrivateKey::EcdsaKey(ecdsa_key) => {
-                ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der()
-            }
+            PrivateKey::Ecdsa(ecdsa_key) => ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der(),
         }
     }
 
     /// The associated COSE signature algorithm identifier.
     pub fn signature_algorithm(&self) -> SignatureAlgorithm {
         match self {
-            PrivateKey::EcdsaKey(_) => SignatureAlgorithm::ES256,
+            PrivateKey::Ecdsa(_) => SignatureAlgorithm::ES256,
         }
     }
 
     /// Writes the key bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            PrivateKey::EcdsaKey(ecdsa_key) => {
+            PrivateKey::Ecdsa(ecdsa_key) => {
                 let mut key_bytes = vec![0u8; 32];
                 ecdsa_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
                 key_bytes
@@ -184,28 +177,40 @@ impl TryFrom<cbor::Value> for PrivateKey {
 
 impl From<ecdsa::SecKey> for PrivateKey {
     fn from(ecdsa_key: ecdsa::SecKey) -> Self {
-        PrivateKey::EcdsaKey(ecdsa_key)
+        PrivateKey::Ecdsa(ecdsa_key)
     }
 }
 
-/// Encrypts the given private key and relying part ID hash into a credential ID.
+/// Encrypts the given private key and relying party ID hash into a credential ID.
 ///
 /// Other information, such as a user name, are not stored. Since encrypted credential IDs are
-/// stored server-side, this information is already available (unecrypted).
+/// stored server-side, this information is already available (unencrypted).
 ///
 /// Also, by limiting ourselves to private key and RP ID hash, we are compatible with U2F for
 /// ECDSA private keys.
+///
+/// This is v1, and we write the following data for ECDSA (algorithm -7):
+/// - 16 bytes: initialization vector for AES-256,
+/// -  4 bytes: algorithm in big endian encoding,
+/// -  1 byte : version number
+/// - 11 bytes: reserved,
+/// - 32 bytes: ECDSA private key for the credential,
+/// - 32 bytes: relying party ID hashed with SHA256,
+/// - 32 bytes: HMAC-SHA256 over everything else.
 pub fn encrypt_key_handle(
     env: &mut impl Env,
     private_key: &PrivateKey,
     application: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     match private_key {
-        PrivateKey::EcdsaKey(ecdsa_key) => {
+        PrivateKey::Ecdsa(ecdsa_key) => {
             let master_keys = storage::master_keys(env)?;
             let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
             let mut plaintext = [0; 80];
+            // Algorithm
             BigEndian::write_i32(&mut plaintext, SignatureAlgorithm::ES256 as i32);
+            // Version number
+            plaintext[4] = 0x01;
             ecdsa_key.to_bytes(array_mut_ref!(plaintext, 16, 32));
             plaintext[48..80].copy_from_slice(application);
 
@@ -222,6 +227,12 @@ pub fn encrypt_key_handle(
 /// Returns None if
 /// - the HMAC test fails or
 /// - the relying party does not match the decrypted relying party ID hash.
+///
+/// This functions reads:
+/// - legacy credentials (no algorithm identifier or version number),
+/// - ECDSA v1
+///
+/// It opportunistically accepts all version numbers >= 1.
 pub fn decrypt_credential_source(
     env: &mut impl Env,
     credential_id: Vec<u8>,
@@ -249,6 +260,10 @@ pub fn decrypt_credential_source(
     let sk_option = if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
         PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32])
     } else {
+        // Version number check.
+        if decrypted_id[4] == 0 {
+            return Ok(None);
+        }
         let algorithm_int = BigEndian::read_i32(&decrypted_id[..4]);
         match SignatureAlgorithm::from(algorithm_int as i64) {
             SignatureAlgorithm::ES256 => PrivateKey::new_ecdsa_from_bytes(&decrypted_id[16..48]),

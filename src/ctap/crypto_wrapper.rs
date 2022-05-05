@@ -227,6 +227,9 @@ pub fn decrypt_credential_source(
     credential_id: Vec<u8>,
     rp_id_hash: &[u8],
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+    if credential_id.len() < LEGACY_CREDENTIAL_ID_SIZE {
+        return Ok(None);
+    }
     let master_keys = storage::master_keys(env)?;
     let payload_size = credential_id.len() - 32;
     if !verify_hmac_256::<Sha256>(
@@ -424,8 +427,6 @@ mod test {
         storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
 
-        // Usually, the relying party ID or its hash is provided by the client.
-        // We are not testing the correctness of our SHA256 here, only if it is checked.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
         let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
@@ -441,7 +442,6 @@ mod test {
         storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
 
-        // Same as above.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
         for i in 0..encrypted_id.len() {
@@ -451,6 +451,23 @@ mod test {
                 decrypt_credential_source(&mut env, modified_id, &rp_id_hash)
                     .unwrap()
                     .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn test_decrypt_credential_missing_blocks() {
+        let mut env = TestEnv::new();
+        storage::init(&mut env).ok().unwrap();
+        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+
+        let rp_id_hash = [0x55; 32];
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+
+        for length in (0..ECDSA_CREDENTIAL_ID_SIZE).step_by(16) {
+            assert_eq!(
+                decrypt_credential_source(&mut env, encrypted_id[..length].to_vec(), &rp_id_hash),
+                Ok(None)
             );
         }
     }
@@ -480,8 +497,6 @@ mod test {
         let ecdsa_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let private_key = PrivateKey::from(ecdsa_key.clone());
 
-        // Usually, the relying party ID or its hash is provided by the client.
-        // We are not testing the correctness of our SHA256 here, only if it is checked.
         let rp_id_hash = [0x55; 32];
         let encrypted_id = legacy_encrypt_key_handle(&mut env, ecdsa_key, &rp_id_hash).unwrap();
         let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)

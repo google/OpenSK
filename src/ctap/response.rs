@@ -24,7 +24,7 @@ use sk_cbor::{
     cbor_array_vec, cbor_bool, cbor_int, cbor_map_collection, cbor_map_options, cbor_text,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
 pub enum ResponseData {
     AuthenticatorMakeCredential(AuthenticatorMakeCredentialResponse),
@@ -62,7 +62,7 @@ impl From<ResponseData> for Option<cbor::Value> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorMakeCredentialResponse {
     pub fmt: String,
     pub auth_data: Vec<u8>,
@@ -91,7 +91,7 @@ impl From<AuthenticatorMakeCredentialResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorGetAssertionResponse {
     pub credential: Option<PublicKeyCredentialDescriptor>,
     pub auth_data: Vec<u8>,
@@ -124,7 +124,7 @@ impl From<AuthenticatorGetAssertionResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorGetInfoResponse {
     pub versions: Vec<String>,
     pub extensions: Option<Vec<String>>,
@@ -214,7 +214,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorClientPinResponse {
     pub key_agreement: Option<CoseKey>,
     pub pin_uv_auth_token: Option<Vec<u8>>,
@@ -241,7 +241,7 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorLargeBlobsResponse {
     pub config: Vec<u8>,
 }
@@ -256,7 +256,7 @@ impl From<AuthenticatorLargeBlobsResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AuthenticatorCredentialManagementResponse {
     pub existing_resident_credentials_count: Option<u64>,
     pub max_possible_remaining_resident_credentials_count: Option<u64>,
@@ -303,7 +303,7 @@ impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorVendorConfigureResponse {
     pub cert_programmed: bool,
     pub pkey_programmed: bool,
@@ -323,7 +323,7 @@ impl From<AuthenticatorVendorConfigureResponse> for cbor::Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorVendorUpgradeInfoResponse {
     pub info: u32,
 }

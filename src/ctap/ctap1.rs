@@ -27,7 +27,7 @@ pub type Ctap1StatusCode = ApduStatusCode;
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ctap1Flags {
     CheckOnly = 0x07,
     EnforceUpAndSign = 0x03,
@@ -53,15 +53,12 @@ impl Into<u8> for Ctap1Flags {
     }
 }
 
-#[derive(Debug, PartialEq)]
-// TODO: remove #allow when https://github.com/rust-lang/rust/issues/64362 is fixed
+#[derive(Debug, PartialEq, Eq)]
 enum U2fCommand {
-    #[allow(dead_code)]
     Register {
         challenge: [u8; 32],
         application: [u8; 32],
     },
-    #[allow(dead_code)]
     Authenticate {
         challenge: [u8; 32],
         application: [u8; 32],
@@ -69,7 +66,6 @@ enum U2fCommand {
         flags: Ctap1Flags,
     },
     Version,
-    #[allow(dead_code)]
     VendorSpecific {
         payload: Vec<u8>,
     },

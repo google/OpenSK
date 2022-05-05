@@ -28,7 +28,7 @@ use rng256::Rng256;
 
 pub const NBYTES: usize = int256::NBYTES;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }

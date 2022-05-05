@@ -30,7 +30,7 @@ use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
 const ES256_ALGORITHM: i64 = -7;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialRpEntity {
     pub rp_id: String,
@@ -73,7 +73,7 @@ impl From<PublicKeyCredentialRpEntity> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialuserentity
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialUserEntity {
     pub user_id: Vec<u8>,
@@ -121,7 +121,7 @@ impl From<PublicKeyCredentialUserEntity> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-publickeycredentialtype
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum PublicKeyCredentialType {
     PublicKey,
@@ -154,7 +154,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialType {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialparameters
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialParameter {
     pub cred_type: PublicKeyCredentialType,
@@ -188,7 +188,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 }
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum AuthenticatorTransport {
@@ -226,7 +226,7 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
 }
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialdescriptor
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct PublicKeyCredentialDescriptor {
     pub key_type: PublicKeyCredentialType,
@@ -278,7 +278,7 @@ impl From<PublicKeyCredentialDescriptor> for cbor::Value {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct MakeCredentialExtensions {
     pub hmac_secret: bool,
@@ -324,7 +324,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GetAssertionExtensions {
     pub hmac_secret: Option<GetAssertionHmacSecretInput>,
     pub cred_blob: bool,
@@ -361,7 +361,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -397,7 +397,7 @@ impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
 }
 
 // Even though options are optional, we can use the default if not present.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct MakeCredentialOptions {
     pub rk: bool,
@@ -434,7 +434,7 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct GetAssertionOptions {
     pub up: bool,
     pub uv: bool,
@@ -479,7 +479,7 @@ impl TryFrom<cbor::Value> for GetAssertionOptions {
 }
 
 // https://www.w3.org/TR/webauthn/#packed-attestation
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PackedAttestationStatement {
     pub alg: i64,
     pub sig: Vec<u8>,
@@ -499,7 +499,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
 }
 
 /// Signature algorithm identifier, as specified for COSE.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
@@ -532,7 +532,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 }
 
 /// The credProtect extension's policies for resident credentials.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 #[allow(clippy::enum_variant_names)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
@@ -571,7 +571,7 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
 //
 // Note that we only use the WebAuthn definition as an example. This data-structure is not specified
 // by FIDO. In particular we may choose how we serialize and deserialize it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKeyCredentialSource {
     pub key_type: PublicKeyCredentialType,
     pub credential_id: Vec<u8>,
@@ -715,7 +715,7 @@ impl PublicKeyCredentialSource {
 }
 
 // The COSE key is used for both ECDH and ECDSA public keys for transmission.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoseKey {
     x_bytes: [u8; ecdh::NBYTES],
     y_bytes: [u8; ecdh::NBYTES],
@@ -867,7 +867,7 @@ impl TryFrom<CoseKey> for ecdsa::PubKey {
 /// Data structure for receiving a signature.
 ///
 /// See https://datatracker.ietf.org/doc/html/rfc8152#appendix-C.1.1 for reference.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoseSignature {
     pub algorithm: SignatureAlgorithm,
     pub bytes: [u8; ecdsa::Signature::BYTES_LENGTH],
@@ -909,7 +909,7 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum PinUvAuthProtocol {
     V1 = 1,
@@ -928,7 +928,7 @@ impl TryFrom<cbor::Value> for PinUvAuthProtocol {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ClientPinSubCommand {
     GetPinRetries = 0x01,
@@ -966,7 +966,7 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum ConfigSubCommand {
     EnableEnterpriseAttestation = 0x01,
@@ -996,7 +996,7 @@ impl TryFrom<cbor::Value> for ConfigSubCommand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfigSubCommandParams {
     SetMinPinLength(SetMinPinLengthParams),
 }
@@ -1011,7 +1011,7 @@ impl From<ConfigSubCommandParams> for cbor::Value {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetMinPinLengthParams {
     pub new_min_pin_length: Option<u8>,
     pub min_pin_length_rp_ids: Option<Vec<String>>,
@@ -1066,7 +1066,7 @@ impl From<SetMinPinLengthParams> for cbor::Value {
 }
 
 /// The level of enterprise attestation allowed in MakeCredential.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EnterpriseAttestationMode {
     /// Enterprise attestation is restricted to a list of RP IDs. Add your
     /// enterprises domain, e.g. "example.com", to the list below.
@@ -1088,7 +1088,7 @@ impl TryFrom<u64> for EnterpriseAttestationMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum CredentialManagementSubCommand {
     GetCredsMetadata = 0x01,
@@ -1124,7 +1124,7 @@ impl TryFrom<cbor::Value> for CredentialManagementSubCommand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CredentialManagementSubCommandParameters {
     pub rp_id_hash: Option<Vec<u8>>,
     pub credential_id: Option<PublicKeyCredentialDescriptor>,

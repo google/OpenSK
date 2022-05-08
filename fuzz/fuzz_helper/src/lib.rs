@@ -28,7 +28,7 @@ use ctap2::ctap::data_formats::EnterpriseAttestationMode;
 use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
-use ctap2::ctap::{cbor_read, Channel, CtapState};
+use ctap2::ctap::{cbor_read, test_helpers, Channel, CtapState};
 use ctap2::env::test::TestEnv;
 use ctap2::{Ctap, Transport};
 
@@ -133,8 +133,7 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
@@ -147,9 +146,13 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     Ok(())
 }
 
-fn setup_storage(unstructured: &mut Unstructured, env: &mut TestEnv) -> arbitrary::Result<()> {
+fn setup_env(
+    unstructured: &mut Unstructured,
+    state: &mut CtapState,
+    env: &mut TestEnv,
+) -> arbitrary::Result<()> {
     if bool::arbitrary(unstructured)? {
-        env.set_enterprise_attestation();
+        test_helpers::env::setup_enterprise_attestation(state, env).ok();
     }
     Ok(())
 }
@@ -158,8 +161,13 @@ fn setup_customization(
     unstructured: &mut Unstructured,
     env: &mut TestEnv,
 ) -> arbitrary::Result<()> {
-    env.customization_mut().enterprise_attestation_mode =
-        Option::<EnterpriseAttestationMode>::arbitrary(unstructured)?;
+    test_helpers::customization::setup_enterprise_attestation(
+        env.customization_mut(),
+        Option::<EnterpriseAttestationMode>::arbitrary(unstructured)?,
+        // TODO: Generate arbitrary rp_id_list (but with some dummies because content doesn't
+        // matter), and use the rp ids in commands.
+        None,
+    );
     Ok(())
 }
 
@@ -170,11 +178,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
-
-    setup_storage(&mut unstructured, &mut env)?;
-    setup_customization(&mut unstructured, &mut env)?;
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     if !is_type(data, input_type) {
@@ -208,9 +212,11 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary:
     let unstructured = &mut Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng().seed_rng_from_u64(u64::arbitrary(unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
+    setup_customization(unstructured, &mut env)?;
 
     let mut state = CtapState::new(&mut env, CtapInstant::new(0));
+    setup_env(unstructured, &mut state, &mut env)?;
 
     let command = match input_type {
         InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(
@@ -244,8 +250,7 @@ pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     let message = raw_to_message(data);

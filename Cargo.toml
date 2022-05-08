@@ -27,7 +27,6 @@ arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 rand = { version = "0.8.4", optional = true }
 
 [features]
-# default = ["std"]
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]

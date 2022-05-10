@@ -551,4 +551,15 @@ mod test {
 
         assert_eq!(private_key, decrypted_source.private_key);
     }
+
+    #[test]
+    fn test_encrypt_credential_size() {
+        let mut env = TestEnv::new();
+        storage::init(&mut env).ok().unwrap();
+        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+
+        let rp_id_hash = [0x55; 32];
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        assert_eq!(encrypted_id.len(), ECDSA_CREDENTIAL_ID_SIZE);
+    }
 }

@@ -183,7 +183,7 @@ fn setup_state(
     env: &mut TestEnv,
 ) -> FuzzResult<()> {
     if bool::arbitrary(unstructured)? {
-        test_helpers::setup_enterprise_attestation(state, env).ok();
+        test_helpers::enable_enterprise_attestation(state, env).ok();
     }
     Ok(())
 }

@@ -14,7 +14,7 @@ const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 #[cfg(feature = "vendor_hid")]
 const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
-pub fn setup_enterprise_attestation(
+pub fn enable_enterprise_attestation(
     state: &mut CtapState,
     env: &mut impl Env,
 ) -> Result<AuthenticatorAttestationMaterial, Ctap2StatusCode> {

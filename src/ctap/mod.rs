@@ -2070,7 +2070,7 @@ mod test {
         );
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2117,7 +2117,7 @@ mod test {
         assert!(customization::is_valid(env.customization()));
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2160,7 +2160,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
-        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(3);

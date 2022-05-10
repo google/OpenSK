@@ -22,7 +22,7 @@ mod crypto_wrapper;
 mod ctap1;
 pub mod data_formats;
 pub mod hid;
-mod key_material;
+pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
@@ -1436,7 +1436,9 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
+    use crate::api::customization;
     use crate::env::test::TestEnv;
+    use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -2062,17 +2064,13 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::VendorFacilitated);
-        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        env.customization_mut().setup_enterprise_attestation(
+            Some(EnterpriseAttestationMode::VendorFacilitated),
+            Some(vec!["example.com".to_string()]),
+        );
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2112,17 +2110,14 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::PlatformManaged);
-        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        env.customization_mut().setup_enterprise_attestation(
+            Some(EnterpriseAttestationMode::PlatformManaged),
+            Some(vec!["example.com".to_string()]),
+        );
+        assert!(customization::is_valid(env.customization()));
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2151,8 +2146,9 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::PlatformManaged);
+        env.customization_mut()
+            .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
+
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
@@ -2164,12 +2160,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(3);

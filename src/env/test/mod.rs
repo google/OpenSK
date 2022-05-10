@@ -10,7 +10,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rng256::Rng256;
 
-mod customization;
+pub mod customization;
 mod upgrade_storage;
 
 pub struct TestEnv {
@@ -26,7 +26,7 @@ pub struct TestRng256 {
 }
 
 impl TestRng256 {
-    pub fn seed_rng_from_u64(&mut self, state: u64) {
+    pub fn seed_from_u64(&mut self, state: u64) {
         self.rng = StdRng::seed_from_u64(state);
     }
 }

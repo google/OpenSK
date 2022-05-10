@@ -52,6 +52,8 @@ pub mod ctap;
 #[cfg(not(feature = "std"))]
 mod ctap;
 pub mod env;
+#[cfg(feature = "std")]
+pub mod test_helpers;
 
 /// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {

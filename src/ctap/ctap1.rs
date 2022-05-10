@@ -14,6 +14,7 @@
 
 use super::super::clock::CtapInstant;
 use super::apdu::{Apdu, ApduStatusCode};
+use super::crypto_wrapper::{decrypt_credential_source, encrypt_key_handle, PrivateKey};
 use super::CtapState;
 use crate::ctap::storage;
 use crate::env::Env;
@@ -195,7 +196,7 @@ impl Ctap1Command {
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
                     return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
-                Ctap1Command::process_register(env, challenge, application, ctap_state)
+                Ctap1Command::process_register(env, challenge, application)
             }
 
             U2fCommand::Authenticate {
@@ -243,12 +244,10 @@ impl Ctap1Command {
         env: &mut impl Env,
         challenge: [u8; 32],
         application: [u8; 32],
-        ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let pk = sk.genpk();
-        let key_handle = ctap_state
-            .encrypt_key_handle(env, sk, &application)
+        let key_handle = encrypt_key_handle(env, &PrivateKey::from(sk), &application)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
@@ -307,10 +306,15 @@ impl Ctap1Command {
         flags: Ctap1Flags,
         ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let credential_source = ctap_state
-            .decrypt_credential_source(env, key_handle, &application)
+        let credential_source = decrypt_credential_source(env, key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
+            // CTAP1 only supports ECDSA, the default case applies if CTAP2 adds more algorithms.
+            #[allow(unreachable_patterns)]
+            let ecdsa_key = match credential_source.private_key {
+                PrivateKey::Ecdsa(k) => k,
+                _ => return Err(Ctap1StatusCode::SW_WRONG_DATA),
+            };
             if flags == Ctap1Flags::CheckOnly {
                 return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }
@@ -325,9 +329,7 @@ impl Ctap1Command {
                 )
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
-            let signature = credential_source
-                .private_key
-                .sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+            let signature = ecdsa_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
 
             let mut response = signature_data[application.len()..application.len() + 5].to_vec();
             response.extend(signature.to_asn1_der());
@@ -340,7 +342,9 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::{key_material, CREDENTIAL_ID_SIZE};
+    use super::super::crypto_wrapper::ECDSA_CREDENTIAL_ID_SIZE;
+    use super::super::data_formats::SignatureAlgorithm;
+    use super::super::key_material;
     use super::*;
     use crate::api::customization::Customization;
     use crate::clock::TEST_CLOCK_FREQUENCY_HZ;
@@ -375,12 +379,12 @@ mod test {
             0x00,
             0x00,
             0x00,
-            65 + CREDENTIAL_ID_SIZE as u8,
+            65 + ECDSA_CREDENTIAL_ID_SIZE as u8,
         ];
         let challenge = [0x0C; 32];
         message.extend(&challenge);
         message.extend(application);
-        message.push(CREDENTIAL_ID_SIZE as u8);
+        message.push(ECDSA_CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);
         message
     }
@@ -439,16 +443,15 @@ mod test {
             Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
                 .unwrap();
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
-        assert_eq!(response[66], CREDENTIAL_ID_SIZE as u8);
-        assert!(ctap_state
-            .decrypt_credential_source(
-                &mut env,
-                response[67..67 + CREDENTIAL_ID_SIZE].to_vec(),
-                &application
-            )
-            .unwrap()
-            .is_some());
-        const CERT_START: usize = 67 + CREDENTIAL_ID_SIZE;
+        assert_eq!(response[66], ECDSA_CREDENTIAL_ID_SIZE as u8);
+        assert!(decrypt_credential_source(
+            &mut env,
+            response[67..67 + ECDSA_CREDENTIAL_ID_SIZE].to_vec(),
+            &application
+        )
+        .unwrap()
+        .is_some());
+        const CERT_START: usize = 67 + ECDSA_CREDENTIAL_ID_SIZE;
         assert_eq!(
             &response[CERT_START..CERT_START + fake_cert.len()],
             &fake_cert[..]
@@ -498,14 +501,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response =
@@ -518,14 +519,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -539,14 +538,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let mut message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -579,14 +576,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
@@ -601,14 +596,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
@@ -623,14 +616,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
@@ -653,14 +644,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -683,14 +672,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let sk = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_key_handle(&mut env, &sk, &application).unwrap();
         let message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -716,7 +703,7 @@ mod test {
     #[test]
     fn test_process_authenticate_bad_key_handle() {
         let application = [0x0A; 32];
-        let key_handle = vec![0x00; CREDENTIAL_ID_SIZE];
+        let key_handle = vec![0x00; ECDSA_CREDENTIAL_ID_SIZE];
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -735,7 +722,7 @@ mod test {
     #[test]
     fn test_process_authenticate_without_up() {
         let application = [0x0A; 32];
-        let key_handle = vec![0x00; CREDENTIAL_ID_SIZE];
+        let key_handle = vec![0x00; ECDSA_CREDENTIAL_ID_SIZE];
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 

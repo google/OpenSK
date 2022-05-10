@@ -16,7 +16,7 @@ use super::super::clock::CtapInstant;
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorCredentialManagementParameters;
 use super::data_formats::{
-    CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
+    CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
     PublicKeyCredentialDescriptor, PublicKeyCredentialRpEntity, PublicKeyCredentialSource,
     PublicKeyCredentialUserEntity,
 };
@@ -92,7 +92,7 @@ fn enumerate_credentials_response(
         key_id: credential_id,
         transports: None, // You can set USB as a hint here.
     };
-    let public_key = CoseKey::from(private_key.genpk());
+    let public_key = private_key.get_pub_key();
     Ok(AuthenticatorCredentialManagementResponse {
         user: Some(user),
         credential_id: Some(credential_id),
@@ -359,6 +359,7 @@ pub fn process_credential_management(
 
 #[cfg(test)]
 mod test {
+    use super::super::crypto_wrapper::PrivateKey;
     use super::super::data_formats::{PinUvAuthProtocol, PublicKeyCredentialType};
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::super::CtapState;
@@ -373,7 +374,7 @@ mod test {
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),

@@ -41,7 +41,9 @@ use self::command::{
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
-use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
+use self::crypto_wrapper::{
+    decrypt_credential_source, encrypt_key_handle, PrivateKey, MAX_CREDENTIAL_ID_SIZE,
+};
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
     EnterpriseAttestationMode, GetAssertionExtensions, PackedAttestationStatement,
@@ -72,7 +74,7 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-use crypto::hmac::{hmac_256, verify_hmac_256};
+use crypto::hmac::hmac_256;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use embedded_time::duration::Milliseconds;
@@ -81,12 +83,6 @@ use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 
 pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
-// Our credential ID consists of
-// - 16 byte initialization vector for AES-256,
-// - 32 byte ECDSA private key for the credential,
-// - 32 byte relying party ID hashed with SHA256,
-// - 32 byte HMAC-SHA256 over everything else.
-pub const CREDENTIAL_ID_SIZE: usize = 112;
 // Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
 // Set this bit when checking user verification.
@@ -431,72 +427,6 @@ impl CtapState {
         Ok(!storage::has_always_uv(env)?)
     }
 
-    // Encrypts the private key and relying party ID hash into a credential ID. Other
-    // information, such as a user name, are not stored, because encrypted credential IDs
-    // are used for credentials stored server-side. Also, we want the key handle to be
-    // compatible with U2F.
-    pub fn encrypt_key_handle(
-        &mut self,
-        env: &mut impl Env,
-        private_key: crypto::ecdsa::SecKey,
-        application: &[u8; 32],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let master_keys = storage::master_keys(env)?;
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-        let mut plaintext = [0; 64];
-        private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
-        plaintext[32..64].copy_from_slice(application);
-
-        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
-        encrypted_id.extend(&id_hmac);
-        Ok(encrypted_id)
-    }
-
-    // Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
-    // None is returned if the HMAC test fails or the relying party does not match the
-    // decrypted relying party ID hash.
-    pub fn decrypt_credential_source(
-        &self,
-        env: &mut impl Env,
-        credential_id: Vec<u8>,
-        rp_id_hash: &[u8],
-    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        if credential_id.len() != CREDENTIAL_ID_SIZE {
-            return Ok(None);
-        }
-        let master_keys = storage::master_keys(env)?;
-        let payload_size = credential_id.len() - 32;
-        if !verify_hmac_256::<Sha256>(
-            &master_keys.hmac,
-            &credential_id[..payload_size],
-            array_ref![credential_id, payload_size, 32],
-        ) {
-            return Ok(None);
-        }
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-
-        let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, &credential_id[..payload_size], true)?;
-        if rp_id_hash != &decrypted_id[32..64] {
-            return Ok(None);
-        }
-        let sk_option = crypto::ecdsa::SecKey::from_bytes(array_ref!(decrypted_id, 0, 32));
-        Ok(sk_option.map(|sk| PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id,
-            private_key: sk,
-            rp_id: String::from(""),
-            user_handle: vec![],
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        }))
-    }
-
     pub fn process_command(
         &mut self,
         env: &mut impl Env,
@@ -673,9 +603,11 @@ impl CtapState {
 
         self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, channel)?;
 
+        // When more algorithms are supported, iterate and pick the first match.
         if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
+        let algorithm = SignatureAlgorithm::ES256;
 
         let rp_id = rp.rp_id;
         let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
@@ -744,9 +676,7 @@ impl CtapState {
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
                 if storage::find_credential(env, &rp_id, &cred_desc.key_id, !has_uv)?.is_some()
-                    || self
-                        .decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash)?
-                        .is_some()
+                    || decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash)?.is_some()
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
@@ -790,15 +720,15 @@ impl CtapState {
             _ => None,
         };
 
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-
+        // We decide on the algorithm early, but delay key creation since it takes time.
+        // We rather do that later so all intermediate checks may return faster.
+        let private_key = PrivateKey::new(env.rng(), algorithm);
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
-                private_key: sk.clone(),
+                private_key: private_key.clone(),
                 rp_id,
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
@@ -820,18 +750,19 @@ impl CtapState {
             storage::store_credential(env, credential_source)?;
             random_id
         } else {
-            self.encrypt_key_handle(env, sk.clone(), &rp_id_hash)?
+            encrypt_key_handle(env, &private_key, &rp_id_hash)?
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
         auth_data.extend(&storage::aaguid(env)?);
-        // The length is fixed to 0x20 or 0x70 and fits one byte.
+        // The length is fixed to 0x20 or 0x80 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        cbor_write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data)?;
+        let public_cose_key = private_key.get_pub_key();
+        cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
                 Some(true)
@@ -864,15 +795,17 @@ impl CtapState {
             let attestation_certificate = storage::attestation_certificate(env)?
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
             (
-                attestation_key.sign_rfc6979::<Sha256>(&signature_data),
+                attestation_key
+                    .sign_rfc6979::<Sha256>(&signature_data)
+                    .to_asn1_der(),
                 Some(vec![attestation_certificate]),
             )
         } else {
-            (sk.sign_rfc6979::<Sha256>(&signature_data), None)
+            (private_key.sign_and_encode(&signature_data), None)
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,
-            sig: signature.to_asn1_der(),
+            sig: signature,
             x5c,
             ecdaa_key_id: None,
         };
@@ -893,13 +826,12 @@ impl CtapState {
     fn generate_cred_random(
         &mut self,
         env: &mut impl Env,
-        private_key: &crypto::ecdsa::SecKey,
+        private_key: &PrivateKey,
         has_uv: bool,
     ) -> Result<[u8; 32], Ctap2StatusCode> {
-        let mut private_key_bytes = [0u8; 32];
-        private_key.to_bytes(&mut private_key_bytes);
+        let entropy = private_key.to_bytes();
         let key = storage::cred_random_secret(env, has_uv)?;
-        Ok(hmac_256::<Sha256>(&key, &private_key_bytes))
+        Ok(hmac_256::<Sha256>(&key, &entropy))
     }
 
     // Processes the input of a get_assertion operation for a given credential
@@ -951,9 +883,7 @@ impl CtapState {
 
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
-        let signature = credential
-            .private_key
-            .sign_rfc6979::<Sha256>(&signature_data);
+        let signature = credential.private_key.sign_and_encode(&signature_data);
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -979,7 +909,7 @@ impl CtapState {
         let response_data = AuthenticatorGetAssertionResponse {
             credential: Some(cred_desc),
             auth_data,
-            signature: signature.to_asn1_der(),
+            signature,
             user,
             number_of_credentials: number_of_credentials.map(|n| n as u64),
             large_blob_key,
@@ -1007,8 +937,7 @@ impl CtapState {
             if credential.is_some() {
                 return Ok(credential);
             }
-            let credential =
-                self.decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash)?;
+            let credential = decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash)?;
             if credential.is_some() {
                 return Ok(credential);
             }
@@ -1215,7 +1144,7 @@ impl CtapState {
                     .customization()
                     .max_credential_count_in_list()
                     .map(|c| c as u64),
-                max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
+                max_credential_id_length: Some(MAX_CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 algorithms: Some(vec![ES256_CRED_PARAM]),
                 max_serialized_large_blob_array: Some(
@@ -1429,6 +1358,7 @@ mod test {
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
         AuthenticatorCredentialManagementParameters,
     };
+    use super::crypto_wrapper::ECDSA_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
         ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionHmacSecretInput,
         GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
@@ -1529,7 +1459,7 @@ mod test {
             0x05 => env.customization().max_msg_size() as u64,
             0x06 => cbor_array![2, 1],
             0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
-            0x08 => CREDENTIAL_ID_SIZE as u64,
+            0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
             0x0A => cbor_array![ES256_CRED_PARAM],
             0x0B => env.customization().max_large_blob_array_size() as u64,
@@ -1635,7 +1565,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            CREDENTIAL_ID_SIZE as u8,
+            ECDSA_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -1668,7 +1598,7 @@ mod test {
         let excluded_credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: excluded_credential_id,
-            private_key: excluded_private_key,
+            private_key: PrivateKey::from(excluded_private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![],
             user_display_name: None,
@@ -1762,7 +1692,7 @@ mod test {
             make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
-            CREDENTIAL_ID_SIZE as u8,
+            ECDSA_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
     }
@@ -2005,7 +1935,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            0x70,
+            ECDSA_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -2374,8 +2304,8 @@ mod test {
                 let auth_data = make_credential_response.auth_data;
                 let offset = 37 + storage::aaguid(&mut env).unwrap().len();
                 assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CREDENTIAL_ID_SIZE].to_vec()
+                assert_eq!(auth_data[offset + 1] as usize, ECDSA_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + ECDSA_CREDENTIAL_ID_SIZE].to_vec()
             }
             _ => panic!("Invalid response type"),
         };
@@ -2490,7 +2420,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: credential_id.clone(),
-            private_key: private_key.clone(),
+            private_key: PrivateKey::from(private_key.clone()),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2552,7 +2482,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2599,7 +2529,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2657,7 +2587,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2943,7 +2873,7 @@ mod test {
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![],
             user_display_name: None,
@@ -3017,47 +2947,6 @@ mod test {
             ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL, CtapInstant::new(0));
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
         assert_eq!(reponse, expected_response);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_credential() {
-        let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-
-        // Usually, the relying party ID or its hash is provided by the client.
-        // We are not testing the correctness of our SHA256 here, only if it is checked.
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state
-            .encrypt_key_handle(&mut env, private_key.clone(), &rp_id_hash)
-            .unwrap();
-        let decrypted_source = ctap_state
-            .decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_bad_hmac() {
-        let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-
-        // Same as above.
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state
-            .encrypt_key_handle(&mut env, private_key, &rp_id_hash)
-            .unwrap();
-        for i in 0..encrypted_id.len() {
-            let mut modified_id = encrypted_id.clone();
-            modified_id[i] ^= 0x01;
-            assert!(ctap_state
-                .decrypt_credential_source(&mut env, modified_id, &rp_id_hash)
-                .unwrap()
-                .is_none());
-        }
     }
 
     #[test]
@@ -3483,10 +3372,11 @@ mod test {
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: crypto::ecdsa::SecKey::gensk(env.rng()),
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),

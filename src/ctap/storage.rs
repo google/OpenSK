@@ -728,6 +728,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
     use crate::env::test::TestEnv;
     use rng256::Rng256;
@@ -741,7 +742,7 @@ mod test {
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from(rp_id),
             user_handle,
             user_display_name: None,
@@ -963,7 +964,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: None,
@@ -1284,7 +1285,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
+            private_key: PrivateKey::from(private_key),
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: Some(String::from("Display Name")),

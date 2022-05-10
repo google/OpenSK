@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::crypto_wrapper::PrivateKey;
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -497,7 +498,8 @@ impl From<PackedAttestationStatement> for cbor::Value {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Signature algorithm identifier, as specified for COSE.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
@@ -512,14 +514,20 @@ impl From<SignatureAlgorithm> for cbor::Value {
     }
 }
 
+impl From<i64> for SignatureAlgorithm {
+    fn from(int: i64) -> Self {
+        match int {
+            ES256_ALGORITHM => SignatureAlgorithm::ES256,
+            _ => SignatureAlgorithm::Unknown,
+        }
+    }
+}
+
 impl TryFrom<cbor::Value> for SignatureAlgorithm {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        match extract_integer(cbor_value)? {
-            ES256_ALGORITHM => Ok(SignatureAlgorithm::ES256),
-            _ => Ok(SignatureAlgorithm::Unknown),
-        }
+        extract_integer(cbor_value).map(SignatureAlgorithm::from)
     }
 }
 
@@ -565,10 +573,9 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
 // by FIDO. In particular we may choose how we serialize and deserialize it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKeyCredentialSource {
-    // TODO function to convert to / from Vec<u8>
     pub key_type: PublicKeyCredentialType,
     pub credential_id: Vec<u8>,
-    pub private_key: ecdsa::SecKey, // TODO(kaczmarczyck) open for other algorithms
+    pub private_key: PrivateKey,
     pub rp_id: String,
     pub user_handle: Vec<u8>, // not optional, but nullable
     pub user_display_name: Option<String>,
@@ -584,7 +591,8 @@ pub struct PublicKeyCredentialSource {
 // is associated with a unique tag, implemented with a CBOR unsigned key.
 enum PublicKeyCredentialSourceField {
     CredentialId = 0,
-    PrivateKey = 1,
+    // Deprecated, we still read this field for backwards compatibility.
+    EcdsaPrivateKey = 1,
     RpId = 2,
     UserHandle = 3,
     UserDisplayName = 4,
@@ -594,6 +602,7 @@ enum PublicKeyCredentialSourceField {
     UserIcon = 9,
     CredBlob = 10,
     LargeBlobKey = 11,
+    PrivateKey = 12,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags:
@@ -608,11 +617,8 @@ impl From<PublicKeyCredentialSourceField> for cbor::Value {
 
 impl From<PublicKeyCredentialSource> for cbor::Value {
     fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
-        let mut private_key = [0u8; 32];
-        credential.private_key.to_bytes(&mut private_key);
         cbor_map_options! {
             PublicKeyCredentialSourceField::CredentialId => Some(credential.credential_id),
-            PublicKeyCredentialSourceField::PrivateKey => Some(private_key.to_vec()),
             PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
             PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
             PublicKeyCredentialSourceField::UserDisplayName => credential.user_display_name,
@@ -622,6 +628,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::UserIcon => credential.user_icon,
             PublicKeyCredentialSourceField::CredBlob => credential.cred_blob,
             PublicKeyCredentialSourceField::LargeBlobKey => credential.large_blob_key,
+            PublicKeyCredentialSourceField::PrivateKey => credential.private_key,
         }
     }
 }
@@ -633,7 +640,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         destructure_cbor_map! {
             let {
                 PublicKeyCredentialSourceField::CredentialId => credential_id,
-                PublicKeyCredentialSourceField::PrivateKey => private_key,
+                PublicKeyCredentialSourceField::EcdsaPrivateKey => ecdsa_private_key,
                 PublicKeyCredentialSourceField::RpId => rp_id,
                 PublicKeyCredentialSourceField::UserHandle => user_handle,
                 PublicKeyCredentialSourceField::UserDisplayName => user_display_name,
@@ -643,16 +650,11 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::UserIcon => user_icon,
                 PublicKeyCredentialSourceField::CredBlob => cred_blob,
                 PublicKeyCredentialSourceField::LargeBlobKey => large_blob_key,
+                PublicKeyCredentialSourceField::PrivateKey => private_key,
             } = extract_map(cbor_value)?;
         }
 
         let credential_id = extract_byte_string(ok_or_missing(credential_id)?)?;
-        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
-        if private_key.len() != 32 {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
-        }
-        let private_key = ecdsa::SecKey::from_bytes(array_ref!(private_key, 0, 32))
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)?;
         let rp_id = extract_text_string(ok_or_missing(rp_id)?)?;
         let user_handle = extract_byte_string(ok_or_missing(user_handle)?)?;
         let user_display_name = user_display_name.map(extract_text_string).transpose()?;
@@ -664,6 +666,18 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let user_icon = user_icon.map(extract_text_string).transpose()?;
         let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
         let large_blob_key = large_blob_key.map(extract_byte_string).transpose()?;
+
+        // Parse the private key from the deprecated field if necessary.
+        let ecdsa_private_key = ecdsa_private_key.map(extract_byte_string).transpose()?;
+        let private_key = private_key.map(PrivateKey::try_from).transpose()?;
+        let private_key = match (ecdsa_private_key, private_key) {
+            (None, None) => return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
+            (Some(_), Some(_)) => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+            (Some(k), None) => PrivateKey::new_ecdsa_from_bytes(&k)
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
+            (None, Some(k)) => k,
+        };
+
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
         // serialization at a given version of OpenSK. This is not a problem because:
@@ -1545,6 +1559,17 @@ mod test {
     }
 
     #[test]
+    fn test_from_into_signature_algorithm_int() {
+        let alg_int = SignatureAlgorithm::ES256 as i64;
+        let signature_algorithm = SignatureAlgorithm::from(alg_int);
+        assert_eq!(signature_algorithm, SignatureAlgorithm::ES256);
+
+        let unknown_alg_int = -1;
+        let unknown_algorithm = SignatureAlgorithm::from(unknown_alg_int);
+        assert_eq!(unknown_algorithm, SignatureAlgorithm::Unknown);
+    }
+
+    #[test]
     fn test_from_into_signature_algorithm() {
         let cbor_signature_algorithm: cbor::Value = cbor_int!(ES256_ALGORITHM);
         let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
@@ -2108,10 +2133,11 @@ mod test {
     #[test]
     fn test_credential_source_cbor_round_trip() {
         let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: crypto::ecdsa::SecKey::gensk(env.rng()),
+            private_key: PrivateKey::from(private_key),
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,
@@ -2186,6 +2212,83 @@ mod test {
         assert_eq!(
             PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
             Ok(credential)
+        );
+    }
+
+    #[test]
+    fn test_credential_source_cbor_read_legacy() {
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut key_bytes = [0u8; 32];
+        private_key.to_bytes(&mut key_bytes);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
+            private_key: PrivateKey::from(private_key),
+            rp_id: "example.com".to_string(),
+            user_handle: b"foo".to_vec(),
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+        };
+
+        let source_cbor = cbor_map! {
+            PublicKeyCredentialSourceField::CredentialId => credential.credential_id.clone(),
+            PublicKeyCredentialSourceField::EcdsaPrivateKey => key_bytes,
+            PublicKeyCredentialSourceField::RpId => credential.rp_id.clone(),
+            PublicKeyCredentialSourceField::UserHandle => credential.user_handle.clone(),
+        };
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(source_cbor),
+            Ok(credential)
+        );
+    }
+
+    #[test]
+    fn test_credential_source_cbor_legacy_error() {
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let mut key_bytes = [0u8; 32];
+        private_key.to_bytes(&mut key_bytes);
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
+            private_key: PrivateKey::from(private_key.clone()),
+            rp_id: "example.com".to_string(),
+            user_handle: b"foo".to_vec(),
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+        };
+
+        let source_cbor = cbor_map! {
+            PublicKeyCredentialSourceField::CredentialId => credential.credential_id.clone(),
+            PublicKeyCredentialSourceField::RpId => credential.rp_id.clone(),
+            PublicKeyCredentialSourceField::UserHandle => credential.user_handle.clone(),
+        };
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(source_cbor),
+            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
+        );
+
+        let source_cbor = cbor_map! {
+            PublicKeyCredentialSourceField::CredentialId => credential.credential_id,
+            PublicKeyCredentialSourceField::EcdsaPrivateKey => key_bytes,
+            PublicKeyCredentialSourceField::RpId => credential.rp_id,
+            PublicKeyCredentialSourceField::UserHandle => credential.user_handle,
+            PublicKeyCredentialSourceField::PrivateKey => PrivateKey::from(private_key),
+        };
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(source_cbor),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
     }
 

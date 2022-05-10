@@ -39,8 +39,9 @@ use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
 // - 32 bytes: HMAC-SHA256 over everything else.
 pub const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
 #[cfg(test)]
-pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 128;
-pub const MAX_CREDENTIAL_ID_SIZE: usize = 128;
+pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 129;
+// See encrypt_key_handle v1 documentation.
+pub const MAX_CREDENTIAL_ID_SIZE: usize = 129;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt(
@@ -52,7 +53,8 @@ pub fn aes256_cbc_encrypt(
     if plaintext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
-    let mut ciphertext = Vec::with_capacity(plaintext.len() + 16 * embeds_iv as usize);
+    // The extra 1 capacity is because encrypt_key_handle adds a version number.
+    let mut ciphertext = Vec::with_capacity(plaintext.len() + 16 * embeds_iv as usize + 1);
     let iv = if embeds_iv {
         let random_bytes = rng.gen_uniform_u8x32();
         ciphertext.extend_from_slice(&random_bytes[..16]);
@@ -190,10 +192,10 @@ impl From<ecdsa::SecKey> for PrivateKey {
 /// ECDSA private keys.
 ///
 /// This is v1, and we write the following data for ECDSA (algorithm -7):
+/// -  1 byte : version number
 /// - 16 bytes: initialization vector for AES-256,
 /// -  4 bytes: algorithm in big endian encoding,
-/// -  1 byte : version number
-/// - 11 bytes: reserved,
+/// - 12 bytes: reserved,
 /// - 32 bytes: ECDSA private key for the credential,
 /// - 32 bytes: relying party ID hashed with SHA256,
 /// - 32 bytes: HMAC-SHA256 over everything else.
@@ -202,24 +204,25 @@ pub fn encrypt_key_handle(
     private_key: &PrivateKey,
     application: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    match private_key {
+    let master_keys = storage::master_keys(env)?;
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+
+    let mut encrypted_id = match private_key {
         PrivateKey::Ecdsa(ecdsa_key) => {
-            let master_keys = storage::master_keys(env)?;
-            let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
             let mut plaintext = [0; 80];
             // Algorithm
             BigEndian::write_i32(&mut plaintext, SignatureAlgorithm::ES256 as i32);
-            // Version number
-            plaintext[4] = 0x01;
             ecdsa_key.to_bytes(array_mut_ref!(plaintext, 16, 32));
             plaintext[48..80].copy_from_slice(application);
-
-            let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-            let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
-            encrypted_id.extend(&id_hmac);
-            Ok(encrypted_id)
+            aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?
         }
-    }
+    };
+
+    // Version number
+    encrypted_id.insert(0, 0x01);
+    let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+    encrypted_id.extend(&id_hmac);
+    Ok(encrypted_id)
 }
 
 /// Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
@@ -242,28 +245,35 @@ pub fn decrypt_credential_source(
         return Ok(None);
     }
     let master_keys = storage::master_keys(env)?;
-    let payload_size = credential_id.len() - 32;
+    let hmac_message_size = credential_id.len() - 32;
     if !verify_hmac_256::<Sha256>(
         &master_keys.hmac,
-        &credential_id[..payload_size],
-        array_ref![credential_id, payload_size, 32],
+        &credential_id[..hmac_message_size],
+        array_ref![credential_id, hmac_message_size, 32],
     ) {
         return Ok(None);
     }
 
+    let is_legacy = credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE;
+    let payload = if is_legacy {
+        &credential_id[..hmac_message_size]
+    } else {
+        // Version number check
+        if credential_id[0] != 1 {
+            return Ok(None);
+        }
+        &credential_id[1..hmac_message_size]
+    };
+
     let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-    let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, &credential_id[..payload_size], true)?;
+    let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, payload, true)?;
 
     if rp_id_hash != &decrypted_id[decrypted_id.len() - 32..] {
         return Ok(None);
     }
-    let sk_option = if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
+    let sk_option = if is_legacy {
         PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32])
     } else {
-        // Version number check.
-        if decrypted_id[4] == 0 {
-            return Ok(None);
-        }
         let algorithm_int = BigEndian::read_i32(&decrypted_id[..4]);
         match SignatureAlgorithm::from(algorithm_int as i64) {
             SignatureAlgorithm::ES256 => PrivateKey::new_ecdsa_from_bytes(&decrypted_id[16..48]),

@@ -309,8 +309,8 @@ impl Ctap1Command {
         let credential_source = decrypt_credential_source(env, key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
-            #[allow(unreachable_patterns)]
             // CTAP1 only supports ECDSA, the default case applies if CTAP2 adds more algorithms.
+            #[allow(unreachable_patterns)]
             let ecdsa_key = match credential_source.private_key {
                 PrivateKey::Ecdsa(k) => k,
                 _ => return Err(Ctap1StatusCode::SW_WRONG_DATA),

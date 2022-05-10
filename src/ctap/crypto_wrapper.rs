@@ -462,6 +462,28 @@ mod test {
     }
 
     #[test]
+    fn test_encrypt_decrypt_bad_version() {
+        let mut env = TestEnv::new();
+        storage::init(&mut env).ok().unwrap();
+        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+
+        let rp_id_hash = [0x55; 32];
+        let mut encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        // Version 2 does not exist yet.
+        encrypted_id[0] = 0x02;
+        // Override the HMAC to pass the check.
+        encrypted_id.truncate(&encrypted_id.len() - 32);
+        let master_keys = storage::master_keys(&mut env).unwrap();
+        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        encrypted_id.extend(&id_hmac);
+
+        assert_eq!(
+            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash),
+            Ok(None)
+        );
+    }
+
+    #[test]
     fn test_encrypt_decrypt_bad_hmac() {
         let mut env = TestEnv::new();
         storage::init(&mut env).ok().unwrap();
@@ -472,10 +494,9 @@ mod test {
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
-            assert!(
-                decrypt_credential_source(&mut env, modified_id, &rp_id_hash)
-                    .unwrap()
-                    .is_none()
+            assert_eq!(
+                decrypt_credential_source(&mut env, modified_id, &rp_id_hash),
+                Ok(None)
             );
         }
     }

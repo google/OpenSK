@@ -19,6 +19,7 @@ extern crate lang_items;
 use arbitrary::{Arbitrary, Unstructured};
 use arrayref::array_ref;
 use core::convert::TryFrom;
+use ctap2::api::customization::is_valid;
 use ctap2::clock::CtapInstant;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
@@ -28,9 +29,10 @@ use ctap2::ctap::data_formats::EnterpriseAttestationMode;
 use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
-use ctap2::ctap::{cbor_read, test_helpers, Channel, CtapState};
+use ctap2::ctap::{cbor_read, Channel, CtapState};
+use ctap2::env::test::customization::TestCustomization;
 use ctap2::env::test::TestEnv;
-use ctap2::{Ctap, Transport};
+use ctap2::{test_helpers, Ctap, Transport};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 
@@ -40,6 +42,19 @@ pub enum InputType {
     CborGetAssertionParameter,
     CborClientPinParameter,
     Ctap1,
+}
+
+pub enum FuzzError {
+    ArbitraryError(arbitrary::Error),
+    InvalidCustomization,
+}
+
+pub type FuzzResult<T> = Result<T, FuzzError>;
+
+impl From<arbitrary::Error> for FuzzError {
+    fn from(err: arbitrary::Error) -> Self {
+        Self::ArbitraryError(err)
+    }
 }
 
 // Converts a byte slice into Message
@@ -146,28 +161,30 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     Ok(())
 }
 
-fn setup_env(
-    unstructured: &mut Unstructured,
-    state: &mut CtapState,
-    env: &mut TestEnv,
-) -> arbitrary::Result<()> {
-    if bool::arbitrary(unstructured)? {
-        test_helpers::env::setup_enterprise_attestation(state, env).ok();
-    }
-    Ok(())
-}
-
 fn setup_customization(
     unstructured: &mut Unstructured,
-    env: &mut TestEnv,
-) -> arbitrary::Result<()> {
-    test_helpers::customization::setup_enterprise_attestation(
-        env.customization_mut(),
+    customization: &mut TestCustomization,
+) -> FuzzResult<()> {
+    customization.setup_enterprise_attestation(
         Option::<EnterpriseAttestationMode>::arbitrary(unstructured)?,
         // TODO: Generate arbitrary rp_id_list (but with some dummies because content doesn't
         // matter), and use the rp ids in commands.
         None,
     );
+    if !is_valid(customization) {
+        return Err(FuzzError::InvalidCustomization);
+    }
+    Ok(())
+}
+
+fn setup_state(
+    unstructured: &mut Unstructured,
+    state: &mut CtapState,
+    env: &mut TestEnv,
+) -> FuzzResult<()> {
+    if bool::arbitrary(unstructured)? {
+        test_helpers::setup_enterprise_attestation(state, env).ok();
+    }
     Ok(())
 }
 
@@ -208,15 +225,15 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     Ok(())
 }
 
-pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
+pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult<()> {
     let unstructured = &mut Unstructured::new(data);
 
     let mut env = TestEnv::new();
     env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
-    setup_customization(unstructured, &mut env)?;
+    setup_customization(unstructured, env.customization_mut())?;
 
     let mut state = CtapState::new(&mut env, CtapInstant::new(0));
-    setup_env(unstructured, &mut state, &mut env)?;
+    setup_state(unstructured, &mut state, &mut env)?;
 
     let command = match input_type {
         InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(

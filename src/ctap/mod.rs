@@ -22,15 +22,13 @@ mod crypto_wrapper;
 mod ctap1;
 pub mod data_formats;
 pub mod hid;
-mod key_material;
+pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
 pub mod response;
 pub mod status_code;
 mod storage;
-#[cfg(feature = "std")]
-pub mod test_helpers;
 mod timed_permission;
 mod token_state;
 #[cfg(feature = "vendor_hid")]
@@ -1438,7 +1436,9 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
+    use crate::api::customization;
     use crate::env::test::TestEnv;
+    use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -2064,14 +2064,13 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::new();
-        test_helpers::customization::setup_enterprise_attestation(
-            env.customization_mut(),
+        env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::VendorFacilitated),
             Some(vec!["example.com".to_string()]),
         );
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        test_helpers::env::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2111,14 +2110,14 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::new();
-        test_helpers::customization::setup_enterprise_attestation(
-            env.customization_mut(),
+        env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::PlatformManaged),
             Some(vec!["example.com".to_string()]),
         );
+        assert!(customization::is_valid(env.customization()));
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        test_helpers::env::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2147,11 +2146,8 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::new();
-        test_helpers::customization::setup_enterprise_attestation(
-            env.customization_mut(),
-            Some(EnterpriseAttestationMode::PlatformManaged),
-            None,
-        );
+        env.customization_mut()
+            .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -2164,7 +2160,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
-        test_helpers::env::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
+        test_helpers::setup_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(3);

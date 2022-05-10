@@ -489,7 +489,7 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthenticatorAttestationMaterial {
     pub certificate: Vec<u8>,
     pub private_key: [u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],

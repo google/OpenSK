@@ -117,6 +117,30 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     alg: SignatureAlgorithm::ES256,
 };
 
+#[cfg(feature = "with_ed25519")]
+pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
+    cred_type: PublicKeyCredentialType::PublicKey,
+    alg: SignatureAlgorithm::EDDSA,
+};
+
+fn get_supported_cred_params() -> Vec<PublicKeyCredentialParameter> {
+    let mut ret_val = vec!();
+    ret_val.push(ES256_CRED_PARAM);
+    #[cfg(feature = "with_ed25519")]
+    ret_val.push(EDDSA_CRED_PARAM);
+    ret_val
+}
+
+fn get_preferred_cred_param (params: &Vec<PublicKeyCredentialParameter>) -> Option<&PublicKeyCredentialParameter> {
+    let supported_cred_params = get_supported_cred_params();
+    for param in params {
+        if supported_cred_params.contains(param) {
+            return Some(param);
+        }
+    }
+    return None;
+}
+
 /// Transports supported by OpenSK.
 ///
 /// An OpenSK library user annotates incoming data with this data type.
@@ -604,10 +628,9 @@ impl CtapState {
         self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, channel)?;
 
         // When more algorithms are supported, iterate and pick the first match.
-        if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        let algorithm = SignatureAlgorithm::ES256;
+        let cred_param = get_preferred_cred_param(&pub_key_cred_params)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)?;
+        let algorithm = cred_param.alg;
 
         let rp_id = rp.rp_id;
         let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
@@ -1146,7 +1169,7 @@ impl CtapState {
                     .map(|c| c as u64),
                 max_credential_id_length: Some(MAX_CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
-                algorithms: Some(vec![ES256_CRED_PARAM]),
+                algorithms: Some(get_supported_cred_params()),
                 max_serialized_large_blob_array: Some(
                     env.customization().max_large_blob_array_size() as u64,
                 ),
@@ -1461,7 +1484,7 @@ mod test {
             0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
             0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
-            0x0A => cbor_array![ES256_CRED_PARAM],
+            0x0A => cbor_array_vec!(get_supported_cred_params()),
             0x0B => env.customization().max_large_blob_array_size() as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,

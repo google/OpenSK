@@ -442,8 +442,6 @@ class OpenSKInstaller:
         f"link-arg=-T{props.app_ldscript}",
         "-C",
         "relocation-model=static",
-        "-D",
-        "warnings",
         f"--remap-path-prefix={os.getcwd()}=",
         "-C",
         "link-arg=-icf=all",
@@ -1089,6 +1087,14 @@ if __name__ == "__main__":
       dest="elf2tab_output",
       default=None,
       help=("When set, the output of elf2tab is appended to this file."),
+  )
+
+  main_parser.add_argument(
+      "--with_ed25519",
+      action="append_const",
+      const="with_ed25519",
+      dest="features",
+      help=("Enable Ed25519 support"),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

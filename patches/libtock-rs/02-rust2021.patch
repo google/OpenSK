@@ -1,0 +1,38 @@
+diff --git a/core/src/entry_point/start_item_arm.rs b/core/src/entry_point/start_item_arm.rs
+index 5d88d6b..4cdaef9 100644
+--- a/core/src/entry_point/start_item_arm.rs
++++ b/core/src/entry_point/start_item_arm.rs
+@@ -20,16 +20,16 @@ pub unsafe extern "C" fn _start() -> ! {
+         subw r4, pc, #4    // r4 = pc
+         ldr r5, =.start   // r5 = address of .start
+         cmp r4, r5
+-        beq .Lstack_init  // Jump to stack initialization if pc was correct
++        beq 2f  // Jump to stack initialization if pc was correct
+         movw r0, #8       // LowLevelDebug driver number
+         movw r1, #1       // LowLevelDebug 'print status code' command
+         movw r2, #2       // LowLevelDebug relocation failed status code
+         svc 2             // command() syscall
+-        .Lyield_loop:
++        1:
+         svc 0             // yield() syscall (in infinite loop)
+-        b .Lyield_loop
++        b 1b
+ 
+-        .Lstack_init:
++        2:
+         // Compute the stacktop (stack_start). The stacktop is computed as
+         // stack_size + mem_start plus padding to align the stack to a multiple
+         // of 8 bytes. The 8 byte alignment is to follow ARM AAPCS:
+diff --git a/rust-toolchain b/rust-toolchain
+index 1674405..64ed934 100644
+--- a/rust-toolchain
++++ b/rust-toolchain
+@@ -1,7 +1,7 @@
+ [toolchain]
+ # See https://rust-lang.github.io/rustup-components-history/ for a list of
+ # recently nightlies and what components are available for them.
+-channel = "nightly-2021-03-25"
++channel = "nightly-2021-10-21"
+ components = ["clippy", "miri", "rustfmt"]
+ targets = ["thumbv7em-none-eabi",
+            "riscv32imac-unknown-none-elf",

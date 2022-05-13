@@ -279,16 +279,15 @@ pub fn encrypt_key_handle(
     let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
 
     let mut plaintext = [0; 64];
-    let version;
-    match private_key {
+    let version = match private_key {
         PrivateKey::Ecdsa(ecdsa_key) => {
             ecdsa_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
-            version = ECDSA_CREDENTIAL_ID_VERSION;
+            ECDSA_CREDENTIAL_ID_VERSION
         }
         #[cfg(feature = "ed25519")]
         PrivateKey::Ed25519(keypair) => {
             plaintext[0..32].copy_from_slice(&keypair.secret.to_bytes());
-            version = ED25519_CREDENTIAL_ID_VERSION;
+            ED25519_CREDENTIAL_ID_VERSION
         }
     };
     plaintext[32..64].copy_from_slice(application);
@@ -329,19 +328,17 @@ pub fn decrypt_credential_source(
         return Ok(None);
     }
 
-    let algorithm;
-    let payload = if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
-        algorithm = ES256_ALGORITHM;
-        &credential_id[..hmac_message_size]
+    let (payload, algorithm) = if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
+        (&credential_id[..hmac_message_size], ES256_ALGORITHM)
     } else {
         // Version number check
-        match credential_id[0] {
-            ECDSA_CREDENTIAL_ID_VERSION => algorithm = ES256_ALGORITHM,
+        let algorithm = match credential_id[0] {
+            ECDSA_CREDENTIAL_ID_VERSION => ES256_ALGORITHM,
             #[cfg(feature = "ed25519")]
-            ED25519_CREDENTIAL_ID_VERSION => algorithm = EDDSA_ALGORITHM,
+            ED25519_CREDENTIAL_ID_VERSION => EDDSA_ALGORITHM,
             _ => return Ok(None),
-        }
-        &credential_id[1..hmac_message_size]
+        };
+        (&credential_id[1..hmac_message_size], algorithm)
     };
     if payload.len() != 80 {
         // We shouldn't have HMAC'ed anything of different length. The check is cheap though.
@@ -354,15 +351,14 @@ pub fn decrypt_credential_source(
     if rp_id_hash != &decrypted_id[32..] {
         return Ok(None);
     }
-    let sk_option;
-    match algorithm {
-        ES256_ALGORITHM => sk_option = PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32]),
+    let sk_option = match algorithm {
+        ES256_ALGORITHM => PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32]),
         #[cfg(feature = "ed25519")]
-        EDDSA_ALGORITHM => sk_option = PrivateKey::new_ed25519_from_bytes(&decrypted_id[..32]),
+        EDDSA_ALGORITHM => PrivateKey::new_ed25519_from_bytes(&decrypted_id[..32]),
         #[cfg(not(feature = "ed25519"))]
         EDDSA_ALGORITHM => return Ok(None),
         _ => return Ok(None),
-    }
+    };
 
     Ok(sk_option.map(|sk| PublicKeyCredentialSource {
         key_type: PublicKeyCredentialType::PublicKey,

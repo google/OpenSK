@@ -540,10 +540,9 @@ mod test {
         test_private_key_from_to_cbor(SignatureAlgorithm::EDDSA);
     }
 
-    #[test]
-    fn test_private_key_from_bad_cbor() {
+    fn test_private_key_from_bad_cbor(signature_algorithm: SignatureAlgorithm) {
         let cbor = cbor_array![
-            cbor_int!(SignatureAlgorithm::ES256 as i64),
+            cbor_int!(signature_algorithm as i64),
             cbor_bytes!(vec![0x88; 32]),
             // The array is too long.
             cbor_int!(0),
@@ -552,21 +551,21 @@ mod test {
             PrivateKey::try_from(cbor),
             Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         );
+    }
 
-        #[cfg(feature = "ed25519")]
-        {
-            let cbor = cbor_array![
-                cbor_int!(SignatureAlgorithm::EDDSA as i64),
-                cbor_bytes!(vec![0x88; 32]),
-                // The array is too long.
-                cbor_int!(0),
-            ];
-            assert_eq!(
-                PrivateKey::try_from(cbor),
-                Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
-            );
-        }
+    #[test]
+    fn test_ecdsa_private_key_from_bad_cbor() {
+        test_private_key_from_bad_cbor(SignatureAlgorithm::ES256);
+    }
 
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_private_key_from_bad_cbor() {
+        test_private_key_from_bad_cbor(SignatureAlgorithm::EDDSA);
+    }
+
+    #[test]
+    fn test_private_key_from_bad_cbor_unsupported_algo() {
         let cbor = cbor_array![
             // This algorithms doesn't exist.
             cbor_int!(-1),

@@ -117,7 +117,7 @@ pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     alg: SignatureAlgorithm::ES256,
 };
 
-#[cfg(feature = "with_ed25519")]
+#[cfg(feature = "ed25519")]
 pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::EDDSA,
@@ -126,7 +126,7 @@ pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 fn get_supported_cred_params() -> Vec<PublicKeyCredentialParameter> {
     let mut ret_val = vec!();
     ret_val.push(ES256_CRED_PARAM);
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     ret_val.push(EDDSA_CRED_PARAM);
     ret_val
 }

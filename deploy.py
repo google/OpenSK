@@ -1090,9 +1090,9 @@ if __name__ == "__main__":
   )
 
   main_parser.add_argument(
-      "--with_ed25519",
+      "--ed25519",
       action="append_const",
-      const="with_ed25519",
+      const="ed25519",
       dest="features",
       help=("Enable Ed25519 support"),
   )

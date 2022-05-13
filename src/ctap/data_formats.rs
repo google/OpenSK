@@ -504,7 +504,7 @@ impl From<PackedAttestationStatement> for cbor::Value {
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum SignatureAlgorithm {
     ES256 = ES256_ALGORITHM as isize,
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     EDDSA = EDDSA_ALGORITHM as isize,
     // This is the default for all numbers not covered above.
     // Unknown types should be ignored, instead of returning errors.
@@ -521,7 +521,7 @@ impl From<i64> for SignatureAlgorithm {
     fn from(int: i64) -> Self {
         match int {
             ES256_ALGORITHM => SignatureAlgorithm::ES256,
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             EDDSA_ALGORITHM => SignatureAlgorithm::EDDSA,
             _ => SignatureAlgorithm::Unknown,
         }
@@ -736,11 +736,11 @@ impl CoseKey {
     const ECDH_ALGORITHM: i64 = -25;
     // The parameter behind map key 1.
     const EC2_KEY_TYPE: i64 = 2;
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     const OKP_KEY_TYPE: i64 = 1;
     // The parameter behind map key -1.
     const P_256_CURVE: i64 = 1;
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     const ED25519_CURVE: i64 = 6;
 }
 
@@ -843,7 +843,7 @@ impl From<ecdsa::PubKey> for CoseKey {
     }
 }
 
-#[cfg(feature = "with_ed25519")]
+#[cfg(feature = "ed25519")]
 impl From<ed25519_dalek::PublicKey> for CoseKey {
     fn from(pk: ed25519_dalek::PublicKey) -> Self {
         CoseKey {
@@ -943,7 +943,7 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
         match cose_signature.algorithm {
             SignatureAlgorithm::ES256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
                 .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             SignatureAlgorithm::EDDSA =>
                 Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
             SignatureAlgorithm::Unknown => 
@@ -1607,7 +1607,7 @@ mod test {
         let signature_algorithm = SignatureAlgorithm::from(alg_int);
         assert_eq!(signature_algorithm, SignatureAlgorithm::ES256);
 
-        #[cfg(feature = "with_ed25519")]
+        #[cfg(feature = "ed25519")]
         {
             let alg_int = SignatureAlgorithm::EDDSA as i64;
             let signature_algorithm = SignatureAlgorithm::from(alg_int);
@@ -1628,7 +1628,7 @@ mod test {
         let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
         assert_eq!(created_cbor, cbor_signature_algorithm);
 
-        #[cfg(feature = "with_ed25519")]
+        #[cfg(feature = "ed25519")]
         {
             let cbor_signature_algorithm: cbor::Value = cbor_int!(EDDSA_ALGORITHM);
             let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
@@ -1723,7 +1723,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_from_into_ed25519_public_key_credential_parameter() {
         test_from_into_public_key_credential_parameter(EDDSA_ALGORITHM, SignatureAlgorithm::EDDSA);
     }

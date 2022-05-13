@@ -37,7 +37,7 @@ with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
 vendor_hid = ["libtock_drivers/vendor_hid"]
 fuzz = ["arbitrary", "std"]
-with_ed25519 = ["ed25519-dalek"]
+ed25519 = ["ed25519-dalek"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

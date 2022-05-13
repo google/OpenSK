@@ -30,7 +30,7 @@ use crypto::sha256::Sha256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
-#[cfg(feature = "with_ed25519")]
+#[cfg(feature = "ed25519")]
 use ed25519_dalek::Signer;
 
 // Legacy credential IDs consist of
@@ -45,13 +45,13 @@ pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 113;
 pub const MAX_CREDENTIAL_ID_SIZE: usize = 113;
 
 const ECDSA_CREDENTIAL_ID_VERSION: u8 = 0x01;
-#[cfg(feature = "with_ed25519")]
+#[cfg(feature = "ed25519")]
 const ED25519_CREDENTIAL_ID_VERSION: u8 = 0x02;
 #[cfg(test)]
-#[cfg(feature = "with_ed25519")]
+#[cfg(feature = "ed25519")]
 const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x03;
 #[cfg(test)]
-#[cfg(not(feature = "with_ed25519"))]
+#[cfg(not(feature = "ed25519"))]
 const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x02;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
@@ -104,7 +104,7 @@ pub fn aes256_cbc_decrypt(
 #[derive(Debug)]
 pub enum PrivateKey {
     Ecdsa(ecdsa::SecKey),
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     Ed25519(ed25519_dalek::Keypair),
 }
 
@@ -112,7 +112,7 @@ impl Clone for PrivateKey {
     fn clone(&self) -> Self {
         match self {
             Self::Ecdsa(sk) => Self::Ecdsa (sk.clone ()),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             Self::Ed25519(keypair) => Self::Ed25519 (ed25519_dalek::Keypair::from_bytes (&keypair.to_bytes()).unwrap()),
         }
     }
@@ -122,9 +122,9 @@ impl PartialEq for PrivateKey {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (&Self::Ecdsa(ref a), &Self::Ecdsa(ref b)) => a == b,
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             (&Self::Ed25519(ref a), &Self::Ed25519(ref b)) => a.to_bytes() == b.to_bytes(),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             _ => false,
         }
     }
@@ -141,7 +141,7 @@ impl PrivateKey {
     pub fn new(rng: &mut impl Rng256, alg: SignatureAlgorithm) -> Self {
         match alg {
             SignatureAlgorithm::ES256 => PrivateKey::Ecdsa(crypto::ecdsa::SecKey::gensk(rng)),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             SignatureAlgorithm::EDDSA => {
                 let bytes = rng.gen_uniform_u8x32();
                 Self::new_ed25519_from_bytes(&bytes).unwrap()
@@ -160,7 +160,7 @@ impl PrivateKey {
         ecdsa::SecKey::from_bytes(array_ref!(bytes, 0, 32)).map(PrivateKey::from)
     }
 
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     pub fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
@@ -177,7 +177,7 @@ impl PrivateKey {
     pub fn get_pub_key(&self) -> CoseKey {
         match self {
             PrivateKey::Ecdsa(ecdsa_key) => CoseKey::from(ecdsa_key.genpk()),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_keypair) => CoseKey::from(ed25519_keypair.public),
         }
     }
@@ -186,7 +186,7 @@ impl PrivateKey {
     pub fn sign_and_encode(&self, message: &[u8]) -> Vec<u8> {
         match self {
             PrivateKey::Ecdsa(ecdsa_key) => ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der(),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_keypair) => ed25519_keypair.try_sign(message).unwrap().to_bytes().to_vec(),
         }
     }
@@ -195,7 +195,7 @@ impl PrivateKey {
     pub fn signature_algorithm(&self) -> SignatureAlgorithm {
         match self {
             PrivateKey::Ecdsa(_) => SignatureAlgorithm::ES256,
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(_) => SignatureAlgorithm::EDDSA,
         }
     }
@@ -208,7 +208,7 @@ impl PrivateKey {
                 ecdsa_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
                 key_bytes
             }
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_keypair) => ed25519_keypair.secret.to_bytes().to_vec(),
         }
     }
@@ -235,7 +235,7 @@ impl TryFrom<cbor::Value> for PrivateKey {
         match SignatureAlgorithm::try_from(array.pop().unwrap())? {
             SignatureAlgorithm::ES256 => PrivateKey::new_ecdsa_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             SignatureAlgorithm::EDDSA => PrivateKey::new_ed25519_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
@@ -285,7 +285,7 @@ pub fn encrypt_key_handle(
             ecdsa_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
             version = ECDSA_CREDENTIAL_ID_VERSION;
         }
-        #[cfg(feature = "with_ed25519")]
+        #[cfg(feature = "ed25519")]
         PrivateKey::Ed25519(keypair) => {
             plaintext[0..32].copy_from_slice(&keypair.secret.to_bytes());
             version = ED25519_CREDENTIAL_ID_VERSION;
@@ -337,7 +337,7 @@ pub fn decrypt_credential_source(
         // Version number check
         match credential_id[0] {
             ECDSA_CREDENTIAL_ID_VERSION => algorithm = ES256_ALGORITHM,
-            #[cfg(feature = "with_ed25519")]
+            #[cfg(feature = "ed25519")]
             ED25519_CREDENTIAL_ID_VERSION => algorithm = EDDSA_ALGORITHM,
             _ => return Ok(None),
         }
@@ -357,9 +357,9 @@ pub fn decrypt_credential_source(
     let sk_option;
     match algorithm {
         ES256_ALGORITHM => sk_option = PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32]),
-        #[cfg(feature = "with_ed25519")]
+        #[cfg(feature = "ed25519")]
         EDDSA_ALGORITHM => sk_option = PrivateKey::new_ed25519_from_bytes(&decrypted_id[..32]),
-        #[cfg(not(feature = "with_ed25519"))]
+        #[cfg(not(feature = "ed25519"))]
         EDDSA_ALGORITHM => return Ok(None),
         _ => return Ok(None),
     }
@@ -462,7 +462,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes() {
         let mut env = TestEnv::new();
         let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::EDDSA);
@@ -482,7 +482,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes_wrong_length() {
         assert_eq!(PrivateKey::new_ed25519_from_bytes(&[0x55; 16]), None);
         assert_eq!(PrivateKey::new_ed25519_from_bytes(&[0x55; 31]), None);
@@ -521,7 +521,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_ed25519_private_key_signature_algorithm() {
         test_private_key_signature_algorithm(SignatureAlgorithm::EDDSA);
     }
@@ -539,7 +539,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_ed25519_private_key_from_to_cbor() {
         test_private_key_from_to_cbor(SignatureAlgorithm::EDDSA);
     }
@@ -557,7 +557,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         );
 
-        #[cfg(feature = "with_ed25519")]
+        #[cfg(feature = "ed25519")]
         {
             let cbor = cbor_array![
                 cbor_int!(SignatureAlgorithm::EDDSA as i64),
@@ -602,7 +602,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_encrypt_decrypt_ed25519_credential() {
         test_encrypt_decrypt_credential(SignatureAlgorithm::EDDSA);
     }
@@ -652,7 +652,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_ed25519_encrypt_decrypt_bad_hmac() {
         test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::EDDSA);
     }
@@ -679,7 +679,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ed25519")]
+    #[cfg(feature = "ed25519")]
     fn test_ed25519_decrypt_credential_missing_blocks() {
         test_decrypt_credential_missing_blocks(SignatureAlgorithm::EDDSA);
     }

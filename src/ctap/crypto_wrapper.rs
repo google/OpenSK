@@ -355,8 +355,6 @@ pub fn decrypt_credential_source(
         ES256_ALGORITHM => PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32]),
         #[cfg(feature = "ed25519")]
         EDDSA_ALGORITHM => PrivateKey::new_ed25519_from_bytes(&decrypted_id[..32]),
-        #[cfg(not(feature = "ed25519"))]
-        EDDSA_ALGORITHM => return Ok(None),
         _ => return Ok(None),
     };
 

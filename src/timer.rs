@@ -1,9 +1,25 @@
-trait Timer: Sized {
-    fn start(milliseconds: u32) -> Self;
-    fn has_elapsed(self) -> Option<Self>;
-}
+// Copyright 2019 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 use libtock_core::syscalls;
+
+trait Timer: Sized {
+    // start instantiate a Timer with a given length of time.
+    fn start(milliseconds: u32) -> Self;
+    // has_elapsed returns whether the Timer is elapsed or not. If it has elapsed, return None.
+    fn has_elapsed(self) -> Option<Self>;
+}
 
 // see: https://github.com/tock/tock/blob/master/doc/syscalls/00000_alarm.md
 mod command_nr {
@@ -29,12 +45,10 @@ fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
 impl Timer for LibtockAlarmTimer {
     fn start(milliseconds: u32) -> Self {
         let clock_frequency =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0).unwrap_or(0);
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0).ok().unwrap();
         let start_tick =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).unwrap_or(0);
-        // 32 bits inverted divisor for 1/1000 ( ceil((2^32) / 1000) ), so that (x * INV_DIV) >> 32 ≈ x / 1000
-        const INV_DIV: u64 = 4294968;
-        let delta_tick = ((clock_frequency as u64 * milliseconds as u64 * INV_DIV) >> 32) as usize;
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).ok().unwrap();
+        let delta_tick = (clock_frequency / 2).checked_mul(milliseconds as usize).unwrap() / 500;
         // this invariant is necessary for the test in has_elapsed to be correct
         assert!(delta_tick < 0x800000);
         let end_tick = wrapping_add_u24(start_tick, delta_tick);
@@ -43,7 +57,7 @@ impl Timer for LibtockAlarmTimer {
 
     fn has_elapsed(self) -> Option<Self> {
         let cur_tick =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).unwrap_or(0);
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).ok().unwrap();
 
         if wrapping_sub_u24(self.end_tick, cur_tick) < 0x800000 {
             None

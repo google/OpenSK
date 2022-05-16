@@ -844,10 +844,10 @@ impl From<ecdsa::PubKey> for CoseKey {
 }
 
 #[cfg(feature = "ed25519")]
-impl From<ed25519_dalek::PublicKey> for CoseKey {
-    fn from(pk: ed25519_dalek::PublicKey) -> Self {
+impl From<ed25519_compact::PublicKey> for CoseKey {
+    fn from(pk: ed25519_compact::PublicKey) -> Self {
         CoseKey {
-            x_bytes: pk.to_bytes(),
+            x_bytes: *pk,
             y_bytes: [0u8; 32],
             key_type: CoseKey::OKP_KEY_TYPE,
             curve: CoseKey::ED25519_CURVE,

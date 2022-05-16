@@ -14,8 +14,10 @@
 
 use crate::ctap::data_formats::{
     extract_array, extract_byte_string, CoseKey, PublicKeyCredentialSource,
-    PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM, EDDSA_ALGORITHM,
+    PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM,
 };
+#[cfg(feature="ed25519")]
+use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::storage;
 use crate::env::Env;
@@ -30,8 +32,6 @@ use crypto::sha256::Sha256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
-#[cfg(feature = "ed25519")]
-use ed25519_dalek::Signer;
 
 // Legacy credential IDs consist of
 // - 16 bytes: initialization vector for AES-256,
@@ -101,36 +101,12 @@ pub fn aes256_cbc_decrypt(
 }
 
 /// An asymmetric private key that can sign messages.
-#[derive(Debug)]
+#[derive(Clone,Debug,PartialEq,Eq)]
 pub enum PrivateKey {
     Ecdsa(ecdsa::SecKey),
     #[cfg(feature = "ed25519")]
-    Ed25519(ed25519_dalek::Keypair),
+    Ed25519(ed25519_compact::SecretKey),
 }
-
-impl Clone for PrivateKey {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Ecdsa(sk) => Self::Ecdsa (sk.clone ()),
-            #[cfg(feature = "ed25519")]
-            Self::Ed25519(keypair) => Self::Ed25519 (ed25519_dalek::Keypair::from_bytes (&keypair.to_bytes()).unwrap()),
-        }
-    }
-}
-
-impl PartialEq for PrivateKey {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&Self::Ecdsa(ref a), &Self::Ecdsa(ref b)) => a == b,
-            #[cfg(feature = "ed25519")]
-            (&Self::Ed25519(ref a), &Self::Ed25519(ref b)) => a.to_bytes() == b.to_bytes(),
-            #[cfg(feature = "ed25519")]
-            _ => false,
-        }
-    }
-}
-
-impl Eq for PrivateKey {}
 
 impl PrivateKey {
     /// Creates a new private key for the given algorithm.
@@ -165,12 +141,8 @@ impl PrivateKey {
         if bytes.len() != 32 {
             return None;
         }
-        if let Ok(secret) = ed25519_dalek::SecretKey::from_bytes(bytes) {
-            let public = ed25519_dalek::PublicKey::from (&secret);
-            Some(Self::Ed25519(ed25519_dalek::Keypair{secret, public}))
-        } else {
-            None
-        }
+        let seed = ed25519_compact::Seed::from_slice(bytes).unwrap();
+        Some(Self::Ed25519(ed25519_compact::KeyPair::from_seed(seed).sk))
     }
 
     /// Returns the corresponding public key.
@@ -178,7 +150,7 @@ impl PrivateKey {
         match self {
             PrivateKey::Ecdsa(ecdsa_key) => CoseKey::from(ecdsa_key.genpk()),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_keypair) => CoseKey::from(ed25519_keypair.public),
+            PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
         }
     }
 
@@ -187,7 +159,7 @@ impl PrivateKey {
         match self {
             PrivateKey::Ecdsa(ecdsa_key) => ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_keypair) => ed25519_keypair.try_sign(message).unwrap().to_bytes().to_vec(),
+            PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message,None).to_vec(),
         }
     }
 
@@ -209,7 +181,7 @@ impl PrivateKey {
                 key_bytes
             }
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_keypair) => ed25519_keypair.secret.to_bytes().to_vec(),
+            PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
         }
     }
 }
@@ -285,8 +257,9 @@ pub fn encrypt_key_handle(
             ECDSA_CREDENTIAL_ID_VERSION
         }
         #[cfg(feature = "ed25519")]
-        PrivateKey::Ed25519(keypair) => {
-            plaintext[0..32].copy_from_slice(&keypair.secret.to_bytes());
+        PrivateKey::Ed25519(ed25519_key) => {
+            let sk_bytes = *ed25519_key.seed();
+            plaintext[0..32].copy_from_slice(&sk_bytes);
             ED25519_CREDENTIAL_ID_VERSION
         }
     };

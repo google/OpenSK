@@ -123,18 +123,15 @@ pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     alg: SignatureAlgorithm::EDDSA,
 };
 
-fn get_supported_cred_params() -> Vec<PublicKeyCredentialParameter> {
-    let mut ret_val = vec!();
-    ret_val.push(ES256_CRED_PARAM);
-    #[cfg(feature = "ed25519")]
-    ret_val.push(EDDSA_CRED_PARAM);
-    ret_val
-}
+const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
+    ES256_CRED_PARAM,
+#[cfg(feature = "ed25519")]
+    EDDSA_CRED_PARAM,
+];
 
-fn get_preferred_cred_param (params: &Vec<PublicKeyCredentialParameter>) -> Option<&PublicKeyCredentialParameter> {
-    let supported_cred_params = get_supported_cred_params();
+fn get_preferred_cred_param (params: &[PublicKeyCredentialParameter]) -> Option<&PublicKeyCredentialParameter> {
     for param in params {
-        if supported_cred_params.contains(param) {
+        if SUPPORTED_CRED_PARAMS.contains(param) {
             return Some(param);
         }
     }
@@ -1169,7 +1166,7 @@ impl CtapState {
                     .map(|c| c as u64),
                 max_credential_id_length: Some(MAX_CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
-                algorithms: Some(get_supported_cred_params()),
+                algorithms: Some(SUPPORTED_CRED_PARAMS.to_vec()),
                 max_serialized_large_blob_array: Some(
                     env.customization().max_large_blob_array_size() as u64,
                 ),
@@ -1484,7 +1481,7 @@ mod test {
             0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
             0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
-            0x0A => cbor_array_vec!(get_supported_cred_params()),
+            0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
             0x0B => env.customization().max_large_blob_array_size() as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,

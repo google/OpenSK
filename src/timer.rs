@@ -45,10 +45,16 @@ fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
 impl Timer for LibtockAlarmTimer {
     fn start(milliseconds: u32) -> Self {
         let clock_frequency =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0).ok().unwrap();
-        let start_tick =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).ok().unwrap();
-        let delta_tick = (clock_frequency / 2).checked_mul(milliseconds as usize).unwrap() / 500;
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)
+                .ok()
+                .unwrap();
+        let start_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
+            .ok()
+            .unwrap();
+        let delta_tick = (clock_frequency / 2)
+            .checked_mul(milliseconds as usize)
+            .unwrap()
+            / 500;
         // this invariant is necessary for the test in has_elapsed to be correct
         assert!(delta_tick < 0x800000);
         let end_tick = wrapping_add_u24(start_tick, delta_tick);
@@ -56,8 +62,9 @@ impl Timer for LibtockAlarmTimer {
     }
 
     fn has_elapsed(self) -> Option<Self> {
-        let cur_tick =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0).ok().unwrap();
+        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
+            .ok()
+            .unwrap();
 
         if wrapping_sub_u24(self.end_tick, cur_tick) < 0x800000 {
             None

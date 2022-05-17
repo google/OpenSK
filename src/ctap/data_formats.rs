@@ -947,7 +947,7 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
             #[cfg(feature = "ed25519")]
             SignatureAlgorithm::EDDSA =>
                 Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
-            SignatureAlgorithm::Unknown => 
+            SignatureAlgorithm::Unknown =>
                 Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
         }
     }

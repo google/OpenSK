@@ -48,11 +48,7 @@ const ECDSA_CREDENTIAL_ID_VERSION: u8 = 0x01;
 #[cfg(feature = "ed25519")]
 const ED25519_CREDENTIAL_ID_VERSION: u8 = 0x02;
 #[cfg(test)]
-#[cfg(feature = "ed25519")]
-const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x03;
-#[cfg(test)]
-#[cfg(not(feature = "ed25519"))]
-const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x02;
+const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt(

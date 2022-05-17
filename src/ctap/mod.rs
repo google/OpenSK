@@ -130,12 +130,7 @@ const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
 ];
 
 fn get_preferred_cred_param (params: &[PublicKeyCredentialParameter]) -> Option<&PublicKeyCredentialParameter> {
-    for param in params {
-        if SUPPORTED_CRED_PARAMS.contains(param) {
-            return Some(param);
-        }
-    }
-    return None;
+    params.iter().find(|&param| SUPPORTED_CRED_PARAMS.contains(param))
 }
 
 /// Transports supported by OpenSK.

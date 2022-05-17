@@ -896,7 +896,10 @@ impl TryFrom<CoseKey> for ecdsa::PubKey {
             curve,
         } = cose_key;
 
-        if algorithm != ES256_ALGORITHM || key_type != CoseKey::EC2_KEY_TYPE || curve != CoseKey::P_256_CURVE {
+        if algorithm != ES256_ALGORITHM
+            || key_type != CoseKey::EC2_KEY_TYPE
+            || curve != CoseKey::P_256_CURVE
+        {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
         ecdsa::PubKey::from_coordinates(&x_bytes, &y_bytes)
@@ -945,10 +948,8 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
             SignatureAlgorithm::ES256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
                 .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::EDDSA =>
-                Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
-            SignatureAlgorithm::Unknown =>
-                Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            SignatureAlgorithm::EDDSA => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            SignatureAlgorithm::Unknown => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
         }
     }
 }
@@ -1632,7 +1633,8 @@ mod test {
         #[cfg(feature = "ed25519")]
         {
             let cbor_signature_algorithm: cbor::Value = cbor_int!(EDDSA_ALGORITHM);
-            let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
+            let signature_algorithm =
+                SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
             let expected_signature_algorithm = SignatureAlgorithm::EDDSA;
             assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
             let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
@@ -1702,7 +1704,10 @@ mod test {
         }
     }
 
-    fn test_from_into_public_key_credential_parameter(alg_int: i64, signature_algorithm: SignatureAlgorithm) {
+    fn test_from_into_public_key_credential_parameter(
+        alg_int: i64,
+        signature_algorithm: SignatureAlgorithm,
+    ) {
         let cbor_credential_parameter = cbor_map! {
             "alg" => alg_int,
             "type" => "public-key",

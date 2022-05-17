@@ -125,12 +125,16 @@ pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
 
 const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
     ES256_CRED_PARAM,
-#[cfg(feature = "ed25519")]
+    #[cfg(feature = "ed25519")]
     EDDSA_CRED_PARAM,
 ];
 
-fn get_preferred_cred_param (params: &[PublicKeyCredentialParameter]) -> Option<&PublicKeyCredentialParameter> {
-    params.iter().find(|&param| SUPPORTED_CRED_PARAMS.contains(param))
+fn get_preferred_cred_param(
+    params: &[PublicKeyCredentialParameter],
+) -> Option<&PublicKeyCredentialParameter> {
+    params
+        .iter()
+        .find(|&param| SUPPORTED_CRED_PARAMS.contains(param))
 }
 
 /// Transports supported by OpenSK.

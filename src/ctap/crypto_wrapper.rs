@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "ed25519")]
+use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::data_formats::{
     extract_array, extract_byte_string, CoseKey, PublicKeyCredentialSource,
     PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM,
 };
-#[cfg(feature="ed25519")]
-use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::storage;
 use crate::env::Env;
@@ -97,7 +97,7 @@ pub fn aes256_cbc_decrypt(
 }
 
 /// An asymmetric private key that can sign messages.
-#[derive(Clone,Debug,PartialEq,Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrivateKey {
     Ecdsa(ecdsa::SecKey),
     #[cfg(feature = "ed25519")]
@@ -117,7 +117,7 @@ impl PrivateKey {
             SignatureAlgorithm::EDDSA => {
                 let bytes = rng.gen_uniform_u8x32();
                 Self::new_ed25519_from_bytes(&bytes).unwrap()
-            },
+            }
             SignatureAlgorithm::Unknown => unreachable!(),
         }
     }
@@ -155,7 +155,7 @@ impl PrivateKey {
         match self {
             PrivateKey::Ecdsa(ecdsa_key) => ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message,None).to_vec(),
+            PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message, None).to_vec(),
         }
     }
 

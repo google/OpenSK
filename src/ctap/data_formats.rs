@@ -28,6 +28,7 @@ use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
 
 // Used as the identifier for ECDSA in assertion signatures and COSE.
 pub const ES256_ALGORITHM: i64 = -7;
+#[cfg(feature = "ed25519")]
 pub const EDDSA_ALGORITHM: i64 = -8;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity

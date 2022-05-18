@@ -45,7 +45,7 @@ pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 113;
 pub const MAX_CREDENTIAL_ID_SIZE: usize = 113;
 
 const ECDSA_CREDENTIAL_ID_VERSION: u8 = 0x01;
-#[cfg(feature = "ed25519")]
+#[allow(dead_code)]
 const ED25519_CREDENTIAL_ID_VERSION: u8 = 0x02;
 #[cfg(test)]
 const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;

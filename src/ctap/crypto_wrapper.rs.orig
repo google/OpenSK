@@ -577,6 +577,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let mut encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        // Version 2 does not exist yet.
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);

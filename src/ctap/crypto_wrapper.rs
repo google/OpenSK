@@ -97,7 +97,9 @@ pub fn aes256_cbc_decrypt(
 }
 
 /// An asymmetric private key that can sign messages.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
+// We shouldn't compare private keys in prod without constant-time operations.
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum PrivateKey {
     Ecdsa(ecdsa::SecKey),
     #[cfg(feature = "ed25519")]

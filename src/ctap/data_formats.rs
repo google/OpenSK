@@ -577,7 +577,8 @@ impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
 //
 // Note that we only use the WebAuthn definition as an example. This data-structure is not specified
 // by FIDO. In particular we may choose how we serialize and deserialize it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct PublicKeyCredentialSource {
     pub key_type: PublicKeyCredentialType,
     pub credential_id: Vec<u8>,

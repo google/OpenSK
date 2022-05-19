@@ -1096,7 +1096,10 @@ if __name__ == "__main__":
       action="append_const",
       const="ed25519",
       dest="features",
-      help=("Enable Ed25519 support"),
+      help=("Adds support for credentials that use EdDSA algorithm over "
+            "curve Ed25519. "
+            "Current implementation is not side-channel resilient due to use "
+            "of variable-time arithmetic for computations over secret key."),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

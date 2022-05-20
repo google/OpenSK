@@ -52,12 +52,13 @@ echo "Checking that CTAP2 builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
 cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
+cargo check --release --target=thumbv7em-none-eabi --features ed25519
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
 cargo check --release --target=thumbv7em-none-eabi --features panic_console
 cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
 cargo check --release --target=thumbv7em-none-eabi --features verbose
 cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,vendor_hid,panic_console,debug_allocations,verbose
+cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,vendor_hid,ed25519,panic_console,debug_allocations,verbose
 
 echo "Checking that examples build properly..."
 cargo check --release --target=thumbv7em-none-eabi --examples

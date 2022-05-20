@@ -1091,6 +1091,17 @@ if __name__ == "__main__":
       help=("When set, the output of elf2tab is appended to this file."),
   )
 
+  main_parser.add_argument(
+      "--ed25519",
+      action="append_const",
+      const="ed25519",
+      dest="features",
+      help=("Adds support for credentials that use EdDSA algorithm over "
+            "curve Ed25519. "
+            "Current implementation is not side-channel resilient due to use "
+            "of variable-time arithmetic for computations over secret key."),
+  )
+
   main_parser.set_defaults(features=["with_ctap1"])
 
   # Start parsing to know if we're going to list things or not.

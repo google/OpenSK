@@ -239,12 +239,12 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult
         InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(
             AuthenticatorMakeCredentialParameters::arbitrary(unstructured)?,
         ),
-        InputType::CborGetAssertionParameter => {
-            unimplemented!()
-        }
-        InputType::CborClientPinParameter => {
-            unimplemented!()
-        }
+        InputType::CborGetAssertionParameter => Command::AuthenticatorGetAssertion(
+            AuthenticatorGetAssertionParameters::arbitrary(unstructured)?,
+        ),
+        InputType::CborClientPinParameter => Command::AuthenticatorClientPin(
+            AuthenticatorClientPinParameters::arbitrary(unstructured)?,
+        ),
         InputType::Ctap1 => {
             unimplemented!()
         }

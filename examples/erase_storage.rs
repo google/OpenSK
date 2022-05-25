@@ -32,7 +32,6 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
         .iter()
         .all(|&x| x == 0xff)
 }
-
 fn main() {
     led::get(1).flex_unwrap().on().flex_unwrap(); // red on dongle
     const NUM_PAGES: usize = 20; // should be at least ctap::storage::NUM_PAGES

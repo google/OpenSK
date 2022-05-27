@@ -727,7 +727,6 @@ class OpenSKInstaller:
           ))
     return 0
 
-
 def main(args):
   colorama.init()
 
@@ -747,7 +746,6 @@ def main(args):
     fatal(f"Listing {args.listing} is not implemented.")
 
   OpenSKInstaller(args).run()
-
 
 if __name__ == "__main__":
   main_parser = argparse.ArgumentParser()

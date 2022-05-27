@@ -327,6 +327,7 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct GetAssertionExtensions {
     pub hmac_secret: Option<GetAssertionHmacSecretInput>,
     pub cred_blob: bool,
@@ -364,6 +365,7 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct GetAssertionHmacSecretInput {
     pub key_agreement: CoseKey,
     pub salt_enc: Vec<u8>,
@@ -437,6 +439,7 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct GetAssertionOptions {
     pub up: bool,
     pub uv: bool,
@@ -723,6 +726,7 @@ impl PublicKeyCredentialSource {
 
 // The COSE key is used for both ECDH and ECDSA public keys for transmission.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct CoseKey {
     x_bytes: [u8; ecdh::NBYTES],
     y_bytes: [u8; ecdh::NBYTES],
@@ -976,6 +980,7 @@ impl TryFrom<cbor::Value> for PinUvAuthProtocol {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum ClientPinSubCommand {
     GetPinRetries = 0x01,
     GetKeyAgreement = 0x02,

@@ -246,6 +246,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct AuthenticatorGetAssertionParameters {
     pub rp_id: String,
     pub client_data_hash: Vec<u8>,
@@ -317,6 +318,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct AuthenticatorClientPinParameters {
     pub pin_uv_auth_protocol: PinUvAuthProtocol,
     pub sub_command: ClientPinSubCommand,

@@ -7,5 +7,9 @@ edition = "2018"
 
 [dependencies]
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 std = []
+hostenv = ["std"]

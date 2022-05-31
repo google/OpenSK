@@ -34,6 +34,18 @@ pub enum StorageError {
 
     /// Implementation-specific error.
     CustomError,
+
+    // I/O error
+    #[cfg(feature = "hostenv")]
+    IOError,
+}
+
+#[cfg(feature = "hostenv")]
+#[allow(unused_variables)]
+impl From<std::io::Error> for StorageError {
+    fn from(error: std::io::Error) -> Self {
+        Self::IOError
+    }
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;

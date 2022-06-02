@@ -14,8 +14,10 @@
 
 #![no_std]
 
+extern crate alloc;
 extern crate lang_items;
 
+use alloc::vec;
 use core::fmt::Write;
 use ctap2::env::tock::take_storage;
 use libtock_drivers::console::Console;
@@ -28,11 +30,9 @@ libtock_core::stack_size! {0x800}
 fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
     let index = StorageIndex { page, byte: 0 };
     let length = storage.page_size();
-    storage
-        .read_slice(index, length)
-        .unwrap()
-        .iter()
-        .all(|&x| x == 0xff)
+    let mut content = vec![0; length];
+    storage.read_slice(index, &mut content).unwrap();
+    content.iter().all(|&x| x == 0xff)
 }
 
 fn main() {

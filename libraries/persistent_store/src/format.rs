@@ -883,8 +883,8 @@ impl Header {
     ///
     /// If the user entry has no payload, the `footer` must be set to `None`. Otherwise it should be
     /// the last word of the entry.
-    pub fn check(&self, footer: Option<&[u8]>) -> bool {
-        footer.map_or(0, count_zeros) == self.checksum
+    pub fn check(&self, footer: Option<WordSlice>) -> bool {
+        footer.map_or(0, |x| count_zeros(&x)) == self.checksum
     }
 }
 

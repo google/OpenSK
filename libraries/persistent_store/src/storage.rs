@@ -59,8 +59,8 @@ pub trait Storage {
 
     /// Reads a byte slice from the storage.
     ///
-    /// The `index` must designate `length` bytes in the storage.
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]>;
+    /// The `index` must designate `value.len()` bytes in the storage.
+    fn read_slice(&self, index: StorageIndex, value: &mut [u8]) -> StorageResult<()>;
 
     /// Writes a word slice to the storage.
     ///

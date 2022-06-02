@@ -173,6 +173,11 @@ impl TockStorage {
     fn is_page_aligned(&self, x: usize) -> bool {
         is_aligned(self.page_size, x)
     }
+
+    fn find_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
+        let start = index.range(length, self)?.start;
+        find_slice(&self.storage_locations, start, length)
+    }
 }
 
 impl Storage for TockStorage {
@@ -196,23 +201,23 @@ impl Storage for TockStorage {
         self.max_page_erases
     }
 
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
-        let start = index.range(length, self)?.start;
-        find_slice(&self.storage_locations, start, length)
+    fn read_slice(&self, index: StorageIndex, value: &mut [u8]) -> StorageResult<()> {
+        value.copy_from_slice(self.find_slice(index, value.len())?);
+        Ok(())
     }
 
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
         if !self.is_word_aligned(index.byte) || !self.is_word_aligned(value.len()) {
             return Err(StorageError::NotAligned);
         }
-        let ptr = self.read_slice(index, value.len())?.as_ptr() as usize;
+        let ptr = self.find_slice(index, value.len())?.as_ptr() as usize;
         write_slice(ptr, value)
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
         let index = StorageIndex { page, byte: 0 };
         let length = self.page_size();
-        let ptr = self.read_slice(index, length)?.as_ptr() as usize;
+        let ptr = self.find_slice(index, length)?.as_ptr() as usize;
         erase_page(ptr, length)
     }
 }

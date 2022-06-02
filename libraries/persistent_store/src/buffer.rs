@@ -301,8 +301,9 @@ impl Storage for BufferStorage {
         self.options.max_page_erases
     }
 
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
-        Ok(&self.storage[index.range(length, self)?])
+    fn read_slice(&self, index: StorageIndex, value: &mut [u8]) -> StorageResult<()> {
+        value.copy_from_slice(&self.storage[index.range(value.len(), self)?]);
+        Ok(())
     }
 
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
@@ -490,6 +491,16 @@ mod tests {
     const SECOND_WORD: &[u8] = &[0xca, 0xc9, 0xa9, 0x65];
     const THIRD_WORD: &[u8] = &[0x88, 0x88, 0x88, 0x44];
 
+    fn read_slice(
+        store: &BufferStorage,
+        index: StorageIndex,
+        length: usize,
+    ) -> StorageResult<Vec<u8>> {
+        let mut result = vec![0; length];
+        store.read_slice(index, &mut result)?;
+        Ok(result)
+    }
+
     fn new_storage() -> Box<[u8]> {
         vec![0xff; NUM_PAGES * OPTIONS.page_size].into_boxed_slice()
     }
@@ -522,10 +533,10 @@ mod tests {
         let mut buffer = BufferStorage::new(new_storage(), OPTIONS);
         let index = StorageIndex { page: 0, byte: 0 };
         let next_index = StorageIndex { page: 0, byte: 4 };
-        assert_eq!(buffer.read_slice(index, 4).unwrap(), BLANK_WORD);
+        assert_eq!(read_slice(&buffer, index, 4).unwrap(), BLANK_WORD);
         buffer.write_slice(index, FIRST_WORD).unwrap();
-        assert_eq!(buffer.read_slice(index, 4).unwrap(), FIRST_WORD);
-        assert_eq!(buffer.read_slice(next_index, 4).unwrap(), BLANK_WORD);
+        assert_eq!(read_slice(&buffer, index, 4).unwrap(), FIRST_WORD);
+        assert_eq!(read_slice(&buffer, next_index, 4).unwrap(), BLANK_WORD);
     }
 
     #[test]
@@ -535,11 +546,11 @@ mod tests {
         let other_index = StorageIndex { page: 1, byte: 0 };
         buffer.write_slice(index, FIRST_WORD).unwrap();
         buffer.write_slice(other_index, FIRST_WORD).unwrap();
-        assert_eq!(buffer.read_slice(index, 4).unwrap(), FIRST_WORD);
-        assert_eq!(buffer.read_slice(other_index, 4).unwrap(), FIRST_WORD);
+        assert_eq!(read_slice(&buffer, index, 4).unwrap(), FIRST_WORD);
+        assert_eq!(read_slice(&buffer, other_index, 4).unwrap(), FIRST_WORD);
         buffer.erase_page(0).unwrap();
-        assert_eq!(buffer.read_slice(index, 4).unwrap(), BLANK_WORD);
-        assert_eq!(buffer.read_slice(other_index, 4).unwrap(), FIRST_WORD);
+        assert_eq!(read_slice(&buffer, index, 4).unwrap(), BLANK_WORD);
+        assert_eq!(read_slice(&buffer, other_index, 4).unwrap(), FIRST_WORD);
     }
 
     #[test]
@@ -551,15 +562,15 @@ mod tests {
         let bad_page = StorageIndex { page: 2, byte: 0 };
 
         // Reading a word in the storage is ok.
-        assert!(buffer.read_slice(index, 4).is_ok());
+        assert!(read_slice(&buffer, index, 4).is_ok());
         // Reading a half-word in the storage is ok.
-        assert!(buffer.read_slice(half_index, 2).is_ok());
+        assert!(read_slice(&buffer, half_index, 2).is_ok());
         // Reading even a single byte outside a page is not ok.
-        assert!(buffer.read_slice(over_index, 1).is_err());
+        assert!(read_slice(&buffer, over_index, 1).is_err());
         // But reading an empty slice just after a page is ok.
-        assert!(buffer.read_slice(over_index, 0).is_ok());
+        assert!(read_slice(&buffer, over_index, 0).is_ok());
         // Reading even an empty slice outside the storage is not ok.
-        assert!(buffer.read_slice(bad_page, 0).is_err());
+        assert!(read_slice(&buffer, bad_page, 0).is_err());
 
         // Writing a word in the storage is ok.
         assert!(buffer.write_slice(index, FIRST_WORD).is_ok());

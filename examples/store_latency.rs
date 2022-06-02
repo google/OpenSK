@@ -195,9 +195,9 @@ fn main() {
 
     // Results for nrf52840dk_opensk:
     // StorageConfig { page_size: 4096, num_pages: 20 }
-    // Overwrite    Length      Boot  Compaction   Insert  Remove
-    //        no  50 words   16.2 ms    143.8 ms  18.3 ms  8.4 ms
-    //       yes   1 words  303.8 ms     97.9 ms   9.7 ms  4.7 ms
+    // Overwrite    Length      Boot  Compaction   Insert   Remove
+    //        no  50 words   21.6 ms    149.1 ms  23.3 ms  11.0 ms
+    //       yes   1 words  417.0 ms    103.2 ms  13.2 ms   6.5 ms
 }
 
 fn align(x: &str, n: usize) {

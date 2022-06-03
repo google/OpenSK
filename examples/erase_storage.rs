@@ -29,7 +29,7 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
     let index = StorageIndex { page, byte: 0 };
     let length = storage.page_size();
     storage
-        .read_slice(index, length)
+        .read_slice(index, length, None)
         .unwrap()
         .iter()
         .all(|&x| x == 0xff)

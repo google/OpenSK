@@ -1096,7 +1096,9 @@ impl<S: Storage> Store<S> {
     /// Reads a slice from the physical storage.
     fn storage_read_slice(&self, index: StorageIndex, length: Nat) -> Cow<[u8]> {
         // The only possible failures are if the slice spans multiple pages.
-        self.storage.read_slice(index, length as usize).unwrap()
+        self.storage
+            .read_slice(index, length as usize, None)
+            .unwrap()
     }
 
     /// Writes a slice to the virtual storage.
@@ -1121,7 +1123,7 @@ impl<S: Storage> Store<S> {
     fn storage_write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StoreResult<()> {
         let word_size = self.format.word_size();
         debug_assert!(usize_to_nat(value.len()) % word_size == 0);
-        let slice = self.storage.read_slice(index, value.len())?;
+        let slice = self.storage.read_slice(index, value.len(), None)?;
         // Skip as many words that don't need to be written as possible.
         for start in (0..usize_to_nat(value.len())).step_by(word_size as usize) {
             if is_write_needed(

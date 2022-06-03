@@ -14,6 +14,8 @@
 
 //! Flash storage abstraction.
 
+use alloc::borrow::Cow;
+
 /// Represents a byte position in a storage.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct StorageIndex {
@@ -60,7 +62,10 @@ pub trait Storage {
     /// Reads a byte slice from the storage.
     ///
     /// The `index` must designate `length` bytes in the storage.
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]>;
+    ///
+    /// Note that we use `Cow` just because it derefs to `[u8]`. We don't really need the fact that
+    /// one can convert it to a `Vec`. In particular we don't do it in the store implementation.
+    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>>;
 
     /// Writes a word slice to the storage.
     ///

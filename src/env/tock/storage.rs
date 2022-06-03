@@ -14,6 +14,7 @@
 
 use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange};
 use crate::api::upgrade_storage::UpgradeStorage;
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use core::cell::Cell;
 use libtock_core::{callback, syscalls};
@@ -196,9 +197,9 @@ impl Storage for TockStorage {
         self.max_page_erases
     }
 
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
+    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {
         let start = index.range(length, self)?.start;
-        find_slice(&self.storage_locations, start, length)
+        find_slice(&self.storage_locations, start, length).map(Cow::Borrowed)
     }
 
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {

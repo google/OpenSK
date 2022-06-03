@@ -18,7 +18,7 @@
 //! actual flash storage. Instead it uses a buffer in memory to represent the storage state.
 
 use crate::{Storage, StorageError, StorageIndex, StorageResult};
-use alloc::borrow::Borrow;
+use alloc::borrow::{Borrow, Cow};
 use alloc::boxed::Box;
 use alloc::vec;
 
@@ -301,8 +301,8 @@ impl Storage for BufferStorage {
         self.options.max_page_erases
     }
 
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<&[u8]> {
-        Ok(&self.storage[index.range(length, self)?])
+    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {
+        Ok(Cow::Borrowed(&self.storage[index.range(length, self)?]))
     }
 
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {

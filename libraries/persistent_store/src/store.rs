@@ -72,8 +72,6 @@ impl From<StorageError> for StoreError {
     fn from(error: StorageError) -> StoreError {
         match error {
             StorageError::CustomError => StoreError::StorageError,
-            #[cfg(feature = "hostenv")]
-            StorageError::IOError => StoreError::StorageError,
             // The store always calls the storage correctly.
             StorageError::NotAligned | StorageError::OutOfBounds => unreachable!(),
         }

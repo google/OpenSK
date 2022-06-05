@@ -17,7 +17,7 @@
 //! [`FileStorage`] implements the flash [`Storage`] interface but doesn't interface with an
 //! actual flash storage. Instead it uses a host-based file to persist the storage state.
 
-use crate::{BufferOptions, Storage, StorageIndex, StorageResult};
+use crate::{Storage, StorageIndex, StorageResult};
 use alloc::borrow::Cow;
 use core::cell::RefCell;
 use std::fs::{File, OpenOptions};
@@ -29,7 +29,7 @@ use std::path::Path;
 /// This is usable for emulating authenticator hardware on VM hypervisor's host OS
 pub struct FileStorage {
     // Options of the storage
-    buffer_options: BufferOptions,
+    options: FileOptions,
 
     /// File for persisting contents of the storage
     /// Reading data from File requires mutable reference, as seeking and reading data
@@ -39,19 +39,20 @@ pub struct FileStorage {
     backing_file_ref: RefCell<File>,
 }
 
-const PAGE_SIZE: usize = 0x1000;
-const NUM_PAGES: usize = 20;
+/// Options for file-backed storage
+pub struct FileOptions {
+    /// Size of a word in bytes.
+    pub word_size: usize,
+
+    /// Size of a page in bytes.
+    pub page_size: usize,
+
+    /// Number of pages in storage
+    pub num_pages: usize,
+}
 
 impl FileStorage {
-    pub fn new(path: &Path) -> StorageResult<FileStorage> {
-        let buffer_options = BufferOptions {
-            word_size: 4,
-            page_size: PAGE_SIZE,
-            max_word_writes: 2,
-            max_page_erases: 10000,
-            strict_mode: true,
-        };
-
+    pub fn new(path: &Path, options: FileOptions) -> StorageResult<FileStorage> {
         let mut backing_file_ref = RefCell::new(
             OpenOptions::new()
                 .read(true)
@@ -61,12 +62,12 @@ impl FileStorage {
         );
         let backing_file = backing_file_ref.get_mut();
         let file_len = backing_file.metadata()?.len();
-        let store_len: u64 = (PAGE_SIZE * NUM_PAGES) as u64;
+        let store_len: u64 = (options.page_size * options.num_pages) as u64;
 
         if file_len == 0 {
             backing_file.seek(SeekFrom::Start(0))?;
-            for _ in 0..NUM_PAGES {
-                let buf = [0xffu8; PAGE_SIZE];
+            let buf = vec![0xffu8; options.page_size];
+            for _ in 0..options.num_pages {
                 backing_file.write(&buf)?;
             }
         } else if file_len != store_len {
@@ -75,7 +76,7 @@ impl FileStorage {
             panic!("Invalid file size {}, should be {}", file_len, store_len);
         }
         Ok(FileStorage {
-            buffer_options,
+            options,
             backing_file_ref,
         })
     }
@@ -83,23 +84,23 @@ impl FileStorage {
 
 impl Storage for FileStorage {
     fn word_size(&self) -> usize {
-        self.buffer_options.word_size
+        self.options.word_size
     }
 
     fn page_size(&self) -> usize {
-        self.buffer_options.page_size
+        self.options.page_size
     }
 
     fn num_pages(&self) -> usize {
-        NUM_PAGES
+        self.options.num_pages
     }
 
     fn max_word_writes(&self) -> usize {
-        self.buffer_options.max_word_writes
+        usize::MAX
     }
 
     fn max_page_erases(&self) -> usize {
-        self.buffer_options.max_page_erases
+        usize::MAX
     }
 
     fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {
@@ -140,6 +141,12 @@ mod tests {
 
     const FILE_NAME: &str = "opensk_storage.bin";
 
+    const OPTIONS: FileOptions = FileOptions {
+        word_size: 4,
+        page_size: 0x1000,
+        num_pages: 20,
+    };
+
     fn make_tmp_dir() -> PathBuf {
         let tmp_dir = TempDir::new().unwrap();
         tmp_dir.into_path()
@@ -152,7 +159,7 @@ mod tests {
     fn temp_storage(tmp_dir: &PathBuf) -> FileStorage {
         let mut tmp_file = tmp_dir.clone();
         tmp_file.push(FILE_NAME);
-        FileStorage::new(&tmp_file).unwrap()
+        FileStorage::new(&tmp_file, OPTIONS).unwrap()
     }
 
     #[test]

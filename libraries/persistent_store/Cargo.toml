@@ -12,4 +12,3 @@ tempfile = "3"
 
 [features]
 std = []
-hostenv = ["std"]

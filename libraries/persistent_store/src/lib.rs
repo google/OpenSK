@@ -365,7 +365,7 @@ extern crate alloc;
 mod buffer;
 #[cfg(feature = "std")]
 mod driver;
-#[cfg(feature = "hostenv")]
+#[cfg(feature = "std")]
 mod file;
 mod format;
 pub mod fragment;
@@ -382,7 +382,7 @@ pub use self::buffer::{BufferCorruptFunction, BufferOptions, BufferStorage};
 pub use self::driver::{
     StoreDriver, StoreDriverOff, StoreDriverOn, StoreInterruption, StoreInvariant,
 };
-#[cfg(feature = "hostenv")]
+#[cfg(feature = "std")]
 pub use self::file::FileStorage;
 #[cfg(feature = "std")]
 pub use self::model::{StoreModel, StoreOperation};

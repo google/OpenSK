@@ -120,7 +120,7 @@ then
   cargo test --features std
   cd ../..
   cd libraries/persistent_store
-  cargo test --features std,hostenv
+  cargo test --features std
   cd ../..
   cargo test --features std
 

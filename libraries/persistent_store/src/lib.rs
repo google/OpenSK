@@ -383,7 +383,7 @@ pub use self::driver::{
     StoreDriver, StoreDriverOff, StoreDriverOn, StoreInterruption, StoreInvariant,
 };
 #[cfg(feature = "std")]
-pub use self::file::FileStorage;
+pub use self::file::{FileOptions, FileStorage};
 #[cfg(feature = "std")]
 pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};

@@ -477,8 +477,8 @@ class OpenSKInstaller:
     features.extend(self.args.features)
     self.checked_command_output([
         "cargo", "test", f"--features={','.join(features)}", "--lib",
-        "customization"]
-    )
+        "customization"
+    ])
 
   def generate_crypto_materials(self, force_regenerate: bool):
     """Calls a shell script that generates cryptographic material."""

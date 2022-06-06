@@ -475,9 +475,10 @@ class OpenSKInstaller:
     print("Testing invariants in customization.rs...")
     features = ["std"]
     features.extend(self.args.features)
-    self.checked_command_output(
-        ["cargo", "test", f"--features={','.join(features)}", "--lib",
-        "customization"])
+    self.checked_command_output([
+        "cargo", "test", f"--features={','.join(features)}", "--lib",
+        "customization"]
+    )
 
   def generate_crypto_materials(self, force_regenerate: bool):
     """Calls a shell script that generates cryptographic material."""

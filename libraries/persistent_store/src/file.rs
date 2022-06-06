@@ -26,20 +26,22 @@ use std::path::Path;
 
 /// Simulates a flash storage using a host-based file.
 ///
-/// This is usable for emulating authenticator hardware on VM hypervisor's host OS
+/// This is usable for emulating authenticator hardware on VM hypervisor's host OS.
 pub struct FileStorage {
-    // Options of the storage
+    // Options of the storage.
     options: FileOptions,
 
-    /// File for persisting contents of the storage
+    /// File for persisting contents of the storage.
+    ///
     /// Reading data from File requires mutable reference, as seeking and reading data
     /// changes file's current position.
+    ///
     /// All operations on backing file internally always first seek to needed position,
     /// so it's safe to borrow mutable reference to backing file for the time of operation.
-    backing_file_ref: RefCell<File>,
+    file: RefCell<File>,
 }
 
-/// Options for file-backed storage
+/// Options for file-backed storage.
 pub struct FileOptions {
     /// Size of a word in bytes.
     pub word_size: usize,
@@ -47,28 +49,28 @@ pub struct FileOptions {
     /// Size of a page in bytes.
     pub page_size: usize,
 
-    /// Number of pages in storage
+    /// Number of pages in storage.
     pub num_pages: usize,
 }
 
 impl FileStorage {
     pub fn new(path: &Path, options: FileOptions) -> StorageResult<FileStorage> {
-        let mut backing_file_ref = RefCell::new(
+        let mut file_ref = RefCell::new(
             OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .open(path)?,
         );
-        let backing_file = backing_file_ref.get_mut();
-        let file_len = backing_file.metadata()?.len();
+        let file = file_ref.get_mut();
+        let file_len = file.metadata()?.len();
         let store_len: u64 = (options.page_size * options.num_pages) as u64;
 
         if file_len == 0 {
-            backing_file.seek(SeekFrom::Start(0))?;
+            file.seek(SeekFrom::Start(0))?;
             let buf = vec![0xffu8; options.page_size];
             for _ in 0..options.num_pages {
-                backing_file.write(&buf)?;
+                file.write(&buf)?;
             }
         } else if file_len != store_len {
             // FileStorage buffer should be of fixed size, opening previously saved file
@@ -77,7 +79,7 @@ impl FileStorage {
         }
         Ok(FileStorage {
             options,
-            backing_file_ref,
+            file: file_ref,
         })
     }
 }
@@ -104,28 +106,29 @@ impl Storage for FileStorage {
     }
 
     fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {
-        let mut backing_file = self.backing_file_ref.borrow_mut();
-        backing_file.seek(SeekFrom::Start(
-            (index.page * self.page_size() + index.byte) as u64,
-        ))?;
+        let mut file = self.file.borrow_mut();
+        file.seek(SeekFrom::Start(index.range(length, self)?.start as u64))?;
         let mut buf = vec![0u8; length];
-        backing_file.read_exact(&mut buf)?;
+        file.read_exact(&mut buf)?;
         Ok(Cow::Owned(buf))
     }
 
     fn write_slice(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
-        let mut backing_file = self.backing_file_ref.borrow_mut();
-        backing_file.seek(SeekFrom::Start(
-            (index.page * self.page_size() + index.byte) as u64,
+        let mut file = self.file.borrow_mut();
+        file.seek(SeekFrom::Start(
+            index.range(value.len(), self)?.start as u64,
         ))?;
-        backing_file.write_all(value)?;
+        file.write_all(value)?;
         Ok(())
     }
 
     fn erase_page(&mut self, page: usize) -> StorageResult<()> {
-        let mut backing_file = self.backing_file_ref.borrow_mut();
-        backing_file.seek(SeekFrom::Start((page * self.page_size()) as u64))?;
-        backing_file.write_all(&vec![0xffu8; self.page_size()][..])?;
+        let mut file = self.file.borrow_mut();
+        let index = StorageIndex { page, byte: 0 };
+        file.seek(SeekFrom::Start(
+            index.range(self.page_size(), self)?.start as u64,
+        ))?;
+        file.write_all(&vec![0xffu8; self.page_size()][..])?;
         Ok(())
     }
 }

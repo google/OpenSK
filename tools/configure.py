@@ -13,8 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
-"""Tools that implements vendor-specific CTAP2 commands to configure OpenSK.
-"""
+"""Tools that implements vendor-specific CTAP2 commands to configure OpenSK."""
 
 from __future__ import absolute_import
 from __future__ import division

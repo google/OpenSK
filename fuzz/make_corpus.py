@@ -19,6 +19,7 @@ import argparse
 import json
 import os.path
 
+
 # Creates a corpus directory to the given path from the given json file.
 def make_corpus(corpus_dir, corpus_json):
   if not os.path.exists(corpus_dir):

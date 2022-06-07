@@ -68,7 +68,7 @@ impl FileStorage {
 
         if file_len == 0 {
             file.seek(SeekFrom::Start(0))?;
-            let buf = vec![0xffu8; options.page_size];
+            let buf = vec![0xff; options.page_size];
             for _ in 0..options.num_pages {
                 file.write(&buf)?;
             }
@@ -128,7 +128,7 @@ impl Storage for FileStorage {
         file.seek(SeekFrom::Start(
             index.range(self.page_size(), self)?.start as u64,
         ))?;
-        file.write_all(&vec![0xffu8; self.page_size()][..])?;
+        file.write_all(&vec![0xff; self.page_size()][..])?;
         Ok(())
     }
 }

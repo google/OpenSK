@@ -98,11 +98,15 @@ impl Storage for FileStorage {
     }
 
     fn max_word_writes(&self) -> usize {
-        usize::MAX
+        // We can write an unlimited amount of times in a file, but the store arithmetic
+        // uses `Nat` so the value should fit in a `Nat`.
+        u32::MAX as usize
     }
 
     fn max_page_erases(&self) -> usize {
-        usize::MAX
+        // We can "erase" an unlimited amount of times in a file, but the store format
+        // encodes the number of erase cycles on 16 bits.
+        u16::MAX as usize
     }
 
     fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {

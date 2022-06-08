@@ -75,10 +75,10 @@ index da3d16d85..bd5337d30 100644
                                          ReturnCode::SUCCESS
                                      } else {
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 41d69752c..a5075d559 100644
+index 41d69752c..0bc39e732 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
-@@ -23,7 +23,14 @@ static LANGUAGES: &'static [u16; 1] = &[
+@@ -23,7 +23,30 @@ static LANGUAGES: &'static [u16; 1] = &[
      0x0409, // English (United States)
  ];
  
@@ -90,10 +90,26 @@ index 41d69752c..a5075d559 100644
  const ENDPOINT_NUM: usize = 1;
 +#[cfg(feature = "vendor_hid")]
 +const VENDOR_ENDPOINT_NUM: usize = ENDPOINT_NUM + 1;
++
++static ENDPOINTS: &'static [usize] = &[
++  ENDPOINT_NUM,
++  #[cfg(feature = "vendor_hid")]
++  VENDOR_ENDPOINT_NUM
++];
++
++// Converts from an endpoint to the index into the in and out buffers.
++fn endpoint_to_buffer(endpoint: usize) -> Option<usize> {
++  for (i, ep) in ENDPOINTS.iter().enumerate() {
++    if endpoint == *ep {
++      return Some(i);
++    }
++  }
++  None
++}
  
  static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[
      0x06, 0xD0, 0xF1, // HID_UsagePage ( FIDO_USAGE_PAGE ),
-@@ -100,16 +107,18 @@ static VENDOR_HID: HIDDescriptor<'static> = HIDDescriptor {
+@@ -100,16 +123,18 @@ static VENDOR_HID: HIDDescriptor<'static> = HIDDescriptor {
  pub struct ClientCtapHID<'a, 'b, C: 'a> {
      client_ctrl: ClientCtrl<'a, 'static, C>,
  
@@ -116,7 +132,7 @@ index 41d69752c..a5075d559 100644
  }
  
  impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
-@@ -167,7 +176,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -167,7 +192,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
              &[
                  EndpointDescriptor {
                      endpoint_address: EndpointAddress::new_const(
@@ -125,7 +141,7 @@ index 41d69752c..a5075d559 100644
                          TransferDirection::HostToDevice,
                      ),
                      transfer_type: TransferType::Interrupt,
-@@ -176,7 +185,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -176,7 +201,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  },
                  EndpointDescriptor {
                      endpoint_address: EndpointAddress::new_const(
@@ -134,7 +150,7 @@ index 41d69752c..a5075d559 100644
                          TransferDirection::DeviceToHost,
                      ),
                      transfer_type: TransferType::Interrupt,
-@@ -228,13 +237,22 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -228,13 +253,22 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  LANGUAGES,
                  strings,
              ),
@@ -160,7 +176,7 @@ index 41d69752c..a5075d559 100644
          }
      }
  
-@@ -242,7 +260,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -242,22 +276,26 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
          self.client.set(client);
      }
  
@@ -169,7 +185,13 @@ index 41d69752c..a5075d559 100644
          if self.pending_in.get() {
              // The previous packet has not yet been transmitted, reject the new one.
              false
-@@ -252,12 +270,12 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+         } else {
++            if endpoint_to_buffer(endpoint).is_none() {
++                // Unsupported endpoint
++                return false;
++            }
+             self.pending_in.set(true);
+             let mut buf: [u8; 64] = [0; 64];
              buf.copy_from_slice(packet);
              self.tx_packet.set(buf);
              // Alert the controller that we now have data to send on the Interrupt IN endpoint.
@@ -184,22 +206,29 @@ index 41d69752c..a5075d559 100644
          if self.pending_out.get() {
              // The previous packet has not yet been received, reject the new one.
              false
-@@ -266,11 +284,11 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -266,11 +304,16 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
              // In case we reported Delay before, send the pending packet back to the client.
              // Otherwise, there's nothing to do, the controller will send us a packet_out when a
              // packet arrives.
 -            if self.delayed_out.take() {
 -                if self.send_packet_to_client() {
-+            if let Some(endpoint) = self.delayed_out.take() {
-+                if self.send_packet_to_client(endpoint) {
-                     // If that succeeds, alert the controller that we can now
-                     // receive data on the Interrupt OUT endpoint.
+-                    // If that succeeds, alert the controller that we can now
+-                    // receive data on the Interrupt OUT endpoint.
 -                    self.controller().endpoint_resume_out(1);
-+                    self.controller().endpoint_resume_out(endpoint);
++            if let Some(endpoint) = self.delayed_out.take() {
++                if endpoint_to_buffer(endpoint).is_none() {
++                  // Unsupported endpoint
++                  return false;
++                } else {
++                    if self.send_packet_to_client(endpoint) {
++                        // If that succeeds, alert the controller that we can now
++                        // receive data on the Interrupt OUT endpoint.
++                        self.controller().endpoint_resume_out(endpoint);
++                    }
                  }
              }
              true
-@@ -280,14 +298,17 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -280,14 +323,18 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
      // Send an OUT packet available in the controller back to the client.
      // This returns false if the client is not ready to receive a packet, and true if the client
      // successfully accepted the packet.
@@ -208,19 +237,20 @@ index 41d69752c..a5075d559 100644
          // Copy the packet into a buffer to send to the client.
          let mut buf: [u8; 64] = [0; 64];
 -        for (i, x) in self.out_buffer.buf.iter().enumerate() {
-+        if endpoint == 0 || endpoint > NUM_ENDPOINTS {
-+            return false
-+        }
-+        for (i, x) in self.out_buffer[endpoint-1].buf.iter().enumerate() {
++        if let Some(i) = endpoint_to_buffer(endpoint) {
++          for (i, x) in self.out_buffer[i].buf.iter().enumerate() {
              buf[i] = x.get();
          }
++        } else {
++          return false;
++        }
  
 -        assert!(!self.delayed_out.get());
 +        assert!(self.delayed_out.is_none());
  
          // Notify the client
          if self
-@@ -301,11 +322,11 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -301,11 +348,11 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
              // should be re-transmitted or not.
              self.cancel_in_transaction();
  
@@ -234,48 +264,63 @@ index 41d69752c..a5075d559 100644
              false
          }
      }
-@@ -336,11 +357,21 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+@@ -334,13 +381,15 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+         // Set up the default control endpoint
+         self.client_ctrl.enable();
  
-         // Set up the interrupt in-out endpoint
-         self.controller()
+-        // Set up the interrupt in-out endpoint
+-        self.controller()
 -            .endpoint_set_in_buffer(1, &self.in_buffer.buf);
-+            .endpoint_set_in_buffer(ENDPOINT_NUM, &self.in_buffer[0].buf);
-         self.controller()
+-        self.controller()
 -            .endpoint_set_out_buffer(1, &self.out_buffer.buf);
-+            .endpoint_set_out_buffer(ENDPOINT_NUM, &self.out_buffer[0].buf);
-         self.controller()
+-        self.controller()
 -            .endpoint_in_out_enable(TransferType::Interrupt, 1);
-+            .endpoint_in_out_enable(TransferType::Interrupt, ENDPOINT_NUM);
-+        // Set up the vendor in-out endpoint
-+        #[cfg(feature = "vendor_hid")]
-+        {
++        // Set up the interrupt in-out endpoint(s).
++        for (i, endpoint) in ENDPOINTS.iter().enumerate() {
 +            self.controller()
-+                .endpoint_set_in_buffer(VENDOR_ENDPOINT_NUM, &self.in_buffer[1].buf);
++                .endpoint_set_in_buffer(*endpoint, &self.in_buffer[i].buf);
 +            self.controller()
-+                .endpoint_set_out_buffer(VENDOR_ENDPOINT_NUM, &self.out_buffer[1].buf);
++                .endpoint_set_out_buffer(*endpoint, &self.out_buffer[i].buf);
 +            self.controller()
-+                .endpoint_in_out_enable(TransferType::Interrupt, VENDOR_ENDPOINT_NUM);
-+        }
++                .endpoint_in_out_enable(TransferType::Interrupt, *endpoint);
++          }
      }
  
      fn attach(&'a self) {
-@@ -383,12 +414,11 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+@@ -383,20 +432,20 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
          match transfer_type {
              TransferType::Bulk => hil::usb::InResult::Error,
              TransferType::Interrupt => {
 -                if endpoint != 1 {
 -                    return hil::usb::InResult::Error;
-+                if endpoint == 0 || endpoint > NUM_ENDPOINTS {
+-                }
+-
+-                if let Some(packet) = self.tx_packet.take() {
+-                    let buf = &self.in_buffer.buf;
+-                    for i in 0..64 {
+-                        buf[i].set(packet[i]);
++                if let Some(i) = endpoint_to_buffer(endpoint) {
++                    if let Some(packet) = self.tx_packet.take() {
++                        let buf = &self.in_buffer[i].buf;
++                        for i in 0..64 {
++                            buf[i].set(packet[i]);
++                        }
++                        hil::usb::InResult::Packet(64)
++                    } else {
++                        // Nothing to send
++                        hil::usb::InResult::Delay
+                     }
+-
+-                    hil::usb::InResult::Packet(64)
+                 } else {
+-                    // Nothing to send
+-                    hil::usb::InResult::Delay
++                  // Unsupported endpoint
 +                  return hil::usb::InResult::Error
                  }
--
-                 if let Some(packet) = self.tx_packet.take() {
--                    let buf = &self.in_buffer.buf;
-+                    let buf = &self.in_buffer[endpoint-1].buf;
-                     for i in 0..64 {
-                         buf[i].set(packet[i]);
-                     }
-@@ -413,7 +443,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+             }
+             TransferType::Control | TransferType::Isochronous => unreachable!(),
+@@ -413,7 +462,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
          match transfer_type {
              TransferType::Bulk => hil::usb::OutResult::Error,
              TransferType::Interrupt => {
@@ -284,7 +329,7 @@ index 41d69752c..a5075d559 100644
                      return hil::usb::OutResult::Error;
                  }
  
-@@ -421,7 +451,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+@@ -421,7 +470,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
                      // Cannot process this packet
                      hil::usb::OutResult::Error
                  } else {
@@ -293,7 +338,7 @@ index 41d69752c..a5075d559 100644
                          hil::usb::OutResult::Ok
                      } else {
                          hil::usb::OutResult::Delay
-@@ -433,7 +463,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
+@@ -433,7 +482,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> hil::usb::Client<'a> for ClientCtap
      }
  
      fn packet_transmitted(&'a self, endpoint: usize) {

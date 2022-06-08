@@ -36,6 +36,13 @@ pub enum StorageError {
     CustomError,
 }
 
+#[cfg(feature = "std")]
+impl From<std::io::Error> for StorageError {
+    fn from(_: std::io::Error) -> Self {
+        Self::CustomError
+    }
+}
+
 pub type StorageResult<T> = Result<T, StorageError>;
 
 /// Abstracts a flash storage.

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
+"""Tools that implements vendor-specific CTAP2 commands to configure OpenSK."""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -121,7 +122,7 @@ def main(args):
             cert.public_bytes(serialization.Encoding.DER),
         2:
             priv_key.private_numbers().private_value.to_bytes(
-                length=32, byteorder='big', signed=False)
+                length=32, byteorder="big", signed=False)
     }
 
   devices = get_opensk_devices(args.batch)

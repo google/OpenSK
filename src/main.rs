@@ -31,10 +31,14 @@ use core::fmt::Write;
 #[cfg(feature = "debug_ctap")]
 use ctap2::clock::CtapClock;
 use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY};
+#[cfg(feature = "std")]
+use ctap2::env::host::HostEnv;
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
-use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv, KEEPALIVE_DELAY_TOCK};
-use ctap2::Transport;
+#[cfg(not(feature = "std"))]
+use ctap2::env::tock::TockEnv;
+use ctap2::env::tock::{switch_off_leds, wink_leds};
+use ctap2::env::{IOChannel, SendOrRecvStatus};
 #[cfg(feature = "debug_ctap")]
 use embedded_time::duration::Microseconds;
 use embedded_time::duration::Milliseconds;
@@ -44,12 +48,18 @@ use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 #[cfg(feature = "with_ctap1")]
 use libtock_drivers::result::FlexUnwrap;
-use libtock_drivers::timer::Duration;
+// FIXME: Common time type for TockEnv and HostEnv
+// use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
+#[cfg(feature = "std")]
+use std::path::Path;
 
 libtock_core::stack_size! {0x4000}
 
-const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
+// FIXME: Common time type for TockEnv and HostEnv
+// const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
+const KEEPALIVE_DELAY_TOCK: isize = 100;
+const SEND_TIMEOUT: isize = 1000;
 
 fn main() {
     let clock = new_clock();
@@ -60,7 +70,11 @@ fn main() {
     }
 
     let boot_time = clock.try_now().unwrap();
+    #[cfg(not(feature = "std"))]
     let env = TockEnv::new();
+    // FIXME: Get path for storage from command line
+    #[cfg(feature = "std")]
+    let env = HostEnv::new(Path::new("opensk-storage.bin"));
     let mut ctap = ctap2::Ctap::new(env, boot_time);
 
     let mut led_counter = 0;
@@ -89,16 +103,18 @@ fn main() {
         }
 
         let mut pkt_request = [0; 64];
-        let usb_interface =
-            match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK) {
-                Some(usb_ctap_hid::SendOrRecvStatus::Received(interface)) => {
-                    #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Received packet", &clock);
-                    Some(interface)
-                }
-                Some(_) => panic!("Error receiving packet"),
-                None => None,
-            };
+        let transport = match ctap
+            .io_channel()
+            .recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK)
+        {
+            Some(SendOrRecvStatus::Received(transport)) => {
+                #[cfg(feature = "debug_ctap")]
+                print_packet_notice("Received packet", &clock);
+                Some(transport)
+            }
+            Some(_) => panic!("Error receiving packet"),
+            None => None,
+        };
 
         let now = clock.try_now().unwrap();
         #[cfg(feature = "with_ctap1")]
@@ -120,19 +136,14 @@ fn main() {
         // don't cause problems with timers.
         ctap.update_timeouts(now);
 
-        if let Some(interface) = usb_interface {
-            let transport = match interface {
-                usb_ctap_hid::UsbInterface::MainHid => Transport::MainHid,
-                #[cfg(feature = "vendor_hid")]
-                usb_ctap_hid::UsbInterface::VendorHid => Transport::VendorHid,
-            };
+        if let Some(transport) = transport {
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let status = usb_ctap_hid::send_or_recv_with_timeout(
+                let status = ctap.io_channel().send_or_recv_with_timeout(
                     &mut pkt_reply,
                     SEND_TIMEOUT,
-                    interface,
+                    transport,
                 );
                 match status {
                     None => {
@@ -142,12 +153,12 @@ fn main() {
                         // Since sending the packet timed out, we cancel this reply.
                         break;
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending packet"),
-                    Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+                    Some(SendOrRecvStatus::Error) => panic!("Error sending packet"),
+                    Some(SendOrRecvStatus::Sent) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sent packet", &clock);
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Received(_)) => {
+                    Some(SendOrRecvStatus::Received(_)) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Received an UNEXPECTED packet", &clock);
                         // TODO: handle this unexpected packet.

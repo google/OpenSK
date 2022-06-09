@@ -2,13 +2,34 @@ use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
+use crate::ctap::{Channel, Transport};
 use persistent_store::{Storage, Store};
 use rng256::Rng256;
 
 #[cfg(feature = "std")]
+pub mod host;
+#[cfg(feature = "std")]
 pub mod test;
 pub mod tock;
+
+pub enum SendOrRecvStatus {
+    // FIXME: Replace Option<SendOrRecvStatus>::None with SendOrRecvStatus::TimedOut?
+    Error,
+    Sent,
+    Received(Transport),
+}
+
+pub trait IOChannel {
+    // FIXME: Separate type for timeout.
+    fn recv_with_timeout(&mut self, buf: &mut [u8; 64], timeout: isize)
+        -> Option<SendOrRecvStatus>;
+    fn send_or_recv_with_timeout(
+        &mut self,
+        buf: &mut [u8; 64],
+        timeout: isize,
+        transport: Transport,
+    ) -> Option<SendOrRecvStatus>;
+}
 
 pub trait UserPresence {
     /// Blocks for user presence.
@@ -26,6 +47,7 @@ pub trait Env {
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
+    type IOChannel: IOChannel;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
@@ -48,4 +70,6 @@ pub trait Env {
     fn write(&mut self) -> Self::Write;
 
     fn customization(&self) -> &Self::Customization;
+
+    fn io_channel(&mut self) -> &mut Self::IOChannel;
 }

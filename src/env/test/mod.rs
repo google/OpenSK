@@ -2,8 +2,8 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
-use crate::env::{Env, UserPresence};
+use crate::ctap::{Channel, Transport};
+use crate::env::{Env, IOChannel, SendOrRecvStatus, UserPresence};
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
@@ -118,6 +118,26 @@ impl FirmwareProtection for TestEnv {
     }
 }
 
+impl IOChannel for TestEnv {
+    fn recv_with_timeout(
+        &mut self,
+        _buf: &mut [u8; 64],
+        _timeout: isize,
+    ) -> Option<SendOrRecvStatus> {
+        // TODO: Implement I/O from canned requests/responses for integration testing.
+        Some(SendOrRecvStatus::Error)
+    }
+    fn send_or_recv_with_timeout(
+        &mut self,
+        _buf: &mut [u8; 64],
+        _timeout: isize,
+        _transport: Transport,
+    ) -> Option<SendOrRecvStatus> {
+        // TODO: Implement I/O from canned requests/responses for integration testing.
+        Some(SendOrRecvStatus::Error)
+    }
+}
+
 impl Env for TestEnv {
     type Rng = TestRng256;
     type UserPresence = TestUserPresence;
@@ -126,6 +146,7 @@ impl Env for TestEnv {
     type FirmwareProtection = Self;
     type Write = TestWrite;
     type Customization = TestCustomization;
+    type IOChannel = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -153,5 +174,9 @@ impl Env for TestEnv {
 
     fn customization(&self) -> &Self::Customization {
         &self.customization
+    }
+
+    fn io_channel(&mut self) -> &mut Self::IOChannel {
+        self
     }
 }

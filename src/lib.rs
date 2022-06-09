@@ -118,4 +118,8 @@ impl<E: Env> Ctap<E> {
         self.state.update_timeouts(now);
         self.hid.update_wink_timeout(now);
     }
+
+    pub fn io_channel(&mut self) -> &mut E::IOChannel {
+        self.env.io_channel()
+    }
 }

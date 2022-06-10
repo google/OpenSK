@@ -37,12 +37,12 @@ index dea2dfed9..66a16fe87 100644
 -            + hid_descriptor.map_or(0, |d| d.size())
 +            + hid_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>())
              + cdc_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>());
-
+ 
      // Set the number of endpoints for each interface descriptor.
 @@ -521,13 +522,11 @@ pub fn create_descriptor_buffers(
          // Add the interface descriptor.
          len += d.write_to(&other_buf.buf[len..]);
-
+ 
 -        // If there is a HID descriptor, we include
 -        // it with the first interface descriptor.
 -        if i == 0 {
@@ -56,16 +56,16 @@ index dea2dfed9..66a16fe87 100644
 +                  len += d.write_to(&other_buf.buf[len..]);
 +              }
          }
-
+ 
          // If there is a CDC descriptor array, we include
 diff --git a/capsules/src/usb/usbc_client_ctrl.rs b/capsules/src/usb/usbc_client_ctrl.rs
 index f7899d8c5..6956523c6 100644
 --- a/capsules/src/usb/usbc_client_ctrl.rs
 +++ b/capsules/src/usb/usbc_client_ctrl.rs
 @@ -38,6 +38,12 @@ const DESCRIPTOR_BUFLEN: usize = 128;
-
+ 
  const N_ENDPOINTS: usize = 3;
-
+ 
 +#[cfg(feature = "vendor_hid")]
 +const N_HID_INTERFACES: usize = 2;
 +
@@ -76,18 +76,18 @@ index f7899d8c5..6956523c6 100644
  pub struct ClientCtrl<'a, 'b, U: 'a> {
      /// The USB hardware controller.
 @@ -64,12 +70,12 @@ pub struct ClientCtrl<'a, 'b, U: 'a> {
-
+ 
      /// An optional HID descriptor for the configuration. This can be requested
      /// separately. It must also be included in `other_descriptor_buffer` if it exists.
 -    hid_descriptor: Option<&'b HIDDescriptor<'b>>,
 +    hid_descriptor: Option<[&'b HIDDescriptor<'b>; N_HID_INTERFACES]>,
-
+ 
      /// An optional report descriptor for the configuration. This can be
      /// requested separately. It must also be included in
      /// `other_descriptor_buffer` if it exists.
 -    report_descriptor: Option<&'b ReportDescriptor<'b>>,
 +    report_descriptor: Option<[&'b ReportDescriptor<'b>; N_HID_INTERFACES]>,
-
+ 
      /// Supported language (only one for now).
      language: &'b [u16; 1],
 @@ -104,8 +110,8 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
@@ -162,7 +162,7 @@ index 642039120..41d69752c 100644
 @@ -44,21 +44,59 @@ static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[
      0xC0, // HID_EndCollection
  ];
-
+ 
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_REPORT_DESCRIPTOR: &'static [u8] = &[
 +    0x06, 0x00, 0xFF, // HID_UsagePage ( VENDOR ),
@@ -186,7 +186,7 @@ index 642039120..41d69752c 100644
  static CTAP_REPORT: ReportDescriptor<'static> = ReportDescriptor {
      desc: CTAP_REPORT_DESCRIPTOR,
  };
-
+ 
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_REPORT: ReportDescriptor<'static> = ReportDescriptor {
 +  desc: VENDOR_REPORT_DESCRIPTOR,
@@ -196,7 +196,7 @@ index 642039120..41d69752c 100644
      typ: DescriptorType::Report,
      len: CTAP_REPORT_DESCRIPTOR.len() as u16,
  }];
-
+ 
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_HID_SUB_DESCRIPTORS: &'static [HIDSubordinateDescriptor] = &[HIDSubordinateDescriptor {
 +  typ: DescriptorType::Report,
@@ -208,7 +208,7 @@ index 642039120..41d69752c 100644
      country_code: HIDCountryCode::NotSupported,
      sub_descriptors: HID_SUB_DESCRIPTORS,
  };
-
+ 
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_HID: HIDDescriptor<'static> = HIDDescriptor {
 +  hid_class: 0x0110,
@@ -218,7 +218,7 @@ index 642039120..41d69752c 100644
 +
  pub struct ClientCtapHID<'a, 'b, C: 'a> {
      client_ctrl: ClientCtrl<'a, 'static, C>,
-
+ 
 @@ -82,6 +120,9 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
          product_id: u16,
          strings: &'static [&'static str],
@@ -243,7 +243,7 @@ index 642039120..41d69752c 100644
 +                ..InterfaceDescriptor::default()
 +            },
          ];
-
+ 
          let endpoints: &[&[EndpointDescriptor]] = &[&[
 +            // 2 Endpoints for FIDO
              EndpointDescriptor {
@@ -279,7 +279,7 @@ index 642039120..41d69752c 100644
 +                },
 +            ],
 +        ];
-
+ 
          let (device_descriptor_buffer, other_descriptor_buffer) =
              descriptors::create_descriptor_buffers(
 @@ -130,17 +203,28 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {

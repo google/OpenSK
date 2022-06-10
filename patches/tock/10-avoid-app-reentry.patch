@@ -79,7 +79,7 @@ index 3f3a4f646..cb5e0af97 100644
  pub mod descriptors;
  pub mod usb_ctap;
 diff --git a/capsules/src/usb/usb_ctap.rs b/capsules/src/usb/usb_ctap.rs
-index da3d16d85..d03859652 100644
+index da3d16d85..3a709aab5 100644
 --- a/capsules/src/usb/usb_ctap.rs
 +++ b/capsules/src/usb/usb_ctap.rs
 @@ -1,7 +1,7 @@
@@ -176,7 +176,7 @@ index da3d16d85..d03859652 100644
          CtapUsbSyscallDriver { usb_client, apps }
      }
 +
-+    fn _packet_received(&self, packet: &[u8; 64], app: &mut App) {
++    fn app_packet_received(&self, packet: &[u8; 64], app: &mut App) {
 +        if app.connected && app.waiting && app.side.map_or(false, |side| side.can_receive()) {
 +            if let Some(buf) = &mut app.buffer {
 +                // Copy the packet to the app's allowed buffer.
@@ -234,15 +234,24 @@ index da3d16d85..d03859652 100644
 +            None => {
 +                for app in self.apps.iter() {
 +                    app.enter(|a, _| {
-+                        self._packet_received(packet, a);
++                        self.app_packet_received(packet, a);
 +                    })
                  }
 -            });
 +            }
-+            Some(a) => self._packet_received(packet, a),
++            Some(a) => self.app_packet_received(packet, a),
          }
      }
  
+@@ -212,7 +165,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> Driver for CtapUsbSyscallDriver<'a,
+                     if !app.set_side(side) {
+                         return ReturnCode::EALREADY;
+                     }
+-                    app.callback = callback;
++                    app.callback = ca}llback;
+                     app.check_side();
+                     ReturnCode::SUCCESS
+                 }
 @@ -282,7 +235,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> Driver for CtapUsbSyscallDriver<'a,
                                  ReturnCode::EALREADY
                              } else {

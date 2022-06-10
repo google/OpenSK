@@ -29,7 +29,7 @@ pub struct VendorHid {
 impl VendorHid {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     pub fn new() -> Self {
-        let hid = CtapHid::new();
+        let hid = CtapHid::new(CtapHid::CAPABILITY_CBOR | CtapHid::CAPABILITY_NMSG);
         VendorHid { hid }
     }
 

@@ -173,6 +173,7 @@ pub struct CtapHid {
     // u32::to/from_be_bytes methods).
     // TODO(kaczmarczyck) We might want to limit or timeout open channels.
     allocated_cids: usize,
+    capabilities: u8,
 }
 
 impl CtapHid {
@@ -190,23 +191,22 @@ impl CtapHid {
     const DEVICE_VERSION_MINOR: u8 = 0;
     const DEVICE_VERSION_BUILD: u8 = 0;
 
-    const CAPABILITY_WINK: u8 = 0x01;
-    const CAPABILITY_CBOR: u8 = 0x04;
-    #[cfg(not(feature = "with_ctap1"))]
-    const CAPABILITY_NMSG: u8 = 0x08;
+    pub const CAPABILITY_WINK: u8 = 0x01;
+    pub const CAPABILITY_CBOR: u8 = 0x04;
+    #[cfg(any(not(feature = "with_ctap1"), feature = "vendor_hid"))]
+    pub const CAPABILITY_NMSG: u8 = 0x08;
 
-    // Capabilitites currently supported by this device.
-    #[cfg(feature = "with_ctap1")]
-    const CAPABILITIES: u8 = Self::CAPABILITY_WINK | Self::CAPABILITY_CBOR;
-    #[cfg(not(feature = "with_ctap1"))]
-    const CAPABILITIES: u8 = Self::CAPABILITY_WINK | Self::CAPABILITY_CBOR | Self::CAPABILITY_NMSG;
     // TODO: Is this timeout duration specified?
     const TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(100 as ClockInt);
 
-    pub fn new() -> CtapHid {
+    /// Creates a new CTAP HID packet parser.
+    ///
+    /// The capabilities passed in are reported to the client in Init.
+    pub fn new(capabilities: u8) -> CtapHid {
         CtapHid {
             assembler: MessageAssembler::new(),
             allocated_cids: 0,
+            capabilities,
         }
     }
 
@@ -295,7 +295,7 @@ impl CtapHid {
                 payload[13] = CtapHid::DEVICE_VERSION_MAJOR;
                 payload[14] = CtapHid::DEVICE_VERSION_MINOR;
                 payload[15] = CtapHid::DEVICE_VERSION_BUILD;
-                payload[16] = CtapHid::CAPABILITIES;
+                payload[16] = self.capabilities;
 
                 Some(Message {
                     cid,
@@ -407,6 +407,7 @@ impl CtapHid {
             CtapHid {
                 assembler: MessageAssembler::new(),
                 allocated_cids: 1,
+                capabilities: 0x0D,
             },
             [0x00, 0x00, 0x00, 0x01],
         )
@@ -445,7 +446,7 @@ mod test {
     #[test]
     fn test_spurious_continuation_packet() {
         let mut env = TestEnv::new();
-        let mut ctap_hid = CtapHid::new();
+        let mut ctap_hid = CtapHid::new(0x0D);
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
         // Continuation packets are silently ignored.
@@ -457,7 +458,7 @@ mod test {
 
     #[test]
     fn test_command_init() {
-        let mut ctap_hid = CtapHid::new();
+        let mut ctap_hid = CtapHid::new(0x0D);
         let init_message = Message {
             cid: CtapHid::CHANNEL_BROADCAST,
             cmd: CtapHidCommand::Init,
@@ -470,23 +471,11 @@ mod test {
                 cid: CtapHid::CHANNEL_BROADCAST,
                 cmd: CtapHidCommand::Init,
                 payload: vec![
-                    0x12, // Nonce
-                    0x34,
-                    0x56,
-                    0x78,
-                    0x9A,
-                    0xBC,
-                    0xDE,
-                    0xF0,
-                    0x00, // Allocated CID
-                    0x00,
-                    0x00,
-                    0x01,
+                    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, // Nonce
+                    0x00, 0x00, 0x00, 0x01, // Allocated CID
                     0x02, // Protocol version
-                    0x01, // Device version
-                    0x00,
-                    0x00,
-                    CtapHid::CAPABILITIES
+                    0x01, 0x00, 0x00, // Device version
+                    0x0D, // Capabilities
                 ]
             })
         );
@@ -517,23 +506,11 @@ mod test {
                 cid,
                 cmd: CtapHidCommand::Init,
                 payload: vec![
-                    0x12, // Nonce
-                    0x34,
-                    0x56,
-                    0x78,
-                    0x9A,
-                    0xBC,
-                    0xDE,
-                    0xF0,
-                    cid[0], // Allocated CID
-                    cid[1],
-                    cid[2],
-                    cid[3],
-                    0x02, // Protocol version
-                    0x01, // Device version
-                    0x00,
-                    0x00,
-                    CtapHid::CAPABILITIES
+                    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, // Nonce
+                    cid[0], cid[1], cid[2], cid[3], // Allocated CID
+                    0x02,   // Protocol version
+                    0x01, 0x00, 0x00, // Device version
+                    0x0D, // Capabilities
                 ]
             })
         );

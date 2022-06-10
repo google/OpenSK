@@ -177,29 +177,31 @@ fn transport_for_interface(usb_interface: usb_ctap_hid::UsbInterface) -> Transpo
 fn send_keepalive_up_needed(
     env: &mut TockEnv,
     channel: Channel,
-    timeout: Duration<isize>,
+    timeout: isize,
 ) -> Result<(), Ctap2StatusCode> {
-    let (interface, cid) = match channel {
-        Channel::MainHid(cid) => (usb_ctap_hid::UsbInterface::MainHid, cid),
+    let (transport, cid) = match channel {
+        Channel::MainHid(cid) => (Transport::MainHid, cid),
         #[cfg(feature = "vendor_hid")]
-        Channel::VendorHid(cid) => (usb_ctap_hid::UsbInterface::VendorHid, cid),
+        Channel::VendorHid(cid) => (Transport::VendorHid, cid),
     };
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
-        let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, interface);
+        let status = env
+            .io_channel()
+            .send_or_recv_with_timeout(&mut pkt, timeout, transport);
         match status {
             None => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
-            Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+            Some(SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
+            Some(SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Received(received_interface)) => {
+            Some(SendOrRecvStatus::Received(received_transport)) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
-                if received_interface != interface || received_cid != &cid {
+                if received_transport != transport || received_cid != &cid {
                     debug_ctap!(
                         env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
@@ -292,7 +294,7 @@ fn check_user_presence(env: &mut TockEnv, channel: Channel) -> Result<(), Ctap2S
         crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
     // First, send a keep-alive packet to notify that the keep-alive status has changed.
-    send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK)?;
+    send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_MS)?;
 
     // Listen to the button presses.
     let button_touched = Cell::new(false);
@@ -342,7 +344,7 @@ fn check_user_presence(env: &mut TockEnv, channel: Channel) -> Result<(), Ctap2S
         // so that LEDs blink with a consistent pattern.
         if keepalive_expired.get() {
             // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK);
+            keepalive_response = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_MS);
         }
 
         if button_touched.get() || keepalive_response.is_err() {

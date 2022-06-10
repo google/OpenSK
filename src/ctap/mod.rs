@@ -51,7 +51,7 @@ use self::data_formats::{
     PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
     SignatureAlgorithm,
 };
-use self::hid::ChannelID;
+use self::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
@@ -66,7 +66,7 @@ use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::clock::{ClockInt, CtapInstant};
-use crate::env::{Env, UserPresence};
+use crate::env::{Env, IOChannel, SendOrRecvStatus, UserPresence};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -240,6 +240,69 @@ fn verify_signature(
     let public_key = ecdsa::PubKey::try_from(cose_key)?;
     if !public_key.verify_hash_vartime(signed_hash, &signature) {
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
+    }
+    Ok(())
+}
+
+// Returns whether the keepalive was sent, or false if cancelled.
+pub fn send_keepalive_up_needed(
+    env: &mut impl Env,
+    channel: Channel,
+    timeout: isize,
+) -> Result<(), Ctap2StatusCode> {
+    let (transport, cid) = match channel {
+        Channel::MainHid(cid) => (Transport::MainHid, cid),
+        #[cfg(feature = "vendor_hid")]
+        Channel::VendorHid(cid) => (Transport::VendorHid, cid),
+    };
+    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
+    for mut pkt in keepalive_msg {
+        let status = env
+            .io_channel()
+            .send_or_recv_with_timeout(&mut pkt, timeout, transport);
+        match status {
+            None => {
+                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
+                // TODO: abort user presence test?
+            }
+            Some(SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
+            Some(SendOrRecvStatus::Sent) => {
+                debug_ctap!(env, "Sent KEEPALIVE packet");
+            }
+            Some(SendOrRecvStatus::Received(received_transport)) => {
+                // We only parse one packet, because we only care about CANCEL.
+                let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
+                if received_transport != transport || received_cid != &cid {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
+                        received_cid,
+                    );
+                    return Ok(());
+                }
+                match processed_packet {
+                    ProcessedPacket::InitPacket { cmd, .. } => {
+                        if cmd == CtapHidCommand::Cancel as u8 {
+                            // We ignore the payload, we can't answer with an error code anyway.
+                            debug_ctap!(env, "User presence check cancelled");
+                            return Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
+                        } else {
+                            debug_ctap!(
+                                env,
+                                "Discarded packet with command {} received while sending a KEEPALIVE packet",
+                                cmd,
+                            );
+                        }
+                    }
+                    ProcessedPacket::ContinuationPacket { .. } => {
+                        debug_ctap!(
+                            env,
+                            "Discarded continuation packet received while sending a KEEPALIVE packet",
+                        );
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -30,7 +30,7 @@ while
 
       set +x
       echo "DONE."
-      # And break the loop
+      # And loop will break
       false
     ;;
 

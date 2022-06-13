@@ -46,4 +46,4 @@ rustup install stable
 cargo +stable install elf2tab --version 0.7.0 --root elf2tab/
 
 # Install python dependencies to factory configure OpenSK (crypto, JTAG lockdown)
-pip3 install --user --upgrade colorama tqdm cryptography "fido2>=0.9.1"
+pip3 install --user --upgrade colorama tqdm cryptography "fido2>=1.0.0"

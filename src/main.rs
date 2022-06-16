@@ -42,7 +42,6 @@ use embedded_time::duration::Milliseconds;
 use libtock_drivers::buttons::{self, ButtonState};
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
-#[cfg(feature = "with_ctap1")]
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
@@ -89,14 +88,21 @@ fn main() {
         }
 
         let mut pkt_request = [0; 64];
-        let usb_interface =
-            match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK) {
-                Some(usb_ctap_hid::SendOrRecvStatus::Received(interface)) => {
+        let usb_endpoint =
+            match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK)
+                .flex_unwrap()
+            {
+                Some(usb_ctap_hid::SendOrRecvStatus::Received(endpoint)) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice("Received packet", &clock);
-                    Some(interface)
+                    Some(endpoint)
                 }
-                Some(_) => panic!("Error receiving packet"),
+                #[cfg(feature = "debug_ctap")]
+                Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+                    panic!("Returned transmit status on receive")
+                }
+                #[cfg(not(feature = "debug_ctap"))]
+                Some(usb_ctap_hid::SendOrRecvStatus::Sent) => panic!(),
                 None => None,
             };
 
@@ -120,20 +126,18 @@ fn main() {
         // don't cause problems with timers.
         ctap.update_timeouts(now);
 
-        if let Some(interface) = usb_interface {
-            let transport = match interface {
-                usb_ctap_hid::UsbInterface::MainHid => Transport::MainHid,
+        if let Some(endpoint) = usb_endpoint {
+            let transport = match endpoint {
+                usb_ctap_hid::UsbEndpoint::MainHid => Transport::MainHid,
                 #[cfg(feature = "vendor_hid")]
-                usb_ctap_hid::UsbInterface::VendorHid => Transport::VendorHid,
+                usb_ctap_hid::UsbEndpoint::VendorHid => Transport::VendorHid,
             };
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let status = usb_ctap_hid::send_or_recv_with_timeout(
-                    &mut pkt_reply,
-                    SEND_TIMEOUT,
-                    interface,
-                );
+                let status =
+                    usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT, endpoint)
+                        .flex_unwrap();
                 match status {
                     None => {
                         #[cfg(feature = "debug_ctap")]
@@ -142,7 +146,6 @@ fn main() {
                         // Since sending the packet timed out, we cancel this reply.
                         break;
                     }
-                    Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending packet"),
                     Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sent packet", &clock);

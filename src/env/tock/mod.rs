@@ -118,27 +118,27 @@ fn send_keepalive_up_needed(
     channel: Channel,
     timeout: Duration<isize>,
 ) -> Result<(), Ctap2StatusCode> {
-    let (interface, cid) = match channel {
-        Channel::MainHid(cid) => (usb_ctap_hid::UsbInterface::MainHid, cid),
+    let (endpoint, cid) = match channel {
+        Channel::MainHid(cid) => (usb_ctap_hid::UsbEndpoint::MainHid, cid),
         #[cfg(feature = "vendor_hid")]
-        Channel::VendorHid(cid) => (usb_ctap_hid::UsbInterface::VendorHid, cid),
+        Channel::VendorHid(cid) => (usb_ctap_hid::UsbEndpoint::VendorHid, cid),
     };
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
-        let status = usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, interface);
+        let status =
+            usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, endpoint).flex_unwrap();
         match status {
             None => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Error) => panic!("Error sending KEEPALIVE packet"),
             Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Received(received_interface)) => {
+            Some(usb_ctap_hid::SendOrRecvStatus::Received(received_endpoint)) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
-                if received_interface != interface || received_cid != &cid {
+                if received_endpoint != endpoint || received_cid != &cid {
                     debug_ctap!(
                         env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",

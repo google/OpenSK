@@ -14,10 +14,11 @@
 
 #[cfg(feature = "debug_ctap")]
 use crate::console::Console;
-use crate::result::TockError;
+use crate::result::{OutOfRangeError, TockError};
 use crate::timer::Duration;
 use crate::{timer, util};
 use core::cell::Cell;
+use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use libtock_core::result::{CommandError, EALREADY, EBUSY, SUCCESS};
@@ -65,27 +66,38 @@ pub fn setup() -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum UsbInterface {
-    MainHid = 0,
+pub enum UsbEndpoint {
+    MainHid = 1,
     #[cfg(feature = "vendor_hid")]
-    VendorHid = 1,
+    VendorHid = 2,
+}
+
+impl TryFrom<usize> for UsbEndpoint {
+    type Error = TockError;
+
+    fn try_from(endpoint_num: usize) -> Result<Self, TockError> {
+        match endpoint_num {
+            1 => Ok(UsbEndpoint::MainHid),
+            #[cfg(feature = "vendor_hid")]
+            2 => Ok(UsbEndpoint::VendorHid),
+            _ => Err(OutOfRangeError.into()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SendOrRecvStatus {
-    Error,
     Sent,
-    Received(UsbInterface),
+    Received(UsbEndpoint),
 }
+
+type SendOrRecvResult = Result<Option<SendOrRecvStatus>, TockError>;
 
 /// Waits to receive a packet.
 ///
 /// Returns None if the transaction timed out, else its status.
 #[allow(clippy::let_and_return)]
-pub fn recv_with_timeout(
-    buf: &mut [u8; 64],
-    timeout_delay: Duration<isize>,
-) -> Option<SendOrRecvStatus> {
+pub fn recv_with_timeout(buf: &mut [u8; 64], timeout_delay: Duration<isize>) -> SendOrRecvResult {
     #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
@@ -97,12 +109,12 @@ pub fn recv_with_timeout(
     let result = recv_with_timeout_detail(buf, timeout_delay);
 
     #[cfg(feature = "verbose_usb")]
-    if let Some(SendOrRecvStatus::Received(interface)) = result {
+    if let Ok(Some(SendOrRecvStatus::Received(endpoint))) = result {
         writeln!(
             Console::new(),
-            "Received packet = {:02x?} on interface {}",
+            "Received packet = {:02x?} on endpoint {}",
             buf as &[u8],
-            interface as u8,
+            endpoint as u8,
         )
         .unwrap();
     }
@@ -126,8 +138,8 @@ pub fn recv_with_timeout(
 pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-    interface: UsbInterface,
-) -> Option<SendOrRecvStatus> {
+    endpoint: UsbEndpoint,
+) -> SendOrRecvResult {
     #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
@@ -137,15 +149,15 @@ pub fn send_or_recv_with_timeout(
     )
     .unwrap();
 
-    let result = send_or_recv_with_timeout_detail(buf, timeout_delay, interface);
+    let result = send_or_recv_with_timeout_detail(buf, timeout_delay, endpoint);
 
     #[cfg(feature = "verbose_usb")]
-    if let Some(SendOrRecvStatus::Received(received_interface)) = result {
+    if let Ok(Some(SendOrRecvStatus::Received(received_endpoint))) = result {
         writeln!(
             Console::new(),
-            "Received packet = {:02x?} on interface {}",
+            "Received packet = {:02x?} on endpoint {}",
             buf as &[u8],
-            received_interface as u8,
+            received_endpoint as u8,
         )
         .unwrap();
     }
@@ -156,52 +168,36 @@ pub fn send_or_recv_with_timeout(
 fn recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-) -> Option<SendOrRecvStatus> {
-    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf);
-    if result.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+) -> SendOrRecvResult {
+    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
 
     let status = Cell::new(None);
-    let mut alarm = |direction| {
+    let mut alarm = |direction, endpoint| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::RECEIVED => {
-                // TODO: set the correct interface
-                SendOrRecvStatus::Received(UsbInterface::MainHid)
+                UsbEndpoint::try_from(endpoint).map(|i| SendOrRecvStatus::Received(i))
             }
             // Unknown direction or "transmitted" sent by the kernel.
-            _ => SendOrRecvStatus::Error,
+            _ => Err(OutOfRangeError.into()),
         }));
     };
 
-    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+    let subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
         DRIVER_NUMBER,
         subscribe_nr::RECEIVE,
         &mut alarm,
-    );
-    if subscription.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+    )?;
 
     // Setup a time-out callback.
     let timeout_expired = Cell::new(false);
     let mut timeout_callback = timer::with_callback(|_, _| {
         timeout_expired.set(true);
     });
-    let mut timeout = match timeout_callback.init() {
-        Ok(x) => x,
-        Err(_) => return Some(SendOrRecvStatus::Error),
-    };
-    let timeout_alarm = match timeout.set_alarm(timeout_delay) {
-        Ok(x) => x,
-        Err(_) => return Some(SendOrRecvStatus::Error),
-    };
+    let mut timeout = timeout_callback.init()?;
+    let timeout_alarm = timeout.set_alarm(timeout_delay)?;
 
     // Trigger USB reception.
-    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0);
-    if result_code.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0)?;
 
     util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
 
@@ -253,61 +249,52 @@ fn recv_with_timeout_detail(
         }
     }
 
-    status.get()
+    core::mem::drop(result);
+    core::mem::drop(subscription);
+    core::mem::drop(result_code);
+    status.get().transpose()
 }
 
 fn send_or_recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-    // TODO: To be used as part of the syscall.
-    _interface: UsbInterface,
-) -> Option<SendOrRecvStatus> {
-    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf);
-    if result.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+    endpoint: UsbEndpoint,
+) -> SendOrRecvResult {
+    let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf)?;
 
     let status = Cell::new(None);
-    let mut alarm = |direction| {
+    let mut alarm = |direction, endpoint| {
         status.set(Some(match direction {
-            subscribe_nr::callback_status::TRANSMITTED => SendOrRecvStatus::Sent,
+            subscribe_nr::callback_status::TRANSMITTED => Ok(SendOrRecvStatus::Sent),
             subscribe_nr::callback_status::RECEIVED => {
-                // TODO: set the correct interface
-                SendOrRecvStatus::Received(UsbInterface::MainHid)
+                UsbEndpoint::try_from(endpoint).map(|i| SendOrRecvStatus::Received(i))
             }
             // Unknown direction sent by the kernel.
-            _ => SendOrRecvStatus::Error,
+            _ => Err(OutOfRangeError.into()),
         }));
     };
 
-    let subscription = syscalls::subscribe::<callback::Identity1Consumer, _>(
+    let subscription = syscalls::subscribe::<callback::Identity2Consumer, _>(
         DRIVER_NUMBER,
         subscribe_nr::TRANSMIT_OR_RECEIVE,
         &mut alarm,
-    );
-    if subscription.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+    )?;
 
     // Setup a time-out callback.
     let timeout_expired = Cell::new(false);
     let mut timeout_callback = timer::with_callback(|_, _| {
         timeout_expired.set(true);
     });
-    let mut timeout = match timeout_callback.init() {
-        Ok(x) => x,
-        Err(_) => return Some(SendOrRecvStatus::Error),
-    };
-    let timeout_alarm = match timeout.set_alarm(timeout_delay) {
-        Ok(x) => x,
-        Err(_) => return Some(SendOrRecvStatus::Error),
-    };
+    let mut timeout = timeout_callback.init()?;
+    let timeout_alarm = timeout.set_alarm(timeout_delay)?;
 
     // Trigger USB transmission.
-    let result_code = syscalls::command(DRIVER_NUMBER, command_nr::TRANSMIT_OR_RECEIVE, 0, 0);
-    if result_code.is_err() {
-        return Some(SendOrRecvStatus::Error);
-    }
+    let result_code = syscalls::command(
+        DRIVER_NUMBER,
+        command_nr::TRANSMIT_OR_RECEIVE,
+        endpoint as usize,
+        0,
+    )?;
 
     util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
 
@@ -361,5 +348,8 @@ fn send_or_recv_with_timeout_detail(
         writeln!(Console::new(), "Cancelled USB transaction!").unwrap();
     }
 
-    status.get()
+    core::mem::drop(result);
+    core::mem::drop(subscription);
+    core::mem::drop(result_code);
+    status.get().transpose()
 }

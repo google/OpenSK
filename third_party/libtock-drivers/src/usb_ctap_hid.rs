@@ -14,7 +14,7 @@
 
 #[cfg(feature = "debug_ctap")]
 use crate::console::Console;
-use crate::result::{OutOfRangeError, TockError};
+use crate::result::{OutOfRangeError, TockError, TockResult};
 use crate::timer::Duration;
 use crate::{timer, util};
 use core::cell::Cell;
@@ -87,17 +87,19 @@ impl TryFrom<usize> for UsbEndpoint {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SendOrRecvStatus {
+    Timeout,
     Sent,
     Received(UsbEndpoint),
 }
-
-type SendOrRecvResult = Result<Option<SendOrRecvStatus>, TockError>;
 
 /// Waits to receive a packet.
 ///
 /// Returns None if the transaction timed out, else its status.
 #[allow(clippy::let_and_return)]
-pub fn recv_with_timeout(buf: &mut [u8; 64], timeout_delay: Duration<isize>) -> SendOrRecvResult {
+pub fn recv_with_timeout(
+    buf: &mut [u8; 64],
+    timeout_delay: Duration<isize>,
+) -> TockResult<SendOrRecvStatus> {
     #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
@@ -109,7 +111,7 @@ pub fn recv_with_timeout(buf: &mut [u8; 64], timeout_delay: Duration<isize>) -> 
     let result = recv_with_timeout_detail(buf, timeout_delay);
 
     #[cfg(feature = "verbose_usb")]
-    if let Ok(Some(SendOrRecvStatus::Received(endpoint))) = result {
+    if let Ok(SendOrRecvStatus::Received(endpoint)) = result {
         writeln!(
             Console::new(),
             "Received packet = {:02x?} on endpoint {}",
@@ -139,7 +141,7 @@ pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
     endpoint: UsbEndpoint,
-) -> SendOrRecvResult {
+) -> TockResult<SendOrRecvStatus> {
     #[cfg(feature = "verbose_usb")]
     writeln!(
         Console::new(),
@@ -152,7 +154,7 @@ pub fn send_or_recv_with_timeout(
     let result = send_or_recv_with_timeout_detail(buf, timeout_delay, endpoint);
 
     #[cfg(feature = "verbose_usb")]
-    if let Ok(Some(SendOrRecvStatus::Received(received_endpoint))) = result {
+    if let Ok(SendOrRecvStatus::Received(received_endpoint)) = result {
         writeln!(
             Console::new(),
             "Received packet = {:02x?} on endpoint {}",
@@ -168,7 +170,7 @@ pub fn send_or_recv_with_timeout(
 fn recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-) -> SendOrRecvResult {
+) -> TockResult<SendOrRecvStatus> {
     let result = syscalls::allow(DRIVER_NUMBER, allow_nr::RECEIVE, buf)?;
 
     let status = Cell::new(None);
@@ -189,9 +191,8 @@ fn recv_with_timeout_detail(
     )?;
 
     // Setup a time-out callback.
-    let timeout_expired = Cell::new(false);
     let mut timeout_callback = timer::with_callback(|_, _| {
-        timeout_expired.set(true);
+        status.set(Some(Ok(SendOrRecvStatus::Timeout)));
     });
     let mut timeout = timeout_callback.init()?;
     let timeout_alarm = timeout.set_alarm(timeout_delay)?;
@@ -199,7 +200,8 @@ fn recv_with_timeout_detail(
     // Trigger USB reception.
     let result_code = syscalls::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0)?;
 
-    util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
+    util::yieldk_for(|| status.get().is_some());
+    let status = status.get().unwrap();
 
     // Cleanup alarm callback.
     match timeout.stop_alarm(timeout_alarm) {
@@ -208,7 +210,7 @@ fn recv_with_timeout_detail(
             return_code: EALREADY,
             ..
         })) => {
-            if !timeout_expired.get() {
+            if matches!(status, Ok(SendOrRecvStatus::Timeout)) {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(
                     Console::new(),
@@ -226,7 +228,7 @@ fn recv_with_timeout_detail(
     }
 
     // Cancel USB transaction if necessary.
-    if status.get().is_none() {
+    if matches!(status, Ok(SendOrRecvStatus::Timeout)) {
         #[cfg(feature = "verbose_usb")]
         writeln!(Console::new(), "Cancelling USB receive due to timeout").unwrap();
         let result_code =
@@ -252,14 +254,14 @@ fn recv_with_timeout_detail(
     core::mem::drop(result);
     core::mem::drop(subscription);
     core::mem::drop(result_code);
-    status.get().transpose()
+    status
 }
 
 fn send_or_recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
     endpoint: UsbEndpoint,
-) -> SendOrRecvResult {
+) -> TockResult<SendOrRecvStatus> {
     let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf)?;
 
     let status = Cell::new(None);
@@ -281,9 +283,8 @@ fn send_or_recv_with_timeout_detail(
     )?;
 
     // Setup a time-out callback.
-    let timeout_expired = Cell::new(false);
     let mut timeout_callback = timer::with_callback(|_, _| {
-        timeout_expired.set(true);
+        status.set(Some(Ok(SendOrRecvStatus::Timeout)));
     });
     let mut timeout = timeout_callback.init()?;
     let timeout_alarm = timeout.set_alarm(timeout_delay)?;
@@ -296,7 +297,8 @@ fn send_or_recv_with_timeout_detail(
         0,
     )?;
 
-    util::yieldk_for(|| status.get().is_some() || timeout_expired.get());
+    util::yieldk_for(|| status.get().is_some());
+    let status = status.get().unwrap();
 
     // Cleanup alarm callback.
     match timeout.stop_alarm(timeout_alarm) {
@@ -305,7 +307,7 @@ fn send_or_recv_with_timeout_detail(
             return_code: EALREADY,
             ..
         })) => {
-            if !timeout_expired.get() {
+            if matches!(status, Ok(SendOrRecvStatus::Timeout)) {
                 #[cfg(feature = "debug_ctap")]
                 writeln!(
                     Console::new(),
@@ -323,7 +325,7 @@ fn send_or_recv_with_timeout_detail(
     }
 
     // Cancel USB transaction if necessary.
-    if status.get().is_none() {
+    if matches!(status, Ok(SendOrRecvStatus::Timeout)) {
         #[cfg(feature = "verbose_usb")]
         writeln!(Console::new(), "Cancelling USB transaction due to timeout").unwrap();
         let result_code =
@@ -351,5 +353,5 @@ fn send_or_recv_with_timeout_detail(
     core::mem::drop(result);
     core::mem::drop(subscription);
     core::mem::drop(result_code);
-    status.get().transpose()
+    status
 }

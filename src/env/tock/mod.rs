@@ -128,14 +128,14 @@ fn send_keepalive_up_needed(
         let status =
             usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, endpoint).flex_unwrap();
         match status {
-            None => {
+            usb_ctap_hid::SendOrRecvStatus::Timeout => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+            usb_ctap_hid::SendOrRecvStatus::Sent => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Some(usb_ctap_hid::SendOrRecvStatus::Received(received_endpoint)) => {
+            usb_ctap_hid::SendOrRecvStatus::Received(received_endpoint) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_endpoint != endpoint || received_cid != &cid {

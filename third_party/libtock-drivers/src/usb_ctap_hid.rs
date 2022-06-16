@@ -329,7 +329,7 @@ fn send_or_recv_with_timeout_detail(
         #[cfg(feature = "verbose_usb")]
         writeln!(Console::new(), "Cancelling USB transaction due to timeout").unwrap();
         let result_code =
-            unsafe { syscalls::raw::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0) };
+            unsafe { syscalls::raw::command(DRIVER_NUMBER, command_nr::CANCEL, endpoint as usize, 0) };
         match result_code {
             // - SUCCESS means that we successfully cancelled the transaction.
             // - EALREADY means that the transaction was already completed.

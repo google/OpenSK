@@ -45,9 +45,9 @@ index 000000000..28dff3575
 +}
 +
 +impl App {
-+  pub fn can_receive_packet(&self) -> bool {
-+    self.waiting && self.side.map_or(false, |side| side.can_receive()) && self.buffer.is_some()
-+  }
++    pub fn can_receive_packet(&self) -> bool {
++        self.waiting && self.side.map_or(false, |side| side.can_receive()) && self.buffer.is_some()
++    }
 +
 +    pub fn check_side(&mut self) {
 +        if self.callback.is_none() && self.buffer.is_none() && !self.waiting {
@@ -243,15 +243,6 @@ index da3d16d85..3a709aab5 100644
          }
      }
  
-@@ -212,7 +165,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> Driver for CtapUsbSyscallDriver<'a,
-                     if !app.set_side(side) {
-                         return ReturnCode::EALREADY;
-                     }
--                    app.callback = callback;
-+                    app.callback = ca}llback;
-                     app.check_side();
-                     ReturnCode::SUCCESS
-                 }
 @@ -282,7 +235,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> Driver for CtapUsbSyscallDriver<'a,
                                  ReturnCode::EALREADY
                              } else {

@@ -108,7 +108,7 @@ index 2c1ecf934..2c91c0968 100644
                              } else {
                                  // Cannot cancel now because the transaction is already in process.
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index f6762b4b9..7da6a5d56 100644
+index f6762b4b9..16b80cb10 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -18,13 +18,27 @@ use core::cell::Cell;
@@ -454,8 +454,8 @@ index f6762b4b9..7da6a5d56 100644
                  } else {
 -                    // Nothing to send
 -                    hil::usb::InResult::Delay
-+                  // Unsupported endpoint
-+                  return hil::usb::InResult::Error
++                    // Unsupported endpoint
++                    return hil::usb::InResult::Error
                  }
              }
              TransferType::Control | TransferType::Isochronous => unreachable!(),

@@ -1,6 +1,7 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::clock::KEEPALIVE_DELAY_MS;
 use crate::ctap::hid::{CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
@@ -222,8 +223,7 @@ pub fn switch_off_leds() {
     }
 }
 
-const KEEPALIVE_DELAY_MS: isize = 100;
-pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
+pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 fn check_user_presence(env: &mut TockEnv, channel: Channel) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.

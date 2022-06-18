@@ -24,7 +24,7 @@ impl<const CLOCK_FREQUENCY: u32> fmt::Debug for LibtockClock<CLOCK_FREQUENCY> {
     }
 }
 
-const KEEPALIVE_DELAY_MS: ClockInt = 100;
+pub const KEEPALIVE_DELAY_MS: ClockInt = 100;
 pub const KEEPALIVE_DELAY: Milliseconds<ClockInt> = Milliseconds(KEEPALIVE_DELAY_MS);
 
 #[cfg(target_pointer_width = "32")]
@@ -57,6 +57,7 @@ pub fn new_clock() -> CtapClock {
 }
 
 pub type CtapInstant = embedded_time::Instant<CtapClock>;
+pub type CtapDuration = Milliseconds<ClockInt>;
 
 #[cfg(feature = "std")]
 pub const TEST_CLOCK_FREQUENCY_HZ: u32 = 32768;

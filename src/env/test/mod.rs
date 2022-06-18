@@ -1,9 +1,10 @@
 use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::clock::CtapDuration;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
-use crate::env::{Env, UserPresence};
+use crate::env::{CtapHidChannel, Env, SendOrRecvError, SendOrRecvResult, UserPresence};
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
@@ -66,6 +67,17 @@ fn new_storage() -> BufferStorage {
     BufferStorage::new(store, options)
 }
 
+impl CtapHidChannel for TestEnv {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        _buf: &mut [u8; 64],
+        _timeout: CtapDuration,
+    ) -> SendOrRecvResult {
+        // TODO: Implement I/O from canned requests/responses for integration testing.
+        Err(SendOrRecvError)
+    }
+}
+
 impl TestEnv {
     pub fn new() -> Self {
         let rng = TestRng256 {
@@ -126,6 +138,7 @@ impl Env for TestEnv {
     type FirmwareProtection = Self;
     type Write = TestWrite;
     type Customization = TestCustomization;
+    type CtapHidChannel = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -153,5 +166,14 @@ impl Env for TestEnv {
 
     fn customization(&self) -> &Self::Customization {
         &self.customization
+    }
+
+    fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
+        self
+    }
+
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
+        self
     }
 }

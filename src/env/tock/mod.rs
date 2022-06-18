@@ -1,13 +1,16 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::clock::KEEPALIVE_DELAY_MS;
+use crate::clock::{CtapDuration, KEEPALIVE_DELAY_MS};
 use crate::ctap::hid::{CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
-use crate::env::{Env, UserPresence};
+use crate::ctap::{Channel, Transport};
+use crate::env::{
+    CtapHidChannel, Env, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UserPresence,
+};
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
+use embedded_time::fixed_point::FixedPoint;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
@@ -19,10 +22,45 @@ use rng256::TockRng256;
 
 mod storage;
 
+pub struct TockCtapHidChannel {
+    transport: Transport,
+}
+
+impl CtapHidChannel for TockCtapHidChannel {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        buf: &mut [u8; 64],
+        timeout: CtapDuration,
+    ) -> SendOrRecvResult {
+        let endpoint = match self.transport {
+            Transport::MainHid => usb_ctap_hid::UsbEndpoint::MainHid,
+            #[cfg(feature = "vendor_hid")]
+            Transport::VendorHid => usb_ctap_hid::UsbEndpoint::VendorHid,
+        };
+        match usb_ctap_hid::send_or_recv_with_timeout(
+            buf,
+            timer::Duration::from_ms(timeout.integer() as isize),
+            endpoint,
+        ) {
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint))
+                if endpoint == recv_endpoint =>
+            {
+                Ok(SendOrRecvStatus::Received)
+            }
+            _ => Err(SendOrRecvError),
+        }
+    }
+}
+
 pub struct TockEnv {
     rng: TockRng256,
     store: Store<TockStorage>,
     upgrade_storage: Option<TockUpgradeStorage>,
+    main_channel: TockCtapHidChannel,
+    #[cfg(feature = "vendor_hid")]
+    vendor_channel: TockCtapHidChannel,
 }
 
 impl TockEnv {
@@ -40,6 +78,13 @@ impl TockEnv {
             rng: TockRng256 {},
             store,
             upgrade_storage,
+            main_channel: TockCtapHidChannel {
+                transport: Transport::MainHid,
+            },
+            #[cfg(feature = "vendor_hid")]
+            vendor_channel: TockCtapHidChannel {
+                transport: Transport::VendorHid,
+            },
         }
     }
 }
@@ -83,6 +128,7 @@ impl Env for TockEnv {
     type FirmwareProtection = Self;
     type Write = Console;
     type Customization = CustomizationImpl;
+    type CtapHidChannel = TockCtapHidChannel;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -110,6 +156,15 @@ impl Env for TockEnv {
 
     fn customization(&self) -> &Self::Customization {
         &DEFAULT_CUSTOMIZATION
+    }
+
+    fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
+        &mut self.main_channel
+    }
+
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
+        &mut self.vendor_channel
     }
 }
 

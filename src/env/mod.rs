@@ -1,6 +1,7 @@
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
+use crate::clock::CtapDuration;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
 use persistent_store::{Storage, Store};
@@ -9,6 +10,24 @@ use rng256::Rng256;
 #[cfg(feature = "std")]
 pub mod test;
 pub mod tock;
+
+pub enum SendOrRecvStatus {
+    Timeout,
+    Sent,
+    Received,
+}
+
+pub struct SendOrRecvError;
+
+pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
+
+pub trait CtapHidChannel {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        buf: &mut [u8; 64],
+        timeout: CtapDuration,
+    ) -> SendOrRecvResult;
+}
 
 pub trait UserPresence {
     /// Blocks for user presence.
@@ -26,6 +45,7 @@ pub trait Env {
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
+    type CtapHidChannel: CtapHidChannel;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
@@ -48,4 +68,8 @@ pub trait Env {
     fn write(&mut self) -> Self::Write;
 
     fn customization(&self) -> &Self::Customization;
+
+    fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
 }

@@ -119,8 +119,8 @@ impl TestUserPresence {
 }
 
 impl UserPresence for TestUserPresence {
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
-        (self.check)(channel)
+    fn quick_check(&mut self, channel: Channel) -> Option<Result<(), Ctap2StatusCode>> {
+        Some((self.check)(channel))
     }
 }
 

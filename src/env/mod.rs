@@ -29,11 +29,39 @@ pub trait CtapHidChannel {
     ) -> SendOrRecvResult;
 }
 
+pub enum UserPresenceStatus {
+    Confirmed,
+    Declined,
+    Timeout,
+}
+
+pub type UserPresenceResult = Result<UserPresenceStatus, Ctap2StatusCode>;
+
 pub trait UserPresence {
-    /// Blocks for user presence.
+    /// Called at the beginning of user presence checking process.
+    fn user_presence_check_init(&mut self, _channel: Channel) {}
+
+    /// Implements a wait for user presence confirmation or rejection.
+    fn wait_for_user_presence_with_timeout(
+        &mut self,
+        _channel: Channel,
+        _timeout: CtapDuration,
+    ) -> UserPresenceResult {
+        Ok(UserPresenceStatus::Confirmed)
+    }
+
+    /// Called at the end of user presence checking process.
+    fn user_presence_check_complete(&mut self, _result: &UserPresenceResult) {}
+
+    /// Short-circuit implementation for fast user presence checking.
     ///
-    /// Returns an error in case of timeout or keepalive error.
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode>;
+    /// Default algorithm for user presence checking waits for user action, while sending keepalive
+    /// packets to the user agent. Implementations may use this function to override this behavior
+    /// and return Some(Result<...>) to pass it immediately to the caller wanting to check user
+    /// presence.
+    fn quick_check(&mut self, _channel: Channel) -> Option<Result<(), Ctap2StatusCode>> {
+        None
+    }
 }
 
 /// Describes what CTAP needs to function.
@@ -69,7 +97,10 @@ pub trait Env {
 
     fn customization(&self) -> &Self::Customization;
 
+    /// I/O channel for sending packets implementing CTAP HID protocol.
     fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
+
+    /// I/O channel for sending packets implementing vendor extensions to CTAP HID protocol.
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
 }

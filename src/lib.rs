@@ -90,7 +90,6 @@ impl<E: Env> Ctap<E> {
         &mut self.hid
     }
 
-    #[cfg(feature = "std")]
     pub fn env(&mut self) -> &mut E {
         &mut self.env
     }
@@ -117,14 +116,5 @@ impl<E: Env> Ctap<E> {
     pub fn update_timeouts(&mut self, now: CtapInstant) {
         self.state.update_timeouts(now);
         self.hid.update_wink_timeout(now);
-    }
-
-    pub fn main_hid_channel(&mut self) -> &mut E::CtapHidChannel {
-        self.env.main_hid_channel()
-    }
-
-    #[cfg(feature = "vendor_hid")]
-    pub fn vendor_hid_channel(&mut self) -> &mut E::CtapHidChannel {
-        self.env.vendor_hid_channel()
     }
 }

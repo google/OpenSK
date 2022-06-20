@@ -28,13 +28,13 @@ use core::convert::TryFrom;
 use core::convert::TryInto;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+use ctap2::api::channel::{CtapHidChannel, SendOrRecvStatus};
 #[cfg(feature = "debug_ctap")]
 use ctap2::clock::CtapClock;
 use ctap2::clock::{new_clock, Clock, ClockInt, CtapDuration, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
-use ctap2::env::{CtapHidChannel, SendOrRecvStatus};
 use ctap2::Transport;
 #[cfg(feature = "debug_ctap")]
 use embedded_time::duration::Microseconds;
@@ -134,11 +134,7 @@ fn main() {
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let channel = match transport {
-                    Transport::MainHid => ctap.main_hid_channel(),
-                    #[cfg(feature = "vendor_hid")]
-                    Transport::VendorHid => ctap.vendor_hid_channel(),
-                };
+                let channel = transport.hid_channel(ctap.env());
                 match channel.send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT) {
                     Ok(SendOrRecvStatus::Timeout) => {
                         #[cfg(feature = "debug_ctap")]

@@ -1,12 +1,11 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
+use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceStatus};
 use crate::clock::{CtapDuration, KEEPALIVE_DELAY_MS};
 use crate::ctap::{Channel, Transport};
-use crate::env::{
-    CtapHidChannel, Env, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UserPresence,
-    UserPresenceResult, UserPresenceStatus,
-};
+use crate::env::Env;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_time::fixed_point::FixedPoint;
@@ -103,10 +102,10 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn user_presence_check_init(&mut self, _channel: Channel) {
+    fn check_init(&mut self, _channel: Channel) {
         self.blink_pattern = 0;
     }
-    fn wait_for_user_presence_with_timeout(
+    fn wait_with_timeout(
         &mut self,
         _channel: Channel,
         timeout: CtapDuration,
@@ -167,7 +166,7 @@ impl UserPresence for TockEnv {
         }
     }
 
-    fn user_presence_check_complete(&mut self, _result: &UserPresenceResult) {
+    fn check_complete(&mut self, _result: &UserPresenceResult) {
         switch_off_leds();
     }
 }

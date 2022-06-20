@@ -1,10 +1,11 @@
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceStatus};
 use crate::clock::CtapDuration;
-use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::Channel;
-use crate::env::{CtapHidChannel, Env, SendOrRecvError, SendOrRecvResult, UserPresence};
+use crate::env::Env;
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
@@ -41,7 +42,7 @@ impl Rng256 for TestRng256 {
 }
 
 pub struct TestUserPresence {
-    check: Box<dyn Fn(Channel) -> Result<(), Ctap2StatusCode>>,
+    check: Box<dyn Fn(Channel) -> UserPresenceResult>,
 }
 
 pub struct TestWrite;
@@ -84,7 +85,7 @@ impl TestEnv {
             rng: StdRng::seed_from_u64(0),
         };
         let user_presence = TestUserPresence {
-            check: Box::new(|_| Ok(())),
+            check: Box::new(|_| Ok(UserPresenceStatus::Confirmed)),
         };
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
@@ -113,15 +114,21 @@ impl TestEnv {
 }
 
 impl TestUserPresence {
-    pub fn set(&mut self, check: impl Fn(Channel) -> Result<(), Ctap2StatusCode> + 'static) {
+    pub fn set(&mut self, check: impl Fn(Channel) -> UserPresenceResult + 'static) {
         self.check = Box::new(check);
     }
 }
 
 impl UserPresence for TestUserPresence {
-    fn quick_check(&mut self, channel: Channel) -> Option<Result<(), Ctap2StatusCode>> {
-        Some((self.check)(channel))
+    fn check_init(&mut self, _channel: Channel) {}
+    fn wait_with_timeout(
+        &mut self,
+        channel: Channel,
+        _timeout: CtapDuration,
+    ) -> UserPresenceResult {
+        (self.check)(channel)
     }
+    fn check_complete(&mut self, _result: &UserPresenceResult) {}
 }
 
 impl FirmwareProtection for TestEnv {

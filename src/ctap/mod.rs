@@ -62,11 +62,13 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::channel::{CtapHidChannel, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
+use crate::api::user_presence::{UserPresence, UserPresenceStatus};
 use crate::clock::{ClockInt, CtapDuration, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
-use crate::env::{CtapHidChannel, Env, SendOrRecvStatus, UserPresence, UserPresenceStatus};
+use crate::env::Env;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -151,6 +153,16 @@ pub enum Transport {
     /// No equivalent in CTAP, used for communication outside the specification.
     #[cfg(feature = "vendor_hid")]
     VendorHid,
+}
+
+impl Transport {
+    pub fn hid_channel<E: Env>(self, env: &mut E) -> &mut E::CtapHidChannel {
+        match self {
+            Transport::MainHid => env.main_hid_channel(),
+            #[cfg(feature = "vendor_hid")]
+            Transport::VendorHid => env.vendor_hid_channel(),
+        }
+    }
 }
 
 /// Communication channels between authenticator and client.
@@ -244,13 +256,15 @@ fn verify_signature(
     Ok(())
 }
 
-// Send keepalive packet during user presence checking. If user agent replies with CANCEL response,
-// return CTAP2_ERR_KEEPALIVE_CANCEL error.
-pub fn send_keepalive_up_needed(
+struct KeepaliveCanceled;
+
+// Sends keepalive packet during user presence checking. If user agent replies with CANCEL response,
+// returns Err(KeepaliveCanceled).
+fn send_keepalive_up_needed(
     env: &mut impl Env,
     channel: Channel,
     timeout: CtapDuration,
-) -> Result<(), Ctap2StatusCode> {
+) -> Result<(), KeepaliveCanceled> {
     let (cid, transport) = match channel {
         Channel::MainHid(cid) => (cid, Transport::MainHid),
         #[cfg(feature = "vendor_hid")]
@@ -258,11 +272,7 @@ pub fn send_keepalive_up_needed(
     };
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
-        let ctap_hid_channel = match transport {
-            Transport::MainHid => env.main_hid_channel(),
-            #[cfg(feature = "vendor_hid")]
-            Transport::VendorHid => env.vendor_hid_channel(),
-        };
+        let ctap_hid_channel = transport.hid_channel(env);
         match ctap_hid_channel.send_or_recv_with_timeout(&mut pkt, timeout) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
@@ -288,7 +298,7 @@ pub fn send_keepalive_up_needed(
                         if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
                             debug_ctap!(env, "User presence check cancelled");
-                            return Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
+                            return Err(KeepaliveCanceled);
                         } else {
                             debug_ctap!(
                                 env,
@@ -313,51 +323,48 @@ pub fn send_keepalive_up_needed(
 /// Blocks for user presence.
 ///
 /// Returns an error in case of timeout, user declining presence request, or keepalive error.
-pub fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2StatusCode> {
-    if let Some(result) = env.user_presence().quick_check(channel) {
-        return result;
-    }
-
-    env.user_presence().user_presence_check_init(channel);
+fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2StatusCode> {
+    env.user_presence().check_init(channel);
 
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
 
-    // First, send a keep-alive packet to notify that the keep-alive status has changed.
     // All fallible functions are called without '?' operator to always reach
-    // user_presence_check_complete(...) cleanup function.
-    let mut result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY)
-        .map(|_| UserPresenceStatus::Timeout);
+    // check_complete(...) cleanup function.
 
-    if result.is_ok() {
-        for _ in 0..TIMEOUT_ITERATIONS {
-            result = env
-                .user_presence()
-                .wait_for_user_presence_with_timeout(channel, KEEPALIVE_DELAY);
-            match result {
-                Ok(UserPresenceStatus::Timeout) => {
-                    // TODO: this may take arbitrary time. Next wait's delay should be adjusted
-                    // accordingly, so that all wait_for_user_presence_with_timeout invocation
-                    // are separated with equal intervals. That way token indicators, such as
-                    // LEDs, will blink with a consistent pattern.
-                    result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY)
-                        .map(|_| UserPresenceStatus::Timeout);
-                    if result.is_err() {
-                        break;
-                    }
-                }
-                _ => {
-                    break;
-                }
-            }
+    let mut result = Ok(UserPresenceStatus::Timeout);
+    for i in 0..=TIMEOUT_ITERATIONS {
+        // First presence check is made without timeout. That way Env implementation may return
+        // user presence check result immediately to client, without sending any keepalive packets.
+        result = env.user_presence().wait_with_timeout(
+            channel,
+            if i == 0 {
+                Milliseconds(0)
+            } else {
+                KEEPALIVE_DELAY
+            },
+        );
+        if let Ok(UserPresenceStatus::Timeout) = result {
+        } else {
+            break;
+        }
+        // TODO: this may take arbitrary time. Next wait's delay should be adjusted
+        // accordingly, so that all wait_with_timeout invocations are separated by
+        // equal time intervals. That way token indicators, such as LEDs, will blink
+        // with a consistent pattern.
+        if send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY).is_err() {
+            result = Ok(UserPresenceStatus::Canceled);
+            break;
         }
     }
-    env.user_presence().user_presence_check_complete(&result);
+
+    env.user_presence().check_complete(&result);
     match result {
         Ok(UserPresenceStatus::Timeout) => Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT),
         Ok(UserPresenceStatus::Declined) => Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED),
         Ok(UserPresenceStatus::Confirmed) => Ok(()),
-        Err(ctap2_status_code) => Err(ctap2_status_code),
+        Ok(UserPresenceStatus::Canceled) => Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL),
+        Err(_) => panic!("Unhandled error checking for user presence"),
     }
 }
 
@@ -2242,7 +2249,7 @@ mod test {
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+            .set(|_| Ok(UserPresenceStatus::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -3034,7 +3041,7 @@ mod test {
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+            .set(|_| Ok(UserPresenceStatus::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);

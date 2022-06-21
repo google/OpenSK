@@ -30,7 +30,6 @@ mod pin_protocol;
 pub mod response;
 pub mod status_code;
 mod storage;
-mod timed_permission;
 mod token_state;
 #[cfg(feature = "vendor_hid")]
 pub mod vendor_hid;
@@ -61,7 +60,6 @@ use self::response::{
     AuthenticatorVendorUpgradeInfoResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
-use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
@@ -72,6 +70,7 @@ use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::clock::{ClockInt, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
+use crate::timer::LibtockAlarmTimer;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -396,7 +395,7 @@ pub enum StatefulCommand {
 /// Additionally, state that is held over multiple commands is assigned to a channel. We discard
 /// all state when we receive data on a different channel.
 pub struct StatefulPermission {
-    permission: TimedPermission,
+    timer: Option<LibtockAlarmTimer>,
     command_type: Option<StatefulCommand>,
     channel: Option<Channel>,
 }
@@ -406,9 +405,9 @@ impl StatefulPermission {
     ///
     /// Resets are only possible after a power cycle. Therefore, initialization
     /// means allowing Reset, and Reset cannot be granted later.
-    pub fn new_reset(now: CtapInstant) -> StatefulPermission {
+    pub fn new_reset() -> StatefulPermission {
         StatefulPermission {
-            permission: TimedPermission::granted(now, RESET_TIMEOUT_DURATION),
+            timer: Timer::start(30000),
             command_type: Some(StatefulCommand::Reset),
             channel: None,
         }
@@ -416,7 +415,7 @@ impl StatefulPermission {
 
     /// Clears all permissions and state.
     pub fn clear(&mut self) {
-        self.permission = TimedPermission::waiting();
+        self.timer = None;
         self.command_type = None;
         self.channel = None;
     }
@@ -441,8 +440,8 @@ impl StatefulPermission {
     }
 
     /// Clears all state if the permission timed out.
-    pub fn clear_timer(&mut self, now: CtapInstant) {
-        if !self.permission.is_granted(now) {
+    pub fn clear_timer(&mut self) {
+        if self.timer.is_some() && self.timer.unwrap().has_elapsed() {
             self.clear();
         }
     }
@@ -457,7 +456,6 @@ impl StatefulPermission {
     /// Sets a new command state, and starts a new clock for timeouts.
     pub fn set_command(
         &mut self,
-        now: CtapInstant,
         new_command_type: StatefulCommand,
         channel: Channel,
     ) {
@@ -465,7 +463,7 @@ impl StatefulPermission {
             // Reset is only allowed after a power cycle.
             StatefulCommand::Reset => unreachable!(),
             _ => {
-                self.permission = TimedPermission::granted(now, STATEFUL_COMMAND_TIMEOUT_DURATION);
+                self.timer = Timer::start(STATEFUL_COMMAND_TIMEOUT_DURATION);
                 self.command_type = Some(new_command_type);
                 self.channel = Some(channel);
             }
@@ -526,21 +524,21 @@ pub struct CtapState {
 }
 
 impl CtapState {
-    pub fn new(env: &mut impl Env, now: CtapInstant) -> Self {
+    pub fn new(env: &mut impl Env) -> Self {
         storage::init(env).ok().unwrap();
         let client_pin = ClientPin::new(env.rng());
         CtapState {
             client_pin,
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(U2F_UP_PROMPT_TIMEOUT, TOUCH_TIMEOUT),
-            stateful_command_permission: StatefulPermission::new_reset(now),
+            stateful_command_permission: StatefulPermission::new_reset(),
             large_blobs: LargeBlobs::new(),
         }
     }
 
-    pub fn update_timeouts(&mut self, now: CtapInstant) {
-        self.stateful_command_permission.clear_timer(now);
-        self.client_pin.update_timeouts(now);
+    pub fn update_timeouts(&mut self) {
+        self.stateful_command_permission.clear_timer();
+        self.client_pin.update_timeouts();
     }
 
     pub fn increment_global_signature_counter(
@@ -567,12 +565,11 @@ impl CtapState {
         env: &mut impl Env,
         command_cbor: &[u8],
         channel: Channel,
-        now: CtapInstant,
     ) -> Vec<u8> {
         let cmd = Command::deserialize(command_cbor);
         debug_ctap!(env, "Received command: {:#?}", cmd);
         let response =
-            cmd.and_then(|command| self.process_parsed_command(env, command, channel, now));
+            cmd.and_then(|command| self.process_parsed_command(env, command, channel));
         debug_ctap!(env, "Sending response: {:#?}", response);
         match response {
             Ok(response_data) => {
@@ -597,7 +594,6 @@ impl CtapState {
         env: &mut impl Env,
         command: Command,
         channel: Channel,
-        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
         #[cfg(feature = "with_ctap1")]
@@ -608,7 +604,7 @@ impl CtapState {
         }
         self.stateful_command_permission
             .clear_old_channels(&channel);
-        self.stateful_command_permission.clear_timer(now);
+        self.stateful_command_permission.clear_timer();
         match (&command, self.stateful_command_permission.get_command()) {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
             | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
@@ -630,7 +626,7 @@ impl CtapState {
             (_, _) => self.stateful_command_permission.clear(),
         }
         match &channel {
-            Channel::MainHid(_) => self.process_fido_command(env, command, channel, now),
+            Channel::MainHid(_) => self.process_fido_command(env, command, channel),
             #[cfg(feature = "vendor_hid")]
             Channel::VendorHid(_) => self.process_vendor_command(env, command, channel),
         }
@@ -641,19 +637,18 @@ impl CtapState {
         env: &mut impl Env,
         command: Command,
         channel: Channel,
-        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         match command {
             Command::AuthenticatorMakeCredential(params) => {
                 self.process_make_credential(env, params, channel)
             }
             Command::AuthenticatorGetAssertion(params) => {
-                self.process_get_assertion(env, params, channel, now)
+                self.process_get_assertion(env, params, channel)
             }
             Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(env),
             Command::AuthenticatorGetInfo => self.process_get_info(env),
             Command::AuthenticatorClientPin(params) => {
-                self.client_pin.process_command(env, params, now)
+                self.client_pin.process_command(env, params)
             }
             Command::AuthenticatorReset => self.process_reset(env, channel),
             Command::AuthenticatorCredentialManagement(params) => process_credential_management(
@@ -662,7 +657,6 @@ impl CtapState {
                 &mut self.client_pin,
                 params,
                 channel,
-                now,
             ),
             Command::AuthenticatorSelection => self.process_selection(env, channel),
             Command::AuthenticatorLargeBlobs(params) => {

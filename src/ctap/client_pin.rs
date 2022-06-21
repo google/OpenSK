@@ -291,7 +291,6 @@ impl ClientPin {
         &mut self,
         env: &mut impl Env,
         client_pin_params: AuthenticatorClientPinParameters,
-        now: CtapInstant,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         let AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
@@ -324,7 +323,7 @@ impl ClientPin {
         self.pin_protocol_v1.reset_pin_uv_auth_token(env.rng());
         self.pin_protocol_v2.reset_pin_uv_auth_token(env.rng());
         self.pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(now);
+            .begin_using_pin_uv_auth_token();
         self.pin_uv_auth_token_state.set_default_permissions();
         let pin_uv_auth_token = shared_secret.encrypt(
             env.rng(),
@@ -359,7 +358,6 @@ impl ClientPin {
         &mut self,
         env: &mut impl Env,
         mut client_pin_params: AuthenticatorClientPinParameters,
-        now: CtapInstant,
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         // Mutating client_pin_params is just an optimization to move it into
         // process_get_pin_token, without cloning permissions_rp_id here.
@@ -375,7 +373,7 @@ impl ClientPin {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 
-        let response = self.process_get_pin_token(env, client_pin_params, now)?;
+        let response = self.process_get_pin_token(env, client_pin_params)?;
         self.pin_uv_auth_token_state.set_permissions(permissions);
         self.pin_uv_auth_token_state
             .set_permissions_rp_id(permissions_rp_id);
@@ -388,7 +386,6 @@ impl ClientPin {
         &mut self,
         env: &mut impl Env,
         client_pin_params: AuthenticatorClientPinParameters,
-        now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let response = match client_pin_params.sub_command {
             ClientPinSubCommand::GetPinRetries => Some(self.process_get_pin_retries(env)?),
@@ -404,7 +401,7 @@ impl ClientPin {
                 None
             }
             ClientPinSubCommand::GetPinToken => {
-                Some(self.process_get_pin_token(env, client_pin_params, now)?)
+                Some(self.process_get_pin_token(env, client_pin_params)?)
             }
             ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_uv_with_permissions(client_pin_params)?,
@@ -414,7 +411,6 @@ impl ClientPin {
                 self.process_get_pin_uv_auth_token_using_pin_with_permissions(
                     env,
                     client_pin_params,
-                    now,
                 )?,
             ),
         };
@@ -495,9 +491,9 @@ impl ClientPin {
     }
 
     /// Updates the running timers, triggers timeout events.
-    pub fn update_timeouts(&mut self, now: CtapInstant) {
+    pub fn update_timeouts(&mut self) {
         self.pin_uv_auth_token_state
-            .pin_uv_auth_token_usage_timer_observer(now);
+            .pin_uv_auth_token_usage_timer_observer();
     }
 
     /// Checks if user verification is cached for use of the pinUvAuthToken.

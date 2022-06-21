@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::clock::CtapInstant;
+use crate::timer::LibtockAlarmTimer;
+
+use super::super::customization::MAX_MSG_SIZE;
 use super::{
     ChannelID, CtapHid, CtapHidCommand, CtapHidError, HidPacket, Message, ProcessedPacket,
 };
@@ -28,7 +32,7 @@ pub struct MessageAssembler {
     // Current channel ID.
     cid: ChannelID,
     // Timestamp of the last packet received on the current channel.
-    last_timestamp: CtapInstant,
+    timer: LibtockAlarmTimer,
     // Current command.
     cmd: u8,
     // Sequence number expected for the next packet.

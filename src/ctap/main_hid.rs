@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::{ClockInt, CtapInstant};
 #[cfg(feature = "with_ctap1")]
 use crate::ctap::ctap1;
 #[cfg(feature = "with_ctap1")]
@@ -20,18 +19,19 @@ use crate::ctap::hid::ChannelID;
 use crate::ctap::hid::{
     CtapHid, CtapHidCommand, CtapHidError, HidPacket, HidPacketIterator, Message,
 };
-use crate::ctap::{Channel, CtapState, TimedPermission};
+use crate::ctap::{Channel, CtapState};
 use crate::env::Env;
+use crate::timer::{Timer,LibtockAlarmTimer};
 use embedded_time::duration::Milliseconds;
 
 /// Implements the standard CTAP command processing for HID.
 pub struct MainHid {
     hid: CtapHid,
-    wink_permission: TimedPermission,
+    wink_permission: Option<LibtockAlarmTimer>,
 }
 
 impl MainHid {
-    const WINK_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(5000 as ClockInt);
+    const WINK_TIMEOUT_DURATION: u32 = 5000_u32;
 
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     pub fn new() -> Self {
@@ -42,7 +42,7 @@ impl MainHid {
             CtapHid::CAPABILITY_WINK | CtapHid::CAPABILITY_CBOR | CtapHid::CAPABILITY_NMSG;
 
         let hid = CtapHid::new(capabilities);
-        let wink_permission = TimedPermission::waiting();
+        let wink_permission = None;
         MainHid {
             hid,
             wink_permission,
@@ -54,11 +54,10 @@ impl MainHid {
         &mut self,
         env: &mut impl Env,
         packet: &HidPacket,
-        now: CtapInstant,
         ctap_state: &mut CtapState,
     ) -> HidPacketIterator {
-        if let Some(message) = self.hid.parse_packet(env, packet, now) {
-            let processed_message = self.process_message(env, message, now, ctap_state);
+        if let Some(message) = self.hid.parse_packet(env, packet) {
+            let processed_message = self.process_message(env, message, ctap_state);
             debug_ctap!(env, "Sending message: {:02x?}", processed_message);
             CtapHid::split_message(processed_message)
         } else {
@@ -71,11 +70,10 @@ impl MainHid {
         &mut self,
         env: &mut impl Env,
         message: Message,
-        now: CtapInstant,
         ctap_state: &mut CtapState,
     ) -> Message {
         // If another command arrives, stop winking to prevent accidential button touches.
-        self.wink_permission = TimedPermission::waiting();
+        self.wink_permission = None;
 
         let cid = message.cid;
         match message.cmd {
@@ -86,7 +84,7 @@ impl MainHid {
                 return CtapHid::error_message(cid, CtapHidError::InvalidCmd);
 
                 #[cfg(feature = "with_ctap1")]
-                match ctap1::Ctap1Command::process_command(env, &message.payload, ctap_state, now) {
+                match ctap1::Ctap1Command::process_command(env, &message.payload, ctap_state) {
                     Ok(payload) => MainHid::ctap1_success_message(cid, &payload),
                     Err(ctap1_status_code) => MainHid::ctap1_error_message(cid, ctap1_status_code),
                 }
@@ -97,7 +95,7 @@ impl MainHid {
                 // don't handle any other packet in the meantime.
                 // TODO: Send "Processing" type keep-alive packets in the meantime.
                 let response =
-                    ctap_state.process_command(env, &message.payload, Channel::MainHid(cid), now);
+                    ctap_state.process_command(env, &message.payload, Channel::MainHid(cid));
                 Message {
                     cid,
                     cmd: CtapHidCommand::Cbor,
@@ -107,8 +105,7 @@ impl MainHid {
             // CTAP 2.1 from 2021-06-15, section 11.2.9.2.1.
             CtapHidCommand::Wink => {
                 if message.payload.is_empty() {
-                    self.wink_permission =
-                        TimedPermission::granted(now, Self::WINK_TIMEOUT_DURATION);
+                    self.wink_permission = Some(LibtockAlarmTimer::start(Self::WINK_TIMEOUT_DURATION));
                     // The response is empty like the request.
                     message
                 } else {
@@ -121,13 +118,13 @@ impl MainHid {
     }
 
     /// Returns whether a wink permission is currently granted.
-    pub fn should_wink(&self, now: CtapInstant) -> bool {
-        self.wink_permission.is_granted(now)
+    pub fn should_wink(&self) -> bool {
+        self.wink_permission.is_some() && self.wink_permission.unwrap().has_elapsed().is_some()
     }
 
     /// Updates the timeout for the wink permission.
-    pub fn update_wink_timeout(&mut self, now: CtapInstant) {
-        self.wink_permission = self.wink_permission.check_expiration(now);
+    pub fn update_wink_timeout(&mut self) {
+        self.wink_permission = Some(LibtockAlarmTimer::start(Self::WINK_TIMEOUT_DURATION));
     }
 
     #[cfg(feature = "with_ctap1")]
@@ -161,7 +158,7 @@ mod test {
 
     fn new_initialized() -> (MainHid, ChannelID) {
         let (hid, cid) = CtapHid::new_initialized();
-        let wink_permission = TimedPermission::waiting();
+        let wink_permission = None;
         (
             MainHid {
                 hid,
@@ -174,7 +171,7 @@ mod test {
     #[test]
     fn test_process_hid_packet() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
 
         let mut ping_packet = [0x00; 64];
@@ -184,7 +181,6 @@ mod test {
         let mut response = main_hid.process_hid_packet(
             &mut env,
             &ping_packet,
-            CtapInstant::new(0),
             &mut ctap_state,
         );
         assert_eq!(response.next(), Some(ping_packet));
@@ -194,7 +190,7 @@ mod test {
     #[test]
     fn test_process_hid_packet_empty() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
 
         let mut cancel_packet = [0x00; 64];
@@ -204,7 +200,6 @@ mod test {
         let mut response = main_hid.process_hid_packet(
             &mut env,
             &cancel_packet,
-            CtapInstant::new(0),
             &mut ctap_state,
         );
         assert_eq!(response.next(), None);
@@ -213,9 +208,9 @@ mod test {
     #[test]
     fn test_wink() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
-        assert!(!main_hid.should_wink(CtapInstant::new(0)));
+        assert!(!main_hid.should_wink());
 
         let mut wink_packet = [0x00; 64];
         wink_packet[..4].copy_from_slice(&cid);
@@ -224,12 +219,10 @@ mod test {
         let mut response = main_hid.process_hid_packet(
             &mut env,
             &wink_packet,
-            CtapInstant::new(0),
             &mut ctap_state,
         );
         assert_eq!(response.next(), Some(wink_packet));
         assert_eq!(response.next(), None);
-        assert!(main_hid.should_wink(CtapInstant::new(0)));
-        assert!(!main_hid.should_wink(CtapInstant::new(1) + MainHid::WINK_TIMEOUT_DURATION));
+        assert!(main_hid.should_wink());
     }
 }

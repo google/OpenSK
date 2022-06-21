@@ -14,7 +14,7 @@
 
 use libtock_core::syscalls;
 
-trait Timer: Sized {
+pub trait Timer: Sized {
     // start instantiate a Timer with a given length of time.
     fn start(milliseconds: u32) -> Self;
     // has_elapsed returns whether the Timer is elapsed or not. If it has elapsed, return None.
@@ -31,7 +31,7 @@ mod command_nr {
 }
 const DRIVER_NUMBER: usize = 0x00000;
 
-struct LibtockAlarmTimer {
+pub struct LibtockAlarmTimer {
     end_tick: usize,
 }
 

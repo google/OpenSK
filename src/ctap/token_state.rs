@@ -14,20 +14,18 @@
 
 use crate::ctap::client_pin::PinPermission;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::timed_permission::TimedPermission;
+use crate::timer::{Timer, LibtockAlarmTimer};
 use alloc::string::String;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 use embedded_time::duration::Milliseconds;
-
-use crate::clock::{ClockInt, CtapInstant};
 
 /// Timeout for auth tokens.
 ///
 /// This usage time limit is correct for USB, BLE, and internal.
 /// NFC only allows 19.8 seconds.
 /// TODO(#15) multiplex over transports, add NFC
-const INITIAL_USAGE_TIME_LIMIT: Milliseconds<ClockInt> = Milliseconds(30000 as ClockInt);
+const INITIAL_USAGE_TIME_LIMIT:u32 = 30000_u32;
 
 /// Implements pinUvAuthToken state from section 6.5.2.1.
 ///
@@ -39,7 +37,7 @@ pub struct PinUvAuthTokenState {
     // Relies on the fact that all permissions are represented by powers of two.
     permissions_set: u8,
     permissions_rp_id: Option<String>,
-    usage_timer: TimedPermission,
+    usage_timer: Option<LibtockAlarmTimer>,
     user_verified: bool,
     in_use: bool,
 }
@@ -50,7 +48,7 @@ impl PinUvAuthTokenState {
         PinUvAuthTokenState {
             permissions_set: 0,
             permissions_rp_id: None,
-            usage_timer: TimedPermission::waiting(),
+            usage_timer: None,
             user_verified: false,
             in_use: false,
         }
@@ -113,19 +111,18 @@ impl PinUvAuthTokenState {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self, now: CtapInstant) {
+    pub fn begin_using_pin_uv_auth_token(&mut self) {
         self.user_verified = true;
-        self.usage_timer = TimedPermission::granted(now, INITIAL_USAGE_TIME_LIMIT);
+        self.usage_timer = Some(LibtockAlarmTimer::start(INITIAL_USAGE_TIME_LIMIT));
         self.in_use = true;
     }
 
     /// Updates the usage timer, and disables the pinUvAuthToken on timeout.
-    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, now: CtapInstant) {
+    pub fn pin_uv_auth_token_usage_timer_observer(&mut self) {
         if !self.in_use {
             return;
         }
-        self.usage_timer = self.usage_timer.check_expiration(now);
-        if !self.usage_timer.is_granted(now) {
+        if self.usage_timer.is_none() || self.usage_timer.unwrap().has_elapsed().is_none() {
             self.stop_using_pin_uv_auth_token();
         }
     }
@@ -149,7 +146,7 @@ impl PinUvAuthTokenState {
     pub fn stop_using_pin_uv_auth_token(&mut self) {
         self.permissions_rp_id = None;
         self.permissions_set = 0;
-        self.usage_timer = TimedPermission::waiting();
+        self.usage_timer = None;
         self.user_verified = false;
         self.in_use = false;
     }
@@ -161,24 +158,9 @@ mod test {
     use enum_iterator::IntoEnumIterator;
 
     #[test]
-    fn test_observer() {
-        let mut token_state = PinUvAuthTokenState::new();
-        let mut now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
-        assert!(token_state.is_in_use());
-        now = now + Milliseconds(100_u32);
-        token_state.pin_uv_auth_token_usage_timer_observer(now);
-        assert!(token_state.is_in_use());
-        now = now + INITIAL_USAGE_TIME_LIMIT;
-        token_state.pin_uv_auth_token_usage_timer_observer(now);
-        assert!(!token_state.is_in_use());
-    }
-
-    #[test]
     fn test_stop() {
         let mut token_state = PinUvAuthTokenState::new();
-        let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token();
         assert!(token_state.is_in_use());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.is_in_use());
@@ -264,12 +246,11 @@ mod test {
     fn test_user_verified_flag() {
         let mut token_state = PinUvAuthTokenState::new();
         assert!(!token_state.get_user_verified_flag_value());
-        let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token();
         assert!(token_state.get_user_verified_flag_value());
         token_state.clear_user_verified_flag();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token();
         assert!(token_state.get_user_verified_flag_value());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.get_user_verified_flag_value());

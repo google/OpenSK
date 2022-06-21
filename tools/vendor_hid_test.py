@@ -38,12 +38,10 @@ class HidDevice(object):
   def create_and_init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.
-    init_packet = [0] + list(_DEFAULT_CID) + [0x86, 0x00, 0x08
-                                              ] + [0x00] * 57
+    init_packet = [0] + list(_DEFAULT_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
     if len(init_packet) != _SEND_DATA_SIZE:
       raise Exception(
-          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(init_packet)}'
-      )
+          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(init_packet)}')
     self.dev.write(bytes(init_packet))
     self.cid = self.dev.read(_PACKET_SIZE, 2000)[15:19]
     sleep()
@@ -63,8 +61,7 @@ class HidDevice(object):
     continue_packet = [0] + list(self.cid) + [num] + [byte] * 59
     if len(continue_packet) != _SEND_DATA_SIZE:
       raise Exception(f'Expected packet to be {_SEND_DATA_SIZE} but was '
-                      '{len(continue_packet)}'
-      )
+                      '{len(continue_packet)}')
     r = self.dev.write(bytes(continue_packet))
     sleep()
     return r

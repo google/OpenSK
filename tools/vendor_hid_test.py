@@ -12,13 +12,17 @@ _PACKET_SIZE = 64
 _SEND_DATA_SIZE = _PACKET_SIZE + 1
 _DEFAULT_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
+
 def sleep():
     time.sleep(.01)
 
+
 def ping_data_size(packets):
-  return 57 + 59 * (packets - 1)
+    return 57 + 59 * (packets - 1)
+
 
 class HidDevice(object):
+
     def __init__(self, device):
         self.device = device
         self.dev = None
@@ -28,33 +32,36 @@ class HidDevice(object):
 
     def __del__(self):
         if self.dev:
-          self.dev.close()
-
+            self.dev.close()
 
     def create_and_init(self) -> None:
         self.dev = hid.Device(path=self.device['path'])
         # Nonce is all zeros, because we don't care.
-        init_packet = [0] + list(_DEFAULT_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
+        init_packet = [0] + list(_DEFAULT_CID) + [0x86, 0x00, 0x08
+                                                  ] + [0x00] * 57
         if len(init_packet) != _SEND_DATA_SIZE:
-          raise Exception("Expected packet to be %d but was %d" % (_SEND_DATA_SIZE, len(init_packet)))
+            raise Exception("Expected packet to be %d but was %d" %
+                            (_SEND_DATA_SIZE, len(init_packet)))
         self.dev.write(bytes(init_packet))
         self.cid = self.dev.read(_PACKET_SIZE, 2000)[15:19]
         sleep()
 
     def ping_init(self, packets=1, byte=0x88) -> int:
         size = ping_data_size(packets)
-        ping_packet = [0] + list(self.cid) + [0x81, size // 256, size % 256] + [byte] * 57
+        ping_packet = [0] + list(self.cid) + [0x81, size // 256, size % 256
+                                              ] + [byte] * 57
         if len(ping_packet) != _SEND_DATA_SIZE:
-          raise Exception("Expected packet to be %d but was %d" % (_PACKET_SIZE, len(ping_packet)))
+            raise Exception("Expected packet to be %d but was %d" %
+                            (_PACKET_SIZE, len(ping_packet)))
         r = self.dev.write(bytes(ping_packet))
         sleep()
         return r
 
-
     def ping_continue(self, num, byte=0x88) -> int:
         continue_packet = [0] + list(self.cid) + [num] + [byte] * 59
         if len(continue_packet) != _SEND_DATA_SIZE:
-          raise Exception("Expected packet to be %d but was %d" % (_PACKET_SIZE, len(continue_packet)))
+            raise Exception("Expected packet to be %d but was %d" %
+                            (_PACKET_SIZE, len(continue_packet)))
         r = self.dev.write(bytes(continue_packet))
         sleep()
         return r
@@ -66,15 +73,16 @@ class HidDevice(object):
         return len(d)
 
     def get_received_data(self):
-      """This combines the data from the received packets, to match the ping
+        """This combines the data from the received packets, to match the ping
       packets sent."""
-      d = b""
-      if len(self.rx_packets) < _PACKETS:
-        raise Exception("Insufficent packets received - want %d, got %d" % (_PACKETS, len(self.rx_packets)))
-      d += self.rx_packets[-_PACKETS][7:]
-      for p in self.rx_packets[-_PACKETS+1:]:
-        d += p[5:]
-      return d
+        d = b""
+        if len(self.rx_packets) < _PACKETS:
+            raise Exception("Insufficent packets received - want %d, got %d" %
+                            (_PACKETS, len(self.rx_packets)))
+        d += self.rx_packets[-_PACKETS][7:]
+        for p in self.rx_packets[-_PACKETS + 1:]:
+            d += p[5:]
+        return d
 
 
 def get_devices(usage_page):
@@ -92,13 +100,13 @@ class VendorHid(unittest.TestCase):
 
     @classmethod
     def get_device(cls, usage_page):
-      devices = list(get_devices(usage_page))
-      if len(devices) != 1:
-        raise Exception("Found %d devices" % len(devices))
-      return HidDevice(devices[0])
+        devices = list(get_devices(usage_page))
+        if len(devices) != 1:
+            raise Exception("Found %d devices" % len(devices))
+        return HidDevice(devices[0])
 
     def assertReceivedDataMatches(self, device: HidDevice, byte):
-        expected = bytes([byte]*ping_data_size(_PACKETS))
+        expected = bytes([byte] * ping_data_size(_PACKETS))
         self.assertEqual(device.get_received_data(), expected)
 
     def test_00_init(self):
@@ -127,10 +135,10 @@ class VendorHid(unittest.TestCase):
         self.assertReceivedDataMatches(dev, byte)
 
     def test_02_fido_ping(self):
-      self._test_ping(self.fido_hid, byte=0x11)
+        self._test_ping(self.fido_hid, byte=0x11)
 
     def test_03_vendor_ping(self):
-      self._test_ping(self.vendor_hid, byte=0x22)
+        self._test_ping(self.vendor_hid, byte=0x22)
 
     def test_04_interleaved_send_and_receive(self):
         r = self.fido_hid.ping_init(packets=_PACKETS, byte=0x33)
@@ -186,6 +194,7 @@ class VendorHid(unittest.TestCase):
             self.assertEqual(r, _PACKET_SIZE)
         self.assertReceivedDataMatches(self.fido_hid, 0x77)
         self.assertReceivedDataMatches(self.vendor_hid, 0x88)
+
 
 if __name__ == '__main__':
     unittest.main()

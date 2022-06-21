@@ -128,7 +128,7 @@ impl UserPresence for TockEnv {
         let immediate_check = timeout.integer() == 0;
         let keepalive_expired = Cell::new(immediate_check);
         // Setup a keep-alive callback.
-        if ! immediate_check {
+        if !immediate_check {
             let mut keepalive_callback = timer::with_callback(|_, _| {
                 keepalive_expired.set(true);
             });

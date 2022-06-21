@@ -51,11 +51,10 @@ class HidDevice(object):
   def ping_init(self, packets=1, byte=0x88) -> int:
     size = ping_data_size(packets)
     ping_packet = [0] + list(self.cid) + [0x81, size // 256, size % 256
-                                          ] + [byte] * 57
+                                         ] + [byte] * 57
     if len(ping_packet) != _SEND_DATA_SIZE:
       raise Exception(
-          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}'
-      )
+          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}')
     r = self.dev.write(bytes(ping_packet))
     sleep()
     return r
@@ -63,9 +62,8 @@ class HidDevice(object):
   def ping_continue(self, num, byte=0x88) -> int:
     continue_packet = [0] + list(self.cid) + [num] + [byte] * 59
     if len(continue_packet) != _SEND_DATA_SIZE:
-      raise Exception(
-          f'Expected packet to be {_SEND_DATA_SIZE} but was '
-          '{len(continue_packet)}'
+      raise Exception(f'Expected packet to be {_SEND_DATA_SIZE} but was '
+                      '{len(continue_packet)}'
       )
     r = self.dev.write(bytes(continue_packet))
     sleep()

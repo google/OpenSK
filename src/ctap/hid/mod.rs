@@ -197,7 +197,10 @@ impl CtapHid {
     pub const CAPABILITY_NMSG: u8 = 0x08;
 
     // TODO: Is this timeout duration specified?
+    #[cfg(not(feature = "debug_ctap"))]
     const TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(100 as ClockInt);
+    #[cfg(feature = "debug_ctap")]
+    const TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(1000 as ClockInt);
 
     /// Creates a new CTAP HID packet parser.
     ///

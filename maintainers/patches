@@ -153,6 +153,7 @@ check() {
     local root="$(get_root "${module}")"
     ( set -e
       cd third_party/"${module}"
+      git commit --allow-empty -qmi
       git add .
       git commit --allow-empty -qmx
       local top="$(get_head)"
@@ -163,6 +164,7 @@ check() {
       local r; if git diff "${top}" --quiet; then r=0; else r=1; fi
       git checkout -q "${top}"
       git reset -q HEAD~
+      git reset -q --soft HEAD~
       [[ "${r}" -eq 0 ]] \
         || fail "The ${module} submodule differs from its patches."
     )

@@ -12,31 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::CtapDuration;
+use crate::clock::ClockInt;
 use crate::ctap::Channel;
+use embedded_time::duration::Milliseconds;
 
-pub enum UserPresenceStatus {
-    Confirmed,
+pub enum UserPresenceError {
     Declined,
     Canceled,
     Timeout,
 }
 
-pub struct UserPresenceError;
-
-pub type UserPresenceResult = Result<UserPresenceStatus, UserPresenceError>;
+pub type UserPresenceResult = Result<(), UserPresenceError>;
 
 pub trait UserPresence {
     /// Called at the beginning of user presence checking process.
-    fn check_init(&mut self, _channel: Channel);
+    fn check_init(&mut self, channel: Channel);
 
     /// Implements a wait for user presence confirmation or rejection.
     fn wait_with_timeout(
         &mut self,
-        _channel: Channel,
-        _timeout: CtapDuration,
+        channel: Channel,
+        timeout: Milliseconds<ClockInt>,
     ) -> UserPresenceResult;
 
     /// Called at the end of user presence checking process.
-    fn check_complete(&mut self, _result: &UserPresenceResult);
+    fn check_complete(&mut self, result: &UserPresenceResult);
 }

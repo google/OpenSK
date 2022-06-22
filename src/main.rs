@@ -31,7 +31,7 @@ use core::fmt::Write;
 use ctap2::api::channel::{CtapHidChannel, SendOrRecvStatus};
 #[cfg(feature = "debug_ctap")]
 use ctap2::clock::CtapClock;
-use ctap2::clock::{new_clock, Clock, ClockInt, CtapDuration, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
+use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
@@ -49,7 +49,7 @@ use libtock_drivers::usb_ctap_hid;
 
 libtock_core::stack_size! {0x4000}
 
-const SEND_TIMEOUT: CtapDuration = Milliseconds(1000);
+const SEND_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(1000);
 const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 fn main() {

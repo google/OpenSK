@@ -2,11 +2,12 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceStatus};
-use crate::clock::CtapDuration;
+use crate::api::user_presence::{UserPresence, UserPresenceResult};
+use crate::clock::ClockInt;
 use crate::ctap::Channel;
 use crate::env::Env;
 use customization::TestCustomization;
+use embedded_time::duration::Milliseconds;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -72,7 +73,7 @@ impl CtapHidChannel for TestEnv {
     fn send_or_recv_with_timeout(
         &mut self,
         _buf: &mut [u8; 64],
-        _timeout: CtapDuration,
+        _timeout: Milliseconds<ClockInt>,
     ) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
         Err(SendOrRecvError)
@@ -85,7 +86,7 @@ impl TestEnv {
             rng: StdRng::seed_from_u64(0),
         };
         let user_presence = TestUserPresence {
-            check: Box::new(|_| Ok(UserPresenceStatus::Confirmed)),
+            check: Box::new(|_| Ok(())),
         };
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
@@ -124,7 +125,7 @@ impl UserPresence for TestUserPresence {
     fn wait_with_timeout(
         &mut self,
         channel: Channel,
-        _timeout: CtapDuration,
+        _timeout: Milliseconds<ClockInt>,
     ) -> UserPresenceResult {
         (self.check)(channel)
     }

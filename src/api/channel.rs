@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::CtapDuration;
+use crate::clock::ClockInt;
+use embedded_time::duration::Milliseconds;
 
 pub enum SendOrRecvStatus {
     Timeout,
@@ -28,6 +29,6 @@ pub trait CtapHidChannel {
     fn send_or_recv_with_timeout(
         &mut self,
         buf: &mut [u8; 64],
-        timeout: CtapDuration,
+        timeout: Milliseconds<ClockInt>,
     ) -> SendOrRecvResult;
 }

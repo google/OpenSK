@@ -2,48 +2,45 @@ pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceStatus};
-use crate::clock::{CtapDuration, KEEPALIVE_DELAY_MS};
-use crate::ctap::{Channel, Transport};
+use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
+use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
+use crate::ctap::Channel;
 use crate::env::Env;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
+use embedded_time::duration::Milliseconds;
 use embedded_time::fixed_point::FixedPoint;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::{crp, led, timer, usb_ctap_hid};
+use libtock_drivers::usb_ctap_hid::{self, UsbEndpoint};
+use libtock_drivers::{crp, led, timer};
 use persistent_store::{StorageResult, Store};
 use rng256::TockRng256;
 
 mod storage;
 
 pub struct TockCtapHidChannel {
-    transport: Transport,
+    endpoint: UsbEndpoint,
 }
 
 impl CtapHidChannel for TockCtapHidChannel {
     fn send_or_recv_with_timeout(
         &mut self,
         buf: &mut [u8; 64],
-        timeout: CtapDuration,
+        timeout: Milliseconds<ClockInt>,
     ) -> SendOrRecvResult {
-        let endpoint = match self.transport {
-            Transport::MainHid => usb_ctap_hid::UsbEndpoint::MainHid,
-            #[cfg(feature = "vendor_hid")]
-            Transport::VendorHid => usb_ctap_hid::UsbEndpoint::VendorHid,
-        };
         match usb_ctap_hid::send_or_recv_with_timeout(
             buf,
             timer::Duration::from_ms(timeout.integer() as isize),
-            endpoint,
+            self.endpoint,
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
             Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
             Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint))
-                if endpoint == recv_endpoint =>
+                if self.endpoint == recv_endpoint =>
             {
                 Ok(SendOrRecvStatus::Received)
             }
@@ -78,11 +75,11 @@ impl TockEnv {
             store,
             upgrade_storage,
             main_channel: TockCtapHidChannel {
-                transport: Transport::MainHid,
+                endpoint: UsbEndpoint::MainHid,
             },
             #[cfg(feature = "vendor_hid")]
             vendor_channel: TockCtapHidChannel {
-                transport: Transport::VendorHid,
+                endpoint: UsbEndpoint::VendorHid,
             },
             blink_pattern: 0,
         }
@@ -108,7 +105,7 @@ impl UserPresence for TockEnv {
     fn wait_with_timeout(
         &mut self,
         _channel: Channel,
-        timeout: CtapDuration,
+        timeout: Milliseconds<ClockInt>,
     ) -> UserPresenceResult {
         blink_leds(self.blink_pattern);
         self.blink_pattern += 1;
@@ -161,9 +158,9 @@ impl UserPresence for TockEnv {
         }
 
         if button_touched.get() {
-            Ok(UserPresenceStatus::Confirmed)
+            Ok(())
         } else if keepalive_expired.get() {
-            Ok(UserPresenceStatus::Timeout)
+            Err(UserPresenceError::Timeout)
         } else {
             panic!("Unexpected exit condition");
         }

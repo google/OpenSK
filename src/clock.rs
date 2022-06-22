@@ -57,7 +57,6 @@ pub fn new_clock() -> CtapClock {
 }
 
 pub type CtapInstant = embedded_time::Instant<CtapClock>;
-pub type CtapDuration = Milliseconds<ClockInt>;
 
 #[cfg(feature = "std")]
 pub const TEST_CLOCK_FREQUENCY_HZ: u32 = 32768;

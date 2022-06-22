@@ -66,8 +66,8 @@ use crate::api::channel::{CtapHidChannel, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::api::user_presence::{UserPresence, UserPresenceStatus};
-use crate::clock::{ClockInt, CtapDuration, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
+use crate::api::user_presence::{UserPresence, UserPresenceError};
+use crate::clock::{ClockInt, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -263,7 +263,7 @@ struct KeepaliveCanceled;
 fn send_keepalive_up_needed(
     env: &mut impl Env,
     channel: Channel,
-    timeout: CtapDuration,
+    timeout: Milliseconds<ClockInt>,
 ) -> Result<(), KeepaliveCanceled> {
     let (cid, transport) = match channel {
         Channel::MainHid(cid) => (cid, Transport::MainHid),
@@ -332,7 +332,7 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
     // All fallible functions are called without '?' operator to always reach
     // check_complete(...) cleanup function.
 
-    let mut result = Ok(UserPresenceStatus::Timeout);
+    let mut result = Err(UserPresenceError::Timeout);
     for i in 0..=TIMEOUT_ITERATIONS {
         // First presence check is made without timeout. That way Env implementation may return
         // user presence check result immediately to client, without sending any keepalive packets.
@@ -344,8 +344,7 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
                 KEEPALIVE_DELAY
             },
         );
-        if let Ok(UserPresenceStatus::Timeout) = result {
-        } else {
+        if !matches!(result, Err(UserPresenceError::Timeout)) {
             break;
         }
         // TODO: this may take arbitrary time. Next wait's delay should be adjusted
@@ -353,18 +352,17 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
         if send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY).is_err() {
-            result = Ok(UserPresenceStatus::Canceled);
+            result = Err(UserPresenceError::Canceled);
             break;
         }
     }
 
     env.user_presence().check_complete(&result);
     match result {
-        Ok(UserPresenceStatus::Timeout) => Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT),
-        Ok(UserPresenceStatus::Declined) => Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED),
-        Ok(UserPresenceStatus::Confirmed) => Ok(()),
-        Ok(UserPresenceStatus::Canceled) => Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL),
-        Err(_) => panic!("Unhandled error checking for user presence"),
+        Ok(()) => Ok(()),
+        Err(UserPresenceError::Timeout) => Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT),
+        Err(UserPresenceError::Declined) => Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED),
+        Err(UserPresenceError::Canceled) => Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL),
     }
 }
 
@@ -2249,7 +2247,7 @@ mod test {
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| Ok(UserPresenceStatus::Canceled));
+            .set(|_| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -3041,7 +3039,7 @@ mod test {
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| Ok(UserPresenceStatus::Canceled));
+            .set(|_| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);

@@ -1,5 +1,5 @@
 use self::upgrade_storage::BufferUpgradeStorage;
-use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult};
+use crate::api::channel::{CtapHidChannel, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
@@ -76,7 +76,7 @@ impl CtapHidChannel for TestEnv {
         _timeout: Milliseconds<ClockInt>,
     ) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
-        Err(SendOrRecvError)
+        Ok(SendOrRecvStatus::Sent)
     }
 }
 

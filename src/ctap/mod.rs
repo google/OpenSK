@@ -256,15 +256,13 @@ fn verify_signature(
     Ok(())
 }
 
-struct KeepaliveCanceled;
-
 // Sends keepalive packet during user presence checking. If user agent replies with CANCEL response,
-// returns Err(KeepaliveCanceled).
+// returns Err(UserPresenceError::Canceled).
 fn send_keepalive_up_needed(
     env: &mut impl Env,
     channel: Channel,
     timeout: Milliseconds<ClockInt>,
-) -> Result<(), KeepaliveCanceled> {
+) -> Result<(), UserPresenceError> {
     let (cid, transport) = match channel {
         Channel::MainHid(cid) => (cid, Transport::MainHid),
         #[cfg(feature = "vendor_hid")]
@@ -298,7 +296,7 @@ fn send_keepalive_up_needed(
                         if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
                             debug_ctap!(env, "User presence check cancelled");
-                            return Err(KeepaliveCanceled);
+                            return Err(UserPresenceError::Canceled);
                         } else {
                             debug_ctap!(
                                 env,
@@ -351,8 +349,8 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         // accordingly, so that all wait_with_timeout invocations are separated by
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
-        if send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY).is_err() {
-            result = Err(UserPresenceError::Canceled);
+        result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if result.is_err() {
             break;
         }
     }

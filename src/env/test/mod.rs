@@ -121,7 +121,7 @@ impl TestUserPresence {
 }
 
 impl UserPresence for TestUserPresence {
-    fn check_init(&mut self, _channel: Channel) {}
+    fn check_init(&mut self) {}
     fn wait_with_timeout(
         &mut self,
         channel: Channel,
@@ -129,7 +129,7 @@ impl UserPresence for TestUserPresence {
     ) -> UserPresenceResult {
         (self.check)(channel)
     }
-    fn check_complete(&mut self, _result: &UserPresenceResult) {}
+    fn check_complete(&mut self) {}
 }
 
 impl FirmwareProtection for TestEnv {

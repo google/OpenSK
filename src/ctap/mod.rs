@@ -322,7 +322,7 @@ fn send_keepalive_up_needed(
 ///
 /// Returns an error in case of timeout, user declining presence request, or keepalive error.
 fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2StatusCode> {
-    env.user_presence().check_init(channel);
+    env.user_presence().check_init();
 
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
@@ -355,13 +355,8 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         }
     }
 
-    env.user_presence().check_complete(&result);
-    match result {
-        Ok(()) => Ok(()),
-        Err(UserPresenceError::Timeout) => Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT),
-        Err(UserPresenceError::Declined) => Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED),
-        Err(UserPresenceError::Canceled) => Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL),
-    }
+    env.user_presence().check_complete();
+    result.map_err(|e| e.into())
 }
 
 /// Holds data necessary to sign an assertion for a credential.

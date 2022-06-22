@@ -99,7 +99,7 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn check_init(&mut self, _channel: Channel) {
+    fn check_init(&mut self) {
         self.blink_pattern = 0;
     }
     fn wait_with_timeout(
@@ -107,6 +107,9 @@ impl UserPresence for TockEnv {
         _channel: Channel,
         timeout: Milliseconds<ClockInt>,
     ) -> UserPresenceResult {
+        if timeout.integer() == 0 {
+            return Err(UserPresenceError::Timeout);
+        }
         blink_leds(self.blink_pattern);
         self.blink_pattern += 1;
 
@@ -122,34 +125,31 @@ impl UserPresence for TockEnv {
             button.enable().flex_unwrap();
         }
 
-        let immediate_check = timeout.integer() == 0;
-        let keepalive_expired = Cell::new(immediate_check);
         // Setup a keep-alive callback.
-        if !immediate_check {
-            let mut keepalive_callback = timer::with_callback(|_, _| {
-                keepalive_expired.set(true);
-            });
-            let mut keepalive = keepalive_callback.init().flex_unwrap();
-            let keepalive_alarm = keepalive
-                .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
-                .flex_unwrap();
+        let keepalive_expired = Cell::new(false);
+        let mut keepalive_callback = timer::with_callback(|_, _| {
+            keepalive_expired.set(true);
+        });
+        let mut keepalive = keepalive_callback.init().flex_unwrap();
+        let keepalive_alarm = keepalive
+            .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
+            .flex_unwrap();
 
-            // Wait for a button touch or an alarm.
-            libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+        // Wait for a button touch or an alarm.
+        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
 
-            // Cleanup alarm callback.
-            match keepalive.stop_alarm(keepalive_alarm) {
-                Ok(()) => (),
-                Err(TockError::Command(CommandError {
-                    return_code: EALREADY,
-                    ..
-                })) => assert!(keepalive_expired.get()),
-                Err(_e) => {
-                    #[cfg(feature = "debug_ctap")]
-                    panic!("Unexpected error when stopping alarm: {:?}", _e);
-                    #[cfg(not(feature = "debug_ctap"))]
-                    panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
-                }
+        // Cleanup alarm callback.
+        match keepalive.stop_alarm(keepalive_alarm) {
+            Ok(()) => (),
+            Err(TockError::Command(CommandError {
+                return_code: EALREADY,
+                ..
+            })) => assert!(keepalive_expired.get()),
+            Err(_e) => {
+                #[cfg(feature = "debug_ctap")]
+                panic!("Unexpected error when stopping alarm: {:?}", _e);
+                #[cfg(not(feature = "debug_ctap"))]
+                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
             }
         }
 
@@ -166,7 +166,7 @@ impl UserPresence for TockEnv {
         }
     }
 
-    fn check_complete(&mut self, _result: &UserPresenceResult) {
+    fn check_complete(&mut self) {
         switch_off_leds();
     }
 }

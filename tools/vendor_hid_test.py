@@ -21,6 +21,15 @@ def ping_data_size(packets):
   return 57 + 59 * (packets - 1)
 
 
+_BYTE_VAL = 0x10
+
+
+def get_byte():
+  global _BYTE_VAL
+  _BYTE_VAL = _BYTE_VAL + 1
+  return _BYTE_VAL
+
+
 class HidDevice(object):
   """Class that helps interact with HID devices."""
 
@@ -141,23 +150,25 @@ class VendorHid(unittest.TestCase):
   def test_03_vendor_ping(self):
     self._test_ping(self.vendor_hid, byte=0x22)
 
-  def _test_interleaved_send_and_receive(self, first_device, second_device):
-    r = first_device.ping_init(packets=_PACKETS, byte=0x33)
+  def _test_interleaved_send_and_receive(self, a: HidDevice, b: HidDevice):
+    byte_a = get_byte()
+    byte_b = get_byte()
+    r = a.ping_init(packets=_PACKETS, byte=byte_a)
     self.assertEqual(r, _SEND_DATA_SIZE)
-    r = second_device.ping_init(packets=_PACKETS, byte=0x44)
+    r = b.ping_init(packets=_PACKETS, byte=byte_b)
     self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS - 1):
-      r = first_device.ping_continue(i, byte=0x33)
+      r = a.ping_continue(i, byte=byte_a)
       self.assertEqual(r, _SEND_DATA_SIZE)
-      r = second_device.ping_continue(i, byte=0x44)
+      r = b.ping_continue(i, byte=byte_b)
       self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS):
-      r = first_device.read_and_print()
+      r = a.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
-      r = second_device.read_and_print()
+      r = b.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
-    self.assertReceivedDataMatches(first_device, 0x33)
-    self.assertReceivedDataMatches(second_device, 0x44)
+    self.assertReceivedDataMatches(a, byte_a)
+    self.assertReceivedDataMatches(b, byte_b)
 
   def test_04_interleaved_send_and_receive_fido_first(self):
     self._test_interleaved_send_and_receive(self.fido_hid, self.vendor_hid)
@@ -165,54 +176,64 @@ class VendorHid(unittest.TestCase):
   def test_05_interleaved_send_and_receive_vendor_first(self):
     self._test_interleaved_send_and_receive(self.vendor_hid, self.fido_hid)
 
-  def _test_interleaved_send_and_batch_receive(self, first_device, second_device):
-    r = first_device.ping_init(packets=_PACKETS, byte=0x55)
+  def _test_interleaved_send_and_batch_receive(self, a: HidDevice,
+                                               b: HidDevice):
+    byte_a = get_byte()
+    byte_b = get_byte()
+    r = a.ping_init(packets=_PACKETS, byte=byte_a)
     self.assertEqual(r, _SEND_DATA_SIZE)
-    r = second_device.ping_init(packets=_PACKETS, byte=0x66)
+    r = b.ping_init(packets=_PACKETS, byte=byte_b)
     self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS - 1):
-      r = first_device.ping_continue(i, byte=0x55)
+      r = a.ping_continue(i, byte=byte_a)
       self.assertEqual(r, _SEND_DATA_SIZE)
-      r = second_device.ping_continue(i, byte=0x66)
+      r = b.ping_continue(i, byte=byte_b)
       self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS):
-      r = first_device.read_and_print()
+      r = a.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
     for i in range(_PACKETS):
-      r = second_device.read_and_print()
+      r = b.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
-    self.assertReceivedDataMatches(first_device, 0x55)
-    self.assertReceivedDataMatches(second_device, 0x66)
+    self.assertReceivedDataMatches(a, byte_a)
+    self.assertReceivedDataMatches(b, byte_b)
 
   def test_06_interleaved_send_and_batch_receive_fido_first(self):
-    self._test_interleaved_send_and_batch_receive(self.fido_hid, self.vendor_hid)
+    self._test_interleaved_send_and_batch_receive(self.fido_hid,
+                                                  self.vendor_hid)
 
   def test_07_interleaved_send_and_batch_receive_vendor_first(self):
-    self._test_interleaved_send_and_batch_receive(self.vendor_hid, self.fido_hid)
+    self._test_interleaved_send_and_batch_receive(self.vendor_hid,
+                                                  self.fido_hid)
 
-  def _test_batch_send_and_interleaved_receive(self, first_device, second_device):
-    r = first_device.ping_init(packets=_PACKETS, byte=0x77)
+  def _test_batch_send_and_interleaved_receive(self, a: HidDevice,
+                                               b: HidDevice):
+    byte_a = get_byte()
+    byte_b = get_byte()
+    r = a.ping_init(packets=_PACKETS, byte=byte_a)
     self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS - 1):
-      r = first_device.ping_continue(i, byte=0x77)
+      r = a.ping_continue(i, byte=byte_a)
       self.assertEqual(r, _SEND_DATA_SIZE)
-    r = second_device.ping_init(packets=_PACKETS, byte=0x88)
+    r = b.ping_init(packets=_PACKETS, byte=byte_b)
     for i in range(_PACKETS - 1):
-      r = second_device.ping_continue(i, byte=0x88)
+      r = b.ping_continue(i, byte=byte_b)
       self.assertEqual(r, _SEND_DATA_SIZE)
     for i in range(_PACKETS):
-      r = first_device.read_and_print()
+      r = a.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
-      r = second_device.read_and_print()
+      r = b.read_and_print()
       self.assertEqual(r, _PACKET_SIZE)
-    self.assertReceivedDataMatches(first_device, 0x77)
-    self.assertReceivedDataMatches(second_device, 0x88)
+    self.assertReceivedDataMatches(a, byte_a)
+    self.assertReceivedDataMatches(b, byte_b)
 
   def test_08_batch_send_and_interleaved_receive_fido_first(self):
-    self._test_batch_send_and_interleaved_receive(self.fido_hid, self.vendor_hid)
+    self._test_batch_send_and_interleaved_receive(self.fido_hid,
+                                                  self.vendor_hid)
 
   def test_09_batch_send_and_interleaved_receive_vendor_first(self):
-    self._test_batch_send_and_interleaved_receive(self.vendor_hid, self.fido_hid)
+    self._test_batch_send_and_interleaved_receive(self.vendor_hid,
+                                                  self.fido_hid)
 
 
 if __name__ == '__main__':

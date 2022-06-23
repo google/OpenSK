@@ -770,6 +770,9 @@ class OpenSKInstaller:
       info("Nothing to do.")
       return 0
 
+    if self.args.check_patches:
+      subprocess.run(["./maintainers/patches", "check"], check=False)
+
     # Compile what needs to be compiled
     board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.tockos:
@@ -1104,6 +1107,14 @@ if __name__ == "__main__":
             "curve Ed25519. "
             "Current implementation is not side-channel resilient due to use "
             "of variable-time arithmetic for computations over secret key."),
+  )
+
+  main_parser.add_argument(
+      "--disable-check-patches",
+      action="store_false",
+      default=True,
+      dest="check_patches",
+      help=("Don't check that patches are in sync with their submodules."),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

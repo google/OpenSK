@@ -90,7 +90,6 @@ impl<E: Env> Ctap<E> {
         &mut self.hid
     }
 
-    #[cfg(feature = "std")]
     pub fn env(&mut self) -> &mut E {
         &mut self.env
     }

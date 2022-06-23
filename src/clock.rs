@@ -24,7 +24,7 @@ impl<const CLOCK_FREQUENCY: u32> fmt::Debug for LibtockClock<CLOCK_FREQUENCY> {
     }
 }
 
-const KEEPALIVE_DELAY_MS: ClockInt = 100;
+pub const KEEPALIVE_DELAY_MS: ClockInt = 100;
 pub const KEEPALIVE_DELAY: Milliseconds<ClockInt> = Milliseconds(KEEPALIVE_DELAY_MS);
 
 #[cfg(target_pointer_width = "32")]

@@ -1,27 +1,61 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
+use crate::api::connection::{HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::ctap::hid::{CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
-use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
-use crate::env::{Env, UserPresence};
+use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
+use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
+use crate::env::Env;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
+use embedded_time::duration::Milliseconds;
+use embedded_time::fixed_point::FixedPoint;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::{crp, led, timer, usb_ctap_hid};
+use libtock_drivers::usb_ctap_hid::{self, UsbEndpoint};
+use libtock_drivers::{crp, led, timer};
 use persistent_store::{StorageResult, Store};
 use rng256::TockRng256;
 
 mod storage;
 
+pub struct TockHidConnection {
+    endpoint: UsbEndpoint,
+}
+
+impl HidConnection for TockHidConnection {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        buf: &mut [u8; 64],
+        timeout: Milliseconds<ClockInt>,
+    ) -> SendOrRecvResult {
+        match usb_ctap_hid::send_or_recv_with_timeout(
+            buf,
+            timer::Duration::from_ms(timeout.integer() as isize),
+            self.endpoint,
+        ) {
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint))
+                if self.endpoint == recv_endpoint =>
+            {
+                Ok(SendOrRecvStatus::Received)
+            }
+            _ => Err(SendOrRecvError),
+        }
+    }
+}
+
 pub struct TockEnv {
     rng: TockRng256,
     store: Store<TockStorage>,
     upgrade_storage: Option<TockUpgradeStorage>,
+    main_connection: TockHidConnection,
+    #[cfg(feature = "vendor_hid")]
+    vendor_connection: TockHidConnection,
+    blink_pattern: usize,
 }
 
 impl TockEnv {
@@ -39,6 +73,14 @@ impl TockEnv {
             rng: TockRng256 {},
             store,
             upgrade_storage,
+            main_connection: TockHidConnection {
+                endpoint: UsbEndpoint::MainHid,
+            },
+            #[cfg(feature = "vendor_hid")]
+            vendor_connection: TockHidConnection {
+                endpoint: UsbEndpoint::VendorHid,
+            },
+            blink_pattern: 0,
         }
     }
 }
@@ -56,8 +98,71 @@ pub fn take_storage() -> StorageResult<TockStorage> {
 }
 
 impl UserPresence for TockEnv {
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
-        check_user_presence(self, channel)
+    fn check_init(&mut self) {
+        self.blink_pattern = 0;
+    }
+    fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
+        if timeout.integer() == 0 {
+            return Err(UserPresenceError::Timeout);
+        }
+        blink_leds(self.blink_pattern);
+        self.blink_pattern += 1;
+
+        let button_touched = Cell::new(false);
+        let mut buttons_callback = buttons::with_callback(|_button_num, state| {
+            match state {
+                ButtonState::Pressed => button_touched.set(true),
+                ButtonState::Released => (),
+            };
+        });
+        let mut buttons = buttons_callback.init().flex_unwrap();
+        for mut button in &mut buttons {
+            button.enable().flex_unwrap();
+        }
+
+        // Setup a keep-alive callback.
+        let keepalive_expired = Cell::new(false);
+        let mut keepalive_callback = timer::with_callback(|_, _| {
+            keepalive_expired.set(true);
+        });
+        let mut keepalive = keepalive_callback.init().flex_unwrap();
+        let keepalive_alarm = keepalive
+            .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
+            .flex_unwrap();
+
+        // Wait for a button touch or an alarm.
+        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+
+        // Cleanup alarm callback.
+        match keepalive.stop_alarm(keepalive_alarm) {
+            Ok(()) => (),
+            Err(TockError::Command(CommandError {
+                return_code: EALREADY,
+                ..
+            })) => assert!(keepalive_expired.get()),
+            Err(_e) => {
+                #[cfg(feature = "debug_ctap")]
+                panic!("Unexpected error when stopping alarm: {:?}", _e);
+                #[cfg(not(feature = "debug_ctap"))]
+                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+            }
+        }
+
+        for mut button in &mut buttons {
+            button.disable().flex_unwrap();
+        }
+
+        if button_touched.get() {
+            Ok(())
+        } else if keepalive_expired.get() {
+            Err(UserPresenceError::Timeout)
+        } else {
+            panic!("Unexpected exit condition");
+        }
+    }
+
+    fn check_complete(&mut self) {
+        switch_off_leds();
     }
 }
 
@@ -82,6 +187,7 @@ impl Env for TockEnv {
     type FirmwareProtection = Self;
     type Write = Console;
     type Customization = CustomizationImpl;
+    type HidConnection = TockHidConnection;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -110,67 +216,15 @@ impl Env for TockEnv {
     fn customization(&self) -> &Self::Customization {
         &DEFAULT_CUSTOMIZATION
     }
-}
 
-// Returns whether the keepalive was sent, or false if cancelled.
-fn send_keepalive_up_needed(
-    env: &mut TockEnv,
-    channel: Channel,
-    timeout: Duration<isize>,
-) -> Result<(), Ctap2StatusCode> {
-    let (endpoint, cid) = match channel {
-        Channel::MainHid(cid) => (usb_ctap_hid::UsbEndpoint::MainHid, cid),
-        #[cfg(feature = "vendor_hid")]
-        Channel::VendorHid(cid) => (usb_ctap_hid::UsbEndpoint::VendorHid, cid),
-    };
-    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
-    for mut pkt in keepalive_msg {
-        let status =
-            usb_ctap_hid::send_or_recv_with_timeout(&mut pkt, timeout, endpoint).flex_unwrap();
-        match status {
-            usb_ctap_hid::SendOrRecvStatus::Timeout => {
-                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
-                // TODO: abort user presence test?
-            }
-            usb_ctap_hid::SendOrRecvStatus::Sent => {
-                debug_ctap!(env, "Sent KEEPALIVE packet");
-            }
-            usb_ctap_hid::SendOrRecvStatus::Received(received_endpoint) => {
-                // We only parse one packet, because we only care about CANCEL.
-                let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
-                if received_endpoint != endpoint || received_cid != &cid {
-                    debug_ctap!(
-                        env,
-                        "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
-                        received_cid,
-                    );
-                    return Ok(());
-                }
-                match processed_packet {
-                    ProcessedPacket::InitPacket { cmd, .. } => {
-                        if cmd == CtapHidCommand::Cancel as u8 {
-                            // We ignore the payload, we can't answer with an error code anyway.
-                            debug_ctap!(env, "User presence check cancelled");
-                            return Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL);
-                        } else {
-                            debug_ctap!(
-                                env,
-                                "Discarded packet with command {} received while sending a KEEPALIVE packet",
-                                cmd,
-                            );
-                        }
-                    }
-                    ProcessedPacket::ContinuationPacket { .. } => {
-                        debug_ctap!(
-                            env,
-                            "Discarded continuation packet received while sending a KEEPALIVE packet",
-                        );
-                    }
-                }
-            }
-        }
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection {
+        &mut self.main_connection
     }
-    Ok(())
+
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
+        &mut self.vendor_connection
+    }
 }
 
 pub fn blink_leds(pattern_seed: usize) {
@@ -222,86 +276,4 @@ pub fn switch_off_leds() {
     }
 }
 
-const KEEPALIVE_DELAY_MS: isize = 100;
-pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
-
-fn check_user_presence(env: &mut TockEnv, channel: Channel) -> Result<(), Ctap2StatusCode> {
-    // The timeout is N times the keepalive delay.
-    const TIMEOUT_ITERATIONS: usize =
-        crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
-
-    // First, send a keep-alive packet to notify that the keep-alive status has changed.
-    send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK)?;
-
-    // Listen to the button presses.
-    let button_touched = Cell::new(false);
-    let mut buttons_callback = buttons::with_callback(|_button_num, state| {
-        match state {
-            ButtonState::Pressed => button_touched.set(true),
-            ButtonState::Released => (),
-        };
-    });
-    let mut buttons = buttons_callback.init().flex_unwrap();
-    // At the moment, all buttons are accepted. You can customize your setup here.
-    for mut button in &mut buttons {
-        button.enable().flex_unwrap();
-    }
-
-    let mut keepalive_response = Ok(());
-    for i in 0..TIMEOUT_ITERATIONS {
-        blink_leds(i);
-
-        // Setup a keep-alive callback.
-        let keepalive_expired = Cell::new(false);
-        let mut keepalive_callback = timer::with_callback(|_, _| {
-            keepalive_expired.set(true);
-        });
-        let mut keepalive = keepalive_callback.init().flex_unwrap();
-        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY_TOCK).flex_unwrap();
-
-        // Wait for a button touch or an alarm.
-        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
-
-        // Cleanup alarm callback.
-        match keepalive.stop_alarm(keepalive_alarm) {
-            Ok(()) => (),
-            Err(TockError::Command(CommandError {
-                return_code: EALREADY,
-                ..
-            })) => assert!(keepalive_expired.get()),
-            Err(_e) => {
-                #[cfg(feature = "debug_ctap")]
-                panic!("Unexpected error when stopping alarm: {:?}", _e);
-                #[cfg(not(feature = "debug_ctap"))]
-                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
-            }
-        }
-
-        // TODO: this may take arbitrary time. The keepalive_delay should be adjusted accordingly,
-        // so that LEDs blink with a consistent pattern.
-        if keepalive_expired.get() {
-            // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_TOCK);
-        }
-
-        if button_touched.get() || keepalive_response.is_err() {
-            break;
-        }
-    }
-
-    switch_off_leds();
-
-    // Cleanup button callbacks.
-    for mut button in &mut buttons {
-        button.disable().flex_unwrap();
-    }
-
-    // Returns whether the user was present.
-    if keepalive_response.is_err() {
-        keepalive_response
-    } else if button_touched.get() {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
-    }
-}
+pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);

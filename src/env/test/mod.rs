@@ -1,10 +1,12 @@
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
-use crate::env::{Env, UserPresence};
+use crate::api::user_presence::{UserPresence, UserPresenceResult};
+use crate::clock::ClockInt;
+use crate::env::Env;
 use customization::TestCustomization;
+use embedded_time::duration::Milliseconds;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -40,7 +42,7 @@ impl Rng256 for TestRng256 {
 }
 
 pub struct TestUserPresence {
-    check: Box<dyn Fn(Channel) -> Result<(), Ctap2StatusCode>>,
+    check: Box<dyn Fn() -> UserPresenceResult>,
 }
 
 pub struct TestWrite;
@@ -66,13 +68,24 @@ fn new_storage() -> BufferStorage {
     BufferStorage::new(store, options)
 }
 
+impl HidConnection for TestEnv {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        _buf: &mut [u8; 64],
+        _timeout: Milliseconds<ClockInt>,
+    ) -> SendOrRecvResult {
+        // TODO: Implement I/O from canned requests/responses for integration testing.
+        Ok(SendOrRecvStatus::Sent)
+    }
+}
+
 impl TestEnv {
     pub fn new() -> Self {
         let rng = TestRng256 {
             rng: StdRng::seed_from_u64(0),
         };
         let user_presence = TestUserPresence {
-            check: Box::new(|_| Ok(())),
+            check: Box::new(|| Ok(())),
         };
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
@@ -101,15 +114,17 @@ impl TestEnv {
 }
 
 impl TestUserPresence {
-    pub fn set(&mut self, check: impl Fn(Channel) -> Result<(), Ctap2StatusCode> + 'static) {
+    pub fn set(&mut self, check: impl Fn() -> UserPresenceResult + 'static) {
         self.check = Box::new(check);
     }
 }
 
 impl UserPresence for TestUserPresence {
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode> {
-        (self.check)(channel)
+    fn check_init(&mut self) {}
+    fn wait_with_timeout(&mut self, _timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
+        (self.check)()
     }
+    fn check_complete(&mut self) {}
 }
 
 impl FirmwareProtection for TestEnv {
@@ -126,6 +141,7 @@ impl Env for TestEnv {
     type FirmwareProtection = Self;
     type Write = TestWrite;
     type Customization = TestCustomization;
+    type HidConnection = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -153,5 +169,14 @@ impl Env for TestEnv {
 
     fn customization(&self) -> &Self::Customization {
         &self.customization
+    }
+
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection {
+        self
+    }
+
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
+        self
     }
 }

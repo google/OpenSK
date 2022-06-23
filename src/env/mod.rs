@@ -1,21 +1,14 @@
+use crate::api::connection::HidConnection;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
+use crate::api::user_presence::UserPresence;
 use persistent_store::{Storage, Store};
 use rng256::Rng256;
 
 #[cfg(feature = "std")]
 pub mod test;
 pub mod tock;
-
-pub trait UserPresence {
-    /// Blocks for user presence.
-    ///
-    /// Returns an error in case of timeout or keepalive error.
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode>;
-}
 
 /// Describes what CTAP needs to function.
 pub trait Env {
@@ -26,6 +19,7 @@ pub trait Env {
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
+    type HidConnection: HidConnection;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
@@ -48,4 +42,11 @@ pub trait Env {
     fn write(&mut self) -> Self::Write;
 
     fn customization(&self) -> &Self::Customization;
+
+    /// I/O connection for sending packets implementing CTAP HID protocol.
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection;
+
+    /// I/O connection for sending packets implementing vendor extensions to CTAP HID protocol.
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
 }

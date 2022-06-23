@@ -28,12 +28,13 @@ use core::convert::TryFrom;
 use core::convert::TryInto;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+use ctap2::api::connection::{HidConnection, SendOrRecvStatus};
 #[cfg(feature = "debug_ctap")]
 use ctap2::clock::CtapClock;
-use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY};
+use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
-use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv, KEEPALIVE_DELAY_TOCK};
+use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
 use ctap2::Transport;
 #[cfg(feature = "debug_ctap")]
 use embedded_time::duration::Microseconds;
@@ -48,7 +49,8 @@ use libtock_drivers::usb_ctap_hid;
 
 libtock_core::stack_size! {0x4000}
 
-const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
+const SEND_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(1000);
+const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 fn main() {
     let clock = new_clock();
@@ -132,26 +134,25 @@ fn main() {
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let status =
-                    usb_ctap_hid::send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT, endpoint)
-                        .flex_unwrap();
-                match status {
-                    usb_ctap_hid::SendOrRecvStatus::Timeout => {
+                let hid_connection = transport.hid_connection(ctap.env());
+                match hid_connection.send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT) {
+                    Ok(SendOrRecvStatus::Timeout) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sending packet timed out", &clock);
                         // TODO: reset the ctap_hid state.
                         // Since sending the packet timed out, we cancel this reply.
                         break;
                     }
-                    usb_ctap_hid::SendOrRecvStatus::Sent => {
+                    Ok(SendOrRecvStatus::Sent) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sent packet", &clock);
                     }
-                    usb_ctap_hid::SendOrRecvStatus::Received(_) => {
+                    Ok(SendOrRecvStatus::Received) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Received an UNEXPECTED packet", &clock);
                         // TODO: handle this unexpected packet.
                     }
+                    Err(_) => panic!("Error sending packet"),
                 }
             }
         }

@@ -51,7 +51,7 @@ use self::data_formats::{
     PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
     SignatureAlgorithm,
 };
-use self::hid::ChannelID;
+use self::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
@@ -62,11 +62,13 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::connection::{HidConnection, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::clock::{ClockInt, CtapInstant};
-use crate::env::{Env, UserPresence};
+use crate::api::user_presence::{UserPresence, UserPresenceError};
+use crate::clock::{ClockInt, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
+use crate::env::Env;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -151,6 +153,16 @@ pub enum Transport {
     /// No equivalent in CTAP, used for communication outside the specification.
     #[cfg(feature = "vendor_hid")]
     VendorHid,
+}
+
+impl Transport {
+    pub fn hid_connection<E: Env>(self, env: &mut E) -> &mut E::HidConnection {
+        match self {
+            Transport::MainHid => env.main_hid_connection(),
+            #[cfg(feature = "vendor_hid")]
+            Transport::VendorHid => env.vendor_hid_connection(),
+        }
+    }
 }
 
 /// Communication channels between authenticator and client.
@@ -242,6 +254,106 @@ fn verify_signature(
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
     }
     Ok(())
+}
+
+// Sends keepalive packet during user presence checking. If user agent replies with CANCEL response,
+// returns Err(UserPresenceError::Canceled).
+fn send_keepalive_up_needed(
+    env: &mut impl Env,
+    channel: Channel,
+    timeout: Milliseconds<ClockInt>,
+) -> Result<(), UserPresenceError> {
+    let (cid, transport) = match channel {
+        Channel::MainHid(cid) => (cid, Transport::MainHid),
+        #[cfg(feature = "vendor_hid")]
+        Channel::VendorHid(cid) => (cid, Transport::VendorHid),
+    };
+    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
+    for mut pkt in keepalive_msg {
+        let ctap_hid_connection = transport.hid_connection(env);
+        match ctap_hid_connection.send_or_recv_with_timeout(&mut pkt, timeout) {
+            Ok(SendOrRecvStatus::Timeout) => {
+                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
+                // TODO: abort user presence test?
+            }
+            Err(_) => panic!("Error sending KEEPALIVE packet"),
+            Ok(SendOrRecvStatus::Sent) => {
+                debug_ctap!(env, "Sent KEEPALIVE packet");
+            }
+            Ok(SendOrRecvStatus::Received) => {
+                // We only parse one packet, because we only care about CANCEL.
+                let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
+                if received_cid != &cid {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
+                        received_cid,
+                    );
+                    return Ok(());
+                }
+                match processed_packet {
+                    ProcessedPacket::InitPacket { cmd, .. } => {
+                        if cmd == CtapHidCommand::Cancel as u8 {
+                            // We ignore the payload, we can't answer with an error code anyway.
+                            debug_ctap!(env, "User presence check cancelled");
+                            return Err(UserPresenceError::Canceled);
+                        } else {
+                            debug_ctap!(
+                                env,
+                                "Discarded packet with command {} received while sending a KEEPALIVE packet",
+                                cmd,
+                            );
+                        }
+                    }
+                    ProcessedPacket::ContinuationPacket { .. } => {
+                        debug_ctap!(
+                            env,
+                            "Discarded continuation packet received while sending a KEEPALIVE packet",
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Blocks for user presence.
+///
+/// Returns an error in case of timeout, user declining presence request, or keepalive error.
+fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2StatusCode> {
+    env.user_presence().check_init();
+
+    // The timeout is N times the keepalive delay.
+    const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
+
+    // All fallible functions are called without '?' operator to always reach
+    // check_complete(...) cleanup function.
+
+    let mut result = Err(UserPresenceError::Timeout);
+    for i in 0..=TIMEOUT_ITERATIONS {
+        // First presence check is made without timeout. That way Env implementation may return
+        // user presence check result immediately to client, without sending any keepalive packets.
+        result = env.user_presence().wait_with_timeout(if i == 0 {
+            Milliseconds(0)
+        } else {
+            KEEPALIVE_DELAY
+        });
+        if !matches!(result, Err(UserPresenceError::Timeout)) {
+            break;
+        }
+        // TODO: this may take arbitrary time. Next wait's delay should be adjusted
+        // accordingly, so that all wait_with_timeout invocations are separated by
+        // equal time intervals. That way token indicators, such as LEDs, will blink
+        // with a consistent pattern.
+        result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if result.is_err() {
+            break;
+        }
+    }
+
+    env.user_presence().check_complete();
+    result.map_err(|e| e.into())
 }
 
 /// Holds data necessary to sign an assertion for a credential.
@@ -590,7 +702,7 @@ impl CtapState {
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                env.user_presence().check(channel)?;
+                check_user_presence(env, channel)?;
                 if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
@@ -699,13 +811,13 @@ impl CtapState {
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
-                    let _ = env.user_presence().check(channel);
+                    let _ = check_user_presence(env, channel);
                     return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
                 }
             }
         }
 
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
         self.client_pin.clear_token_flags();
 
         let default_cred_protect = env.customization().default_cred_protect();
@@ -1069,7 +1181,7 @@ impl CtapState {
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         if options.up {
-            env.user_presence().check(channel)?;
+            check_user_presence(env, channel)?;
             self.client_pin.clear_token_flags();
         }
 
@@ -1193,7 +1305,7 @@ impl CtapState {
             StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
 
         storage::reset(env)?;
         self.client_pin.reset(env.rng());
@@ -1211,7 +1323,7 @@ impl CtapState {
         env: &mut impl Env,
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
         Ok(ResponseData::AuthenticatorSelection)
     }
 
@@ -1222,7 +1334,7 @@ impl CtapState {
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         if params.attestation_material.is_some() || params.lockdown {
-            env.user_presence().check(channel)?;
+            check_user_presence(env, channel)?;
         }
 
         // Sanity checks
@@ -2124,8 +2236,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -2916,8 +3027,7 @@ mod test {
     #[test]
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);

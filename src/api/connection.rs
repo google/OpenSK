@@ -25,7 +25,7 @@ pub struct SendOrRecvError;
 
 pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
 
-pub trait CtapHidChannel {
+pub trait HidConnection {
     fn send_or_recv_with_timeout(
         &mut self,
         buf: &mut [u8; 64],

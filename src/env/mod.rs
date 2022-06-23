@@ -1,4 +1,4 @@
-use crate::api::channel::CtapHidChannel;
+use crate::api::connection::HidConnection;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
@@ -19,7 +19,7 @@ pub trait Env {
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
-    type CtapHidChannel: CtapHidChannel;
+    type HidConnection: HidConnection;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
@@ -43,10 +43,10 @@ pub trait Env {
 
     fn customization(&self) -> &Self::Customization;
 
-    /// I/O channel for sending packets implementing CTAP HID protocol.
-    fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
+    /// I/O connection for sending packets implementing CTAP HID protocol.
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection;
 
-    /// I/O channel for sending packets implementing vendor extensions to CTAP HID protocol.
+    /// I/O connection for sending packets implementing vendor extensions to CTAP HID protocol.
     #[cfg(feature = "vendor_hid")]
-    fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel;
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
 }

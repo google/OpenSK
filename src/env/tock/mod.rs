@@ -1,10 +1,9 @@
 pub use self::storage::{TockStorage, TockUpgradeStorage};
-use crate::api::channel::{CtapHidChannel, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
+use crate::api::connection::{HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
-use crate::ctap::Channel;
 use crate::env::Env;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -22,11 +21,11 @@ use rng256::TockRng256;
 
 mod storage;
 
-pub struct TockCtapHidChannel {
+pub struct TockHidConnection {
     endpoint: UsbEndpoint,
 }
 
-impl CtapHidChannel for TockCtapHidChannel {
+impl HidConnection for TockHidConnection {
     fn send_or_recv_with_timeout(
         &mut self,
         buf: &mut [u8; 64],
@@ -53,9 +52,9 @@ pub struct TockEnv {
     rng: TockRng256,
     store: Store<TockStorage>,
     upgrade_storage: Option<TockUpgradeStorage>,
-    main_channel: TockCtapHidChannel,
+    main_connection: TockHidConnection,
     #[cfg(feature = "vendor_hid")]
-    vendor_channel: TockCtapHidChannel,
+    vendor_connection: TockHidConnection,
     blink_pattern: usize,
 }
 
@@ -74,11 +73,11 @@ impl TockEnv {
             rng: TockRng256 {},
             store,
             upgrade_storage,
-            main_channel: TockCtapHidChannel {
+            main_connection: TockHidConnection {
                 endpoint: UsbEndpoint::MainHid,
             },
             #[cfg(feature = "vendor_hid")]
-            vendor_channel: TockCtapHidChannel {
+            vendor_connection: TockHidConnection {
                 endpoint: UsbEndpoint::VendorHid,
             },
             blink_pattern: 0,
@@ -102,11 +101,7 @@ impl UserPresence for TockEnv {
     fn check_init(&mut self) {
         self.blink_pattern = 0;
     }
-    fn wait_with_timeout(
-        &mut self,
-        _channel: Channel,
-        timeout: Milliseconds<ClockInt>,
-    ) -> UserPresenceResult {
+    fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
         if timeout.integer() == 0 {
             return Err(UserPresenceError::Timeout);
         }
@@ -192,7 +187,7 @@ impl Env for TockEnv {
     type FirmwareProtection = Self;
     type Write = Console;
     type Customization = CustomizationImpl;
-    type CtapHidChannel = TockCtapHidChannel;
+    type HidConnection = TockHidConnection;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -222,13 +217,13 @@ impl Env for TockEnv {
         &DEFAULT_CUSTOMIZATION
     }
 
-    fn main_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
-        &mut self.main_channel
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection {
+        &mut self.main_connection
     }
 
     #[cfg(feature = "vendor_hid")]
-    fn vendor_hid_channel(&mut self) -> &mut Self::CtapHidChannel {
-        &mut self.vendor_channel
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
+        &mut self.vendor_connection
     }
 }
 

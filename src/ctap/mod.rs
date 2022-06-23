@@ -62,7 +62,7 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
-use crate::api::channel::{CtapHidChannel, SendOrRecvStatus};
+use crate::api::connection::{HidConnection, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
@@ -156,11 +156,11 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub fn hid_channel<E: Env>(self, env: &mut E) -> &mut E::CtapHidChannel {
+    pub fn hid_connection<E: Env>(self, env: &mut E) -> &mut E::HidConnection {
         match self {
-            Transport::MainHid => env.main_hid_channel(),
+            Transport::MainHid => env.main_hid_connection(),
             #[cfg(feature = "vendor_hid")]
-            Transport::VendorHid => env.vendor_hid_channel(),
+            Transport::VendorHid => env.vendor_hid_connection(),
         }
     }
 }
@@ -270,8 +270,8 @@ fn send_keepalive_up_needed(
     };
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
-        let ctap_hid_channel = transport.hid_channel(env);
-        match ctap_hid_channel.send_or_recv_with_timeout(&mut pkt, timeout) {
+        let ctap_hid_connection = transport.hid_connection(env);
+        match ctap_hid_connection.send_or_recv_with_timeout(&mut pkt, timeout) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
@@ -334,14 +334,11 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
     for i in 0..=TIMEOUT_ITERATIONS {
         // First presence check is made without timeout. That way Env implementation may return
         // user presence check result immediately to client, without sending any keepalive packets.
-        result = env.user_presence().wait_with_timeout(
-            channel,
-            if i == 0 {
-                Milliseconds(0)
-            } else {
-                KEEPALIVE_DELAY
-            },
-        );
+        result = env.user_presence().wait_with_timeout(if i == 0 {
+            Milliseconds(0)
+        } else {
+            KEEPALIVE_DELAY
+        });
         if !matches!(result, Err(UserPresenceError::Timeout)) {
             break;
         }
@@ -2239,8 +2236,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(UserPresenceError::Canceled));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -3031,8 +3027,7 @@ mod test {
     #[test]
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(UserPresenceError::Canceled));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);

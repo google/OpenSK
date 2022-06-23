@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::clock::ClockInt;
-use crate::ctap::Channel;
 use embedded_time::duration::Milliseconds;
 
 pub enum UserPresenceError {
@@ -44,11 +43,7 @@ pub trait UserPresence {
     /// Returns [`UserPresenceError::Declined`] if user presence was explicitly denied by user.
     /// Returns [`UserPresenceError::Canceled`] if authenticator receives CANCEL message from User
     /// Agent during wait for user presence.
-    fn wait_with_timeout(
-        &mut self,
-        channel: Channel,
-        timeout: Milliseconds<ClockInt>,
-    ) -> UserPresenceResult;
+    fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult;
 
     /// Finalizes a user presence check.
     ///

@@ -28,7 +28,7 @@ use core::convert::TryFrom;
 use core::convert::TryInto;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-use ctap2::api::channel::{CtapHidChannel, SendOrRecvStatus};
+use ctap2::api::connection::{HidConnection, SendOrRecvStatus};
 #[cfg(feature = "debug_ctap")]
 use ctap2::clock::CtapClock;
 use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
@@ -134,8 +134,8 @@ fn main() {
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             // This block handles sending packets.
             for mut pkt_reply in reply {
-                let channel = transport.hid_channel(ctap.env());
-                match channel.send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT) {
+                let hid_connection = transport.hid_connection(ctap.env());
+                match hid_connection.send_or_recv_with_timeout(&mut pkt_reply, SEND_TIMEOUT) {
                     Ok(SendOrRecvStatus::Timeout) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Sending packet timed out", &clock);

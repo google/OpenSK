@@ -16,11 +16,11 @@ use crate::clock::ClockInt;
 use embedded_time::duration::Milliseconds;
 
 pub enum UserPresenceError {
-    // User explicitly declined user presence check.
+    /// User explicitly declined user presence check.
     Declined,
-    // User presence check was canceled by User Agent.
+    /// User presence check was canceled by User Agent.
     Canceled,
-    // User presence check timed out.
+    /// User presence check timed out.
     Timeout,
 }
 
@@ -35,14 +35,6 @@ pub trait UserPresence {
     /// Waits until user presence is confirmed, rejected, or the given timeout expires.
     ///
     /// Must be called between calls to [`Self::check_init`] and [`Self::check_complete`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`UserPresenceError::Timeout`] if no evidence of user interaction was provided by
-    /// authenticator.
-    /// Returns [`UserPresenceError::Declined`] if user presence was explicitly denied by user.
-    /// Returns [`UserPresenceError::Canceled`] if authenticator receives CANCEL message from User
-    /// Agent during wait for user presence.
     fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult;
 
     /// Finalizes a user presence check.

@@ -179,7 +179,7 @@ fn setup_customization(
 
 fn setup_state(
     unstructured: &mut Unstructured,
-    state: &mut CtapState,
+    state: &mut CtapState::<TestEnv>,
     env: &mut TestEnv,
 ) -> FuzzResult<()> {
     if bool::arbitrary(unstructured)? {

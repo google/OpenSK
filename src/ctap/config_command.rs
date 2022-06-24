@@ -73,9 +73,9 @@ fn process_set_min_pin_length(
 }
 
 /// Processes the AuthenticatorConfig command.
-pub fn process_config(
-    env: &mut impl Env,
-    client_pin: &mut ClientPin,
+pub fn process_config<E: Env>(
+    env: &mut E,
+    client_pin: &mut ClientPin<E>,
     params: AuthenticatorConfigParameters,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let AuthenticatorConfigParameters {
@@ -133,8 +133,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
@@ -160,8 +164,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
@@ -195,8 +203,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let mut config_data = vec![0xFF; 32];
@@ -265,8 +277,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         // First, increase minimum PIN length from 4 to 6 without PIN auth.
         let min_pin_length = 6;
@@ -309,8 +325,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         // First, set RP IDs without PIN auth.
         let min_pin_length = 6;
@@ -385,8 +405,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
         // Increase min PIN, force PIN change.
@@ -408,8 +432,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -439,8 +467,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::VendorPrototype,

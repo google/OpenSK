@@ -15,7 +15,9 @@
 use crate::ctap::client_pin::PinPermission;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::timed_permission::TimedPermission;
+use crate::env::Env;
 use alloc::string::String;
+use core::marker::PhantomData;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 use embedded_time::duration::Milliseconds;
@@ -35,7 +37,8 @@ const INITIAL_USAGE_TIME_LIMIT: Milliseconds<ClockInt> = Milliseconds(30000 as C
 /// built-in user verification. Therefore, we never cache user presence.
 ///
 /// This implementation does not use a rolling timer.
-pub struct PinUvAuthTokenState {
+pub struct PinUvAuthTokenState<E: Env> {
+    _phantom: PhantomData<E>,
     // Relies on the fact that all permissions are represented by powers of two.
     permissions_set: u8,
     permissions_rp_id: Option<String>,
@@ -44,10 +47,11 @@ pub struct PinUvAuthTokenState {
     in_use: bool,
 }
 
-impl PinUvAuthTokenState {
+impl<E: Env> PinUvAuthTokenState<E> {
     /// Creates a pinUvAuthToken state without permissions.
-    pub fn new() -> PinUvAuthTokenState {
+    pub fn new() -> Self {
         PinUvAuthTokenState {
+            _phantom: PhantomData,
             permissions_set: 0,
             permissions_rp_id: None,
             usage_timer: TimedPermission::waiting(),
@@ -158,11 +162,12 @@ impl PinUvAuthTokenState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::env::test::TestEnv;
     use enum_iterator::IntoEnumIterator;
 
     #[test]
     fn test_observer() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         let mut now: CtapInstant = CtapInstant::new(0);
         token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.is_in_use());
@@ -176,7 +181,7 @@ mod test {
 
     #[test]
     fn test_stop() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         let now: CtapInstant = CtapInstant::new(0);
         token_state.begin_using_pin_uv_auth_token(now);
         assert!(token_state.is_in_use());
@@ -186,7 +191,7 @@ mod test {
 
     #[test]
     fn test_permissions() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         token_state.set_permissions(0xFF);
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(token_state.has_permission(permission), Ok(()));
@@ -211,7 +216,7 @@ mod test {
 
     #[test]
     fn test_permissions_rp_id_none() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         let example_hash = Sha256::hash(b"example.com");
         token_state.set_permissions_rp_id(None);
         assert_eq!(token_state.has_no_permissions_rp_id(), Ok(()));
@@ -227,7 +232,7 @@ mod test {
 
     #[test]
     fn test_permissions_rp_id_some() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         let example_hash = Sha256::hash(b"example.com");
         token_state.set_permissions_rp_id(Some(String::from("example.com")));
 
@@ -262,7 +267,7 @@ mod test {
 
     #[test]
     fn test_user_verified_flag() {
-        let mut token_state = PinUvAuthTokenState::new();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         assert!(!token_state.get_user_verified_flag_value());
         let now: CtapInstant = CtapInstant::new(0);
         token_state.begin_using_pin_uv_auth_token(now);

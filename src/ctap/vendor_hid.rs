@@ -22,24 +22,24 @@ use crate::env::Env;
 /// Implements the non-standard command processing for HID.
 ///
 /// Outside of the pure HID commands like INIT, only PING and CBOR commands are allowed.
-pub struct VendorHid {
-    hid: CtapHid,
+pub struct VendorHid<E: Env> {
+    hid: CtapHid<E>,
 }
 
-impl VendorHid {
+impl<E: Env> VendorHid<E> {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     pub fn new() -> Self {
-        let hid = CtapHid::new(CtapHid::CAPABILITY_CBOR | CtapHid::CAPABILITY_NMSG);
+        let hid = CtapHid::<E>::new(CtapHid::<E>::CAPABILITY_CBOR | CtapHid::<E>::CAPABILITY_NMSG);
         VendorHid { hid }
     }
 
     /// Processes an incoming USB HID packet, and returns an iterator for all outgoing packets.
     pub fn process_hid_packet(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         packet: &HidPacket,
         now: CtapInstant,
-        ctap_state: &mut CtapState,
+        ctap_state: &mut CtapState<E>,
     ) -> HidPacketIterator {
         if let Some(message) = self.hid.parse_packet(env, packet, now) {
             let processed_message = self.process_message(env, message, now, ctap_state);
@@ -48,7 +48,7 @@ impl VendorHid {
                 "Sending message through the second usage page: {:02x?}",
                 processed_message
             );
-            CtapHid::split_message(processed_message)
+            CtapHid::<E>::split_message(processed_message)
         } else {
             HidPacketIterator::none()
         }
@@ -57,15 +57,15 @@ impl VendorHid {
     /// Processes a message's commands that affect the protocol outside HID.
     pub fn process_message(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         message: Message,
         now: CtapInstant,
-        ctap_state: &mut CtapState,
+        ctap_state: &mut CtapState<E>,
     ) -> Message {
         let cid = message.cid;
         match message.cmd {
             // There are no custom CTAP1 commands.
-            CtapHidCommand::Msg => CtapHid::error_message(cid, CtapHidError::InvalidCmd),
+            CtapHidCommand::Msg => CtapHid::<E>::error_message(cid, CtapHidError::InvalidCmd),
             // The CTAP2 processing function multiplexes internally.
             CtapHidCommand::Cbor => {
                 let response =
@@ -77,7 +77,7 @@ impl VendorHid {
                 }
             }
             // Call Wink over the main HID.
-            CtapHidCommand::Wink => CtapHid::error_message(cid, CtapHidError::InvalidCmd),
+            CtapHidCommand::Wink => CtapHid::<E>::error_message(cid, CtapHidError::InvalidCmd),
             // All other commands have already been processed, keep them as is.
             _ => message,
         }
@@ -90,15 +90,15 @@ mod test {
     use crate::ctap::hid::ChannelID;
     use crate::env::test::TestEnv;
 
-    fn new_initialized() -> (VendorHid, ChannelID) {
+    fn new_initialized() -> (VendorHid<TestEnv>, ChannelID) {
         let (hid, cid) = CtapHid::new_initialized();
-        (VendorHid { hid }, cid)
+        (VendorHid::<TestEnv> { hid }, cid)
     }
 
     #[test]
     fn test_process_hid_packet() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
         let (mut vendor_hid, cid) = new_initialized();
 
         let mut ping_packet = [0x00; 64];
@@ -118,7 +118,7 @@ mod test {
     #[test]
     fn test_process_hid_packet_empty() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
         let (mut vendor_hid, cid) = new_initialized();
 
         let mut cancel_packet = [0x00; 64];
@@ -137,7 +137,7 @@ mod test {
     #[test]
     fn test_blocked_commands() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
         let (mut vendor_hid, cid) = new_initialized();
 
         // Usually longer, but we don't parse them anyway.

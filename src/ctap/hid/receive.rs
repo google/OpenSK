@@ -19,10 +19,12 @@ use crate::api::customization::Customization;
 use crate::clock::CtapInstant;
 use crate::env::Env;
 use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::mem::swap;
 
 /// A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
-pub struct MessageAssembler {
+pub struct MessageAssembler<E: Env> {
+    _phantom: PhantomData<E>,
     // Whether this is waiting to receive an initialization packet.
     idle: bool,
     // Current channel ID.
@@ -39,9 +41,10 @@ pub struct MessageAssembler {
     payload: Vec<u8>,
 }
 
-impl MessageAssembler {
-    pub fn new() -> MessageAssembler {
+impl<E: Env> MessageAssembler<E> {
+    pub fn new() -> MessageAssembler<E> {
         MessageAssembler {
+            _phantom: PhantomData,
             idle: true,
             cid: [0, 0, 0, 0],
             last_timestamp: CtapInstant::new(0),
@@ -73,15 +76,15 @@ impl MessageAssembler {
     // packet was received.
     pub fn parse_packet(
         &mut self,
-        env: &mut impl Env,
+        env: &mut E,
         packet: &HidPacket,
         timestamp: CtapInstant,
     ) -> Result<Option<Message>, (ChannelID, CtapHidError)> {
         // TODO: Support non-full-speed devices (i.e. packet len != 64)? This isn't recommended by
         // section 8.8.1
-        let (cid, processed_packet) = CtapHid::process_single_packet(packet);
+        let (cid, processed_packet) = CtapHid::<E>::process_single_packet(packet);
 
-        if !self.idle && timestamp >= self.last_timestamp + CtapHid::TIMEOUT_DURATION {
+        if !self.idle && timestamp >= self.last_timestamp + CtapHid::<E>::TIMEOUT_DURATION {
             // The current channel timed out.
             // Save the channel ID and reset the state.
             let current_cid = self.cid;
@@ -590,7 +593,7 @@ mod test {
             assembler.parse_packet(
                 &mut env,
                 &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
-                CtapInstant::new(0) + CtapHid::TIMEOUT_DURATION
+                CtapInstant::new(0) + CtapHid::<TestEnv>::TIMEOUT_DURATION
             ),
             Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::MsgTimeout))
         );
@@ -601,7 +604,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut timestamp: CtapInstant = CtapInstant::new(0);
         // Delay between each packet is just below the threshold.
-        let delay = CtapHid::TIMEOUT_DURATION - Milliseconds(1_u32);
+        let delay = CtapHid::<TestEnv>::TIMEOUT_DURATION - Milliseconds(1_u32);
 
         let mut assembler = MessageAssembler::new();
         assert_eq!(

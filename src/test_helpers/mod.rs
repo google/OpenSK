@@ -28,9 +28,9 @@ const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 #[cfg(feature = "vendor_hid")]
 const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
-pub fn enable_enterprise_attestation(
-    state: &mut CtapState,
-    env: &mut impl Env,
+pub fn enable_enterprise_attestation<E: Env>(
+    state: &mut CtapState<E>,
+    env: &mut E,
 ) -> Result<AuthenticatorAttestationMaterial, Ctap2StatusCode> {
     let dummy_key = [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
     let dummy_cert = vec![0xdd; 20];

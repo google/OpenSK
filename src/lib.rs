@@ -55,10 +55,10 @@ pub mod test_helpers;
 /// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {
     env: E,
-    state: CtapState,
-    hid: MainHid,
+    state: CtapState<E>,
+    hid: MainHid<E>,
     #[cfg(feature = "vendor_hid")]
-    vendor_hid: VendorHid,
+    vendor_hid: VendorHid<E>,
 }
 
 impl<E: Env> Ctap<E> {
@@ -66,7 +66,7 @@ impl<E: Env> Ctap<E> {
     // This should only take the environment, but it temporarily takes the boot time until the
     // clock is part of the environment.
     pub fn new(mut env: E, now: CtapInstant) -> Self {
-        let state = CtapState::new(&mut env, now);
+        let state = CtapState::<E>::new(&mut env, now);
         let hid = MainHid::new();
         #[cfg(feature = "vendor_hid")]
         let vendor_hid = VendorHid::new();
@@ -79,11 +79,11 @@ impl<E: Env> Ctap<E> {
         }
     }
 
-    pub fn state(&mut self) -> &mut CtapState {
+    pub fn state(&mut self) -> &mut CtapState<E> {
         &mut self.state
     }
 
-    pub fn hid(&mut self) -> &mut MainHid {
+    pub fn hid(&mut self) -> &mut MainHid<E> {
         &mut self.hid
     }
 

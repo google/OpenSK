@@ -270,7 +270,7 @@ class OpenSKInstaller:
         jlink_speed=1200,
         openocd=self.args.programmer == "openocd",
         openocd_board=board.openocd_board,
-        openocd_cmd="openocd",
+        openocd_cmd=self.args.openocd_cmd,
         openocd_commands=copy.copy(board.openocd_commands),
         openocd_options=copy.copy(board.openocd_options),
         jtag=False,
@@ -1004,6 +1004,14 @@ if __name__ == "__main__":
       default="jlink",
       help=("Sets the method to be used to flash Tock OS or the application "
             "on the target board."),
+  )
+  main_parser.add_argument(
+      "--openocd_cmd",
+      dest="openocd_cmd",
+      metavar="CMD",
+      default="openocd",
+      help=("Specifies a custom command to use when calling openocd. Can be "
+            "used to pass arguments i.e. 'openocd -s /tmp/openocd_scripts'."),
   )
 
   main_parser.add_argument(

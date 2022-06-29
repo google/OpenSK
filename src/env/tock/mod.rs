@@ -197,6 +197,7 @@ impl Env for TockEnv {
     type Rng = TockRng256;
     type UserPresence = Self;
     type Storage = TockStorage;
+    type KeyStore = Self;
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
@@ -213,6 +214,10 @@ impl Env for TockEnv {
 
     fn store(&mut self) -> &mut Store<Self::Storage> {
         &mut self.store
+    }
+
+    fn key_store(&mut self) -> &mut Self {
+        self
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {

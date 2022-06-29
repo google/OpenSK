@@ -15,6 +15,7 @@
 mod key;
 
 use crate::api::customization::Customization;
+use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
@@ -33,15 +34,6 @@ use persistent_store::{fragment, StoreUpdate};
 use rng256::Rng256;
 use sk_cbor::cbor_array_vec;
 
-/// Wrapper for master keys.
-pub struct MasterKeys {
-    /// Master encryption key.
-    pub encryption: [u8; 32],
-
-    /// Master hmac key.
-    pub hmac: [u8; 32],
-}
-
 /// Wrapper for PIN properties.
 struct PinProperties {
     /// 16 byte prefix of SHA256 of the currently set PIN.
@@ -53,16 +45,6 @@ struct PinProperties {
 
 /// Initializes the store by creating missing objects.
 pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    // Generate and store the master keys if they are missing.
-    if env.store().find_handle(key::MASTER_KEYS)?.is_none() {
-        let master_encryption_key = env.rng().gen_uniform_u8x32();
-        let master_hmac_key = env.rng().gen_uniform_u8x32();
-        let mut master_keys = Vec::with_capacity(64);
-        master_keys.extend_from_slice(&master_encryption_key);
-        master_keys.extend_from_slice(&master_hmac_key);
-        env.store().insert(key::MASTER_KEYS, &master_keys)?;
-    }
-
     // Generate and store the CredRandom secrets if they are missing.
     if env.store().find_handle(key::CRED_RANDOM_SECRET)?.is_none() {
         let cred_random_with_uv = env.rng().gen_uniform_u8x32();
@@ -278,21 +260,6 @@ pub fn incr_global_signature_counter(
     env.store()
         .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
     Ok(())
-}
-
-/// Returns the master keys.
-pub fn master_keys(env: &mut impl Env) -> Result<MasterKeys, Ctap2StatusCode> {
-    let master_keys = env
-        .store()
-        .find(key::MASTER_KEYS)?
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    if master_keys.len() != 64 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    Ok(MasterKeys {
-        encryption: *array_ref![master_keys, 0, 32],
-        hmac: *array_ref![master_keys, 32, 32],
-    })
 }
 
 /// Returns the CredRandom secret.
@@ -549,6 +516,7 @@ pub fn set_aaguid(
 /// In particular persistent entries are not reset.
 pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     env.store().clear(key::NUM_PERSISTENT_KEYS)?;
+    env.key_store().reset()?;
     init(env)?;
     Ok(())
 }
@@ -979,27 +947,6 @@ mod test {
 
         let no_credential = find_credential(&mut env, "example.com", &[0x00], true).unwrap();
         assert_eq!(no_credential, None);
-    }
-
-    #[test]
-    fn test_master_keys() {
-        let mut env = TestEnv::new();
-        init(&mut env).unwrap();
-
-        // Master keys stay the same within the same CTAP reset cycle.
-        let master_keys_1 = master_keys(&mut env).unwrap();
-        let master_keys_2 = master_keys(&mut env).unwrap();
-        assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
-        assert_eq!(master_keys_2.hmac, master_keys_1.hmac);
-
-        // Master keys change after reset. This test may fail if the random generator produces the
-        // same keys.
-        let master_encryption_key = master_keys_1.encryption.to_vec();
-        let master_hmac_key = master_keys_1.hmac.to_vec();
-        reset(&mut env).unwrap();
-        let master_keys_3 = master_keys(&mut env).unwrap();
-        assert!(master_keys_3.encryption != master_encryption_key.as_slice());
-        assert!(master_keys_3.hmac != master_hmac_key.as_slice());
     }
 
     #[test]

@@ -151,6 +151,7 @@ impl Env for TestEnv {
     type Rng = TestRng256;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
+    type KeyStore = Self;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
@@ -167,6 +168,10 @@ impl Env for TestEnv {
 
     fn store(&mut self) -> &mut Store<Self::Storage> {
         &mut self.store
+    }
+
+    fn key_store(&mut self) -> &mut Self {
+        self
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {

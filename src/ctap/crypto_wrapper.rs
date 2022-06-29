@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::key_store::KeyStore;
 #[cfg(feature = "ed25519")]
 use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::data_formats::{
@@ -19,7 +20,6 @@ use crate::ctap::data_formats::{
     PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::storage;
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;
@@ -245,8 +245,7 @@ pub fn encrypt_key_handle(
     private_key: &PrivateKey,
     application: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let master_keys = storage::master_keys(env)?;
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
 
     let mut plaintext = [0; 64];
     let version = match private_key {
@@ -265,7 +264,7 @@ pub fn encrypt_key_handle(
     let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
     encrypted_id.insert(0, version);
 
-    let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+    let id_hmac = hmac_256::<Sha256>(&env.key_store().kh_authentication()?, &encrypted_id[..]);
     encrypted_id.extend(&id_hmac);
     Ok(encrypted_id)
 }
@@ -289,10 +288,9 @@ pub fn decrypt_credential_source(
     if credential_id.len() < LEGACY_CREDENTIAL_ID_SIZE {
         return Ok(None);
     }
-    let master_keys = storage::master_keys(env)?;
     let hmac_message_size = credential_id.len() - 32;
     if !verify_hmac_256::<Sha256>(
-        &master_keys.hmac,
+        &env.key_store().kh_authentication()?,
         &credential_id[..hmac_message_size],
         array_ref![credential_id, hmac_message_size, 32],
     ) {
@@ -316,7 +314,7 @@ pub fn decrypt_credential_source(
         return Ok(None);
     }
 
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
     let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, payload, true)?;
 
     if rp_id_hash != &decrypted_id[32..] {
@@ -548,7 +546,6 @@ mod test {
 
     fn test_encrypt_decrypt_credential(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -574,7 +571,6 @@ mod test {
     #[test]
     fn test_encrypt_decrypt_bad_version() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];
@@ -582,8 +578,8 @@ mod test {
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
-        let master_keys = storage::master_keys(&mut env).unwrap();
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        let hmac_key = env.key_store().kh_authentication().unwrap();
+        let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
 
         assert_eq!(
@@ -594,7 +590,6 @@ mod test {
 
     fn test_encrypt_decrypt_bad_hmac(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -622,7 +617,6 @@ mod test {
 
     fn test_decrypt_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -653,14 +647,13 @@ mod test {
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let master_keys = storage::master_keys(env)?;
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
         let mut plaintext = [0; 64];
         private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
         let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        let id_hmac = hmac_256::<Sha256>(&env.key_store().kh_authentication()?, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
     }
@@ -668,7 +661,6 @@ mod test {
     #[test]
     fn test_encrypt_decrypt_credential_legacy() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let ecdsa_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let private_key = PrivateKey::from(ecdsa_key.clone());
 
@@ -684,7 +676,6 @@ mod test {
     #[test]
     fn test_encrypt_credential_size() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
         let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];

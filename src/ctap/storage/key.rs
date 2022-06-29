@@ -125,10 +125,8 @@ make_partition! {
     /// the length, the following are an array with the hash.
     PIN_PROPERTIES = 2045;
 
-    /// The encryption and hmac keys.
-    ///
-    /// This entry is always present. It is generated at startup if absent.
-    MASTER_KEYS = 2046;
+    /// Reserved for the key store implementation of the environment.
+    _RESERVED_KEY_STORE = 2046;
 
     /// The global signature counter.
     ///

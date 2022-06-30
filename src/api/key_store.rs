@@ -24,10 +24,10 @@ use crate::env::Env;
 /// Implementations may use the environment store: [`STORE_KEY`] is reserved for this usage.
 pub trait KeyStore {
     /// Returns the AES key for key handles encryption.
-    fn kh_encryption(&mut self) -> Result<[u8; 32], Error>;
+    fn key_handle_encryption(&mut self) -> Result<[u8; 32], Error>;
 
     /// Returns the key for key handles authentication.
-    fn kh_authentication(&mut self) -> Result<[u8; 32], Error>;
+    fn key_handle_authentication(&mut self) -> Result<[u8; 32], Error>;
 
     /// Derives an ECDSA private key from a seed.
     ///
@@ -51,11 +51,11 @@ pub struct Error;
 pub const STORE_KEY: usize = 2046;
 
 impl<T: Env> KeyStore for T {
-    fn kh_encryption(&mut self) -> Result<[u8; 32], Error> {
+    fn key_handle_encryption(&mut self) -> Result<[u8; 32], Error> {
         Ok(get_master_keys(self)?.encryption)
     }
 
-    fn kh_authentication(&mut self) -> Result<[u8; 32], Error> {
+    fn key_handle_authentication(&mut self) -> Result<[u8; 32], Error> {
         Ok(get_master_keys(self)?.authentication)
     }
 
@@ -120,10 +120,13 @@ fn test_key_store() {
     let key_store = env.key_store();
 
     // Master keys are well-defined and stable.
-    let encryption_key = key_store.kh_encryption().unwrap();
-    let authentication_key = key_store.kh_authentication().unwrap();
-    assert_eq!(key_store.kh_encryption(), Ok(encryption_key));
-    assert_eq!(key_store.kh_authentication(), Ok(authentication_key));
+    let encryption_key = key_store.key_handle_encryption().unwrap();
+    let authentication_key = key_store.key_handle_authentication().unwrap();
+    assert_eq!(key_store.key_handle_encryption(), Ok(encryption_key));
+    assert_eq!(
+        key_store.key_handle_authentication(),
+        Ok(authentication_key)
+    );
 
     // ECDSA seeds are well-defined and stable.
     let ecdsa_seed = key_store.generate_ecdsa_seed().unwrap();
@@ -133,6 +136,6 @@ fn test_key_store() {
     // Master keys change after reset. We don't require this for ECDSA seeds because it's not the
     // case, but it might be better.
     key_store.reset().unwrap();
-    assert!(key_store.kh_encryption().unwrap() != encryption_key);
-    assert!(key_store.kh_authentication().unwrap() != authentication_key);
+    assert!(key_store.key_handle_encryption().unwrap() != encryption_key);
+    assert!(key_store.key_handle_authentication().unwrap() != authentication_key);
 }

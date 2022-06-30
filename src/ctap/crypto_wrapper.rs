@@ -260,7 +260,7 @@ pub fn encrypt_key_handle(
     private_key: &PrivateKey,
     application: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
 
     let mut plaintext = [0; 64];
     let version = match private_key {
@@ -279,7 +279,10 @@ pub fn encrypt_key_handle(
     let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
     encrypted_id.insert(0, version);
 
-    let id_hmac = hmac_256::<Sha256>(&env.key_store().kh_authentication()?, &encrypted_id[..]);
+    let id_hmac = hmac_256::<Sha256>(
+        &env.key_store().key_handle_authentication()?,
+        &encrypted_id[..],
+    );
     encrypted_id.extend(&id_hmac);
     Ok(encrypted_id)
 }
@@ -305,7 +308,7 @@ pub fn decrypt_credential_source(
     }
     let hmac_message_size = credential_id.len() - 32;
     if !verify_hmac_256::<Sha256>(
-        &env.key_store().kh_authentication()?,
+        &env.key_store().key_handle_authentication()?,
         &credential_id[..hmac_message_size],
         array_ref![credential_id, hmac_message_size, 32],
     ) {
@@ -329,7 +332,7 @@ pub fn decrypt_credential_source(
         return Ok(None);
     }
 
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
     let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, payload, true)?;
 
     if rp_id_hash != &decrypted_id[32..] {
@@ -599,7 +602,7 @@ mod test {
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
-        let hmac_key = env.key_store().kh_authentication().unwrap();
+        let hmac_key = env.key_store().key_handle_authentication().unwrap();
         let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
 
@@ -668,13 +671,17 @@ mod test {
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().kh_encryption()?);
+        let aes_enc_key =
+            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
         let mut plaintext = [0; 64];
         private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
         let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(&env.key_store().kh_authentication()?, &encrypted_id[..]);
+        let id_hmac = hmac_256::<Sha256>(
+            &env.key_store().key_handle_authentication()?,
+            &encrypted_id[..],
+        );
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
     }

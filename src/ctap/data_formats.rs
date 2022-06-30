@@ -2215,11 +2215,11 @@ mod test {
     #[test]
     fn test_credential_source_cbor_round_trip() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: PrivateKey::from(private_key),
+            private_key,
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,
@@ -2300,13 +2300,12 @@ mod test {
     #[test]
     fn test_credential_source_cbor_read_legacy() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut key_bytes = [0u8; 32];
-        private_key.to_bytes(&mut key_bytes);
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let key_bytes = private_key.to_bytes();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: PrivateKey::from(private_key),
+            private_key,
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,
@@ -2333,13 +2332,12 @@ mod test {
     #[test]
     fn test_credential_source_cbor_legacy_error() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut key_bytes = [0u8; 32];
-        private_key.to_bytes(&mut key_bytes);
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let key_bytes = private_key.to_bytes();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: PrivateKey::from(private_key.clone()),
+            private_key: private_key.clone(),
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,
@@ -2366,7 +2364,7 @@ mod test {
             PublicKeyCredentialSourceField::EcdsaPrivateKey => key_bytes,
             PublicKeyCredentialSourceField::RpId => credential.rp_id,
             PublicKeyCredentialSourceField::UserHandle => credential.user_handle,
-            PublicKeyCredentialSourceField::PrivateKey => PrivateKey::from(private_key),
+            PublicKeyCredentialSourceField::PrivateKey => private_key,
         };
         assert_eq!(
             PublicKeyCredentialSource::try_from(source_cbor),

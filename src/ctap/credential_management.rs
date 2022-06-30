@@ -64,6 +64,7 @@ fn enumerate_rps_response(
 
 /// Generates the response for subcommands enumerating credentials.
 fn enumerate_credentials_response(
+    env: &mut impl Env,
     credential: PublicKeyCredentialSource,
     total_credentials: Option<u64>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -92,7 +93,9 @@ fn enumerate_credentials_response(
         key_id: credential_id,
         transports: None, // You can set USB as a hint here.
     };
-    let public_key = private_key.get_pub_key();
+    let public_key = private_key
+        .get_pub_key(env)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
     Ok(AuthenticatorCredentialManagementResponse {
         user: Some(user),
         credential_id: Some(credential_id),
@@ -207,7 +210,7 @@ fn process_enumerate_credentials_begin(
             channel,
         );
     }
-    enumerate_credentials_response(credential, Some(total_credentials as u64))
+    enumerate_credentials_response(env, credential, Some(total_credentials as u64))
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
@@ -217,7 +220,7 @@ fn process_enumerate_credentials_get_next_credential(
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential()?;
     let credential = storage::get_credential(env, credential_key)?;
-    enumerate_credentials_response(credential, None)
+    enumerate_credentials_response(env, credential, None)
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.
@@ -369,12 +372,12 @@ mod test {
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
-    fn create_credential_source(rng: &mut impl Rng256) -> PublicKeyCredentialSource {
-        let private_key = crypto::ecdsa::SecKey::gensk(rng);
+    fn create_credential_source(env: &mut TestEnv) -> PublicKeyCredentialSource {
+        let private_key = PrivateKey::new_ecdsa(env);
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
-            private_key: PrivateKey::from(private_key),
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
+            private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),
@@ -393,7 +396,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
-        let credential_source = create_credential_source(env.rng());
+        let credential_source = create_credential_source(&mut env);
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
@@ -475,8 +478,8 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source1 = create_credential_source(env.rng());
-        let mut credential_source2 = create_credential_source(env.rng());
+        let credential_source1 = create_credential_source(&mut env);
+        let mut credential_source2 = create_credential_source(&mut env);
         credential_source2.rp_id = "another.example.com".to_string();
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -569,7 +572,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source = create_credential_source(env.rng());
+        let credential_source = create_credential_source(&mut env);
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         ctap_state.client_pin = client_pin;
@@ -650,8 +653,8 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let credential_source1 = create_credential_source(env.rng());
-        let mut credential_source2 = create_credential_source(env.rng());
+        let credential_source1 = create_credential_source(&mut env);
+        let mut credential_source2 = create_credential_source(&mut env);
         credential_source2.user_handle = vec![0x02];
         credential_source2.user_name = Some("user2".to_string());
         credential_source2.user_display_name = Some("User Two".to_string());
@@ -752,7 +755,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let mut credential_source = create_credential_source(env.rng());
+        let mut credential_source = create_credential_source(&mut env);
         credential_source.credential_id = vec![0x1D; 32];
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -822,7 +825,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
-        let mut credential_source = create_credential_source(env.rng());
+        let mut credential_source = create_credential_source(&mut env);
         credential_source.credential_id = vec![0x1D; 32];
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));

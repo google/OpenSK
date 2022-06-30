@@ -43,7 +43,7 @@ pub trait KeyStore {
 
 /// Key store errors.
 ///
-/// They are deliberately indistinguishable from each other to avoid leaking information.
+/// They are deliberately indistinguishable to avoid leaking information.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Error;
 

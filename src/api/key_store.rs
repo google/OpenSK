@@ -50,7 +50,10 @@ pub struct Error;
 /// Key of the environment store reserved for the key store.
 pub const STORE_KEY: usize = 2046;
 
-impl<T: Env> KeyStore for T {
+/// Implements a default key store using the environment rng and store.
+pub trait Helper: Env {}
+
+impl<T: Helper> KeyStore for T {
     fn key_handle_encryption(&mut self) -> Result<[u8; 32], Error> {
         Ok(get_master_keys(self)?.encryption)
     }
@@ -114,28 +117,33 @@ impl From<StoreError> for Error {
     }
 }
 
-#[test]
-fn test_key_store() {
-    let mut env = crate::env::test::TestEnv::new();
-    let key_store = env.key_store();
+#[cfg(test)]
+mod test {
+    use super::*;
 
-    // Master keys are well-defined and stable.
-    let encryption_key = key_store.key_handle_encryption().unwrap();
-    let authentication_key = key_store.key_handle_authentication().unwrap();
-    assert_eq!(key_store.key_handle_encryption(), Ok(encryption_key));
-    assert_eq!(
-        key_store.key_handle_authentication(),
-        Ok(authentication_key)
-    );
+    #[test]
+    fn test_key_store() {
+        let mut env = crate::env::test::TestEnv::new();
+        let key_store = env.key_store();
 
-    // ECDSA seeds are well-defined and stable.
-    let ecdsa_seed = key_store.generate_ecdsa_seed().unwrap();
-    let ecdsa_key = key_store.derive_ecdsa(&ecdsa_seed).unwrap();
-    assert_eq!(key_store.derive_ecdsa(&ecdsa_seed), Ok(ecdsa_key));
+        // Master keys are well-defined and stable.
+        let encryption_key = key_store.key_handle_encryption().unwrap();
+        let authentication_key = key_store.key_handle_authentication().unwrap();
+        assert_eq!(key_store.key_handle_encryption(), Ok(encryption_key));
+        assert_eq!(
+            key_store.key_handle_authentication(),
+            Ok(authentication_key)
+        );
 
-    // Master keys change after reset. We don't require this for ECDSA seeds because it's not the
-    // case, but it might be better.
-    key_store.reset().unwrap();
-    assert!(key_store.key_handle_encryption().unwrap() != encryption_key);
-    assert!(key_store.key_handle_authentication().unwrap() != authentication_key);
+        // ECDSA seeds are well-defined and stable.
+        let ecdsa_seed = key_store.generate_ecdsa_seed().unwrap();
+        let ecdsa_key = key_store.derive_ecdsa(&ecdsa_seed).unwrap();
+        assert_eq!(key_store.derive_ecdsa(&ecdsa_seed), Ok(ecdsa_key));
+
+        // Master keys change after reset. We don't require this for ECDSA seeds because it's not
+        // the case, but it might be better.
+        key_store.reset().unwrap();
+        assert!(key_store.key_handle_encryption().unwrap() != encryption_key);
+        assert!(key_store.key_handle_authentication().unwrap() != authentication_key);
+    }
 }

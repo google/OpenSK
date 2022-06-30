@@ -16,6 +16,7 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::key_store;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::clock::ClockInt;
 use crate::env::Env;
@@ -146,6 +147,8 @@ impl FirmwareProtection for TestEnv {
         true
     }
 }
+
+impl key_store::Helper for TestEnv {}
 
 impl Env for TestEnv {
     type Rng = TestRng256;

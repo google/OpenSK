@@ -446,7 +446,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::EDDSA);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::EDDSA);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
             PrivateKey::new_ed25519_from_bytes(&key_bytes),

@@ -155,7 +155,7 @@ impl PrivateKey {
     /// Returns the ECDSA private key.
     pub fn ecdsa_key(&self, env: &mut impl Env) -> Option<ecdsa::SecKey> {
         match self {
-            PrivateKey::Ecdsa(seed) => ecdsa_key(env, seed),
+            PrivateKey::Ecdsa(seed) => ecdsa_key_from_seed(env, seed),
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -164,7 +164,9 @@ impl PrivateKey {
     /// Returns the corresponding public key.
     pub fn get_pub_key(&self, env: &mut impl Env) -> Option<CoseKey> {
         Some(match self {
-            PrivateKey::Ecdsa(ecdsa_seed) => CoseKey::from(ecdsa_key(env, ecdsa_seed)?.genpk()),
+            PrivateKey::Ecdsa(ecdsa_seed) => {
+                CoseKey::from(ecdsa_key_from_seed(env, ecdsa_seed)?.genpk())
+            }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
         })
@@ -173,7 +175,7 @@ impl PrivateKey {
     /// Returns the encoded signature for a given message.
     pub fn sign_and_encode(&self, env: &mut impl Env, message: &[u8]) -> Option<Vec<u8>> {
         Some(match self {
-            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_key(env, ecdsa_seed)?
+            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_key_from_seed(env, ecdsa_seed)?
                 .sign_rfc6979::<Sha256>(message)
                 .to_asn1_der(),
             #[cfg(feature = "ed25519")]
@@ -200,7 +202,7 @@ impl PrivateKey {
     }
 }
 
-fn ecdsa_key(env: &mut impl Env, seed: &[u8; 32]) -> Option<ecdsa::SecKey> {
+fn ecdsa_key_from_seed(env: &mut impl Env, seed: &[u8; 32]) -> Option<ecdsa::SecKey> {
     let ecdsa_bytes = env.key_store().derive_ecdsa(seed).ok()?;
     ecdsa::SecKey::from_bytes(&ecdsa_bytes)
 }

@@ -248,7 +248,7 @@ impl Ctap1Command {
         let private_key = PrivateKey::new_ecdsa(env);
         let sk = private_key
             .ecdsa_key(env)
-            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = sk.genpk();
         let key_handle = encrypt_key_handle(env, &private_key, &application)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
@@ -315,7 +315,7 @@ impl Ctap1Command {
             let ecdsa_key = credential_source
                 .private_key
                 .ecdsa_key(env)
-                .ok_or(Ctap1StatusCode::SW_WRONG_DATA)?;
+                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             if flags == Ctap1Flags::CheckOnly {
                 return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }

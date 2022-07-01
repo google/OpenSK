@@ -892,9 +892,7 @@ impl CtapState {
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        let public_cose_key = private_key
-            .get_pub_key(env)
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+        let public_cose_key = private_key.get_pub_key(env)?;
         cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
@@ -934,12 +932,7 @@ impl CtapState {
                 Some(vec![attestation_certificate]),
             )
         } else {
-            (
-                private_key
-                    .sign_and_encode(env, &signature_data)
-                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
-                None,
-            )
+            (private_key.sign_and_encode(env, &signature_data)?, None)
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,
@@ -1023,8 +1016,7 @@ impl CtapState {
         signature_data.extend(client_data_hash);
         let signature = credential
             .private_key
-            .sign_and_encode(env, &signature_data)
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+            .sign_and_encode(env, &signature_data)?;
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,

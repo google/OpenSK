@@ -93,9 +93,7 @@ fn enumerate_credentials_response(
         key_id: credential_id,
         transports: None, // You can set USB as a hint here.
     };
-    let public_key = private_key
-        .get_pub_key(env)
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+    let public_key = private_key.get_pub_key(env)?;
     Ok(AuthenticatorCredentialManagementResponse {
         user: Some(user),
         credential_id: Some(credential_id),

@@ -153,17 +153,17 @@ impl PrivateKey {
     }
 
     /// Returns the ECDSA private key.
-    pub fn ecdsa_key(&self, env: &mut impl Env) -> Option<ecdsa::SecKey> {
+    pub fn ecdsa_key(&self, env: &mut impl Env) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
         match self {
             PrivateKey::Ecdsa(seed) => ecdsa_key_from_seed(env, seed),
             #[allow(unreachable_patterns)]
-            _ => None,
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
     }
 
     /// Returns the corresponding public key.
-    pub fn get_pub_key(&self, env: &mut impl Env) -> Option<CoseKey> {
-        Some(match self {
+    pub fn get_pub_key(&self, env: &mut impl Env) -> Result<CoseKey, Ctap2StatusCode> {
+        Ok(match self {
             PrivateKey::Ecdsa(ecdsa_seed) => {
                 CoseKey::from(ecdsa_key_from_seed(env, ecdsa_seed)?.genpk())
             }
@@ -173,8 +173,12 @@ impl PrivateKey {
     }
 
     /// Returns the encoded signature for a given message.
-    pub fn sign_and_encode(&self, env: &mut impl Env, message: &[u8]) -> Option<Vec<u8>> {
-        Some(match self {
+    pub fn sign_and_encode(
+        &self,
+        env: &mut impl Env,
+        message: &[u8],
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        Ok(match self {
             PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_key_from_seed(env, ecdsa_seed)?
                 .sign_rfc6979::<Sha256>(message)
                 .to_asn1_der(),
@@ -202,9 +206,12 @@ impl PrivateKey {
     }
 }
 
-fn ecdsa_key_from_seed(env: &mut impl Env, seed: &[u8; 32]) -> Option<ecdsa::SecKey> {
-    let ecdsa_bytes = env.key_store().derive_ecdsa(seed).ok()?;
-    ecdsa::SecKey::from_bytes(&ecdsa_bytes)
+fn ecdsa_key_from_seed(
+    env: &mut impl Env,
+    seed: &[u8; 32],
+) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
+    let ecdsa_bytes = env.key_store().derive_ecdsa(seed)?;
+    Ok(ecdsa::SecKey::from_bytes(&ecdsa_bytes).unwrap())
 }
 
 impl From<PrivateKey> for cbor::Value {
@@ -481,7 +488,7 @@ mod test {
         let public_key = ecdsa_key.genpk();
         assert_eq!(
             private_key.get_pub_key(&mut env),
-            Some(CoseKey::from(public_key))
+            Ok(CoseKey::from(public_key))
         );
     }
 
@@ -494,7 +501,7 @@ mod test {
         let signature = ecdsa_key.sign_rfc6979::<Sha256>(&message).to_asn1_der();
         assert_eq!(
             private_key.sign_and_encode(&mut env, &message),
-            Some(signature)
+            Ok(signature)
         );
     }
 

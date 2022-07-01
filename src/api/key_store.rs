@@ -21,7 +21,7 @@ use crate::env::Env;
 
 /// Provides storage for secret keys.
 ///
-/// Implementations may use the environment store: [`STORE_KEY`] is reserved for this usage.
+/// Implementations may use the environment store: [`STORAGE_KEY`] is reserved for this usage.
 pub trait KeyStore {
     /// Returns the AES key for key handles encryption.
     fn key_handle_encryption(&mut self) -> Result<[u8; 32], Error>;
@@ -48,7 +48,7 @@ pub trait KeyStore {
 pub struct Error;
 
 /// Key of the environment store reserved for the key store.
-pub const STORE_KEY: usize = 2046;
+pub const STORAGE_KEY: usize = 2046;
 
 /// Implements a default key store using the environment rng and store.
 pub trait Helper: Env {}
@@ -76,7 +76,7 @@ impl<T: Helper> KeyStore for T {
     }
 
     fn reset(&mut self) -> Result<(), Error> {
-        Ok(self.store().remove(STORE_KEY)?)
+        Ok(self.store().remove(STORAGE_KEY)?)
     }
 }
 
@@ -90,7 +90,7 @@ struct MasterKeys {
 }
 
 fn get_master_keys(env: &mut impl Env) -> Result<MasterKeys, Error> {
-    let master_keys = match env.store().find(STORE_KEY)? {
+    let master_keys = match env.store().find(STORAGE_KEY)? {
         Some(x) => x,
         None => {
             let master_encryption_key = env.rng().gen_uniform_u8x32();
@@ -98,7 +98,7 @@ fn get_master_keys(env: &mut impl Env) -> Result<MasterKeys, Error> {
             let mut master_keys = Vec::with_capacity(64);
             master_keys.extend_from_slice(&master_encryption_key);
             master_keys.extend_from_slice(&master_authentication_key);
-            env.store().insert(STORE_KEY, &master_keys)?;
+            env.store().insert(STORAGE_KEY, &master_keys)?;
             master_keys
         }
     };

@@ -15,6 +15,7 @@
 use crate::api::connection::HidConnection;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::key_store::KeyStore;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::UserPresence;
 use persistent_store::{Storage, Store};
@@ -29,6 +30,7 @@ pub trait Env {
     type Rng: Rng256;
     type UserPresence: UserPresence;
     type Storage: Storage;
+    type KeyStore: KeyStore;
     type UpgradeStorage: UpgradeStorage;
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
@@ -38,6 +40,7 @@ pub trait Env {
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn store(&mut self) -> &mut Store<Self::Storage>;
+    fn key_store(&mut self) -> &mut Self::KeyStore;
 
     /// Returns the upgrade storage instance.
     ///

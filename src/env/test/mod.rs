@@ -16,6 +16,7 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::key_store;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::clock::ClockInt;
 use crate::env::Env;
@@ -147,10 +148,13 @@ impl FirmwareProtection for TestEnv {
     }
 }
 
+impl key_store::Helper for TestEnv {}
+
 impl Env for TestEnv {
     type Rng = TestRng256;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
+    type KeyStore = Self;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
@@ -167,6 +171,10 @@ impl Env for TestEnv {
 
     fn store(&mut self) -> &mut Store<Self::Storage> {
         &mut self.store
+    }
+
+    fn key_store(&mut self) -> &mut Self {
+        self
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {

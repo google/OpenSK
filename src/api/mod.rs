@@ -20,5 +20,6 @@
 pub mod connection;
 pub mod customization;
 pub mod firmware_protection;
+pub mod key_store;
 pub mod upgrade_storage;
 pub mod user_presence;

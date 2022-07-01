@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::key_store::KeyStore;
 #[cfg(feature = "ed25519")]
 use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::data_formats::{
@@ -19,7 +20,6 @@ use crate::ctap::data_formats::{
     PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::storage;
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;
@@ -101,7 +101,9 @@ pub fn aes256_cbc_decrypt(
 // We shouldn't compare private keys in prod without constant-time operations.
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum PrivateKey {
-    Ecdsa(ecdsa::SecKey),
+    // We store the seed instead of the key since we can't get the seed back from the key. We could
+    // store both if we believe deriving the key is done more than once and costly.
+    Ecdsa([u8; 32]),
     #[cfg(feature = "ed25519")]
     Ed25519(ed25519_compact::SecretKey),
 }
@@ -112,16 +114,23 @@ impl PrivateKey {
     /// # Panics
     ///
     /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
-    pub fn new(rng: &mut impl Rng256, alg: SignatureAlgorithm) -> Self {
+    pub fn new(env: &mut impl Env, alg: SignatureAlgorithm) -> Self {
         match alg {
-            SignatureAlgorithm::ES256 => PrivateKey::Ecdsa(crypto::ecdsa::SecKey::gensk(rng)),
+            SignatureAlgorithm::ES256 => {
+                PrivateKey::Ecdsa(env.key_store().generate_ecdsa_seed().unwrap())
+            }
             #[cfg(feature = "ed25519")]
             SignatureAlgorithm::EDDSA => {
-                let bytes = rng.gen_uniform_u8x32();
+                let bytes = env.rng().gen_uniform_u8x32();
                 Self::new_ed25519_from_bytes(&bytes).unwrap()
             }
             SignatureAlgorithm::Unknown => unreachable!(),
         }
+    }
+
+    /// Creates a new ecdsa private key.
+    pub fn new_ecdsa(env: &mut impl Env) -> PrivateKey {
+        Self::new(env, SignatureAlgorithm::ES256)
     }
 
     /// Helper function that creates a private key of type ECDSA.
@@ -131,7 +140,7 @@ impl PrivateKey {
         if bytes.len() != 32 {
             return None;
         }
-        ecdsa::SecKey::from_bytes(array_ref!(bytes, 0, 32)).map(PrivateKey::from)
+        Some(PrivateKey::Ecdsa(*array_ref!(bytes, 0, 32)))
     }
 
     #[cfg(feature = "ed25519")]
@@ -143,22 +152,39 @@ impl PrivateKey {
         Some(Self::Ed25519(ed25519_compact::KeyPair::from_seed(seed).sk))
     }
 
-    /// Returns the corresponding public key.
-    pub fn get_pub_key(&self) -> CoseKey {
+    /// Returns the ECDSA private key.
+    pub fn ecdsa_key(&self, env: &mut impl Env) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
         match self {
-            PrivateKey::Ecdsa(ecdsa_key) => CoseKey::from(ecdsa_key.genpk()),
-            #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
+            PrivateKey::Ecdsa(seed) => ecdsa_key_from_seed(env, seed),
+            #[allow(unreachable_patterns)]
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
     }
 
+    /// Returns the corresponding public key.
+    pub fn get_pub_key(&self, env: &mut impl Env) -> Result<CoseKey, Ctap2StatusCode> {
+        Ok(match self {
+            PrivateKey::Ecdsa(ecdsa_seed) => {
+                CoseKey::from(ecdsa_key_from_seed(env, ecdsa_seed)?.genpk())
+            }
+            #[cfg(feature = "ed25519")]
+            PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
+        })
+    }
+
     /// Returns the encoded signature for a given message.
-    pub fn sign_and_encode(&self, message: &[u8]) -> Vec<u8> {
-        match self {
-            PrivateKey::Ecdsa(ecdsa_key) => ecdsa_key.sign_rfc6979::<Sha256>(message).to_asn1_der(),
+    pub fn sign_and_encode(
+        &self,
+        env: &mut impl Env,
+        message: &[u8],
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        Ok(match self {
+            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_key_from_seed(env, ecdsa_seed)?
+                .sign_rfc6979::<Sha256>(message)
+                .to_asn1_der(),
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message, None).to_vec(),
-        }
+        })
     }
 
     /// The associated COSE signature algorithm identifier.
@@ -173,15 +199,19 @@ impl PrivateKey {
     /// Writes the key bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            PrivateKey::Ecdsa(ecdsa_key) => {
-                let mut key_bytes = vec![0u8; 32];
-                ecdsa_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-                key_bytes
-            }
+            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_seed.to_vec(),
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
         }
     }
+}
+
+fn ecdsa_key_from_seed(
+    env: &mut impl Env,
+    seed: &[u8; 32],
+) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
+    let ecdsa_bytes = env.key_store().derive_ecdsa(seed)?;
+    Ok(ecdsa::SecKey::from_bytes(&ecdsa_bytes).unwrap())
 }
 
 impl From<PrivateKey> for cbor::Value {
@@ -213,12 +243,6 @@ impl TryFrom<cbor::Value> for PrivateKey {
     }
 }
 
-impl From<ecdsa::SecKey> for PrivateKey {
-    fn from(ecdsa_key: ecdsa::SecKey) -> Self {
-        PrivateKey::Ecdsa(ecdsa_key)
-    }
-}
-
 /// Encrypts the given private key and relying party ID hash into a credential ID.
 ///
 /// Other information, such as a user name, are not stored. Since encrypted credential IDs are
@@ -245,13 +269,12 @@ pub fn encrypt_key_handle(
     private_key: &PrivateKey,
     application: &[u8; 32],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let master_keys = storage::master_keys(env)?;
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
 
     let mut plaintext = [0; 64];
     let version = match private_key {
-        PrivateKey::Ecdsa(ecdsa_key) => {
-            ecdsa_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
+        PrivateKey::Ecdsa(ecdsa_seed) => {
+            plaintext[..32].copy_from_slice(ecdsa_seed);
             ECDSA_CREDENTIAL_ID_VERSION
         }
         #[cfg(feature = "ed25519")]
@@ -265,7 +288,10 @@ pub fn encrypt_key_handle(
     let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
     encrypted_id.insert(0, version);
 
-    let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+    let id_hmac = hmac_256::<Sha256>(
+        &env.key_store().key_handle_authentication()?,
+        &encrypted_id[..],
+    );
     encrypted_id.extend(&id_hmac);
     Ok(encrypted_id)
 }
@@ -289,10 +315,9 @@ pub fn decrypt_credential_source(
     if credential_id.len() < LEGACY_CREDENTIAL_ID_SIZE {
         return Ok(None);
     }
-    let master_keys = storage::master_keys(env)?;
     let hmac_message_size = credential_id.len() - 32;
     if !verify_hmac_256::<Sha256>(
-        &master_keys.hmac,
+        &env.key_store().key_handle_authentication()?,
         &credential_id[..hmac_message_size],
         array_ref![credential_id, hmac_message_size, 32],
     ) {
@@ -316,7 +341,7 @@ pub fn decrypt_credential_source(
         return Ok(None);
     }
 
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
     let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, payload, true)?;
 
     if rp_id_hash != &decrypted_id[32..] {
@@ -418,7 +443,7 @@ mod test {
     #[test]
     fn test_new_ecdsa_from_bytes() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
             PrivateKey::new_ecdsa_from_bytes(&key_bytes),
@@ -430,7 +455,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::EDDSA);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::EDDSA);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
             PrivateKey::new_ed25519_from_bytes(&key_bytes),
@@ -458,25 +483,31 @@ mod test {
     #[test]
     fn test_private_key_get_pub_key() {
         let mut env = TestEnv::new();
-        let ecdsa_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
         let public_key = ecdsa_key.genpk();
-        let private_key = PrivateKey::from(ecdsa_key);
-        assert_eq!(private_key.get_pub_key(), CoseKey::from(public_key));
+        assert_eq!(
+            private_key.get_pub_key(&mut env),
+            Ok(CoseKey::from(public_key))
+        );
     }
 
     #[test]
     fn test_private_key_sign_and_encode() {
         let mut env = TestEnv::new();
         let message = [0x5A; 32];
-        let ecdsa_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
         let signature = ecdsa_key.sign_rfc6979::<Sha256>(&message).to_asn1_der();
-        let private_key = PrivateKey::from(ecdsa_key);
-        assert_eq!(private_key.sign_and_encode(&message), signature);
+        assert_eq!(
+            private_key.sign_and_encode(&mut env, &message),
+            Ok(signature)
+        );
     }
 
     fn test_private_key_signature_algorithm(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(env.rng(), signature_algorithm);
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
         assert_eq!(private_key.signature_algorithm(), signature_algorithm);
     }
 
@@ -493,7 +524,7 @@ mod test {
 
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(env.rng(), signature_algorithm);
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
         let cbor = cbor::Value::from(private_key.clone());
         assert_eq!(PrivateKey::try_from(cbor), Ok(private_key),);
     }
@@ -548,8 +579,7 @@ mod test {
 
     fn test_encrypt_decrypt_credential(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let private_key = PrivateKey::new(env.rng(), signature_algorithm);
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
@@ -574,16 +604,15 @@ mod test {
     #[test]
     fn test_encrypt_decrypt_bad_version() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];
         let mut encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
-        let master_keys = storage::master_keys(&mut env).unwrap();
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        let hmac_key = env.key_store().key_handle_authentication().unwrap();
+        let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
 
         assert_eq!(
@@ -594,8 +623,7 @@ mod test {
 
     fn test_encrypt_decrypt_bad_hmac(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let private_key = PrivateKey::new(env.rng(), signature_algorithm);
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
@@ -622,8 +650,7 @@ mod test {
 
     fn test_decrypt_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let private_key = PrivateKey::new(env.rng(), signature_algorithm);
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
@@ -653,14 +680,17 @@ mod test {
         private_key: crypto::ecdsa::SecKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let master_keys = storage::master_keys(env)?;
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
+        let aes_enc_key =
+            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
         let mut plaintext = [0; 64];
         private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
         let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
+        let id_hmac = hmac_256::<Sha256>(
+            &env.key_store().key_handle_authentication()?,
+            &encrypted_id[..],
+        );
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
     }
@@ -668,9 +698,8 @@ mod test {
     #[test]
     fn test_encrypt_decrypt_credential_legacy() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let ecdsa_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let private_key = PrivateKey::from(ecdsa_key.clone());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = legacy_encrypt_key_handle(&mut env, ecdsa_key, &rp_id_hash).unwrap();
@@ -684,8 +713,7 @@ mod test {
     #[test]
     fn test_encrypt_credential_size() {
         let mut env = TestEnv::new();
-        storage::init(&mut env).ok().unwrap();
-        let private_key = PrivateKey::new(env.rng(), SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();

@@ -16,7 +16,7 @@ use super::super::clock::CtapInstant;
 use super::apdu::{Apdu, ApduStatusCode};
 use super::crypto_wrapper::{decrypt_credential_source, encrypt_key_handle, PrivateKey};
 use super::CtapState;
-use crate::ctap::storage;
+use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -257,11 +257,13 @@ impl Ctap1Command {
             return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION);
         }
 
-        let certificate = storage::attestation_certificate(env)
+        let Attestation {
+            private_key,
+            certificate,
+        } = env
+            .attestation_store()
+            .get(&attestation_store::Id::Batch)
             .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let private_key = storage::attestation_private_key(env)
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
@@ -345,10 +347,10 @@ impl Ctap1Command {
 mod test {
     use super::super::crypto_wrapper::ECDSA_CREDENTIAL_ID_SIZE;
     use super::super::data_formats::SignatureAlgorithm;
-    use super::super::key_material;
     use super::*;
     use crate::api::customization::Customization;
     use crate::clock::TEST_CLOCK_FREQUENCY_HZ;
+    use crate::ctap::storage;
     use crate::env::test::TestEnv;
     use crypto::Hash256;
 
@@ -423,21 +425,13 @@ mod test {
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
-        let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        assert!(storage::set_attestation_private_key(&mut env, &fake_key).is_ok());
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response = Ctap1Command::process_command(
-            &mut env,
-            &message,
-            &mut ctap_state,
-            CtapInstant::new(0_u64),
-        );
-        // Certificate is still missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
-
-        let fake_cert = [0x99u8; 100]; // Arbitrary length
-        assert!(storage::set_attestation_certificate(&mut env, &fake_cert[..]).is_ok());
+        let attestation = Attestation {
+            private_key: [0x41; 32],
+            certificate: vec![0x99; 100],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Batch, Some(&attestation))
+            .unwrap();
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
         ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
         let response =
@@ -454,8 +448,8 @@ mod test {
         .is_some());
         const CERT_START: usize = 67 + ECDSA_CREDENTIAL_ID_SIZE;
         assert_eq!(
-            &response[CERT_START..CERT_START + fake_cert.len()],
-            &fake_cert[..]
+            &response[CERT_START..][..attestation.certificate.len()],
+            &attestation.certificate
         );
     }
 

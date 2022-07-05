@@ -62,6 +62,7 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::connection::{HidConnection, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
@@ -860,7 +861,7 @@ impl CtapState {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
                 private_key: private_key.clone(),
-                rp_id,
+                rp_id: rp_id.clone(),
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
                 // The UTF8 encoding is always preserved, so the string might end up shorter.
@@ -918,21 +919,31 @@ impl CtapState {
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
 
-        let (signature, x5c) = if env.customization().use_batch_attestation() || ep_att {
-            let attestation_private_key = storage::attestation_private_key(env)?
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-            let attestation_key =
-                crypto::ecdsa::SecKey::from_bytes(&attestation_private_key).unwrap();
-            let attestation_certificate = storage::attestation_certificate(env)?
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-            (
-                attestation_key
-                    .sign_rfc6979::<Sha256>(&signature_data)
-                    .to_asn1_der(),
-                Some(vec![attestation_certificate]),
-            )
+        let attestation_id = if env.customization().use_batch_attestation() {
+            Some(attestation_store::Id::Batch)
+        } else if ep_att {
+            Some(attestation_store::Id::Enterprise { rp_id })
         } else {
-            (private_key.sign_and_encode(env, &signature_data)?, None)
+            None
+        };
+        let (signature, x5c) = match attestation_id {
+            Some(id) => {
+                let Attestation {
+                    private_key,
+                    certificate,
+                } = env
+                    .attestation_store()
+                    .get(&id)?
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                let attestation_key = crypto::ecdsa::SecKey::from_bytes(&private_key).unwrap();
+                (
+                    attestation_key
+                        .sign_rfc6979::<Sha256>(&signature_data)
+                        .to_asn1_der(),
+                    Some(vec![certificate]),
+                )
+            }
+            None => (private_key.sign_and_encode(env, &signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::ES256 as i64,
@@ -1338,41 +1349,26 @@ impl CtapState {
         if params.attestation_material.is_some() || params.lockdown {
             check_user_presence(env, channel)?;
         }
+        // This command is for U2F support and we use the batch attestation there.
+        let attestation_id = attestation_store::Id::Batch;
 
         // Sanity checks
-        let current_priv_key = storage::attestation_private_key(env)?;
-        let current_cert = storage::attestation_certificate(env)?;
-
+        let current_attestation = env.attestation_store().get(&attestation_id)?;
         let response = match params.attestation_material {
-            // Only reading values.
             None => AuthenticatorVendorConfigureResponse {
-                cert_programmed: current_cert.is_some(),
-                pkey_programmed: current_priv_key.is_some(),
+                cert_programmed: current_attestation.is_some(),
+                pkey_programmed: current_attestation.is_some(),
             },
-            // Device is already fully programmed. We don't leak information.
-            Some(_) if current_cert.is_some() && current_priv_key.is_some() => {
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            }
-            // Device is partially or not programmed. We complete the process.
             Some(data) => {
-                if let Some(current_cert) = &current_cert {
-                    if current_cert != &data.certificate {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                }
-                if let Some(current_priv_key) = &current_priv_key {
-                    if current_priv_key != &data.private_key {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                }
-                if current_cert.is_none() {
-                    storage::set_attestation_certificate(env, &data.certificate)?;
-                }
-                if current_priv_key.is_none() {
-                    storage::set_attestation_private_key(env, &data.private_key)?;
+                // We don't overwrite the attestation if it's already set. We don't return any error
+                // to not leak information.
+                if current_attestation.is_none() {
+                    let attestation = Attestation {
+                        private_key: data.private_key,
+                        certificate: data.certificate,
+                    };
+                    env.attestation_store()
+                        .set(&attestation_id, Some(&attestation))?;
                 }
                 AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
@@ -3145,12 +3141,11 @@ mod test {
             ))
         );
         assert_eq!(
-            storage::attestation_certificate(&mut env).unwrap().unwrap(),
-            dummy_cert
-        );
-        assert_eq!(
-            storage::attestation_private_key(&mut env).unwrap().unwrap(),
-            dummy_key
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(Attestation {
+                private_key: dummy_key,
+                certificate: dummy_cert.to_vec(),
+            }))
         );
 
         // Try to inject other dummy values and check that initial values are retained.
@@ -3176,12 +3171,11 @@ mod test {
             ))
         );
         assert_eq!(
-            storage::attestation_certificate(&mut env).unwrap().unwrap(),
-            dummy_cert
-        );
-        assert_eq!(
-            storage::attestation_private_key(&mut env).unwrap().unwrap(),
-            dummy_key
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(Attestation {
+                private_key: dummy_key,
+                certificate: dummy_cert.to_vec(),
+            }))
         );
 
         // Now try to lock the device

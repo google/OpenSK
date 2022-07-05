@@ -437,58 +437,6 @@ pub fn commit_large_blob_array(
     )?)
 }
 
-/// Returns the attestation private key if defined.
-pub fn attestation_private_key(
-    env: &mut impl Env,
-) -> Result<Option<[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_PRIVATE_KEY)? {
-        None => Ok(None),
-        Some(key) if key.len() == key_material::ATTESTATION_PRIVATE_KEY_LENGTH => {
-            Ok(Some(*array_ref![
-                key,
-                0,
-                key_material::ATTESTATION_PRIVATE_KEY_LENGTH
-            ]))
-        }
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
-/// Sets the attestation private key.
-///
-/// If it is already defined, it is overwritten.
-pub fn set_attestation_private_key(
-    env: &mut impl Env,
-    attestation_private_key: &[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
-) -> Result<(), Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_PRIVATE_KEY)? {
-        None => Ok(env
-            .store()
-            .insert(key::ATTESTATION_PRIVATE_KEY, attestation_private_key)?),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
-/// Returns the attestation certificate if defined.
-pub fn attestation_certificate(env: &mut impl Env) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
-    Ok(env.store().find(key::ATTESTATION_CERTIFICATE)?)
-}
-
-/// Sets the attestation certificate.
-///
-/// If it is already defined, it is overwritten.
-pub fn set_attestation_certificate(
-    env: &mut impl Env,
-    attestation_certificate: &[u8],
-) -> Result<(), Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_CERTIFICATE)? {
-        None => Ok(env
-            .store()
-            .insert(key::ATTESTATION_CERTIFICATE, attestation_certificate)?),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
 /// Returns the AAGUID.
 pub fn aaguid(env: &mut impl Env) -> Result<[u8; key_material::AAGUID_LENGTH], Ctap2StatusCode> {
     let aaguid = env
@@ -545,10 +493,9 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 }
 
 /// Marks enterprise attestation as enabled.
+///
+/// Doesn't check whether an attestation is setup because it depends on the RP id.
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if attestation_private_key(env)?.is_none() || attestation_certificate(env)?.is_none() {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
     if !enterprise_attestation(env)? {
         env.store().insert(key::ENTERPRISE_ATTESTATION, &[])?;
     }
@@ -696,6 +643,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::api::attestation_store::{self, Attestation, AttestationStore};
     use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
     use crate::env::test::TestEnv;
@@ -1033,25 +981,26 @@ mod test {
         init(&mut env).unwrap();
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
-        assert!(attestation_private_key(&mut env).unwrap().is_none());
-        assert!(attestation_certificate(&mut env).unwrap().is_none());
+        assert_eq!(
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(None)
+        );
 
         // Make sure the persistent keys are initialized to dummy values.
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        let dummy_cert = [0xddu8; 20];
-        set_attestation_private_key(&mut env, &dummy_key).unwrap();
-        set_attestation_certificate(&mut env, &dummy_cert).unwrap();
+        let dummy_attestation = Attestation {
+            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            certificate: vec![0xdd; 20],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
+            .unwrap();
         assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
         reset(&mut env).unwrap();
         assert_eq!(
-            &attestation_private_key(&mut env).unwrap().unwrap(),
-            &dummy_key
-        );
-        assert_eq!(
-            attestation_certificate(&mut env).unwrap().unwrap(),
-            &dummy_cert
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(dummy_attestation))
         );
         assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
     }
@@ -1187,17 +1136,13 @@ mod test {
     fn test_enterprise_attestation() {
         let mut env = TestEnv::new();
 
-        assert!(!enterprise_attestation(&mut env).unwrap());
-        assert_eq!(
-            enable_enterprise_attestation(&mut env),
-            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-        );
-        assert!(!enterprise_attestation(&mut env).unwrap());
-
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        let dummy_cert = [0xddu8; 20];
-        set_attestation_private_key(&mut env, &dummy_key).unwrap();
-        set_attestation_certificate(&mut env, &dummy_cert).unwrap();
+        let dummy_attestation = Attestation {
+            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            certificate: vec![0xdd; 20],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
+            .unwrap();
 
         assert!(!enterprise_attestation(&mut env).unwrap());
         assert_eq!(enable_enterprise_attestation(&mut env), Ok(()));

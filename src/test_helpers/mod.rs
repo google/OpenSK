@@ -25,8 +25,6 @@ use crate::env::Env;
 // In tests where we define a dummy user-presence check that immediately returns, the channel
 // ID is irrelevant, so we pass this (dummy but valid) value.
 const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
-#[cfg(feature = "vendor_hid")]
-const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
 pub fn enable_enterprise_attestation(
     state: &mut CtapState,

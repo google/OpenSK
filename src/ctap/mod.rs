@@ -861,7 +861,7 @@ impl CtapState {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
                 private_key: private_key.clone(),
-                rp_id: rp_id.clone(),
+                rp_id,
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
                 // The UTF8 encoding is always preserved, so the string might end up shorter.
@@ -922,7 +922,7 @@ impl CtapState {
         let attestation_id = if env.customization().use_batch_attestation() {
             Some(attestation_store::Id::Batch)
         } else if ep_att {
-            Some(attestation_store::Id::Enterprise { rp_id })
+            Some(attestation_store::Id::Enterprise)
         } else {
             None
         };
@@ -2123,6 +2123,7 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::new();
+        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::VendorFacilitated),
             Some(vec!["example.com".to_string()]),
@@ -2169,6 +2170,7 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::new();
+        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::PlatformManaged),
             Some(vec!["example.com".to_string()]),
@@ -2205,6 +2207,7 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::new();
+        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut()
             .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
 

@@ -195,7 +195,12 @@ impl FirmwareProtection for TockEnv {
 }
 
 impl key_store::Helper for TockEnv {}
-impl attestation_store::Helper for TockEnv {}
+
+impl attestation_store::Helper for TockEnv {
+    fn attestation_id(&self) -> attestation_store::Id {
+        attestation_store::Id::Batch
+    }
+}
 
 impl Env for TockEnv {
     type Rng = TockRng256;

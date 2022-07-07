@@ -262,8 +262,7 @@ impl Ctap1Command {
             certificate,
         } = env
             .attestation_store()
-            .get(&attestation_store::Id::Batch)
-            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
+            .get(&attestation_store::Id::Batch)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());

@@ -14,6 +14,7 @@
 
 mod key;
 
+use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
@@ -493,9 +494,14 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 }
 
 /// Marks enterprise attestation as enabled.
-///
-/// Doesn't check whether an attestation is setup because it depends on the RP id.
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    if env
+        .attestation_store()
+        .get(&attestation_store::Id::Enterprise)?
+        .is_none()
+    {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
     if !enterprise_attestation(env)? {
         env.store().insert(key::ENTERPRISE_ATTESTATION, &[])?;
     }
@@ -1135,13 +1141,14 @@ mod test {
     #[test]
     fn test_enterprise_attestation() {
         let mut env = TestEnv::new();
+        env.set_attestation_id(attestation_store::Id::Enterprise);
 
         let dummy_attestation = Attestation {
             private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()
-            .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
+            .set(&attestation_store::Id::Enterprise, Some(&dummy_attestation))
             .unwrap();
 
         assert!(!enterprise_attestation(&mut env).unwrap());

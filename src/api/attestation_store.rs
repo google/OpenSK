@@ -1,13 +1,13 @@
-use alloc::string::String;
 use alloc::vec::Vec;
 use persistent_store::{StoreError, StoreUpdate};
 
 use crate::env::Env;
 
 /// Identifies an attestation.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Id {
     Batch,
-    Enterprise { rp_id: String },
+    Enterprise,
 }
 
 #[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
@@ -18,9 +18,6 @@ pub struct Attestation {
 }
 
 /// Stores enterprise or batch attestations.
-///
-/// Implementations don't need to distinguish different attestations. In particular, setting one
-/// attestation may set other ones.
 pub trait AttestationStore {
     /// Returns an attestation given its id, if it exists.
     ///
@@ -48,11 +45,17 @@ pub const STORAGE_KEYS: &[usize] = &[1, 2];
 
 /// Implements a default attestation store using the environment store.
 ///
-/// The same attestation is used for batch and enterprise.
-pub trait Helper: Env {}
+/// Supports only one attestation at a time.
+pub trait Helper: Env {
+    /// Returns the current attestation id.
+    fn attestation_id(&self) -> Id;
+}
 
 impl<T: Helper> AttestationStore for T {
-    fn get(&mut self, _: &Id) -> Result<Option<Attestation>, Error> {
+    fn get(&mut self, id: &Id) -> Result<Option<Attestation>, Error> {
+        if id != &self.attestation_id() {
+            return Err(Error::NoSupport);
+        }
         let private_key = self.store().find(PRIVATE_KEY_STORAGE_KEY)?;
         let certificate = self.store().find(CERTIFICATE_STORAGE_KEY)?;
         let (private_key, certificate) = match (private_key, certificate) {
@@ -69,7 +72,10 @@ impl<T: Helper> AttestationStore for T {
         }))
     }
 
-    fn set(&mut self, _: &Id, attestation: Option<&Attestation>) -> Result<(), Error> {
+    fn set(&mut self, id: &Id, attestation: Option<&Attestation>) -> Result<(), Error> {
+        if id != &self.attestation_id() {
+            return Err(Error::NoSupport);
+        }
         let updates = match attestation {
             None => [
                 StoreUpdate::Remove {

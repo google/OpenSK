@@ -150,6 +150,48 @@ impl FirmwareProtection for TestEnv {
 }
 
 impl key_store::Helper for TestEnv {}
+struct TestTimer {
+    end: u32,
+}
+
+trait Clock {
+    type Timer;
+
+    fn make_timer(&self, duration: u32) -> Self::Timer;
+    
+    fn check_timer(&self, timer: Self::Timer) -> Option<Self::Timer>;
+}
+
+#[derive(Debug)]
+struct TestClock {
+    cur_time: u32,
+}
+
+impl TestClock {
+    fn new() -> Self {
+        TestClock { cur_time: 0 }
+    }
+    
+    fn advance(&mut self, duration: u32) {
+        self.cur_time += duration;
+    }
+}
+
+impl Clock for TestClock {
+    type Timer = TestTimer;
+
+    fn make_timer(&self, duration: u32) -> Self::Timer {
+        TestTimer { end: self.cur_time + duration }
+    }
+    
+    fn check_timer(&self, timer: Self::Timer) -> Option<Self::Timer> {
+        if timer.end > self.cur_time {
+            Some(timer)
+        } else {
+            None
+        }
+    }
+}
 
 impl AttestationStore for TestEnv {
     fn get(
@@ -179,6 +221,7 @@ impl Env for TestEnv {
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
+    type Clock = TestClock;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -223,5 +266,9 @@ impl Env for TestEnv {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
         self
+    }
+
+    fn clock(&mut self) -> Self::Clock {
+        &mut self.clock    
     }
 }

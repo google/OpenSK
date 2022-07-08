@@ -14,7 +14,8 @@
 
 use crate::ctap::client_pin::PinPermission;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::timer::{Timer, LibtockAlarmTimer};
+use crate::api::clock::Clock;
+use crate::env::Env;
 use alloc::string::String;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
@@ -33,18 +34,18 @@ const INITIAL_USAGE_TIME_LIMIT:u32 = 30000_u32;
 /// built-in user verification. Therefore, we never cache user presence.
 ///
 /// This implementation does not use a rolling timer.
-pub struct PinUvAuthTokenState {
+pub struct PinUvAuthTokenState<E:Env> {
     // Relies on the fact that all permissions are represented by powers of two.
     permissions_set: u8,
     permissions_rp_id: Option<String>,
-    usage_timer: Option<LibtockAlarmTimer>,
+    usage_timer: Option<E::Clock::Timer>,
     user_verified: bool,
     in_use: bool,
 }
 
-impl PinUvAuthTokenState {
+impl<E:Env> PinUvAuthTokenState<E> {
     /// Creates a pinUvAuthToken state without permissions.
-    pub fn new() -> PinUvAuthTokenState {
+    pub fn new() -> PinUvAuthTokenState<E> {
         PinUvAuthTokenState {
             permissions_set: 0,
             permissions_rp_id: None,
@@ -111,18 +112,19 @@ impl PinUvAuthTokenState {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self) {
+    pub fn begin_using_pin_uv_auth_token(&mut self, env: &mut impl Env) {
         self.user_verified = true;
-        self.usage_timer = Some(LibtockAlarmTimer::start(INITIAL_USAGE_TIME_LIMIT));
+        self.usage_timer = Some(env.clock().make_timer(INITIAL_USAGE_TIME_LIMIT));
         self.in_use = true;
     }
 
     /// Updates the usage timer, and disables the pinUvAuthToken on timeout.
-    pub fn pin_uv_auth_token_usage_timer_observer(&mut self) {
+    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, env: &mut impl Env) {
         if !self.in_use {
             return;
         }
-        if self.usage_timer.is_none() || self.usage_timer.unwrap().has_elapsed().is_none() {
+        self.usage_timer = self.usage_timer.and_then(|t| env.clock().check_timer(t));
+        if self.usage_timer.is_none(){
             self.stop_using_pin_uv_auth_token();
         }
     }

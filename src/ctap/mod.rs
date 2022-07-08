@@ -407,11 +407,12 @@ impl StatefulPermission {
     /// means allowing Reset, and Reset cannot be granted later.
     pub fn new_reset() -> StatefulPermission {
         StatefulPermission {
-            timer: Timer::start(30000),
+            timer: Timer::start(10000),
             command_type: Some(StatefulCommand::Reset),
             channel: None,
         }
     }
+    /// You can only run your command before your timer expires.
 
     /// Clears all permissions and state.
     pub fn clear(&mut self) {

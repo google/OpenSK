@@ -26,6 +26,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_time::duration::Milliseconds;
 use embedded_time::fixed_point::FixedPoint;
 use libtock_core::result::{CommandError, EALREADY};
+use libtock_core::syscalls;
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
@@ -68,10 +69,12 @@ pub struct TockEnv {
     rng: TockRng256,
     store: Store<TockStorage>,
     upgrade_storage: Option<TockUpgradeStorage>,
+    clock: Clock,
     main_connection: TockHidConnection,
     #[cfg(feature = "vendor_hid")]
     vendor_connection: TockHidConnection,
     blink_pattern: usize,
+    clock: Clock,
 }
 
 impl TockEnv {
@@ -89,6 +92,7 @@ impl TockEnv {
             rng: TockRng256 {},
             store,
             upgrade_storage,
+            clock:TockClock::new(),
             main_connection: TockHidConnection {
                 endpoint: UsbEndpoint::MainHid,
             },
@@ -264,6 +268,11 @@ impl Env for TockEnv {
         Console::new()
     }
 
+    fn clock(&mut self) -> Self::Clock {
+        &mut self.clock
+    }
+}
+
     fn customization(&self) -> &Self::Customization {
         &DEFAULT_CUSTOMIZATION
     }
@@ -327,4 +336,164 @@ pub fn switch_off_leds() {
     }
 }
 
-pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
+const KEEPALIVE_DELAY_MS: isize = 100;
+pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
+
+fn check_user_presence(env: &mut TockEnv, cid: ChannelID) -> Result<(), Ctap2StatusCode> {
+    // The timeout is N times the keepalive delay.
+    const TIMEOUT_ITERATIONS: usize =
+        crate::ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
+
+    // First, send a keep-alive packet to notify that the keep-alive status has changed.
+    send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK)?;
+
+    // Listen to the button presses.
+    let button_touched = Cell::new(false);
+    let mut buttons_callback = buttons::with_callback(|_button_num, state| {
+        match state {
+            ButtonState::Pressed => button_touched.set(true),
+            ButtonState::Released => (),
+        };
+    });
+    let mut buttons = buttons_callback.init().flex_unwrap();
+    // At the moment, all buttons are accepted. You can customize your setup here.
+    for mut button in &mut buttons {
+        button.enable().flex_unwrap();
+    }
+
+    let mut keepalive_response = Ok(());
+    for i in 0..TIMEOUT_ITERATIONS {
+        blink_leds(i);
+
+        // Setup a keep-alive callback.
+        let keepalive_expired = Cell::new(false);
+        let mut keepalive_callback = timer::with_callback(|_, _| {
+            keepalive_expired.set(true);
+        });
+        let mut keepalive = keepalive_callback.init().flex_unwrap();
+        let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY_TOCK).flex_unwrap();
+
+        // Wait for a button touch or an alarm.
+        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+
+        // Cleanup alarm callback.
+        match keepalive.stop_alarm(keepalive_alarm) {
+            Ok(()) => (),
+            Err(TockError::Command(CommandError {
+                return_code: EALREADY,
+                ..
+            })) => assert!(keepalive_expired.get()),
+            Err(_e) => {
+                #[cfg(feature = "debug_ctap")]
+                panic!("Unexpected error when stopping alarm: {:?}", _e);
+                #[cfg(not(feature = "debug_ctap"))]
+                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+            }
+        }
+
+        // TODO: this may take arbitrary time. The keepalive_delay should be adjusted accordingly,
+        // so that LEDs blink with a consistent pattern.
+        if keepalive_expired.get() {
+            // Do not return immediately, because we must clean up still.
+            keepalive_response = send_keepalive_up_needed(env, cid, KEEPALIVE_DELAY_TOCK);
+        }
+
+        if button_touched.get() || keepalive_response.is_err() {
+            break;
+        }
+    }
+
+    switch_off_leds();
+
+    // Cleanup button callbacks.
+    for mut button in &mut buttons {
+        button.disable().flex_unwrap();
+    }
+
+    // Returns whether the user was present.
+    if keepalive_response.is_err() {
+        keepalive_response
+    } else if button_touched.get() {
+        Ok(())
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+    }
+}
+
+// see: https://github.com/tock/tock/blob/master/doc/syscalls/00000_alarm.md
+mod command_nr {
+    pub const _IS_DRIVER_AVAILABLE: usize = 0;
+    pub const GET_CLOCK_FREQUENCY: usize = 1;
+    pub const GET_CLOCK_VALUE: usize = 2;
+    pub const _STOP_ALARM: usize = 3;
+    pub const _SET_ALARM: usize = 4;
+}
+const DRIVER_NUMBER: usize = 0x00000;
+
+pub struct TockTimer {
+    end_tick: usize,
+}
+
+fn wrapping_add_u24(lhs: usize, rhs: usize) -> usize {
+    lhs.wrapping_add(rhs) & 0xffffff
+}
+fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
+    lhs.wrapping_sub(rhs) & 0xffffff
+}
+
+pub struct TockClock {
+}
+
+impl TockClock {
+    fn new() -> Self {
+        TockClock {  }
+    }
+}
+
+impl Clock for TockClock {
+    type Timer = TockTimer;
+    fn make_timer(&self, milliseconds: u32) -> Self::Timer {
+        let clock_frequency =
+            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)
+                .ok()
+                .unwrap();
+        let start_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
+            .ok()
+            .unwrap();
+        let delta_tick = (clock_frequency / 2)
+            .checked_mul(milliseconds as usize)
+            .unwrap()
+            / 500;
+        // this invariant is necessary for the test in has_elapsed to be correct
+        assert!(delta_tick < 0x800000);
+        let end_tick = wrapping_add_u24(start_tick, delta_tick);
+        Self::Timer { end_tick }       
+    }
+
+    fn check_timer(&self, timer: TockTimer) -> Option<Self::Timer> {
+        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
+            .ok()
+            .unwrap();
+        if wrapping_sub_u24(timer.end_tick, cur_tick) < 0x800000 {
+            None
+        } else {
+            Some(timer)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_wrapping_sub_u24() {
+        // non-wrapping cases
+        assert_eq!(wrapping_sub_u24(0, 0), 0);
+        assert_eq!(wrapping_sub_u24(0xffffff, 0), 0xffffff);
+        assert_eq!(wrapping_sub_u24(0xffffff, 0xffffff), 0);
+        // wrapping cases
+        assert_eq!(wrapping_sub_u24(0, 0xffffff), 1);
+        assert_eq!(wrapping_sub_u24(0, 1), 0xffffff);
+    }
+}

@@ -39,6 +39,7 @@ pub const MAX_CREDENTIAL_ID_SIZE: usize = 241;
 pub const MIN_CREDENTIAL_ID_SIZE: usize = 112;
 
 pub const ECDSA_CREDENTIAL_ID_VERSION: u8 = 0x01;
+#[cfg(feature = "ed25519")]
 pub const ED25519_CREDENTIAL_ID_VERSION: u8 = 0x02;
 pub const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x03;
 

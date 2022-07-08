@@ -255,27 +255,27 @@ pub fn decrypt_credential_source(
     credential_id_bytes: Vec<u8>,
     rp_id_hash: &[u8],
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-    CredentialId::decrypt_from_bytes(env, credential_id_bytes.clone()).map(|cred_id| {
-        cred_id.and_then(|cred_id| {
-            if rp_id_hash != cred_id.rp_id_hash {
-                return None;
-            }
-            Some(PublicKeyCredentialSource {
-                key_type: PublicKeyCredentialType::PublicKey,
-                credential_id: credential_id_bytes,
-                private_key: cred_id.private_key,
-                rp_id: String::new(),
-                user_handle: Vec::new(),
-                user_display_name: None,
-                cred_protect_policy: cred_id.cred_protect_policy,
-                creation_order: 0,
-                user_name: None,
-                user_icon: None,
-                cred_blob: None,
-                large_blob_key: None,
-            })
-        })
-    })
+    let cred_id = match CredentialId::decrypt_from_bytes(env, credential_id_bytes.clone())? {
+        None => return Ok(None),
+        Some(x) => x,
+    };
+    if rp_id_hash != cred_id.rp_id_hash {
+        return Ok(None);
+    }
+    Ok(Some(PublicKeyCredentialSource {
+        key_type: PublicKeyCredentialType::PublicKey,
+        credential_id: credential_id_bytes,
+        private_key: cred_id.private_key,
+        rp_id: String::new(),
+        user_handle: Vec::new(),
+        user_display_name: None,
+        cred_protect_policy: cred_id.cred_protect_policy,
+        creation_order: 0,
+        user_name: None,
+        user_icon: None,
+        cred_blob: None,
+        large_blob_key: None,
+    }))
 }
 
 #[cfg(test)]

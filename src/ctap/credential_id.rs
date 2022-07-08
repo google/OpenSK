@@ -45,9 +45,9 @@ pub const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x03;
 pub const MAX_PADDING_LENGTH: u8 = 0xBF;
 
 pub(crate) struct CredentialId {
-    pub(crate) private_key: PrivateKey,
-    pub(crate) rp_id_hash: Vec<u8>,
-    pub(crate) cred_protect_policy: Option<CredentialProtectionPolicy>,
+    pub private_key: PrivateKey,
+    pub rp_id_hash: [u8; 32],
+    pub cred_protect_policy: Option<CredentialProtectionPolicy>,
 }
 
 fn decrypt_legacy_key_handle(
@@ -111,6 +111,9 @@ fn decrypt_cbor_key_handle(
         (Some(private_key), Some(rp_id_hash), cred_protect_policy) => {
             let private_key = PrivateKey::try_from(private_key)?;
             let rp_id_hash = extract_byte_string(rp_id_hash)?;
+            if rp_id_hash.len() != 32 {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
             let cred_protect_policy = if let Some(policy) = cred_protect_policy {
                 Some(CredentialProtectionPolicy::try_from(policy)?)
             } else {
@@ -118,16 +121,12 @@ fn decrypt_cbor_key_handle(
             };
             Some(CredentialId {
                 private_key,
-                rp_id_hash,
+                rp_id_hash: rp_id_hash.try_into().unwrap(),
                 cred_protect_policy,
             })
         }
         _ => None,
     })
-}
-
-fn is_legacy_key_handle_version(version: u8) -> bool {
-    version == ECDSA_CREDENTIAL_ID_VERSION || version == ED25519_CREDENTIAL_ID_VERSION
 }
 
 /// Pad data to MAX_PADDING_LENGTH+1 (192) bytes using PKCS padding scheme.
@@ -152,7 +151,12 @@ fn remove_padding(data: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
     if pad_length == 0 || pad_length > MAX_PADDING_LENGTH {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
-    data.truncate(data.len() - pad_length as usize);
+    if !data
+        .drain((data.len() - pad_length as usize)..)
+        .all(|x| x == pad_length)
+    {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
     Ok(())
 }
 
@@ -236,19 +240,28 @@ impl CredentialId {
         }
 
         if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
-            decrypt_legacy_key_handle(env, &credential_id[..hmac_message_size], ES256_ALGORITHM)
-        } else if is_legacy_key_handle_version(credential_id[0]) {
-            let algorithm = match credential_id[0] {
-                ECDSA_CREDENTIAL_ID_VERSION => ES256_ALGORITHM,
-                #[cfg(feature = "ed25519")]
-                ED25519_CREDENTIAL_ID_VERSION => EDDSA_ALGORITHM,
-                _ => return Ok(None),
-            };
-            decrypt_legacy_key_handle(env, &credential_id[1..hmac_message_size], algorithm)
-        } else if credential_id[0] == CBOR_CREDENTIAL_ID_VERSION {
-            decrypt_cbor_key_handle(env, &credential_id[1..hmac_message_size])
-        } else {
-            Ok(None)
+            return decrypt_legacy_key_handle(
+                env,
+                &credential_id[..hmac_message_size],
+                ES256_ALGORITHM,
+            );
+        }
+        match credential_id[0] {
+            ECDSA_CREDENTIAL_ID_VERSION => decrypt_legacy_key_handle(
+                env,
+                &credential_id[1..hmac_message_size],
+                ES256_ALGORITHM,
+            ),
+            #[cfg(feature = "ed25519")]
+            ED25519_CREDENTIAL_ID_VERSION => decrypt_legacy_key_handle(
+                env,
+                &credential_id[1..hmac_message_size],
+                EDDSA_ALGORITHM,
+            ),
+            CBOR_CREDENTIAL_ID_VERSION => {
+                decrypt_cbor_key_handle(env, &credential_id[1..hmac_message_size])
+            }
+            _ => Ok(None),
         }
     }
 }

@@ -16,6 +16,7 @@ pub mod apdu;
 mod client_pin;
 pub mod command;
 mod config_command;
+mod credential_id;
 mod credential_management;
 mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
@@ -40,10 +41,9 @@ use self::command::{
     AuthenticatorVendorConfigureParameters, AuthenticatorVendorUpgradeParameters, Command,
 };
 use self::config_command::process_config;
+use self::credential_id::MAX_CREDENTIAL_ID_SIZE;
 use self::credential_management::process_credential_management;
-use self::crypto_wrapper::{
-    decrypt_credential_source, encrypt_key_handle, PrivateKey, MAX_CREDENTIAL_ID_SIZE,
-};
+use self::crypto_wrapper::{decrypt_credential_source, encrypt_key_handle, PrivateKey};
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
     EnterpriseAttestationMode, GetAssertionExtensions, PackedAttestationStatement,
@@ -881,7 +881,7 @@ impl CtapState {
             storage::store_credential(env, credential_source)?;
             random_id
         } else {
-            encrypt_key_handle(env, &private_key, &rp_id_hash)?
+            encrypt_key_handle(env, &private_key, &rp_id_hash, cred_protect_policy)?
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
@@ -1491,7 +1491,7 @@ mod test {
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
         AuthenticatorCredentialManagementParameters,
     };
-    use super::crypto_wrapper::ECDSA_CREDENTIAL_ID_SIZE;
+    use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
         ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionHmacSecretInput,
         GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
@@ -1698,7 +1698,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            ECDSA_CREDENTIAL_ID_SIZE as u8,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -1825,7 +1825,7 @@ mod test {
             make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
-            ECDSA_CREDENTIAL_ID_SIZE as u8,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
     }
@@ -2068,7 +2068,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            ECDSA_CREDENTIAL_ID_SIZE as u8,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -2436,8 +2436,8 @@ mod test {
                 let auth_data = make_credential_response.auth_data;
                 let offset = 37 + storage::aaguid(&mut env).unwrap().len();
                 assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, ECDSA_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + ECDSA_CREDENTIAL_ID_SIZE].to_vec()
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
             }
             _ => panic!("Invalid response type"),
         };

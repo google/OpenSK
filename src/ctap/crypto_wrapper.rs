@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::credential_id::CredentialId;
+use super::data_formats::CredentialProtectionPolicy;
 use crate::api::key_store::KeyStore;
-#[cfg(feature = "ed25519")]
-use crate::ctap::data_formats::EDDSA_ALGORITHM;
 use crate::ctap::data_formats::{
     extract_array, extract_byte_string, CoseKey, PublicKeyCredentialSource,
-    PublicKeyCredentialType, SignatureAlgorithm, ES256_ALGORITHM,
+    PublicKeyCredentialType, SignatureAlgorithm,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::Env;
@@ -27,28 +27,10 @@ use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use crypto::ecdsa;
-use crypto::hmac::{hmac_256, verify_hmac_256};
 use crypto::sha256::Sha256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
-
-// Legacy credential IDs consist of
-// - 16 bytes: initialization vector for AES-256,
-// - 32 bytes: ECDSA private key for the credential,
-// - 32 bytes: relying party ID hashed with SHA256,
-// - 32 bytes: HMAC-SHA256 over everything else.
-pub const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
-#[cfg(test)]
-pub const ECDSA_CREDENTIAL_ID_SIZE: usize = 113;
-// See encrypt_key_handle v1 documentation.
-pub const MAX_CREDENTIAL_ID_SIZE: usize = 113;
-
-const ECDSA_CREDENTIAL_ID_VERSION: u8 = 0x01;
-#[allow(dead_code)]
-const ED25519_CREDENTIAL_ID_VERSION: u8 = 0x02;
-#[cfg(test)]
-const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt(
@@ -214,6 +196,15 @@ fn ecdsa_key_from_seed(
     Ok(ecdsa::SecKey::from_bytes(&ecdsa_bytes).unwrap())
 }
 
+impl From<&PrivateKey> for cbor::Value {
+    fn from(private_key: &PrivateKey) -> Self {
+        cbor_array![
+            cbor_int!(private_key.signature_algorithm() as i64),
+            cbor_bytes!(private_key.to_bytes()),
+        ]
+    }
+}
+
 impl From<PrivateKey> for cbor::Value {
     fn from(private_key: PrivateKey) -> Self {
         cbor_array![
@@ -243,57 +234,14 @@ impl TryFrom<cbor::Value> for PrivateKey {
     }
 }
 
-/// Encrypts the given private key and relying party ID hash into a credential ID.
-///
-/// Other information, such as a user name, are not stored. Since encrypted credential IDs are
-/// stored server-side, this information is already available (unencrypted).
-///
-/// Also, by limiting ourselves to private key and RP ID hash, we are compatible with U2F for
-/// ECDSA private keys.
-///
-/// For v1 we write the following data for ECDSA (algorithm -7):
-/// -  1 byte : version number
-/// - 16 bytes: initialization vector for AES-256,
-/// - 32 bytes: ECDSA private key for the credential,
-/// - 32 bytes: relying party ID hashed with SHA256,
-/// - 32 bytes: HMAC-SHA256 over everything else.
-///
-/// For v2 we write the following data for EdDSA over curve Ed25519 (algorithm -8, curve 6):
-/// -  1 byte : version number
-/// - 16 bytes: initialization vector for AES-256,
-/// - 32 bytes: Ed25519 private key for the credential,
-/// - 32 bytes: relying party ID hashed with SHA256,
-/// - 32 bytes: HMAC-SHA256 over everything else.
+/// Encrypts the given data into a credential ID, see CredentialId::encrypt_to_bytes.
 pub fn encrypt_key_handle(
     env: &mut impl Env,
     private_key: &PrivateKey,
-    application: &[u8; 32],
+    rp_id_hash: &[u8; 32],
+    cred_protect_policy: Option<CredentialProtectionPolicy>,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-
-    let mut plaintext = [0; 64];
-    let version = match private_key {
-        PrivateKey::Ecdsa(ecdsa_seed) => {
-            plaintext[..32].copy_from_slice(ecdsa_seed);
-            ECDSA_CREDENTIAL_ID_VERSION
-        }
-        #[cfg(feature = "ed25519")]
-        PrivateKey::Ed25519(ed25519_key) => {
-            let sk_bytes = *ed25519_key.seed();
-            plaintext[0..32].copy_from_slice(&sk_bytes);
-            ED25519_CREDENTIAL_ID_VERSION
-        }
-    };
-    plaintext[32..64].copy_from_slice(application);
-    let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-    encrypted_id.insert(0, version);
-
-    let id_hmac = hmac_256::<Sha256>(
-        &env.key_store().key_handle_authentication()?,
-        &encrypted_id[..],
-    );
-    encrypted_id.extend(&id_hmac);
-    Ok(encrypted_id)
+    CredentialId::encrypt_to_bytes(env, private_key, rp_id_hash, cred_protect_policy)
 }
 
 /// Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
@@ -302,78 +250,44 @@ pub fn encrypt_key_handle(
 /// - the format does not match any known versions,
 /// - the HMAC test fails or
 /// - the relying party does not match the decrypted relying party ID hash.
-///
-/// This functions reads:
-/// - legacy credentials (no version number),
-/// - v1 (ECDSA)
-/// - v2 (EdDSA over curve Ed25519)
 pub fn decrypt_credential_source(
     env: &mut impl Env,
-    credential_id: Vec<u8>,
+    credential_id_bytes: Vec<u8>,
     rp_id_hash: &[u8],
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-    if credential_id.len() < LEGACY_CREDENTIAL_ID_SIZE {
-        return Ok(None);
-    }
-    let hmac_message_size = credential_id.len() - 32;
-    if !verify_hmac_256::<Sha256>(
-        &env.key_store().key_handle_authentication()?,
-        &credential_id[..hmac_message_size],
-        array_ref![credential_id, hmac_message_size, 32],
-    ) {
-        return Ok(None);
-    }
-
-    let (payload, algorithm) = if credential_id.len() == LEGACY_CREDENTIAL_ID_SIZE {
-        (&credential_id[..hmac_message_size], ES256_ALGORITHM)
-    } else {
-        // Version number check
-        let algorithm = match credential_id[0] {
-            ECDSA_CREDENTIAL_ID_VERSION => ES256_ALGORITHM,
-            #[cfg(feature = "ed25519")]
-            ED25519_CREDENTIAL_ID_VERSION => EDDSA_ALGORITHM,
-            _ => return Ok(None),
-        };
-        (&credential_id[1..hmac_message_size], algorithm)
-    };
-    if payload.len() != 80 {
-        // We shouldn't have HMAC'ed anything of different length. The check is cheap though.
-        return Ok(None);
-    }
-
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-    let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, payload, true)?;
-
-    if rp_id_hash != &decrypted_id[32..] {
-        return Ok(None);
-    }
-    let sk_option = match algorithm {
-        ES256_ALGORITHM => PrivateKey::new_ecdsa_from_bytes(&decrypted_id[..32]),
-        #[cfg(feature = "ed25519")]
-        EDDSA_ALGORITHM => PrivateKey::new_ed25519_from_bytes(&decrypted_id[..32]),
-        _ => return Ok(None),
-    };
-
-    Ok(sk_option.map(|sk| PublicKeyCredentialSource {
-        key_type: PublicKeyCredentialType::PublicKey,
-        credential_id,
-        private_key: sk,
-        rp_id: String::from(""),
-        user_handle: vec![],
-        user_display_name: None,
-        cred_protect_policy: None,
-        creation_order: 0,
-        user_name: None,
-        user_icon: None,
-        cred_blob: None,
-        large_blob_key: None,
-    }))
+    CredentialId::decrypt_from_bytes(env, credential_id_bytes.clone()).map(|cred_id| {
+        cred_id.and_then(|cred_id| {
+            if rp_id_hash != cred_id.rp_id_hash {
+                return None;
+            }
+            Some(PublicKeyCredentialSource {
+                key_type: PublicKeyCredentialType::PublicKey,
+                credential_id: credential_id_bytes,
+                private_key: cred_id.private_key,
+                rp_id: String::new(),
+                user_handle: Vec::new(),
+                user_display_name: None,
+                cred_protect_policy: cred_id.cred_protect_policy,
+                creation_order: 0,
+                user_name: None,
+                user_icon: None,
+                cred_blob: None,
+                large_blob_key: None,
+            })
+        })
+    })
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    #[cfg(feature = "ed25519")]
+    use crate::ctap::credential_id::ED25519_CREDENTIAL_ID_VERSION;
+    use crate::ctap::credential_id::{CBOR_CREDENTIAL_ID_SIZE, ECDSA_CREDENTIAL_ID_VERSION};
     use crate::env::test::TestEnv;
+    use crypto::hmac::hmac_256;
+
+    const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
     #[test]
     fn test_encrypt_decrypt_with_iv() {
@@ -582,7 +496,7 @@ mod test {
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
         let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
             .unwrap()
             .unwrap();
@@ -607,7 +521,8 @@ mod test {
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];
-        let mut encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        let mut encrypted_id =
+            encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
@@ -626,7 +541,7 @@ mod test {
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
@@ -653,9 +568,9 @@ mod test {
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
 
-        for length in (1..ECDSA_CREDENTIAL_ID_SIZE).step_by(16) {
+        for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
             assert_eq!(
                 decrypt_credential_source(&mut env, encrypted_id[..length].to_vec(), &rp_id_hash),
                 Ok(None)
@@ -672,6 +587,40 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_ed25519_decrypt_credential_missing_blocks() {
         test_decrypt_credential_missing_blocks(SignatureAlgorithm::EDDSA);
+    }
+
+    /// This is a copy of the function that genereated deprecated v1 and v2 key handles.
+    pub fn legacy_encrypt_versioned_key_handle(
+        env: &mut impl Env,
+        private_key: &PrivateKey,
+        application: &[u8; 32],
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        let aes_enc_key =
+            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
+
+        let mut plaintext = [0; 64];
+        let version = match private_key {
+            PrivateKey::Ecdsa(ecdsa_seed) => {
+                plaintext[..32].copy_from_slice(ecdsa_seed);
+                ECDSA_CREDENTIAL_ID_VERSION
+            }
+            #[cfg(feature = "ed25519")]
+            PrivateKey::Ed25519(ed25519_key) => {
+                let sk_bytes = *ed25519_key.seed();
+                plaintext[0..32].copy_from_slice(&sk_bytes);
+                ED25519_CREDENTIAL_ID_VERSION
+            }
+        };
+        plaintext[32..64].copy_from_slice(application);
+        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
+        encrypted_id.insert(0, version);
+
+        let id_hmac = hmac_256::<Sha256>(
+            &env.key_store().key_handle_authentication()?,
+            &encrypted_id[..],
+        );
+        encrypted_id.extend(&id_hmac);
+        Ok(encrypted_id)
     }
 
     /// This is a copy of the function that genereated deprecated key handles.
@@ -710,13 +659,38 @@ mod test {
         assert_eq!(private_key, decrypted_source.private_key);
     }
 
+    fn test_encrypt_decrypt_credential_legacy_versioned(signature_algorithm: SignatureAlgorithm) {
+        let mut env = TestEnv::new();
+        let private_key = PrivateKey::new(&mut env, signature_algorithm);
+
+        let rp_id_hash = [0x55; 32];
+        let encrypted_id =
+            legacy_encrypt_versioned_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
+        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(private_key, decrypted_source.private_key);
+    }
+
+    #[test]
+    fn test_ecdsa_encrypt_decrypt_credential_legacy_versioned() {
+        test_encrypt_decrypt_credential_legacy_versioned(SignatureAlgorithm::ES256);
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_encrypt_decrypt_credential_legacy_versioned() {
+        test_encrypt_decrypt_credential_legacy_versioned(SignatureAlgorithm::EDDSA);
+    }
+
     #[test]
     fn test_encrypt_credential_size() {
         let mut env = TestEnv::new();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
 
         let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
-        assert_eq!(encrypted_id.len(), ECDSA_CREDENTIAL_ID_SIZE);
+        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
+        assert_eq!(encrypted_id.len(), CBOR_CREDENTIAL_ID_SIZE);
     }
 }

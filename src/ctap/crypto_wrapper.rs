@@ -250,16 +250,20 @@ pub fn encrypt_key_handle(
 /// - the format does not match any known versions,
 /// - the HMAC test fails or
 /// - the relying party does not match the decrypted relying party ID hash.
+/// - check_cred_protect is set and the credential requires user verification.
 pub fn decrypt_credential_source(
     env: &mut impl Env,
     credential_id_bytes: Vec<u8>,
     rp_id_hash: &[u8],
+    check_cred_protect: bool,
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
     let cred_id = match CredentialId::decrypt_from_bytes(env, credential_id_bytes.clone())? {
         None => return Ok(None),
         Some(x) => x,
     };
-    if rp_id_hash != cred_id.rp_id_hash {
+    let is_protected =
+        cred_id.cred_protect_policy == Some(CredentialProtectionPolicy::UserVerificationRequired);
+    if rp_id_hash != cred_id.rp_id_hash || (check_cred_protect && is_protected) {
         return Ok(None);
     }
     Ok(Some(PublicKeyCredentialSource {
@@ -497,9 +501,10 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
-            .unwrap()
-            .unwrap();
+        let decrypted_source =
+            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, false)
+                .unwrap()
+                .unwrap();
 
         assert_eq!(private_key, decrypted_source.private_key);
     }
@@ -531,7 +536,7 @@ mod test {
         encrypted_id.extend(&id_hmac);
 
         assert_eq!(
-            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash),
+            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, false),
             Ok(None)
         );
     }
@@ -546,7 +551,7 @@ mod test {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
             assert_eq!(
-                decrypt_credential_source(&mut env, modified_id, &rp_id_hash),
+                decrypt_credential_source(&mut env, modified_id, &rp_id_hash, false),
                 Ok(None)
             );
         }
@@ -572,7 +577,12 @@ mod test {
 
         for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
             assert_eq!(
-                decrypt_credential_source(&mut env, encrypted_id[..length].to_vec(), &rp_id_hash),
+                decrypt_credential_source(
+                    &mut env,
+                    encrypted_id[..length].to_vec(),
+                    &rp_id_hash,
+                    false
+                ),
                 Ok(None)
             );
         }
@@ -652,7 +662,9 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = legacy_encrypt_key_handle(&mut env, ecdsa_key, &rp_id_hash).unwrap();
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
+        // When checking credProtect for legacy credentials the check will always pass because we didn't persist credProtect
+        // policy info in it.
+        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
             .unwrap()
             .unwrap();
 
@@ -666,7 +678,9 @@ mod test {
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
             legacy_encrypt_versioned_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
+        // When checking credProtect for legacy credentials the check will always pass because we didn't persist credProtect
+        // policy info in it.
+        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
             .unwrap()
             .unwrap();
 
@@ -692,5 +706,50 @@ mod test {
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
         assert_eq!(encrypted_id.len(), CBOR_CREDENTIAL_ID_SIZE);
+    }
+
+    #[test]
+    fn test_check_cred_protect_fail() {
+        let mut env = TestEnv::new();
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+
+        let rp_id_hash = [0x55; 32];
+        let encrypted_id = encrypt_key_handle(
+            &mut env,
+            &private_key,
+            &rp_id_hash,
+            Some(CredentialProtectionPolicy::UserVerificationRequired),
+        )
+        .unwrap();
+
+        assert_eq!(
+            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn test_check_cred_protect_success() {
+        let mut env = TestEnv::new();
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+
+        let rp_id_hash = [0x55; 32];
+        let encrypted_id = encrypt_key_handle(
+            &mut env,
+            &private_key,
+            &rp_id_hash,
+            Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
+        )
+        .unwrap();
+
+        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(decrypted_source.private_key, private_key);
+        assert_eq!(
+            decrypted_source.cred_protect_policy,
+            Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList)
+        );
     }
 }

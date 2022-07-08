@@ -309,7 +309,7 @@ impl Ctap1Command {
         flags: Ctap1Flags,
         ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let credential_source = decrypt_credential_source(env, key_handle, &application)
+        let credential_source = decrypt_credential_source(env, key_handle, &application, false)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             let ecdsa_key = credential_source
@@ -447,7 +447,8 @@ mod test {
         assert!(decrypt_credential_source(
             &mut env,
             response[67..67 + CBOR_CREDENTIAL_ID_SIZE].to_vec(),
-            &application
+            &application,
+            false
         )
         .unwrap()
         .is_some());

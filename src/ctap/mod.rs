@@ -807,7 +807,8 @@ impl CtapState {
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
                 if storage::find_credential(env, &rp_id, &cred_desc.key_id, !has_uv)?.is_some()
-                    || decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash)?.is_some()
+                    || decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash, !has_uv)?
+                        .is_some()
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
@@ -1070,7 +1071,8 @@ impl CtapState {
             if credential.is_some() {
                 return Ok(credential);
             }
-            let credential = decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash)?;
+            let credential =
+                decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash, !has_uv)?;
             if credential.is_some() {
                 return Ok(credential);
             }

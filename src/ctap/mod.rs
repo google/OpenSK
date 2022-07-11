@@ -919,10 +919,10 @@ impl CtapState {
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
 
-        let attestation_id = if env.customization().use_batch_attestation() {
-            Some(attestation_store::Id::Batch)
-        } else if ep_att {
+        let attestation_id = if ep_att {
             Some(attestation_store::Id::Enterprise)
+        } else if env.customization().use_batch_attestation() {
+            Some(attestation_store::Id::Batch)
         } else {
             None
         };

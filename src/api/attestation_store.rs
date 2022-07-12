@@ -56,48 +56,56 @@ impl<T: Helper> AttestationStore for T {
         if id != &self.attestation_id() {
             return Err(Error::NoSupport);
         }
-        let private_key = self.store().find(PRIVATE_KEY_STORAGE_KEY)?;
-        let certificate = self.store().find(CERTIFICATE_STORAGE_KEY)?;
-        let (private_key, certificate) = match (private_key, certificate) {
-            (Some(x), Some(y)) => (x, y),
-            (None, None) => return Ok(None),
-            _ => return Err(Error::Internal),
-        };
-        if private_key.len() != 32 {
-            return Err(Error::Internal);
-        }
-        Ok(Some(Attestation {
-            private_key: *array_ref![private_key, 0, 32],
-            certificate,
-        }))
+        helper_get(self)
     }
 
     fn set(&mut self, id: &Id, attestation: Option<&Attestation>) -> Result<(), Error> {
         if id != &self.attestation_id() {
             return Err(Error::NoSupport);
         }
-        let updates = match attestation {
-            None => [
-                StoreUpdate::Remove {
-                    key: PRIVATE_KEY_STORAGE_KEY,
-                },
-                StoreUpdate::Remove {
-                    key: CERTIFICATE_STORAGE_KEY,
-                },
-            ],
-            Some(attestation) => [
-                StoreUpdate::Insert {
-                    key: PRIVATE_KEY_STORAGE_KEY,
-                    value: &attestation.private_key[..],
-                },
-                StoreUpdate::Insert {
-                    key: CERTIFICATE_STORAGE_KEY,
-                    value: &attestation.certificate[..],
-                },
-            ],
-        };
-        Ok(self.store().transaction(&updates)?)
+        helper_set(self, attestation)
     }
+}
+
+pub fn helper_get(env: &mut impl Env) -> Result<Option<Attestation>, Error> {
+    let private_key = env.store().find(PRIVATE_KEY_STORAGE_KEY)?;
+    let certificate = env.store().find(CERTIFICATE_STORAGE_KEY)?;
+    let (private_key, certificate) = match (private_key, certificate) {
+        (Some(x), Some(y)) => (x, y),
+        (None, None) => return Ok(None),
+        _ => return Err(Error::Internal),
+    };
+    if private_key.len() != 32 {
+        return Err(Error::Internal);
+    }
+    Ok(Some(Attestation {
+        private_key: *array_ref![private_key, 0, 32],
+        certificate,
+    }))
+}
+
+pub fn helper_set(env: &mut impl Env, attestation: Option<&Attestation>) -> Result<(), Error> {
+    let updates = match attestation {
+        None => [
+            StoreUpdate::Remove {
+                key: PRIVATE_KEY_STORAGE_KEY,
+            },
+            StoreUpdate::Remove {
+                key: CERTIFICATE_STORAGE_KEY,
+            },
+        ],
+        Some(attestation) => [
+            StoreUpdate::Insert {
+                key: PRIVATE_KEY_STORAGE_KEY,
+                value: &attestation.private_key[..],
+            },
+            StoreUpdate::Insert {
+                key: CERTIFICATE_STORAGE_KEY,
+                value: &attestation.certificate[..],
+            },
+        ],
+    };
+    Ok(env.store().transaction(&updates)?)
 }
 
 const PRIVATE_KEY_STORAGE_KEY: usize = STORAGE_KEYS[0];

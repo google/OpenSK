@@ -21,6 +21,7 @@ use super::{cbor_read, cbor_write};
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_byte_string, extract_map};
 use crate::env::Env;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 use crypto::hmac::{hmac_256, verify_hmac_256};

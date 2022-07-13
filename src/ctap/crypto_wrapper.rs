@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::credential_id::CredentialId;
+use super::credential_id::ParsedCredentialId;
 use super::data_formats::CredentialProtectionPolicy;
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{
@@ -205,15 +205,6 @@ impl From<&PrivateKey> for cbor::Value {
     }
 }
 
-impl From<PrivateKey> for cbor::Value {
-    fn from(private_key: PrivateKey) -> Self {
-        cbor_array![
-            cbor_int!(private_key.signature_algorithm() as i64),
-            cbor_bytes!(private_key.to_bytes()),
-        ]
-    }
-}
-
 impl TryFrom<cbor::Value> for PrivateKey {
     type Error = Ctap2StatusCode;
 
@@ -234,14 +225,14 @@ impl TryFrom<cbor::Value> for PrivateKey {
     }
 }
 
-/// Encrypts the given data into a credential ID, see CredentialId::encrypt_to_bytes.
+/// Encrypts the given data into a credential ID, see CredentialId::encrypt.
 pub fn encrypt_key_handle(
     env: &mut impl Env,
     private_key: &PrivateKey,
     rp_id_hash: &[u8; 32],
     cred_protect_policy: Option<CredentialProtectionPolicy>,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    CredentialId::encrypt_to_bytes(env, private_key, rp_id_hash, cred_protect_policy)
+    ParsedCredentialId::encrypt(env, private_key, rp_id_hash, cred_protect_policy)
 }
 
 /// Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
@@ -253,11 +244,11 @@ pub fn encrypt_key_handle(
 /// - check_cred_protect is set and the credential requires user verification.
 pub fn decrypt_credential_source(
     env: &mut impl Env,
-    credential_id_bytes: Vec<u8>,
+    credential_id: Vec<u8>,
     rp_id_hash: &[u8],
     check_cred_protect: bool,
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-    let cred_id = match CredentialId::decrypt_from_bytes(env, credential_id_bytes.clone())? {
+    let cred_id = match ParsedCredentialId::decrypt(env, &credential_id)? {
         None => return Ok(None),
         Some(x) => x,
     };
@@ -268,7 +259,7 @@ pub fn decrypt_credential_source(
     }
     Ok(Some(PublicKeyCredentialSource {
         key_type: PublicKeyCredentialType::PublicKey,
-        credential_id: credential_id_bytes,
+        credential_id,
         private_key: cred_id.private_key,
         rp_id: String::new(),
         user_handle: Vec::new(),
@@ -285,9 +276,7 @@ pub fn decrypt_credential_source(
 #[cfg(test)]
 mod test {
     use super::*;
-    #[cfg(feature = "ed25519")]
-    use crate::ctap::credential_id::ED25519_CREDENTIAL_ID_VERSION;
-    use crate::ctap::credential_id::{CBOR_CREDENTIAL_ID_SIZE, ECDSA_CREDENTIAL_ID_VERSION};
+    use crate::ctap::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use crate::env::test::TestEnv;
     use crypto::hmac::hmac_256;
 
@@ -443,7 +432,7 @@ mod test {
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::new();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
-        let cbor = cbor::Value::from(private_key.clone());
+        let cbor = cbor::Value::from(&private_key);
         assert_eq!(PrivateKey::try_from(cbor), Ok(private_key),);
     }
 
@@ -599,40 +588,6 @@ mod test {
         test_decrypt_credential_missing_blocks(SignatureAlgorithm::EDDSA);
     }
 
-    /// This is a copy of the function that genereated deprecated v1 and v2 key handles.
-    pub fn legacy_encrypt_versioned_key_handle(
-        env: &mut impl Env,
-        private_key: &PrivateKey,
-        application: &[u8; 32],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let aes_enc_key =
-            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-
-        let mut plaintext = [0; 64];
-        let version = match private_key {
-            PrivateKey::Ecdsa(ecdsa_seed) => {
-                plaintext[..32].copy_from_slice(ecdsa_seed);
-                ECDSA_CREDENTIAL_ID_VERSION
-            }
-            #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => {
-                let sk_bytes = *ed25519_key.seed();
-                plaintext[0..32].copy_from_slice(&sk_bytes);
-                ED25519_CREDENTIAL_ID_VERSION
-            }
-        };
-        plaintext[32..64].copy_from_slice(application);
-        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        encrypted_id.insert(0, version);
-
-        let id_hmac = hmac_256::<Sha256>(
-            &env.key_store().key_handle_authentication()?,
-            &encrypted_id[..],
-        );
-        encrypted_id.extend(&id_hmac);
-        Ok(encrypted_id)
-    }
-
     /// This is a copy of the function that genereated deprecated key handles.
     fn legacy_encrypt_key_handle(
         env: &mut impl Env,
@@ -669,33 +624,6 @@ mod test {
             .unwrap();
 
         assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    fn test_encrypt_decrypt_credential_legacy_versioned(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id =
-            legacy_encrypt_versioned_key_handle(&mut env, &private_key, &rp_id_hash).unwrap();
-        // When checking credProtect for legacy credentials the check will always pass because we didn't persist credProtect
-        // policy info in it.
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    #[test]
-    fn test_ecdsa_encrypt_decrypt_credential_legacy_versioned() {
-        test_encrypt_decrypt_credential_legacy_versioned(SignatureAlgorithm::ES256);
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_ed25519_encrypt_decrypt_credential_legacy_versioned() {
-        test_encrypt_decrypt_credential_legacy_versioned(SignatureAlgorithm::EDDSA);
     }
 
     #[test]

@@ -12,16 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::credential_id::ParsedCredentialId;
-use super::data_formats::CredentialProtectionPolicy;
 use crate::api::key_store::KeyStore;
-use crate::ctap::data_formats::{
-    extract_array, extract_byte_string, CoseKey, PublicKeyCredentialSource,
-    PublicKeyCredentialType, SignatureAlgorithm,
-};
+use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::Env;
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
@@ -225,62 +219,10 @@ impl TryFrom<cbor::Value> for PrivateKey {
     }
 }
 
-/// Encrypts the given data into a credential ID, see CredentialId::encrypt.
-pub fn encrypt_key_handle(
-    env: &mut impl Env,
-    private_key: &PrivateKey,
-    rp_id_hash: &[u8; 32],
-    cred_protect_policy: Option<CredentialProtectionPolicy>,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
-    ParsedCredentialId::encrypt(env, private_key, rp_id_hash, cred_protect_policy)
-}
-
-/// Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
-///
-/// Returns None if
-/// - the format does not match any known versions,
-/// - the HMAC test fails or
-/// - the relying party does not match the decrypted relying party ID hash.
-/// - check_cred_protect is set and the credential requires user verification.
-pub fn decrypt_credential_source(
-    env: &mut impl Env,
-    credential_id: Vec<u8>,
-    rp_id_hash: &[u8],
-    check_cred_protect: bool,
-) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-    let cred_id = match ParsedCredentialId::decrypt(env, &credential_id)? {
-        None => return Ok(None),
-        Some(x) => x,
-    };
-    let is_protected =
-        cred_id.cred_protect_policy == Some(CredentialProtectionPolicy::UserVerificationRequired);
-    if rp_id_hash != cred_id.rp_id_hash || (check_cred_protect && is_protected) {
-        return Ok(None);
-    }
-    Ok(Some(PublicKeyCredentialSource {
-        key_type: PublicKeyCredentialType::PublicKey,
-        credential_id,
-        private_key: cred_id.private_key,
-        rp_id: String::new(),
-        user_handle: Vec::new(),
-        user_display_name: None,
-        cred_protect_policy: cred_id.cred_protect_policy,
-        creation_order: 0,
-        user_name: None,
-        user_icon: None,
-        cred_blob: None,
-        large_blob_key: None,
-    }))
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ctap::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use crate::env::test::TestEnv;
-    use crypto::hmac::hmac_256;
-
-    const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
     #[test]
     fn test_encrypt_decrypt_with_iv() {
@@ -481,203 +423,6 @@ mod test {
         assert_eq!(
             PrivateKey::try_from(cbor),
             Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
-        );
-    }
-
-    fn test_encrypt_decrypt_credential(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-        let decrypted_source =
-            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, false)
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_ecdsa_credential() {
-        test_encrypt_decrypt_credential(SignatureAlgorithm::ES256);
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_encrypt_decrypt_ed25519_credential() {
-        test_encrypt_decrypt_credential(SignatureAlgorithm::EDDSA);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_bad_version() {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
-
-        let rp_id_hash = [0x55; 32];
-        let mut encrypted_id =
-            encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-        encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
-        // Override the HMAC to pass the check.
-        encrypted_id.truncate(&encrypted_id.len() - 32);
-        let hmac_key = env.key_store().key_handle_authentication().unwrap();
-        let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
-        encrypted_id.extend(&id_hmac);
-
-        assert_eq!(
-            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, false),
-            Ok(None)
-        );
-    }
-
-    fn test_encrypt_decrypt_bad_hmac(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-        for i in 0..encrypted_id.len() {
-            let mut modified_id = encrypted_id.clone();
-            modified_id[i] ^= 0x01;
-            assert_eq!(
-                decrypt_credential_source(&mut env, modified_id, &rp_id_hash, false),
-                Ok(None)
-            );
-        }
-    }
-
-    #[test]
-    fn test_ecdsa_encrypt_decrypt_bad_hmac() {
-        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::ES256);
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_ed25519_encrypt_decrypt_bad_hmac() {
-        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::EDDSA);
-    }
-
-    fn test_decrypt_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-
-        for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
-            assert_eq!(
-                decrypt_credential_source(
-                    &mut env,
-                    encrypted_id[..length].to_vec(),
-                    &rp_id_hash,
-                    false
-                ),
-                Ok(None)
-            );
-        }
-    }
-
-    #[test]
-    fn test_ecdsa_decrypt_credential_missing_blocks() {
-        test_decrypt_credential_missing_blocks(SignatureAlgorithm::ES256);
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_ed25519_decrypt_credential_missing_blocks() {
-        test_decrypt_credential_missing_blocks(SignatureAlgorithm::EDDSA);
-    }
-
-    /// This is a copy of the function that genereated deprecated key handles.
-    fn legacy_encrypt_key_handle(
-        env: &mut impl Env,
-        private_key: crypto::ecdsa::SecKey,
-        application: &[u8; 32],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let aes_enc_key =
-            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-        let mut plaintext = [0; 64];
-        private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
-        plaintext[32..64].copy_from_slice(application);
-
-        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(
-            &env.key_store().key_handle_authentication()?,
-            &encrypted_id[..],
-        );
-        encrypted_id.extend(&id_hmac);
-        Ok(encrypted_id)
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_credential_legacy() {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
-        let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = legacy_encrypt_key_handle(&mut env, ecdsa_key, &rp_id_hash).unwrap();
-        // When checking credProtect for legacy credentials the check will always pass because we didn't persist credProtect
-        // policy info in it.
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    #[test]
-    fn test_encrypt_credential_size() {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(&mut env, &private_key, &rp_id_hash, None).unwrap();
-        assert_eq!(encrypted_id.len(), CBOR_CREDENTIAL_ID_SIZE);
-    }
-
-    #[test]
-    fn test_check_cred_protect_fail() {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(
-            &mut env,
-            &private_key,
-            &rp_id_hash,
-            Some(CredentialProtectionPolicy::UserVerificationRequired),
-        )
-        .unwrap();
-
-        assert_eq!(
-            decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true),
-            Ok(None)
-        );
-    }
-
-    #[test]
-    fn test_check_cred_protect_success() {
-        let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
-
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = encrypt_key_handle(
-            &mut env,
-            &private_key,
-            &rp_id_hash,
-            Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
-        )
-        .unwrap();
-
-        let decrypted_source = decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash, true)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(decrypted_source.private_key, private_key);
-        assert_eq!(
-            decrypted_source.cred_protect_policy,
-            Some(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList)
         );
     }
 }

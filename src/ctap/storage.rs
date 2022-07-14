@@ -1141,7 +1141,6 @@ mod test {
     #[test]
     fn test_enterprise_attestation() {
         let mut env = TestEnv::new();
-        env.set_attestation_id(attestation_store::Id::Enterprise);
 
         let dummy_attestation = Attestation {
             private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],

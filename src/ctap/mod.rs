@@ -2126,7 +2126,6 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::new();
-        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::VendorFacilitated),
             Some(vec!["example.com".to_string()]),
@@ -2173,7 +2172,6 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::new();
-        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut().setup_enterprise_attestation(
             Some(EnterpriseAttestationMode::PlatformManaged),
             Some(vec!["example.com".to_string()]),
@@ -2210,7 +2208,6 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::new();
-        env.set_attestation_id(attestation_store::Id::Enterprise);
         env.customization_mut()
             .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
 

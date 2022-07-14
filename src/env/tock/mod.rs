@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub use self::storage::{TockStorage, TockUpgradeStorage};
+use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::{HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
@@ -196,9 +197,26 @@ impl FirmwareProtection for TockEnv {
 
 impl key_store::Helper for TockEnv {}
 
-impl attestation_store::Helper for TockEnv {
-    fn attestation_id(&self) -> attestation_store::Id {
-        attestation_store::Id::Batch
+impl AttestationStore for TockEnv {
+    fn get(
+        &mut self,
+        id: &attestation_store::Id,
+    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
+        if !matches!(id, attestation_store::Id::Batch) {
+            return Err(attestation_store::Error::NoSupport);
+        }
+        attestation_store::helper_get(self)
+    }
+
+    fn set(
+        &mut self,
+        id: &attestation_store::Id,
+        attestation: Option<&attestation_store::Attestation>,
+    ) -> Result<(), attestation_store::Error> {
+        if !matches!(id, attestation_store::Id::Batch) {
+            return Err(attestation_store::Error::NoSupport);
+        }
+        attestation_store::helper_set(self, attestation)
     }
 }
 

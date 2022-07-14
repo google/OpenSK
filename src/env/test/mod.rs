@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
@@ -36,7 +37,6 @@ pub struct TestEnv {
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
     customization: TestCustomization,
-    attestation_id: attestation_store::Id,
 }
 
 pub struct TestRng256 {
@@ -107,14 +107,12 @@ impl TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
         let customization = DEFAULT_CUSTOMIZATION.into();
-        let attestation_id = attestation_store::Id::Batch;
         TestEnv {
             rng,
             user_presence,
             store,
             upgrade_storage,
             customization,
-            attestation_id,
         }
     }
 
@@ -128,10 +126,6 @@ impl TestEnv {
 
     pub fn rng(&mut self) -> &mut TestRng256 {
         &mut self.rng
-    }
-
-    pub fn set_attestation_id(&mut self, id: attestation_store::Id) {
-        self.attestation_id = id;
     }
 }
 
@@ -157,9 +151,20 @@ impl FirmwareProtection for TestEnv {
 
 impl key_store::Helper for TestEnv {}
 
-impl attestation_store::Helper for TestEnv {
-    fn attestation_id(&self) -> attestation_store::Id {
-        self.attestation_id.clone()
+impl AttestationStore for TestEnv {
+    fn get(
+        &mut self,
+        _id: &attestation_store::Id,
+    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
+        attestation_store::helper_get(self)
+    }
+
+    fn set(
+        &mut self,
+        _id: &attestation_store::Id,
+        attestation: Option<&attestation_store::Attestation>,
+    ) -> Result<(), attestation_store::Error> {
+        attestation_store::helper_set(self, attestation)
     }
 }
 

@@ -43,30 +43,6 @@ pub enum Error {
 /// Keys of the environment store reserved for the attestation store.
 pub const STORAGE_KEYS: &[usize] = &[1, 2];
 
-/// Implements a default attestation store using the environment store.
-///
-/// Supports only one attestation at a time.
-pub trait Helper: Env {
-    /// Returns the current attestation id.
-    fn attestation_id(&self) -> Id;
-}
-
-impl<T: Helper> AttestationStore for T {
-    fn get(&mut self, id: &Id) -> Result<Option<Attestation>, Error> {
-        if id != &self.attestation_id() {
-            return Err(Error::NoSupport);
-        }
-        helper_get(self)
-    }
-
-    fn set(&mut self, id: &Id, attestation: Option<&Attestation>) -> Result<(), Error> {
-        if id != &self.attestation_id() {
-            return Err(Error::NoSupport);
-        }
-        helper_set(self, attestation)
-    }
-}
-
 pub fn helper_get(env: &mut impl Env) -> Result<Option<Attestation>, Error> {
     let private_key = env.store().find(PRIVATE_KEY_STORAGE_KEY)?;
     let certificate = env.store().find(CERTIFICATE_STORAGE_KEY)?;

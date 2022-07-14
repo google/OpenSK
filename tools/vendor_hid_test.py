@@ -14,7 +14,8 @@ _DEFAULT_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 
 def sleep():
-  time.sleep(.01)
+  #time.sleep(.01)
+  pass
 
 
 def ping_data_size(packets):
@@ -149,6 +150,24 @@ class VendorHid(unittest.TestCase):
 
   def test_03_vendor_ping(self):
     self._test_ping(self.vendor_hid, byte=0x22)
+
+  def _test_send_and_receive(self, a: HidDevice):
+    byte_a = get_byte()
+    r = a.ping_init(packets=_PACKETS, byte=byte_a)
+    self.assertEqual(r, _SEND_DATA_SIZE)
+    for i in range(_PACKETS - 1):
+      r = a.ping_continue(i, byte=byte_a)
+      self.assertEqual(r, _SEND_DATA_SIZE)
+    for i in range(_PACKETS):
+      r = a.read_and_print()
+      self.assertEqual(r, _PACKET_SIZE)
+    self.assertReceivedDataMatches(a, byte_a)
+
+  def test_04_send_and_receive_fido(self):
+    self._test_send_and_receive(self.fido_hid)
+
+  def test_05_send_and_receive_vendor(self):
+    self._test_send_and_receive(self.vendor_hid)
 
   def _test_interleaved_send_and_receive(self, a: HidDevice, b: HidDevice):
     byte_a = get_byte()

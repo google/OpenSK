@@ -12,14 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! APIs for the environment.
-//!
-//! The [environment](crate::env::Env) is split into components. Each component has an API described
-//! by a trait. This module gathers the API of those components.
+use crate::clock::ClockInt;
+use embedded_time::duration::Milliseconds;
 
-pub mod connection;
-pub mod customization;
-pub mod firmware_protection;
-pub mod key_store;
-pub mod upgrade_storage;
-pub mod user_presence;
+pub enum SendOrRecvStatus {
+    Timeout,
+    Sent,
+    Received,
+}
+
+pub struct SendOrRecvError;
+
+pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
+
+pub trait HidConnection {
+    fn send_or_recv_with_timeout(
+        &mut self,
+        buf: &mut [u8; 64],
+        timeout: Milliseconds<ClockInt>,
+    ) -> SendOrRecvResult;
+}

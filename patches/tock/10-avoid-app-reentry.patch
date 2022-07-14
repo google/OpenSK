@@ -1,6 +1,6 @@
 diff --git a/capsules/src/usb/app.rs b/capsules/src/usb/app.rs
 new file mode 100644
-index 000000000..28dff3575
+index 000000000..c2f434f12
 --- /dev/null
 +++ b/capsules/src/usb/app.rs
 @@ -0,0 +1,65 @@
@@ -79,7 +79,7 @@ index 3f3a4f646..cb5e0af97 100644
  pub mod descriptors;
  pub mod usb_ctap;
 diff --git a/capsules/src/usb/usb_ctap.rs b/capsules/src/usb/usb_ctap.rs
-index da3d16d85..3a709aab5 100644
+index da3d16d85..e8f1a87a4 100644
 --- a/capsules/src/usb/usb_ctap.rs
 +++ b/capsules/src/usb/usb_ctap.rs
 @@ -1,7 +1,7 @@
@@ -262,7 +262,7 @@ index da3d16d85..3a709aab5 100644
                                  if !app.waiting {
                                      // The call to receive_packet() collected a pending packet.
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 41d69752c..cf17d7942 100644
+index adb7fde14..f6762b4b9 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -11,6 +11,7 @@ use super::descriptors::HIDSubordinateDescriptor;

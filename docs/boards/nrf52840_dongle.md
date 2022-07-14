@@ -59,14 +59,48 @@ Follow these steps:
 
     ![Nordic dongle retainer clip](../img/dongle_clip.jpg)
 
-1.  Depending on the programmer you're using, you may have to adapt the next
-    command line. Run our script for compiling/flashing Tock OS on your device:
+#### JLink
 
+Run our script for compiling/flashing Tock OS on your device:
+
+```shell
+$ ./deploy.py --board=nrf52840_dongle --programmer=jlink
+```
+
+#### OpenOCD
+
+1.  Create your openocd config, named `nordic_nrf52840_dongle.cfg` in the
+    appropriate location:
     ```shell
-    $ ./deploy.py --board=nrf52840_dongle_opensk --programmer=jlink
+    mkdir -p ${HOME}/.openocd/board
+    touch ${HOME}/.openocd/board/nordic_nrf52840_dongle.cfg
+    ```
+    
+    Paste the following st-link example and edit the specific setup to your needs:
+    ```
+    # Specific setup
+    source [find interface/stlink-dap.cfg]
+    transport select dapdirect_swd
+    
+    # The rest should be kept the same
+    set CHIPNAME nrf52840
+    source [find target/nrf52.cfg]
     ```
 
-1.  Remove the programming cable and the USB-A extension cable.
+1.  Test your config:
+       
+    ```shell
+    openocd -f board/nordic_nrf52840_dongle.cfg
+    ``` 
+
+1.  Run the deploy script with the appropriate options, i.e.:
+
+    ```shell
+    ./deploy.py --board=nrf52840_dongle --opensk --programmer=openocd
+    ```
+
+
+Finally, remove the programming cable and the USB-A extension cable.
 
 ### Buttons and LEDs
 

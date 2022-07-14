@@ -1,8 +1,23 @@
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::api::connection::HidConnection;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::key_store::KeyStore;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::Channel;
+use crate::api::user_presence::UserPresence;
 use persistent_store::{Storage, Store};
 use rng256::Rng256;
 
@@ -10,26 +25,22 @@ use rng256::Rng256;
 pub mod test;
 pub mod tock;
 
-pub trait UserPresence {
-    /// Blocks for user presence.
-    ///
-    /// Returns an error in case of timeout or keepalive error.
-    fn check(&mut self, channel: Channel) -> Result<(), Ctap2StatusCode>;
-}
-
 /// Describes what CTAP needs to function.
 pub trait Env {
     type Rng: Rng256;
     type UserPresence: UserPresence;
     type Storage: Storage;
+    type KeyStore: KeyStore;
     type UpgradeStorage: UpgradeStorage;
     type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
+    type HidConnection: HidConnection;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn store(&mut self) -> &mut Store<Self::Storage>;
+    fn key_store(&mut self) -> &mut Self::KeyStore;
 
     /// Returns the upgrade storage instance.
     ///
@@ -48,4 +59,11 @@ pub trait Env {
     fn write(&mut self) -> Self::Write;
 
     fn customization(&self) -> &Self::Customization;
+
+    /// I/O connection for sending packets implementing CTAP HID protocol.
+    fn main_hid_connection(&mut self) -> &mut Self::HidConnection;
+
+    /// I/O connection for sending packets implementing vendor extensions to CTAP HID protocol.
+    #[cfg(feature = "vendor_hid")]
+    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
 }

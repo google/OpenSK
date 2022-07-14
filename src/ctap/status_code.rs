@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::key_store;
+use crate::api::user_presence::UserPresenceError;
+
 // CTAP specification (version 20190130) section 6.3
 // For now, only the CTAP2 codes are here, the CTAP1 are not included.
 #[allow(non_camel_case_types)]
@@ -80,4 +83,20 @@ pub enum Ctap2StatusCode {
     /// It may be possible that some of those errors are actually internal errors.
     CTAP2_ERR_VENDOR_HARDWARE_FAILURE = 0xF3,
     _CTAP2_ERR_VENDOR_LAST = 0xFF,
+}
+
+impl From<UserPresenceError> for Ctap2StatusCode {
+    fn from(user_presence_error: UserPresenceError) -> Self {
+        match user_presence_error {
+            UserPresenceError::Timeout => Self::CTAP2_ERR_USER_ACTION_TIMEOUT,
+            UserPresenceError::Declined => Self::CTAP2_ERR_OPERATION_DENIED,
+            UserPresenceError::Canceled => Self::CTAP2_ERR_KEEPALIVE_CANCEL,
+        }
+    }
+}
+
+impl From<key_store::Error> for Ctap2StatusCode {
+    fn from(_: key_store::Error) -> Self {
+        Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR
+    }
 }

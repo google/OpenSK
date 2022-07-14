@@ -270,7 +270,7 @@ class OpenSKInstaller:
         jlink_speed=1200,
         openocd=self.args.programmer == "openocd",
         openocd_board=board.openocd_board,
-        openocd_cmd="openocd",
+        openocd_cmd=self.args.openocd_cmd,
         openocd_commands=copy.copy(board.openocd_commands),
         openocd_options=copy.copy(board.openocd_options),
         jtag=False,
@@ -770,6 +770,9 @@ class OpenSKInstaller:
       info("Nothing to do.")
       return 0
 
+    if self.args.check_patches:
+      subprocess.run(["./maintainers/patches", "check"], check=False)
+
     # Compile what needs to be compiled
     board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.tockos:
@@ -1002,6 +1005,14 @@ if __name__ == "__main__":
       help=("Sets the method to be used to flash Tock OS or the application "
             "on the target board."),
   )
+  main_parser.add_argument(
+      "--openocd_cmd",
+      dest="openocd_cmd",
+      metavar="CMD",
+      default="openocd",
+      help=("Specifies a custom command to use when calling openocd. Can be "
+            "used to pass arguments i.e. 'openocd -s /tmp/openocd_scripts'."),
+  )
 
   main_parser.add_argument(
       "--no-tockos",
@@ -1104,6 +1115,14 @@ if __name__ == "__main__":
             "curve Ed25519. "
             "Current implementation is not side-channel resilient due to use "
             "of variable-time arithmetic for computations over secret key."),
+  )
+
+  main_parser.add_argument(
+      "--disable-check-patches",
+      action="store_false",
+      default=True,
+      dest="check_patches",
+      help=("Don't check that patches are in sync with their submodules."),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

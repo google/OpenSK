@@ -7,12 +7,12 @@ PROGRAM="$0"
 MODULES=(tock libtock-rs)
 
 success() {
-  echo -e "\e[1;32mDone:\e[m $1"
+  echo -e "\r\e[1;32mDone:\e[m $1"
   exit 0
 }
 
 fail() {
-  echo -e "\e[1;31mError:\e[m $1"
+  echo -e "\r\e[1;31mError:\e[m $1"
   exit 1
 }
 
@@ -34,7 +34,7 @@ get_head() {
 help() {
   local root="$(get_root)"
   cat <<EOF
-Usage: ${PROGRAM} {apply|save}
+Usage: ${PROGRAM} {apply|save|restore|check}
 
   apply       Applies the patches to the submodules regardless of their state.
               As a consequence this can always be called to get to a clean state
@@ -50,6 +50,11 @@ Usage: ${PROGRAM} {apply|save}
               state. As a consequence this can always be called to get to a
               clean state but may result in data loss if there are unsaved
               changes.
+
+  check       Checks whether the submodules and the patches are in sync. This
+              may fail in two cases:
+              - when the patches were updated but not restored/applied, and
+              - when the submodules have been modified but not saved.
 
 Example:
 
@@ -85,6 +90,20 @@ EOF
   exit 0
 }
 
+apply_module() {
+  local root="$1" module="$2" file
+  git checkout -q "${root}"
+  if [[ "${module}" == tock ]]; then
+    cp -a ../../boards .
+    commit '00-boards'
+  fi
+  for file in ../../patches/"${module}"/*; do
+    git apply "${file}"
+    commit "$(basename "${file}" .patch)"
+    echo -n .
+  done
+}
+
 apply() {
   for module in "${MODULES[@]}"; do
     local root="$(get_root "${module}")"
@@ -92,15 +111,7 @@ apply() {
       cd third_party/"${module}"
       git reset -q --hard
       git clean -qfxd
-      git checkout -q "${root}"
-      if [[ "${module}" == tock ]]; then
-        cp -a ../../boards .
-        commit '00-boards'
-      fi
-      for file in ../../patches/"${module}"/*; do
-        git apply "${file}"
-        commit "$(basename "${file}" .patch)"
-      done
+      apply_module "${root}" "${module}"
     )
   done
 }
@@ -119,7 +130,7 @@ save() {
           | sed '/^-- $/,$d' > "../../patches/${module}/${file#*-}"
       done
       git clean -qfxd
-      top="$(get_head)"
+      local top="$(get_head)"
       git checkout -q "${root}"
       if [[ "${module}" == tock ]]; then
         rm -r boards
@@ -131,6 +142,31 @@ save() {
       git reset -q --hard
       git clean -qfxd
       git checkout -q "${top}"
+    )
+  done
+}
+
+check() {
+  # Overwrite the commit function to do nothing.
+  commit() { true; }
+  for module in "${MODULES[@]}"; do
+    local root="$(get_root "${module}")"
+    ( set -e
+      cd third_party/"${module}"
+      git commit --allow-empty -qmi
+      git add .
+      git commit --allow-empty -qmx
+      local top="$(get_head)"
+      apply_module "${root}" "${module}"
+      git add .
+      git commit --allow-empty -qmy
+      # We need to cleanup (and not exit) regardless of a diff.
+      local r; if git diff "${top}" --quiet; then r=0; else r=1; fi
+      git checkout -q "${top}"
+      git reset -q HEAD~
+      git reset -q --soft HEAD~
+      [[ "${r}" -eq 0 ]] \
+        || fail "The ${module} submodule differs from its patches."
     )
   done
 }
@@ -148,10 +184,14 @@ case $1 in
     success 'Saved the submodules to the patches.'
     ;;
   restore)
-    # Ovewrite the commit function to do nothing.
+    # Overwrite the commit function to do nothing.
     commit() { true; }
     apply
     success 'Restored the submodules.'
+    ;;
+  check)
+    check
+    success 'The submodules and patches are in sync.'
     ;;
   *) fail 'Unexpected argument. Run without argument for help.' ;;
 esac

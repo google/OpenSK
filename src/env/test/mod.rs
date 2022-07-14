@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use self::upgrade_storage::BufferUpgradeStorage;
+use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::api::key_store;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
+use crate::api::{attestation_store, key_store};
 use crate::clock::ClockInt;
 use crate::env::Env;
 use customization::TestCustomization;
@@ -150,11 +151,29 @@ impl FirmwareProtection for TestEnv {
 
 impl key_store::Helper for TestEnv {}
 
+impl AttestationStore for TestEnv {
+    fn get(
+        &mut self,
+        _id: &attestation_store::Id,
+    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
+        attestation_store::helper_get(self)
+    }
+
+    fn set(
+        &mut self,
+        _id: &attestation_store::Id,
+        attestation: Option<&attestation_store::Attestation>,
+    ) -> Result<(), attestation_store::Error> {
+        attestation_store::helper_set(self, attestation)
+    }
+}
+
 impl Env for TestEnv {
     type Rng = TestRng256;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
     type KeyStore = Self;
+    type AttestationStore = Self;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
@@ -174,6 +193,10 @@ impl Env for TestEnv {
     }
 
     fn key_store(&mut self) -> &mut Self {
+        self
+    }
+
+    fn attestation_store(&mut self) -> &mut Self {
         self
     }
 

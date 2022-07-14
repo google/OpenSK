@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::HidConnection;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
@@ -36,11 +37,13 @@ pub trait Env {
     type Write: core::fmt::Write;
     type Customization: Customization;
     type HidConnection: HidConnection;
+    type AttestationStore: AttestationStore;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn store(&mut self) -> &mut Store<Self::Storage>;
     fn key_store(&mut self) -> &mut Self::KeyStore;
+    fn attestation_store(&mut self) -> &mut Self::AttestationStore;
 
     /// Returns the upgrade storage instance.
     ///

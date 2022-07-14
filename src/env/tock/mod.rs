@@ -13,11 +13,12 @@
 // limitations under the License.
 
 pub use self::storage::{TockStorage, TockUpgradeStorage};
+use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::{HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
-use crate::api::key_store;
 use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
+use crate::api::{attestation_store, key_store};
 use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
 use core::cell::Cell;
@@ -196,11 +197,35 @@ impl FirmwareProtection for TockEnv {
 
 impl key_store::Helper for TockEnv {}
 
+impl AttestationStore for TockEnv {
+    fn get(
+        &mut self,
+        id: &attestation_store::Id,
+    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
+        if !matches!(id, attestation_store::Id::Batch) {
+            return Err(attestation_store::Error::NoSupport);
+        }
+        attestation_store::helper_get(self)
+    }
+
+    fn set(
+        &mut self,
+        id: &attestation_store::Id,
+        attestation: Option<&attestation_store::Attestation>,
+    ) -> Result<(), attestation_store::Error> {
+        if !matches!(id, attestation_store::Id::Batch) {
+            return Err(attestation_store::Error::NoSupport);
+        }
+        attestation_store::helper_set(self, attestation)
+    }
+}
+
 impl Env for TockEnv {
     type Rng = TockRng256;
     type UserPresence = Self;
     type Storage = TockStorage;
     type KeyStore = Self;
+    type AttestationStore = Self;
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
@@ -220,6 +245,10 @@ impl Env for TockEnv {
     }
 
     fn key_store(&mut self) -> &mut Self {
+        self
+    }
+
+    fn attestation_store(&mut self) -> &mut Self {
         self
     }
 

@@ -32,6 +32,10 @@ impl HidPacketIterator {
     pub fn none() -> HidPacketIterator {
         HidPacketIterator(None)
     }
+
+    pub fn has_data(&self) -> bool {
+        self.0.is_some()
+    }
 }
 
 impl Iterator for HidPacketIterator {

@@ -283,7 +283,7 @@ fn send_keepalive_up_needed(
             Ok(SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Ok(SendOrRecvStatus::Received) => {
+            Ok(SendOrRecvStatus::Received(_)) => {
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {

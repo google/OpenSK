@@ -54,10 +54,8 @@ impl HidConnection for TockHidConnection {
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
             Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
-            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint))
-                if self.endpoint == recv_endpoint =>
-            {
-                Ok(SendOrRecvStatus::Received)
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
+                Ok(SendOrRecvStatus::Received(recv_endpoint))
             }
             _ => Err(SendOrRecvError),
         }

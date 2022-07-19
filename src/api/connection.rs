@@ -14,11 +14,12 @@
 
 use crate::clock::ClockInt;
 use embedded_time::duration::Milliseconds;
+use libtock_drivers::usb_ctap_hid::UsbEndpoint;
 
 pub enum SendOrRecvStatus {
     Timeout,
     Sent,
-    Received,
+    Received(UsbEndpoint),
 }
 
 pub struct SendOrRecvError;

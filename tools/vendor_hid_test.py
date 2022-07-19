@@ -1,4 +1,5 @@
 """These tests verify the functionality of the VendorHID interface."""
+from typing import Dict, Iterable
 import hid
 import time
 import unittest
@@ -10,11 +11,12 @@ _VENDOR_USAGE_PAGE = 0xFF00
 _PACKETS = 4
 _PACKET_SIZE = 64
 _SEND_DATA_SIZE = _PACKET_SIZE + 1
-_DEFAULT_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
+_BROADCAST_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 
 def sleep():
-  #time.sleep(.01)
+  # TODO(liamjm): remove this sleep once it is not necessary.
+  time.sleep(.01)
   pass
 
 
@@ -22,13 +24,13 @@ def ping_data_size(packets):
   return 57 + 59 * (packets - 1)
 
 
-_BYTE_VAL = 0x10
-
-
 def get_byte():
-  global _BYTE_VAL
-  _BYTE_VAL = _BYTE_VAL + 1
-  return _BYTE_VAL
+  """Return a unique byte value per request."""
+  get_byte.byte_val += 1
+  return get_byte.byte_val
+
+
+get_byte.byte_val = 0x10
 
 
 class HidDevice(object):
@@ -45,13 +47,15 @@ class HidDevice(object):
     if self.dev:
       self.dev.close()
 
+  def reset(self) -> None:
+    self.rx_packets = []
+
   def create_and_init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.
-    init_packet = [0] + list(_DEFAULT_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
-    if len(init_packet) != _SEND_DATA_SIZE:
-      raise Exception(
-          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(init_packet)}')
+    init_packet = [0] + list(_BROADCAST_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
+    assert len(init_packet) == _SEND_DATA_SIZE, (
+        f'Expected packet to be {_SEND_DATA_SIZE} but was {len(init_packet)}')
     self.dev.write(bytes(init_packet))
     self.cid = self.dev.read(_PACKET_SIZE, 2000)[15:19]
     sleep()
@@ -60,18 +64,18 @@ class HidDevice(object):
     size = ping_data_size(packets)
     ping_packet = [0] + list(self.cid) + [0x81, size // 256, size % 256
                                          ] + [byte] * 57
-    if len(ping_packet) != _SEND_DATA_SIZE:
-      raise Exception(
-          f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}')
+    assert len(ping_packet) == _SEND_DATA_SIZE, (
+        f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}')
+
     r = self.dev.write(bytes(ping_packet))
     sleep()
     return r
 
   def ping_continue(self, num, byte=0x88) -> int:
     continue_packet = [0] + list(self.cid) + [num] + [byte] * 59
-    if len(continue_packet) != _SEND_DATA_SIZE:
-      raise Exception(f'Expected packet to be {_SEND_DATA_SIZE} but was '
-                      '{len(continue_packet)}')
+    assert len(continue_packet) == _SEND_DATA_SIZE, (
+        f'Expected packet to be {_SEND_DATA_SIZE} '
+        'but was {len(continue_packet)}')
     r = self.dev.write(bytes(continue_packet))
     sleep()
     return r
@@ -82,27 +86,24 @@ class HidDevice(object):
     sleep()
     return len(d)
 
-  def get_received_data(self):
+  def get_received_data(self) -> bytes:
     """This combines the data from the received packets, to match the ping
 packets sent."""
     d = b''
-    if len(self.rx_packets) < _PACKETS:
-      raise Exception(f'Insufficent packets received - want {_PACKETS}'
-                      ', got {len(self.rx_packets)}')
-    d += self.rx_packets[-_PACKETS][7:]
-    for p in self.rx_packets[-_PACKETS + 1:]:
+    d += self.rx_packets.pop(0)[7:]
+    for p in self.rx_packets:
       d += p[5:]
     return d
 
 
-def get_devices(usage_page):
+def get_devices(usage_page) -> Iterable[Dict]:
   for device in hid.enumerate(_OPENSK_VID, _OPENSK_PID):
     if device['usage_page'] == usage_page:
       yield device
 
 
-class VendorHid(unittest.TestCase):
-  """Tests for the Vendor HID interface."""
+class HidInterfaces(unittest.TestCase):
+  """Tests for the Vendor and FIDO HID interfaces."""
 
   @classmethod
   def setUpClass(cls):
@@ -110,14 +111,21 @@ class VendorHid(unittest.TestCase):
     cls.vendor_hid = cls.get_device(_VENDOR_USAGE_PAGE)
 
   @classmethod
-  def get_device(cls, usage_page):
+  def get_device(cls, usage_page) -> HidDevice:
     devices = list(get_devices(usage_page))
     if len(devices) != 1:
       raise Exception(f'Found {len(devices)} devices')
     return HidDevice(devices[0])
 
+  def setUp(self) -> None:
+    super().setUp()
+    # Ensure the rx_packets are empty
+    self.fido_hid.reset()
+    self.vendor_hid.reset()
+
   def assertReceivedDataMatches(self, device: HidDevice, byte):
     expected = bytes([byte] * ping_data_size(_PACKETS))
+    self.assertEqual(len(device.rx_packets), _PACKETS)
     self.assertEqual(device.get_received_data(), expected)
 
   def test_00_init(self):
@@ -132,7 +140,7 @@ class VendorHid(unittest.TestCase):
     self.assertNotEqual(self.fido_hid.cid, None)
 
   def test_01_cid(self):
-    self.assertNotEqual(self.vendor_hid.cid, _DEFAULT_CID)
+    self.assertNotEqual(self.vendor_hid.cid, _BROADCAST_CID)
 
   def _test_ping(self, dev: HidDevice, byte):
     r = dev.ping_init(_PACKETS, byte)
@@ -189,10 +197,10 @@ class VendorHid(unittest.TestCase):
     self.assertReceivedDataMatches(a, byte_a)
     self.assertReceivedDataMatches(b, byte_b)
 
-  def test_04_interleaved_send_and_receive_fido_first(self):
+  def test_06_interleaved_send_and_receive_fido_first(self):
     self._test_interleaved_send_and_receive(self.fido_hid, self.vendor_hid)
 
-  def test_05_interleaved_send_and_receive_vendor_first(self):
+  def test_07_interleaved_send_and_receive_vendor_first(self):
     self._test_interleaved_send_and_receive(self.vendor_hid, self.fido_hid)
 
   def _test_interleaved_send_and_batch_receive(self, a: HidDevice,
@@ -217,11 +225,11 @@ class VendorHid(unittest.TestCase):
     self.assertReceivedDataMatches(a, byte_a)
     self.assertReceivedDataMatches(b, byte_b)
 
-  def test_06_interleaved_send_and_batch_receive_fido_first(self):
+  def test_08_interleaved_send_and_batch_receive_fido_first(self):
     self._test_interleaved_send_and_batch_receive(self.fido_hid,
                                                   self.vendor_hid)
 
-  def test_07_interleaved_send_and_batch_receive_vendor_first(self):
+  def test_09_interleaved_send_and_batch_receive_vendor_first(self):
     self._test_interleaved_send_and_batch_receive(self.vendor_hid,
                                                   self.fido_hid)
 
@@ -246,11 +254,11 @@ class VendorHid(unittest.TestCase):
     self.assertReceivedDataMatches(a, byte_a)
     self.assertReceivedDataMatches(b, byte_b)
 
-  def test_08_batch_send_and_interleaved_receive_fido_first(self):
+  def test_10_batch_send_and_interleaved_receive_fido_first(self):
     self._test_batch_send_and_interleaved_receive(self.fido_hid,
                                                   self.vendor_hid)
 
-  def test_09_batch_send_and_interleaved_receive_vendor_first(self):
+  def test_11_batch_send_and_interleaved_receive_vendor_first(self):
     self._test_batch_send_and_interleaved_receive(self.vendor_hid,
                                                   self.fido_hid)
 

@@ -1,5 +1,5 @@
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 16b80cb10..2876074e1 100644
+index 16b80cb10..2b19519e4 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -120,7 +120,6 @@ struct EndpointState {
@@ -38,7 +38,7 @@ index 16b80cb10..2876074e1 100644
              endpoints: [
                  EndpointState::new(ENDPOINT_NUM),
                  #[cfg(feature = "vendor_hid")]
-@@ -306,16 +310,20 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -306,12 +310,13 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
      }
 
      pub fn receive_packet(&'a self, app: &mut App) {
@@ -53,19 +53,12 @@ index 16b80cb10..2876074e1 100644
 +        } else {
 +            self.pending_out.set(true);
 +            // Process the next endpoint that has a delayed packet.
-+            // TODO(liamjm): Determine if a round-robin approach reduces latency
-+            // in the worst case.
 +            for i in self.next_endpoint_index.get()..self.next_endpoint_index.get()+NUM_ENDPOINTS {
 +                let s = &self.endpoints[i % NUM_ENDPOINTS];
                  // In case we reported Delay before, send the pending packet back to the client.
                  // Otherwise, there's nothing to do, the controller will send us a packet_out when a
                  // packet arrives.
-                 if s.delayed_out.take() {
-+                    self.next_endpoint_index.set((i + 1) % NUM_ENDPOINTS);
-                     if self.send_packet_to_client(s.endpoint, Some(app)) {
-                         // If that succeeds, alert the controller that we can now
-                         // receive data on the Interrupt OUT endpoint.
-@@ -344,7 +352,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -344,7 +349,7 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  .client
                  .map_or(false, |client| client.can_receive_packet(&app))
              {
@@ -74,7 +67,21 @@ index 16b80cb10..2876074e1 100644
 
                  // Clear any pending packet on the transmitting side.
                  // It's up to the client to handle the received packet and decide if this packet
-@@ -387,8 +395,8 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+@@ -352,6 +357,13 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
+                 self.cancel_in_transaction(endpoint);
+ 
+                 self.client.map(|client| client.packet_received(&buf, endpoint, app));
++                // Update next packet to send.
++                for (i, ep) in self.endpoints.iter().enumerate() {
++                  if ep.endpoint == endpoint {
++                    self.next_endpoint_index.set((i + 1) % NUM_ENDPOINTS);
++                    break
++                  }
++                }
+                 true
+             } else {
+                 // Cannot receive now, indicate a delay to the controller.
+@@ -387,8 +399,8 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
      }
 
      fn cancel_out_transaction(&'a self, endpoint: usize) -> bool {

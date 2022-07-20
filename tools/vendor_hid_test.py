@@ -50,7 +50,6 @@ class HidDevice(object):
   def reset(self) -> None:
     self.rx_packets = []
 
-
   def create_and_init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.

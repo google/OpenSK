@@ -50,6 +50,7 @@ class HidDevice(object):
   def reset(self) -> None:
     self.rx_packets = []
 
+
   def create_and_init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.
@@ -93,6 +94,8 @@ packets sent."""
     d += self.rx_packets.pop(0)[7:]
     for p in self.rx_packets:
       d += p[5:]
+    # And clear the packets received to ensure consistency.
+    self.rx_packets = []
     return d
 
 

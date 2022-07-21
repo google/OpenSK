@@ -284,6 +284,7 @@ fn send_keepalive_up_needed(
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
             Ok(SendOrRecvStatus::Received(_)) => {
+                // TODO(liamjm): Support receiving packets on both interfaces.
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {

@@ -86,14 +86,14 @@ struct SendPacket {
     packet: [u8; 64],
 }
 
-struct Endpoints {
-    endpoints: [EndpointReply; NUM_ENDPOINTS],
+struct EndpointReplies {
+    replies: [EndpointReply; NUM_ENDPOINTS],
 }
 
-impl Endpoints {
+impl EndpointReplies {
     pub fn new() -> Self {
-        Endpoints {
-            endpoints: [
+        EndpointReplies {
+            replies: [
                 EndpointReply::new(UsbEndpoint::MainHid),
                 #[cfg(feature = "vendor_hid")]
                 EndpointReply::new(UsbEndpoint::VendorHid),
@@ -102,7 +102,7 @@ impl Endpoints {
     }
 
     pub fn next_packet(&mut self) -> Option<SendPacket> {
-        for ep in self.endpoints.iter_mut() {
+        for ep in self.replies.iter_mut() {
             if let Some(packet) = ep.reply.next() {
                 return Some(SendPacket {
                     transport: ep.transport,
@@ -128,7 +128,7 @@ fn main() {
     let mut led_counter = 0;
     let mut last_led_increment = boot_time;
 
-    let mut endpoints = Endpoints::new();
+    let mut replies = EndpointReplies::new();
 
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
@@ -156,7 +156,7 @@ fn main() {
         let mut usb_endpoint: Option<UsbEndpoint> = None;
         let mut pkt_request = [0; 64];
 
-        if let Some(mut packet) = endpoints.next_packet() {
+        if let Some(mut packet) = replies.next_packet() {
             // send and receive.
             let hid_connection = packet.transport.hid_connection(ctap.env());
             match hid_connection.send_or_recv_with_timeout(&mut packet.packet, SEND_TIMEOUT) {
@@ -229,7 +229,7 @@ fn main() {
             let reply = ctap.process_hid_packet(&pkt_request, transport, now);
             if reply.has_data() {
                 // Update endpoint with the reply.
-                for ep in endpoints.endpoints.iter_mut() {
+                for ep in replies.replies.iter_mut() {
                     if ep.endpoint == endpoint {
                         ep.reply = reply;
                         break;

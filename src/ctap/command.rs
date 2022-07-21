@@ -1103,7 +1103,7 @@ mod test {
                 data: vec![0xFF; 0x100],
                 hash: vec![0x44; 32],
                 signature: Some(CoseSignature {
-                    algorithm: SignatureAlgorithm::ES256,
+                    algorithm: SignatureAlgorithm::Es256,
                     bytes: [0x55; 64],
                 }),
             })

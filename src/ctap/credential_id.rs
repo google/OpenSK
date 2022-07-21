@@ -288,19 +288,19 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_ecdsa_credential() {
-        test_encrypt_decrypt_credential(SignatureAlgorithm::ES256);
+        test_encrypt_decrypt_credential(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_encrypt_decrypt_ed25519_credential() {
-        test_encrypt_decrypt_credential(SignatureAlgorithm::EDDSA);
+        test_encrypt_decrypt_credential(SignatureAlgorithm::Eddsa);
     }
 
     #[test]
     fn test_encrypt_decrypt_bad_version() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
         let mut encrypted_id =
@@ -337,13 +337,13 @@ mod test {
 
     #[test]
     fn test_ecdsa_encrypt_decrypt_bad_hmac() {
-        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::ES256);
+        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_ed25519_encrypt_decrypt_bad_hmac() {
-        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::EDDSA);
+        test_encrypt_decrypt_bad_hmac(SignatureAlgorithm::Eddsa);
     }
 
     fn test_decrypt_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
@@ -369,13 +369,13 @@ mod test {
 
     #[test]
     fn test_ecdsa_decrypt_credential_missing_blocks() {
-        test_decrypt_credential_missing_blocks(SignatureAlgorithm::ES256);
+        test_decrypt_credential_missing_blocks(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_ed25519_decrypt_credential_missing_blocks() {
-        test_decrypt_credential_missing_blocks(SignatureAlgorithm::EDDSA);
+        test_decrypt_credential_missing_blocks(SignatureAlgorithm::Eddsa);
     }
 
     /// This is a copy of the function that genereated deprecated key handles.
@@ -420,7 +420,7 @@ mod test {
     #[test]
     fn test_encrypt_credential_size() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
@@ -431,7 +431,7 @@ mod test {
     #[test]
     fn test_check_cred_protect_fail() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_to_credential_id(
@@ -451,7 +451,7 @@ mod test {
     #[test]
     fn test_check_cred_protect_success() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id = encrypt_to_credential_id(

@@ -507,9 +507,9 @@ impl From<PackedAttestationStatement> for cbor::Value {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum SignatureAlgorithm {
-    ES256 = ES256_ALGORITHM as isize,
+    Es256 = ES256_ALGORITHM as isize,
     #[cfg(feature = "ed25519")]
-    EDDSA = EDDSA_ALGORITHM as isize,
+    Eddsa = EDDSA_ALGORITHM as isize,
     // This is the default for all numbers not covered above.
     // Unknown types should be ignored, instead of returning errors.
     Unknown = 0,
@@ -524,9 +524,9 @@ impl From<SignatureAlgorithm> for cbor::Value {
 impl From<i64> for SignatureAlgorithm {
     fn from(int: i64) -> Self {
         match int {
-            ES256_ALGORITHM => SignatureAlgorithm::ES256,
+            ES256_ALGORITHM => SignatureAlgorithm::Es256,
             #[cfg(feature = "ed25519")]
-            EDDSA_ALGORITHM => SignatureAlgorithm::EDDSA,
+            EDDSA_ALGORITHM => SignatureAlgorithm::Eddsa,
             _ => SignatureAlgorithm::Unknown,
         }
     }
@@ -950,10 +950,10 @@ impl TryFrom<CoseSignature> for ecdsa::Signature {
 
     fn try_from(cose_signature: CoseSignature) -> Result<Self, Ctap2StatusCode> {
         match cose_signature.algorithm {
-            SignatureAlgorithm::ES256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
+            SignatureAlgorithm::Es256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
                 .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::EDDSA => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            SignatureAlgorithm::Eddsa => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
             SignatureAlgorithm::Unknown => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
         }
     }
@@ -1611,15 +1611,15 @@ mod test {
 
     #[test]
     fn test_from_into_signature_algorithm_int() {
-        let alg_int = SignatureAlgorithm::ES256 as i64;
+        let alg_int = SignatureAlgorithm::Es256 as i64;
         let signature_algorithm = SignatureAlgorithm::from(alg_int);
-        assert_eq!(signature_algorithm, SignatureAlgorithm::ES256);
+        assert_eq!(signature_algorithm, SignatureAlgorithm::Es256);
 
         #[cfg(feature = "ed25519")]
         {
-            let alg_int = SignatureAlgorithm::EDDSA as i64;
+            let alg_int = SignatureAlgorithm::Eddsa as i64;
             let signature_algorithm = SignatureAlgorithm::from(alg_int);
-            assert_eq!(signature_algorithm, SignatureAlgorithm::EDDSA);
+            assert_eq!(signature_algorithm, SignatureAlgorithm::Eddsa);
         }
 
         let unknown_alg_int = -1;
@@ -1631,7 +1631,7 @@ mod test {
     fn test_from_into_signature_algorithm() {
         let cbor_signature_algorithm: cbor::Value = cbor_int!(ES256_ALGORITHM);
         let signature_algorithm = SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
-        let expected_signature_algorithm = SignatureAlgorithm::ES256;
+        let expected_signature_algorithm = SignatureAlgorithm::Es256;
         assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
         let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
         assert_eq!(created_cbor, cbor_signature_algorithm);
@@ -1641,7 +1641,7 @@ mod test {
             let cbor_signature_algorithm: cbor::Value = cbor_int!(EDDSA_ALGORITHM);
             let signature_algorithm =
                 SignatureAlgorithm::try_from(cbor_signature_algorithm.clone());
-            let expected_signature_algorithm = SignatureAlgorithm::EDDSA;
+            let expected_signature_algorithm = SignatureAlgorithm::Eddsa;
             assert_eq!(signature_algorithm, Ok(expected_signature_algorithm));
             let created_cbor: cbor::Value = signature_algorithm.unwrap().into();
             assert_eq!(created_cbor, cbor_signature_algorithm);
@@ -1731,13 +1731,13 @@ mod test {
 
     #[test]
     fn test_from_into_ecdsa_public_key_credential_parameter() {
-        test_from_into_public_key_credential_parameter(ES256_ALGORITHM, SignatureAlgorithm::ES256);
+        test_from_into_public_key_credential_parameter(ES256_ALGORITHM, SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_from_into_ed25519_public_key_credential_parameter() {
-        test_from_into_public_key_credential_parameter(EDDSA_ALGORITHM, SignatureAlgorithm::EDDSA);
+        test_from_into_public_key_credential_parameter(EDDSA_ALGORITHM, SignatureAlgorithm::Eddsa);
     }
 
     #[test]

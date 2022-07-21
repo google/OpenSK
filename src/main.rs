@@ -232,11 +232,13 @@ fn main() {
                 for ep in replies.replies.iter_mut() {
                     if ep.endpoint == endpoint {
                         if ep.reply.has_data() {
+                            #[cfg(feature = "debug_ctap")]
                             writeln!(
                                 Console::new(),
                                 "Warning overwritting existing reply for endpoint {}",
                                 endpoint as usize
-                            ).unwrap();
+                            )
+                            .unwrap();
                         }
                         ep.reply = reply;
                         break;

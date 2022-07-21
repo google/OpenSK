@@ -353,7 +353,7 @@ mod test {
 
         for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
             assert_eq!(
-                decrypt_credential_id(&mut env, encrypted_id[..length].to_vec(), &rp_id_hash,),
+                decrypt_credential_id(&mut env, encrypted_id[..length].to_vec(), &rp_id_hash),
                 Ok(None)
             );
         }

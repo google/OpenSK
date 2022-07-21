@@ -231,6 +231,13 @@ fn main() {
                 // Update endpoint with the reply.
                 for ep in replies.replies.iter_mut() {
                     if ep.endpoint == endpoint {
+                        if ep.reply.has_data() {
+                            writeln!(
+                                Console::new(),
+                                "Warning overwritting existing reply for endpoint {}",
+                                endpoint as usize
+                            ).unwrap();
+                        }
                         ep.reply = reply;
                         break;
                     }

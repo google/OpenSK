@@ -717,7 +717,7 @@ impl CtapState {
         Ok(())
     }
 
-    fn check_cred_protect(
+    fn check_cred_protect_for_listed_credential(
         &mut self,
         credential: &Option<PublicKeyCredentialSource>,
         has_uv: bool,
@@ -825,10 +825,10 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if self.check_cred_protect(
+                if self.check_cred_protect_for_listed_credential(
                     &storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
                     has_uv,
-                ) || self.check_cred_protect(
+                ) || self.check_cred_protect_for_listed_credential(
                     &decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash)?,
                     has_uv,
                 ) {
@@ -1099,11 +1099,11 @@ impl CtapState {
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
             let credential = storage::find_credential(env, rp_id, &allowed_credential.key_id)?;
-            if self.check_cred_protect(&credential, has_uv) {
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
             let credential = decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash)?;
-            if self.check_cred_protect(&credential, has_uv) {
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
         }

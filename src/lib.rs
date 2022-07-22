@@ -46,10 +46,6 @@ macro_rules! debug_ctap {
 
 pub mod api;
 pub mod clock;
-// Implementation details must be public for testing (in particular fuzzing).
-#[cfg(feature = "std")]
-pub mod ctap;
-#[cfg(not(feature = "std"))]
 pub mod ctap;
 pub mod env;
 #[cfg(feature = "std")]

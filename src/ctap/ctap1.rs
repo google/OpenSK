@@ -21,7 +21,7 @@ use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use core::convert::{Into, TryFrom};
+use core::convert::TryFrom;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;
@@ -49,9 +49,9 @@ impl TryFrom<u8> for Ctap1Flags {
     }
 }
 
-impl Into<u8> for Ctap1Flags {
-    fn into(self) -> u8 {
-        self as u8
+impl From<Ctap1Flags> for u8 {
+    fn from(flags: Ctap1Flags) -> u8 {
+        flags as u8
     }
 }
 
@@ -79,9 +79,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
         let apdu: Apdu = match Apdu::try_from(message) {
             Ok(apdu) => apdu,
-            Err(apdu_status_code) => {
-                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
-            }
+            Err(apdu_status_code) => return Err(apdu_status_code),
         };
 
         let lc = apdu.lc as usize;
@@ -373,7 +371,7 @@ mod test {
     fn create_authenticate_message(
         application: &[u8; 32],
         flags: Ctap1Flags,
-        key_handle: &Vec<u8>,
+        key_handle: &[u8],
     ) -> Vec<u8> {
         let mut message = vec![
             Ctap1Command::CTAP1_CLA,
@@ -496,7 +494,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -514,7 +512,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -533,7 +531,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -571,7 +569,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -591,7 +589,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -611,7 +609,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -639,7 +637,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
@@ -667,7 +665,7 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";

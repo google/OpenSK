@@ -38,8 +38,8 @@ cd ..
 
 echo "Running Clippy lints..."
 cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
-cargo clippy --all-targets --features std,with_nfc -- -A clippy::new_without_default -D warnings
-cargo clippy --all-targets --features std,vendor_hid -- -A clippy::new_without_default -D warnings
+cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
+cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml

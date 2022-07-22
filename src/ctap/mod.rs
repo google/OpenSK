@@ -119,13 +119,13 @@ pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
-    alg: SignatureAlgorithm::ES256,
+    alg: SignatureAlgorithm::Es256,
 };
 
 #[cfg(feature = "ed25519")]
 pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
-    alg: SignatureAlgorithm::EDDSA,
+    alg: SignatureAlgorithm::Eddsa,
 };
 
 const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
@@ -968,7 +968,7 @@ impl CtapState {
             None => (private_key.sign_and_encode(env, &signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
-            alg: SignatureAlgorithm::ES256 as i64,
+            alg: SignatureAlgorithm::Es256 as i64,
             sig: signature,
             x5c,
             ecdaa_key_id: None,
@@ -1564,7 +1564,7 @@ mod test {
                     expected_extension_cbor
                 );
                 assert!(ep_att.is_none());
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
+                assert_eq!(att_stmt.alg, SignatureAlgorithm::Es256 as i64);
                 assert_eq!(large_blob_key, None);
             }
             _ => panic!("Invalid response type"),
@@ -3416,7 +3416,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 
@@ -3452,7 +3452,7 @@ mod test {
         );
         signature_bytes[0] ^= 0x01;
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
         assert_eq!(
@@ -3489,7 +3489,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 

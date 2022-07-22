@@ -184,6 +184,8 @@ pub trait Customization {
     /// # Invariant
     ///
     /// - The length must be at least 32.
+    /// - OpenSK puts a limit that the length must be at most 64, as it needs to
+    ///   be persisted in the credential ID.
     fn max_cred_blob_length(&self) -> usize;
 
     /// Limits the number of considered entries in credential lists.
@@ -397,8 +399,8 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
-    // Max cred blob length should be at least 32.
-    if customization.max_cred_blob_length() < 32 {
+    // Max cred blob length should be at least 32, and at most 64.
+    if customization.max_cred_blob_length() < 32 || customization.max_cred_blob_length() > 64 {
         return false;
     }
 

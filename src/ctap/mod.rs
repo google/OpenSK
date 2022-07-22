@@ -856,7 +856,7 @@ impl CtapState {
         let has_cred_blob_output = extensions.cred_blob.is_some();
         let cred_blob = extensions
             .cred_blob
-            .filter(|c| options.rk && c.len() <= env.customization().max_cred_blob_length());
+            .filter(|c| c.len() <= env.customization().max_cred_blob_length());
         let cred_blob_output = if has_cred_blob_output {
             Some(cred_blob.is_some())
         } else {
@@ -904,7 +904,13 @@ impl CtapState {
             storage::store_credential(env, credential_source)?;
             random_id
         } else {
-            encrypt_to_credential_id(env, &private_key, &rp_id_hash, cred_protect_policy)?
+            encrypt_to_credential_id(
+                env,
+                &private_key,
+                &rp_id_hash,
+                cred_protect_policy,
+                cred_blob,
+            )?
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
@@ -1530,13 +1536,13 @@ mod test {
     const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
     fn check_make_response(
-        make_credential_response: Result<ResponseData, Ctap2StatusCode>,
+        make_credential_response: &Result<ResponseData, Ctap2StatusCode>,
         flags: u8,
         expected_aaguid: &[u8],
         expected_credential_id_size: u8,
         expected_extension_cbor: &[u8],
     ) {
-        match make_credential_response.unwrap() {
+        match make_credential_response.as_ref().unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let AuthenticatorMakeCredentialResponse {
                     fmt,
@@ -1565,7 +1571,7 @@ mod test {
                 );
                 assert!(ep_att.is_none());
                 assert_eq!(att_stmt.alg, SignatureAlgorithm::Es256 as i64);
-                assert_eq!(large_blob_key, None);
+                assert_eq!(large_blob_key, &None);
             }
             _ => panic!("Invalid response type"),
         }
@@ -1683,6 +1689,22 @@ mod test {
         make_credential_params
     }
 
+    fn parse_credential_id_from_non_resident_make_credential_response(
+        env: &mut impl Env,
+        make_credential_response: ResponseData,
+    ) -> Vec<u8> {
+        match make_credential_response {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        }
+    }
+
     #[test]
     fn test_resident_process_make_credential() {
         let mut env = TestEnv::new();
@@ -1693,7 +1715,7 @@ mod test {
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -1712,7 +1734,7 @@ mod test {
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
@@ -1832,16 +1854,10 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
-        let credential_id = match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
-                assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
-            }
-            _ => panic!("Invalid response type"),
-        };
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
@@ -1858,16 +1874,10 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
-        let credential_id = match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
-                assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
-            }
-            _ => panic!("Invalid response type"),
-        };
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
@@ -1894,7 +1904,7 @@ mod test {
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
         ];
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
@@ -1920,7 +1930,7 @@ mod test {
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
         ];
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -1943,7 +1953,7 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -1969,7 +1979,7 @@ mod test {
             0x04,
         ];
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -1994,7 +2004,7 @@ mod test {
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
         ];
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -2026,7 +2036,7 @@ mod test {
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF4,
         ];
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -2100,7 +2110,7 @@ mod test {
         );
 
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0x45,
             &storage::aaguid(&mut env).unwrap(),
             0x20,
@@ -2137,7 +2147,7 @@ mod test {
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
-            make_credential_response,
+            &make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
@@ -2325,7 +2335,7 @@ mod test {
 
     fn check_assertion_response_with_user(
         response: Result<ResponseData, Ctap2StatusCode>,
-        expected_user: PublicKeyCredentialUserEntity,
+        expected_user: Option<PublicKeyCredentialUserEntity>,
         flags: u8,
         signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
@@ -2354,23 +2364,23 @@ mod test {
         );
         expected_auth_data.extend(expected_extension_cbor);
         assert_eq!(auth_data, expected_auth_data);
-        assert_eq!(user, Some(expected_user));
+        assert_eq!(user, expected_user);
         assert_eq!(number_of_credentials, expected_number_of_credentials);
     }
 
     fn check_assertion_response_with_extension(
         response: Result<ResponseData, Ctap2StatusCode>,
-        expected_user_id: Vec<u8>,
+        expected_user_id: Option<Vec<u8>>,
         signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
         expected_extension_cbor: &[u8],
     ) {
-        let expected_user = PublicKeyCredentialUserEntity {
-            user_id: expected_user_id,
+        let expected_user = expected_user_id.map(|user_id| PublicKeyCredentialUserEntity {
+            user_id,
             user_name: None,
             user_display_name: None,
             user_icon: None,
-        };
+        });
         check_assertion_response_with_user(
             response,
             expected_user,
@@ -2395,7 +2405,7 @@ mod test {
         };
         check_assertion_response_with_user(
             response,
-            expected_user,
+            Some(expected_user),
             0x00,
             signature_counter,
             expected_number_of_credentials,
@@ -2503,16 +2513,10 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
-        let credential_id = match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
-                assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
-            }
-            _ => panic!("Invalid response type"),
-        };
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
 
         let client_pin_params = AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
@@ -2735,16 +2739,10 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
-        let credential_id = match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
-                assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
-            }
-            _ => panic!("Invalid response type"),
-        };
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
             key_id: credential_id,
@@ -2777,16 +2775,10 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
-        let credential_id = match make_credential_response.unwrap() {
-            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
-                let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
-                assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
-            }
-            _ => panic!("Invalid response type"),
-        };
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
             key_id: credential_id,
@@ -2867,7 +2859,76 @@ mod test {
         ];
         check_assertion_response_with_extension(
             get_assertion_response,
-            vec![0x1D],
+            Some(vec![0x1D]),
+            signature_counter,
+            None,
+            &expected_extension_cbor,
+        );
+    }
+
+    #[test]
+    fn test_non_resident_process_get_assertion_with_cred_blob() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let extensions = MakeCredentialExtensions {
+            cred_blob: Some(vec![0xCB]),
+            ..Default::default()
+        };
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.extensions = extensions;
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        let expected_extension_cbor = [
+            0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
+        ];
+        check_make_response(
+            &make_credential_response,
+            0xC1,
+            &storage::aaguid(&mut env).unwrap(),
+            CBOR_CREDENTIAL_ID_SIZE as u8,
+            &expected_extension_cbor,
+        );
+
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let extensions = GetAssertionExtensions {
+            cred_blob: true,
+            ..Default::default()
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions,
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        let signature_counter = storage::global_signature_counter(&mut env).unwrap();
+        let expected_extension_cbor = [
+            0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0x41, 0xCB,
+        ];
+        check_assertion_response_with_extension(
+            get_assertion_response,
+            None,
             signature_counter,
             None,
             &expected_extension_cbor,
@@ -2993,7 +3054,7 @@ mod test {
         let signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_assertion_response_with_user(
             get_assertion_response,
-            user2,
+            Some(user2),
             0x04,
             signature_counter,
             Some(2),
@@ -3003,7 +3064,7 @@ mod test {
         let get_assertion_response = ctap_state.process_get_next_assertion(&mut env);
         check_assertion_response_with_user(
             get_assertion_response,
-            user1,
+            Some(user1),
             0x04,
             signature_counter,
             None,

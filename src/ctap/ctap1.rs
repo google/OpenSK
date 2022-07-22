@@ -249,7 +249,7 @@ impl Ctap1Command {
             .ecdsa_key(env)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = sk.genpk();
-        let key_handle = encrypt_to_credential_id(env, &private_key, &application, None)
+        let key_handle = encrypt_to_credential_id(env, &private_key, &application, None, None)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
@@ -498,7 +498,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response =
@@ -516,7 +516,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -535,7 +535,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -573,7 +573,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
@@ -593,7 +593,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
@@ -613,7 +613,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
@@ -641,7 +641,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -669,7 +669,7 @@ mod test {
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,

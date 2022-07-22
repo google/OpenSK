@@ -274,7 +274,7 @@ fn send_keepalive_up_needed(
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let ctap_hid_connection = transport.hid_connection(env);
-        match ctap_hid_connection.send_or_recv_with_timeout(&mut pkt, timeout) {
+        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?

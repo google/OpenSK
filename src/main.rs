@@ -152,14 +152,14 @@ fn main() {
             button.enable().flex_unwrap();
         }
 
-        // Variable for use in both the send_or_recv and recv cases.
+        // Variable for use in both the send_and_maybe_recv and recv cases.
         let mut usb_endpoint: Option<UsbEndpoint> = None;
         let mut pkt_request = [0; 64];
 
         if let Some(mut packet) = replies.next_packet() {
             // send and receive.
             let hid_connection = packet.transport.hid_connection(ctap.env());
-            match hid_connection.send_or_recv_with_timeout(&mut packet.packet, SEND_TIMEOUT) {
+            match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT) {
                 Ok(SendOrRecvStatus::Timeout) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice("Sending packet timed out", &clock);

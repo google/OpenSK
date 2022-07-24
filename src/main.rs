@@ -235,7 +235,7 @@ fn main() {
                             #[cfg(feature = "debug_ctap")]
                             writeln!(
                                 Console::new(),
-                                "Warning overwritting existing reply for endpoint {}",
+                                "Warning overwriting existing reply for endpoint {}",
                                 endpoint as usize
                             )
                             .unwrap();

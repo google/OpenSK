@@ -92,11 +92,11 @@ impl PrivateKey {
     /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
     pub fn new(env: &mut impl Env, alg: SignatureAlgorithm) -> Self {
         match alg {
-            SignatureAlgorithm::ES256 => {
+            SignatureAlgorithm::Es256 => {
                 PrivateKey::Ecdsa(env.key_store().generate_ecdsa_seed().unwrap())
             }
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::EDDSA => {
+            SignatureAlgorithm::Eddsa => {
                 let bytes = env.rng().gen_uniform_u8x32();
                 Self::new_ed25519_from_bytes(&bytes).unwrap()
             }
@@ -106,7 +106,7 @@ impl PrivateKey {
 
     /// Creates a new ecdsa private key.
     pub fn new_ecdsa(env: &mut impl Env) -> PrivateKey {
-        Self::new(env, SignatureAlgorithm::ES256)
+        Self::new(env, SignatureAlgorithm::Es256)
     }
 
     /// Helper function that creates a private key of type ECDSA.
@@ -166,9 +166,9 @@ impl PrivateKey {
     /// The associated COSE signature algorithm identifier.
     pub fn signature_algorithm(&self) -> SignatureAlgorithm {
         match self {
-            PrivateKey::Ecdsa(_) => SignatureAlgorithm::ES256,
+            PrivateKey::Ecdsa(_) => SignatureAlgorithm::Es256,
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(_) => SignatureAlgorithm::EDDSA,
+            PrivateKey::Ed25519(_) => SignatureAlgorithm::Eddsa,
         }
     }
 
@@ -209,10 +209,10 @@ impl TryFrom<cbor::Value> for PrivateKey {
         }
         let key_bytes = extract_byte_string(array.pop().unwrap())?;
         match SignatureAlgorithm::try_from(array.pop().unwrap())? {
-            SignatureAlgorithm::ES256 => PrivateKey::new_ecdsa_from_bytes(&key_bytes)
+            SignatureAlgorithm::Es256 => PrivateKey::new_ecdsa_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::EDDSA => PrivateKey::new_ed25519_from_bytes(&key_bytes)
+            SignatureAlgorithm::Eddsa => PrivateKey::new_ed25519_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         }
@@ -292,7 +292,7 @@ mod test {
     #[test]
     fn test_new_ecdsa_from_bytes() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::ES256);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
             PrivateKey::new_ecdsa_from_bytes(&key_bytes),
@@ -304,7 +304,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes() {
         let mut env = TestEnv::new();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::EDDSA);
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Eddsa);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
             PrivateKey::new_ed25519_from_bytes(&key_bytes),
@@ -362,13 +362,13 @@ mod test {
 
     #[test]
     fn test_ecdsa_private_key_signature_algorithm() {
-        test_private_key_signature_algorithm(SignatureAlgorithm::ES256);
+        test_private_key_signature_algorithm(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_ed25519_private_key_signature_algorithm() {
-        test_private_key_signature_algorithm(SignatureAlgorithm::EDDSA);
+        test_private_key_signature_algorithm(SignatureAlgorithm::Eddsa);
     }
 
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
@@ -380,13 +380,13 @@ mod test {
 
     #[test]
     fn test_ecdsa_private_key_from_to_cbor() {
-        test_private_key_from_to_cbor(SignatureAlgorithm::ES256);
+        test_private_key_from_to_cbor(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_ed25519_private_key_from_to_cbor() {
-        test_private_key_from_to_cbor(SignatureAlgorithm::EDDSA);
+        test_private_key_from_to_cbor(SignatureAlgorithm::Eddsa);
     }
 
     fn test_private_key_from_bad_cbor(signature_algorithm: SignatureAlgorithm) {
@@ -404,13 +404,13 @@ mod test {
 
     #[test]
     fn test_ecdsa_private_key_from_bad_cbor() {
-        test_private_key_from_bad_cbor(SignatureAlgorithm::ES256);
+        test_private_key_from_bad_cbor(SignatureAlgorithm::Es256);
     }
 
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_ed25519_private_key_from_bad_cbor() {
-        test_private_key_from_bad_cbor(SignatureAlgorithm::EDDSA);
+        test_private_key_from_bad_cbor(SignatureAlgorithm::Eddsa);
     }
 
     #[test]

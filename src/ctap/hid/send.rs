@@ -34,7 +34,11 @@ impl HidPacketIterator {
     }
 
     pub fn has_data(&self) -> bool {
-        self.0.is_some()
+        if let Some(ms) = &self.0 {
+            ms.finished()
+        } else {
+            false
+        }
     }
 }
 
@@ -96,6 +100,15 @@ impl MessageSplitter {
             // Fill all of dst.
             dst.copy_from_slice(&data[..dst_len]);
             dst_len
+        }
+    }
+
+    // Is there more data to iterate over?
+    fn finished(&self) -> bool {
+        let payload_len = self.message.payload.len();
+        match self.seq {
+            None => true,
+            Some(_) => self.i < payload_len,
         }
     }
 }

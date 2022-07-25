@@ -296,6 +296,8 @@ fn send_keepalive_up_needed(
                         "Received a packet on transport {:?} while sending a KEEPALIVE packet on transport {:?}",
                          rx_transport, transport
                     );
+                    // Ignore this packet.
+                    continue;
                 }
 
                 // TODO(liamjm): Support receiving packets on both interfaces.

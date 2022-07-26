@@ -297,10 +297,10 @@ fn send_keepalive_up_needed(
                          rx_transport, transport
                     );
                     // Ignore this packet.
+                    // TODO(liamjm): Support receiving packets on both interfaces.
                     continue;
                 }
 
-                // TODO(liamjm): Support receiving packets on both interfaces.
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {

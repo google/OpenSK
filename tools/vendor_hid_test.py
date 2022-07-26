@@ -1,7 +1,11 @@
 """These tests verify the functionality of the VendorHID interface."""
-from typing import Dict, Iterable
+from fido2 import ctap
+from fido2.hid import CtapHidDevice
+from fido2.client import Fido2Client, UserInteraction, ClientError
+from fido2.server import Fido2Server
 import hid
 import time
+from typing import Dict, Iterable
 import unittest
 
 _OPENSK_VID = 0x1915
@@ -12,7 +16,7 @@ _PACKETS = 4
 _PACKET_SIZE = 64
 _SEND_DATA_SIZE = _PACKET_SIZE + 1
 _BROADCAST_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
-
+_TEST_USER = {'id': b'user_id', 'name': 'Foo User'}
 
 def sleep():
   # TODO(liamjm): remove this sleep once it is not necessary.
@@ -41,7 +45,7 @@ class HidDevice(object):
     self.dev = None
     self.cid = None
     self.rx_packets = []
-    self.create_and_init()
+    self.dev = hid.Device(path=self.device['path'])
 
   def __del__(self):
     if self.dev:
@@ -50,7 +54,7 @@ class HidDevice(object):
   def reset(self) -> None:
     self.rx_packets = []
 
-  def create_and_init(self) -> None:
+  def init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.
     init_packet = [0] + list(_BROADCAST_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
@@ -77,7 +81,15 @@ class HidDevice(object):
         f'Expected packet to be {_SEND_DATA_SIZE} '
         'but was {len(continue_packet)}')
     r = self.dev.write(bytes(continue_packet))
-    sleep()
+    return r
+
+  def cancel(self, cid: bytes) -> None:
+    cancel_packet = b'\x00' + \
+        cid.to_bytes(4, byteorder='big') + b'\x91' + b''.join([b'\x00'] * 59)
+    assert len(cancel_packet) == _SEND_DATA_SIZE, (
+        f'Expected packet to be {_SEND_DATA_SIZE} '
+        'but was {len(cancel_packet)}')
+    r = self.dev.write(bytes(cancel_packet))
     return r
 
   def read_and_print(self) -> int:
@@ -104,20 +116,22 @@ def get_devices(usage_page) -> Iterable[Dict]:
       yield device
 
 
+def get_device(usage_page) -> HidDevice:
+  devices = list(get_devices(usage_page))
+  if len(devices) != 1:
+    raise Exception(f'Found {len(devices)} devices')
+  return HidDevice(devices[0])
+
+
 class HidInterfaces(unittest.TestCase):
   """Tests for the Vendor and FIDO HID interfaces."""
 
   @classmethod
   def setUpClass(cls):
-    cls.fido_hid = cls.get_device(_FIDO_USAGE_PAGE)
-    cls.vendor_hid = cls.get_device(_VENDOR_USAGE_PAGE)
-
-  @classmethod
-  def get_device(cls, usage_page) -> HidDevice:
-    devices = list(get_devices(usage_page))
-    if len(devices) != 1:
-      raise Exception(f'Found {len(devices)} devices')
-    return HidDevice(devices[0])
+    cls.fido_hid = get_device(_FIDO_USAGE_PAGE)
+    cls.fido_hid.init()
+    cls.vendor_hid = get_device(_VENDOR_USAGE_PAGE)
+    cls.vendor_hid.init()
 
   def setUp(self) -> None:
     super().setUp()
@@ -263,6 +277,80 @@ class HidInterfaces(unittest.TestCase):
   def test_11_batch_send_and_interleaved_receive_vendor_first(self):
     self._test_batch_send_and_interleaved_receive(self.vendor_hid,
                                                   self.fido_hid)
+
+
+def get_fido_device() -> CtapHidDevice:
+  for d in CtapHidDevice.list_devices():
+    if d.descriptor.vid == _OPENSK_VID and d.descriptor.pid == _OPENSK_PID:
+      return d
+  raise Exception('Unable to find Fido device')
+
+
+class CliInteraction(UserInteraction):
+  """Sends cancel messages while prompting user."""
+
+  def __init__(self, device, cid):
+    super(CliInteraction).__init__()
+    self.device = device
+    self.cid = cid
+
+  def prompt_up(self) -> None:
+    # Send some cancel messages to the specified device.
+    for _ in range(10):
+      self.device.cancel(self.cid)
+    print('\n Touch your authenticator device now...\n')
+
+
+class CancelTests(unittest.TestCase):
+  """Tests for the canceling while waiting for user touch."""
+
+  @classmethod
+  def setUpClass(cls):
+    cls.fido = get_fido_device()
+    # NOTE: these devices are not initialized as they are only used to send
+    # raw messages.
+    cls.fido_hid = get_device(_FIDO_USAGE_PAGE)
+    cls.vendor_hid = get_device(_VENDOR_USAGE_PAGE)
+
+  def setUp(self) -> None:
+    super().setUp()
+    server = Fido2Server({
+        'id': 'example.com',
+        'name': 'Example RP'
+    },
+                         attestation='direct')
+    self.create_options, _ = server.register_begin(
+        _TEST_USER,
+        user_verification='foo',
+        authenticator_attachment='cross-platform')
+
+  def test_cancel_works(self):
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(self.fido_hid, self.fido._channel_id))
+
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+      self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+      self.assertEqual(context.exception.cause,
+                       ctap.CtapError.ERR.KEEPALIVE_CANCEL)
+
+  def test_cancel_ignores_wrong_interface(self):
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(self.vendor_hid, self.fido._channel_id))
+
+    client.make_credential(self.create_options['publicKey'])
+
+  def test_cancel_ignores_wrong_cid(self):
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(self.fido_hid,
+                                        self.fido._channel_id + 1))
+    client.make_credential(self.create_options['publicKey'])
 
 
 if __name__ == '__main__':

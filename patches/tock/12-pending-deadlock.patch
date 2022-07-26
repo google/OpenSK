@@ -3,7 +3,7 @@ index 16b80cb10..949388b70 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -120,7 +120,6 @@ struct EndpointState {
- 
+
      tx_packet: OptionalCell<[u8; 64]>,
      pending_in: Cell<bool>,
 -    pending_out: Cell<bool>,
@@ -21,13 +21,13 @@ index 16b80cb10..949388b70 100644
 @@ -142,6 +140,10 @@ impl EndpointState {
  pub struct ClientCtapHID<'a, 'b, C: 'a> {
      client_ctrl: ClientCtrl<'a, 'static, C>,
- 
+
 +    // Is there a pending OUT transaction happening?
 +    pending_out: Cell<bool>,
 +    next_endpoint_index: Cell<usize>,
 +
      endpoints: [EndpointState; NUM_ENDPOINTS],
- 
+
      // Interaction with the client
 @@ -264,6 +266,8 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  LANGUAGES,
@@ -40,7 +40,7 @@ index 16b80cb10..949388b70 100644
                  #[cfg(feature = "vendor_hid")]
 @@ -306,12 +310,13 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
      }
- 
+
      pub fn receive_packet(&'a self, app: &mut App) {
 -        for (_, s) in self.endpoints.iter().enumerate() {
 -            if s.pending_out.get() {
@@ -64,12 +64,12 @@ index 16b80cb10..949388b70 100644
              {
 -                assert!(s.pending_out.take());
 +                assert!(self.pending_out.take());
- 
+
                  // Clear any pending packet on the transmitting side.
                  // It's up to the client to handle the received packet and decide if this packet
 @@ -352,6 +357,13 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
                  self.cancel_in_transaction(endpoint);
- 
+
                  self.client.map(|client| client.packet_received(&buf, endpoint, app));
 +                // Update next packet to send.
 +                for (i, ep) in self.endpoints.iter().enumerate() {
@@ -83,7 +83,7 @@ index 16b80cb10..949388b70 100644
                  // Cannot receive now, indicate a delay to the controller.
 @@ -387,8 +399,8 @@ impl<'a, 'b, C: hil::usb::UsbController<'a>> ClientCtapHID<'a, 'b, C> {
      }
- 
+
      fn cancel_out_transaction(&'a self, endpoint: usize) -> bool {
 -        if let Some(s) = self.get_endpoint(endpoint) {
 -            s.pending_out.take()

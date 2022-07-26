@@ -50,7 +50,7 @@ struct CredentialSource {
     cred_blob: Option<Vec<u8>>,
 }
 
-// The data fields contained in the credential ID are serizlied using CBOR maps.
+// The data fields contained in the credential ID are serialized using CBOR maps.
 // Each field is associated with a unique tag, implemented with a CBOR unsigned key.
 enum CredentialSourceField {
     PrivateKey = 0,
@@ -111,16 +111,10 @@ fn decrypt_cbor_credential_id(
             if rp_id_hash.len() != 32 {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
             }
-            let cred_protect_policy = if let Some(policy) = cred_protect_policy {
-                Some(CredentialProtectionPolicy::try_from(policy)?)
-            } else {
-                None
-            };
-            let cred_blob = if let Some(blob) = cred_blob {
-                Some(extract_byte_string(blob)?)
-            } else {
-                None
-            };
+            let cred_protect_policy = cred_protect_policy
+                .map(CredentialProtectionPolicy::try_from)
+                .transpose()?;
+            let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
             Some(CredentialSource {
                 private_key,
                 rp_id_hash: rp_id_hash.try_into().unwrap(),
@@ -163,7 +157,7 @@ fn remove_padding(data: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
     Ok(())
 }
 
-/// Encrypts the given private key, relying party ID hash, and cred protect policy into a credential ID.
+/// Encrypts the given private key, relying party ID hash, and some other metadata into a credential ID.
 ///
 /// Other information, such as a user name, are not stored. Since encrypted credential IDs are
 /// stored server-side, this information is already available (unencrypted).

@@ -19,6 +19,12 @@ _BROADCAST_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 _TEST_USER = {'id': b'user_id', 'name': 'Foo User'}
 
 
+def sleep():
+  # TODO(liamjm): remove this sleep once it is not necessary.
+  time.sleep(.01)
+  pass
+
+
 def ping_data_size(packets):
   return 57 + 59 * (packets - 1)
 
@@ -57,6 +63,7 @@ class HidDevice(object):
         f'Expected packet to be {_SEND_DATA_SIZE} but was {len(init_packet)}')
     self.dev.write(bytes(init_packet))
     self.cid = self.dev.read(_PACKET_SIZE, 2000)[15:19]
+    sleep()
 
   def ping_init(self, packets=1, byte=0x88) -> int:
     size = ping_data_size(packets)
@@ -66,6 +73,7 @@ class HidDevice(object):
         f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}')
 
     r = self.dev.write(bytes(ping_packet))
+    sleep()
     return r
 
   def ping_continue(self, num, byte=0x88) -> int:
@@ -88,6 +96,7 @@ class HidDevice(object):
   def read_and_print(self) -> int:
     d = self.dev.read(_PACKET_SIZE, 2000)
     self.rx_packets.append(d)
+    sleep()
     return len(d)
 
   def get_received_data(self) -> bytes:
@@ -320,7 +329,7 @@ class CancelTests(unittest.TestCase):
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.fido_hid, self.fido.))
+        user_interaction=CliInteraction(self.fido_hid, self.fido._channel_id))
 
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
@@ -332,7 +341,7 @@ class CancelTests(unittest.TestCase):
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.vendor_hid, self.fido.))
+        user_interaction=CliInteraction(self.vendor_hid, self.fido._channel_id))
 
     client.make_credential(self.create_options['publicKey'])
 
@@ -341,7 +350,7 @@ class CancelTests(unittest.TestCase):
         self.fido,
         'https://example.com',
         user_interaction=CliInteraction(self.fido_hid,
-                                        self.fido. + 1))
+                                        self.fido._channel_id + 1))
     client.make_credential(self.create_options['publicKey'])
 
 

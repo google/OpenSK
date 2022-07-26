@@ -326,10 +326,11 @@ class CancelTests(unittest.TestCase):
         authenticator_attachment='cross-platform')
 
   def test_cancel_works(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.fido_hid, self.fido._channel_id))
+        user_interaction=CliInteraction(self.fido_hid, cid))
 
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
@@ -338,19 +339,20 @@ class CancelTests(unittest.TestCase):
                        ctap.CtapError.ERR.KEEPALIVE_CANCEL)
 
   def test_cancel_ignores_wrong_interface(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.vendor_hid, self.fido._channel_id))
+        user_interaction=CliInteraction(self.vendor_hid, cid))
 
     client.make_credential(self.create_options['publicKey'])
 
   def test_cancel_ignores_wrong_cid(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.fido_hid,
-                                        self.fido._channel_id + 1))
+        user_interaction=CliInteraction(self.fido_hid, cid + 1))
     client.make_credential(self.create_options['publicKey'])
 
 

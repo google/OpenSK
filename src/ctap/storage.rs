@@ -19,8 +19,7 @@ use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
-    extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
-    PublicKeyCredentialUserEntity,
+    extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, INITIAL_SIGNATURE_COUNTER};
@@ -114,16 +113,13 @@ pub fn find_credential(
     env: &mut impl Env,
     rp_id: &str,
     credential_id: &[u8],
-    check_cred_protect: bool,
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
     let credential = match find_credential_item(env, credential_id) {
         Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS) => return Ok(None),
         Err(e) => return Err(e),
         Ok((_key, credential)) => credential,
     };
-    let is_protected = credential.cred_protect_policy
-        == Some(CredentialProtectionPolicy::UserVerificationRequired);
-    if credential.rp_id != rp_id || (check_cred_protect && is_protected) {
+    if credential.rp_id != rp_id {
         return Ok(None);
     }
     Ok(Some(credential))
@@ -651,7 +647,9 @@ mod test {
     use super::*;
     use crate::api::attestation_store::{self, Attestation, AttestationStore};
     use crate::ctap::crypto_wrapper::PrivateKey;
-    use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
+    use crate::ctap::data_formats::{
+        CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
+    };
     use crate::env::test::TestEnv;
     use rng256::Rng256;
 
@@ -725,14 +723,14 @@ mod test {
         let credential_source = create_credential_source(&mut env, "example.com", vec![0x1D]);
         let credential_id = credential_source.credential_id.clone();
         assert!(store_credential(&mut env, credential_source).is_ok());
-        let stored_credential = find_credential(&mut env, "example.com", &credential_id, false)
+        let stored_credential = find_credential(&mut env, "example.com", &credential_id)
             .unwrap()
             .unwrap();
         assert_eq!(stored_credential.user_name, None);
         assert_eq!(stored_credential.user_display_name, None);
         assert_eq!(stored_credential.user_icon, None);
         assert!(update_credential(&mut env, &credential_id, user.clone()).is_ok());
-        let stored_credential = find_credential(&mut env, "example.com", &credential_id, false)
+        let stored_credential = find_credential(&mut env, "example.com", &credential_id)
             .unwrap()
             .unwrap();
         assert_eq!(stored_credential.user_name, user.user_name);
@@ -796,16 +794,12 @@ mod test {
         assert!(store_credential(&mut env, credential_source0).is_ok());
         assert!(store_credential(&mut env, credential_source1).is_ok());
         assert_eq!(count_credentials(&mut env).unwrap(), 1);
-        assert!(
-            find_credential(&mut env, "example.com", &credential_id0, false)
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            find_credential(&mut env, "example.com", &credential_id1, false)
-                .unwrap()
-                .is_some()
-        );
+        assert!(find_credential(&mut env, "example.com", &credential_id0)
+            .unwrap()
+            .is_none());
+        assert!(find_credential(&mut env, "example.com", &credential_id1)
+            .unwrap()
+            .is_some());
 
         reset(&mut env).unwrap();
         let max_supported_resident_keys = env.customization().max_supported_resident_keys();
@@ -858,9 +852,9 @@ mod test {
         assert!(store_credential(&mut env, credential_source0).is_ok());
         assert!(store_credential(&mut env, credential_source1).is_ok());
 
-        let no_credential = find_credential(&mut env, "another.example.com", &id0, false).unwrap();
+        let no_credential = find_credential(&mut env, "another.example.com", &id0).unwrap();
         assert_eq!(no_credential, None);
-        let found_credential = find_credential(&mut env, "example.com", &id0, false).unwrap();
+        let found_credential = find_credential(&mut env, "example.com", &id0).unwrap();
         let expected_credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: id0,
@@ -876,31 +870,6 @@ mod test {
             large_blob_key: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
-    }
-
-    #[test]
-    fn test_find_with_cred_protect() {
-        let mut env = TestEnv::new();
-        assert_eq!(count_credentials(&mut env).unwrap(), 0);
-        let private_key = PrivateKey::new_ecdsa(&mut env);
-        let credential = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x00],
-            user_display_name: None,
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        };
-        assert!(store_credential(&mut env, credential).is_ok());
-
-        let no_credential = find_credential(&mut env, "example.com", &[0x00], true).unwrap();
-        assert_eq!(no_credential, None);
     }
 
     #[test]

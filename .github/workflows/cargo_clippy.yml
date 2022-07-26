@@ -26,5 +26,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-targets --features std
-      - name: Deny Clippy warnings
+      - name: Deny Clippy warnings (std)
         run: cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
+      - name: Deny Clippy warnings (all)
+        run: cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
+      - name: Deny Clippy warnings (all, nfc)
+        run: cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings

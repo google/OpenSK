@@ -119,13 +119,13 @@ pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
-    alg: SignatureAlgorithm::ES256,
+    alg: SignatureAlgorithm::Es256,
 };
 
 #[cfg(feature = "ed25519")]
 pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
-    alg: SignatureAlgorithm::EDDSA,
+    alg: SignatureAlgorithm::Eddsa,
 };
 
 const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
@@ -717,6 +717,22 @@ impl CtapState {
         Ok(())
     }
 
+    fn check_cred_protect_for_listed_credential(
+        &mut self,
+        credential: &Option<PublicKeyCredentialSource>,
+        has_uv: bool,
+    ) -> bool {
+        if let Some(credential) = credential {
+            has_uv
+                || !matches!(
+                    credential.cred_protect_policy,
+                    Some(CredentialProtectionPolicy::UserVerificationRequired),
+                )
+        } else {
+            false
+        }
+    }
+
     fn process_make_credential(
         &mut self,
         env: &mut impl Env,
@@ -809,9 +825,13 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if storage::find_credential(env, &rp_id, &cred_desc.key_id, !has_uv)?.is_some()
-                    || decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash, !has_uv)?.is_some()
-                {
+                if self.check_cred_protect_for_listed_credential(
+                    &storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
+                    has_uv,
+                ) || self.check_cred_protect_for_listed_credential(
+                    &decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash)?,
+                    has_uv,
+                ) {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
                     let _ = check_user_presence(env, channel);
@@ -948,7 +968,7 @@ impl CtapState {
             None => (private_key.sign_and_encode(env, &signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
-            alg: SignatureAlgorithm::ES256 as i64,
+            alg: SignatureAlgorithm::Es256 as i64,
             sig: signature,
             x5c,
             ecdaa_key_id: None,
@@ -1078,14 +1098,12 @@ impl CtapState {
         has_uv: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
-            let credential =
-                storage::find_credential(env, rp_id, &allowed_credential.key_id, !has_uv)?;
-            if credential.is_some() {
+            let credential = storage::find_credential(env, rp_id, &allowed_credential.key_id)?;
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
-            let credential =
-                decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash, !has_uv)?;
-            if credential.is_some() {
+            let credential = decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash)?;
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
         }
@@ -1546,7 +1564,7 @@ mod test {
                     expected_extension_cbor
                 );
                 assert!(ep_att.is_none());
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
+                assert_eq!(att_stmt.alg, SignatureAlgorithm::Es256 as i64);
                 assert_eq!(large_blob_key, None);
             }
             _ => panic!("Invalid response type"),
@@ -1795,6 +1813,61 @@ mod test {
         let credential_id = stored_credential.credential_id;
         assert_eq!(stored_credential.cred_protect_policy, Some(test_policy));
 
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+    }
+
+    #[test]
+    fn test_non_resident_process_make_credential_credential_with_cred_protect() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationRequired;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let make_credential_response =
@@ -2651,6 +2724,99 @@ mod test {
     }
 
     #[test]
+    fn test_non_resident_process_get_assertion_with_cred_protect() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(get_assertion_response.is_ok());
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationRequired;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+    }
+
+    #[test]
     fn test_process_get_assertion_with_cred_blob() {
         let mut env = TestEnv::new();
         let private_key = PrivateKey::new_ecdsa(&mut env);
@@ -3250,7 +3416,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 
@@ -3286,7 +3452,7 @@ mod test {
         );
         signature_bytes[0] ^= 0x01;
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
         assert_eq!(
@@ -3323,7 +3489,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 

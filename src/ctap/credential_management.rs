@@ -872,10 +872,9 @@ mod test {
             Ok(ResponseData::AuthenticatorCredentialManagement(None))
         );
 
-        let updated_credential =
-            storage::find_credential(&mut env, "example.com", &[0x1D; 32], false)
-                .unwrap()
-                .unwrap();
+        let updated_credential = storage::find_credential(&mut env, "example.com", &[0x1D; 32])
+            .unwrap()
+            .unwrap();
         assert_eq!(updated_credential.user_handle, vec![0x01]);
         assert_eq!(&updated_credential.user_name.unwrap(), "new_name");
         assert_eq!(

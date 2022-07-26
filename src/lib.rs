@@ -46,6 +46,7 @@ macro_rules! debug_ctap {
 
 pub mod api;
 pub mod clock;
+// TODO(kaczmarczyck): Refactor this so that ctap module isn't public.
 pub mod ctap;
 pub mod env;
 #[cfg(feature = "std")]

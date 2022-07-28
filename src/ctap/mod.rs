@@ -100,7 +100,7 @@ const ED_FLAG: u8 = 0x80;
 // CTAP2 specification section 6 requires that the depth of nested CBOR structures be limited to at most four levels.
 const MAX_CBOR_NESTING_DEPTH: i8 = 4;
 
-pub const TOUCH_TIMEOUT_MS: ClockInt = 30000;
+pub const TOUCH_TIMEOUT_MS: ClockInt = 3000;
 #[cfg(feature = "with_ctap1")]
 pub const TOUCH_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(TOUCH_TIMEOUT_MS);
 #[cfg(feature = "with_ctap1")]
@@ -349,8 +349,14 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         // accordingly, so that all wait_with_timeout invocations are separated by
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
-        result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
-        if result.is_err() {
+        let ka_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if ka_result.is_err() {
+            debug_ctap!(
+                env,
+                "Sending keepalive failed with error {:?}",
+                ka_result.as_ref().unwrap_err()
+            );
+            result = ka_result;
             break;
         }
     }

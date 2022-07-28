@@ -100,7 +100,7 @@ const ED_FLAG: u8 = 0x80;
 // CTAP2 specification section 6 requires that the depth of nested CBOR structures be limited to at most four levels.
 const MAX_CBOR_NESTING_DEPTH: i8 = 4;
 
-pub const TOUCH_TIMEOUT_MS: ClockInt = 3000;
+pub const TOUCH_TIMEOUT_MS: ClockInt = 30000;
 #[cfg(feature = "with_ctap1")]
 pub const TOUCH_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(TOUCH_TIMEOUT_MS);
 #[cfg(feature = "with_ctap1")]

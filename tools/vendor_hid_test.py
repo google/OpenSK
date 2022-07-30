@@ -69,7 +69,7 @@ class HidDevice(object):
   def ping_init(self, packets=1, byte=0x88) -> int:
     size = ping_data_size(packets)
     ping_packet = [0] + list(self.cid) + [0x81, size // 256, size % 256
-                                          ] + [byte] * 57
+                                         ] + [byte] * 57
     assert len(ping_packet) == _SEND_DATA_SIZE, (
         f'Expected packet to be {_SEND_DATA_SIZE} but was {len(ping_packet)}')
 
@@ -313,7 +313,7 @@ class CancelTests(unittest.TestCase):
         'id': 'example.com',
         'name': 'Example RP'
     },
-        attestation='direct')
+                         attestation='direct')
     self.create_options, _ = server.register_begin(
         _TEST_USER,
         user_verification='foo',

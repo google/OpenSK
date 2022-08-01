@@ -341,22 +341,34 @@ class CancelTests(unittest.TestCase):
         self.fido,
         'https://example.com',
         user_interaction=CliInteraction(cid + 1, connection))
+<<<<<<< HEAD
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
 
     self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
     self.assertEqual(context.exception.cause.code,
                      ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
+=======
+    # TODO(https://github.com/google/OpenSK/issues/519): This should be an
+    # exception
+    client.make_credential(self.create_options['publicKey'])
+>>>>>>> origin/develop
 
   def test_timeout(self):
     client = Fido2Client(
         self.fido, 'https://example.com', user_interaction=CliInteraction())
+<<<<<<< HEAD
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
 
     self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
     self.assertEqual(context.exception.cause.code,
                      ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
+=======
+    # TODO(https://github.com/google/OpenSK/issues/519): This should be an
+    # exception
+    client.make_credential(self.create_options['publicKey'])
+>>>>>>> origin/develop
 
 
 if __name__ == '__main__':

@@ -349,14 +349,14 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         // accordingly, so that all wait_with_timeout invocations are separated by
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
-        let ka_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
-        if ka_result.is_err() {
+        let keepalive_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if keepalive_result.is_err() {
             debug_ctap!(
                 env,
                 "Sending keepalive failed with error {:?}",
-                ka_result.as_ref().unwrap_err()
+                keepalive_result.as_ref().unwrap_err()
             );
-            result = ka_result;
+            result = keepalive_result;
             break;
         }
     }

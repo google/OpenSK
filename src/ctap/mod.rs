@@ -69,6 +69,8 @@ use crate::api::connection::{HidConnection, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
+#[cfg(test)]
+use crate::api::user_presence::UserPresenceResult;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::clock::{ClockInt, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
@@ -3744,6 +3746,28 @@ mod test {
             CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION + Milliseconds(1 as ClockInt),
         );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
+    }
+
+    #[test]
+    fn test_check_user_presence() {
+        // This TestEnv always returns successful user_presence checks.
+        let mut env = TestEnv::new();
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(response, Ok(_)));
+    }
+
+    #[test]
+    fn test_check_user_presence_timeout() {
+        // This will always return timeout.
+        fn user_presence_timeout() -> UserPresenceResult {
+            Err(UserPresenceError::Timeout)
+        }
+
+        let mut env = TestEnv::new();
+        env.user_presence().set(user_presence_timeout);
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        // TODO(https://github.com/google/OpenSK/issues/519): This should be timeout.
+        assert!(matches!(response, Ok(_)));
     }
 
     #[test]

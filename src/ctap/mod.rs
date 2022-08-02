@@ -1523,6 +1523,7 @@ mod test {
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
     use crate::api::customization;
+    use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
@@ -3750,6 +3751,30 @@ mod test {
             CtapInstant::new(0) + STATEFUL_COMMAND_TIMEOUT_DURATION + Milliseconds(1 as ClockInt),
         );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
+    }
+
+    #[test]
+    fn test_check_user_presence() {
+        // This TestEnv always returns successful user_presence checks.
+        let mut env = TestEnv::new();
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(response, Ok(_)));
+    }
+
+    #[test]
+    fn test_check_user_presence_timeout() {
+        // This will always return timeout.
+        fn user_presence_timeout() -> UserPresenceResult {
+            Err(UserPresenceError::Timeout)
+        }
+
+        let mut env = TestEnv::new();
+        env.user_presence().set(user_presence_timeout);
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+        ));
     }
 
     #[test]

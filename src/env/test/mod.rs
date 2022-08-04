@@ -85,7 +85,7 @@ fn new_storage() -> BufferStorage {
 }
 
 impl HidConnection for TestEnv {
-    fn send_or_recv_with_timeout(
+    fn send_and_maybe_recv(
         &mut self,
         _buf: &mut [u8; 64],
         _timeout: Milliseconds<ClockInt>,

@@ -83,6 +83,7 @@ use crypto::hmac::hmac_256;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use embedded_time::duration::Milliseconds;
+use libtock_drivers::usb_ctap_hid::UsbEndpoint;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -274,7 +275,7 @@ fn send_keepalive_up_needed(
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let ctap_hid_connection = transport.hid_connection(env);
-        match ctap_hid_connection.send_or_recv_with_timeout(&mut pkt, timeout) {
+        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
@@ -283,7 +284,23 @@ fn send_keepalive_up_needed(
             Ok(SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Ok(SendOrRecvStatus::Received) => {
+            Ok(SendOrRecvStatus::Received(endpoint)) => {
+                let rx_transport = match endpoint {
+                    UsbEndpoint::MainHid => Transport::MainHid,
+                    #[cfg(feature = "vendor_hid")]
+                    UsbEndpoint::VendorHid => Transport::VendorHid,
+                };
+                if rx_transport != transport {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on transport {:?} while sending a KEEPALIVE packet on transport {:?}",
+                         rx_transport, transport
+                    );
+                    // Ignore this packet.
+                    // TODO(liamjm): Support receiving packets on both interfaces.
+                    continue;
+                }
+
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {

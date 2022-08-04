@@ -1,4 +1,5 @@
 """These tests verify the functionality of the VendorHID interface."""
+import fido2
 from fido2 import ctap
 from fido2.hid import CtapHidDevice
 from fido2.hid.base import CtapHidConnection
@@ -8,6 +9,7 @@ import hid
 import time
 from typing import Dict, Iterable
 import unittest
+from unittest.mock import patch
 
 _OPENSK_VID = 0x1915
 _OPENSK_PID = 0x521F
@@ -278,6 +280,12 @@ def get_fido_device() -> CtapHidDevice:
   raise Exception('Unable to find Fido device')
 
 
+def get_fido_device_vendor() -> CtapHidDevice:
+  # Patch for the Vendor Usage Page.
+  with patch.object(fido2.hid.base, 'FIDO_USAGE_PAGE', 0xFF00):
+    return get_fido_device()
+
+
 class CliInteraction(UserInteraction):
   """Sends cancel messages while prompting user."""
 
@@ -306,6 +314,7 @@ class CancelTests(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.fido = get_fido_device()
+    cls.vendor = get_fido_device_vendor()
 
   def setUp(self) -> None:
     super().setUp()
@@ -341,6 +350,21 @@ class CancelTests(unittest.TestCase):
         self.fido,
         'https://example.com',
         user_interaction=CliInteraction(cid + 1, connection))
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
+
+  def test_cancel_ignores_wrong_interface(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.vendor._connection  # pylint: disable=protected-access
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(cid, connection))
+
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
 

@@ -166,7 +166,7 @@ index 642039120..adb7fde14 100644
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_REPORT_DESCRIPTOR: &'static [u8] = &[
 +    0x06, 0x00, 0xFF, // HID_UsagePage ( VENDOR ),
-+    0x09, 0x00, // HID_Usage ( Unused ),
++    0x09, 0x01, // HID_Usage ( Unused ),
 +    0xA1, 0x01, // HID_Collection ( HID_Application ),
 +    0x09, 0x20, // HID_Usage ( FIDO_USAGE_DATA_IN ),
 +    0x15, 0x00, // HID_LogicalMin ( 0 ),

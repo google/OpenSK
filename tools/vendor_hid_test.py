@@ -49,7 +49,7 @@ class HidDevice(object):
     self.dev = None
     self.cid = None
     self.rx_packets = []
-    self.dev = hid.Device(path=self.device['path'])
+    self.create_and_init()
 
   def __del__(self):
     if self.dev:
@@ -58,7 +58,7 @@ class HidDevice(object):
   def reset(self) -> None:
     self.rx_packets = []
 
-  def init(self) -> None:
+  def create_and_init(self) -> None:
     self.dev = hid.Device(path=self.device['path'])
     # Nonce is all zeros, because we don't care.
     init_packet = [0] + list(_BROADCAST_CID) + [0x86, 0x00, 0x08] + [0x00] * 57
@@ -85,15 +85,7 @@ class HidDevice(object):
         f'Expected packet to be {_SEND_DATA_SIZE} '
         'but was {len(continue_packet)}')
     r = self.dev.write(bytes(continue_packet))
-    return r
-
-  def cancel(self, cid: bytes) -> None:
-    cancel_packet = b'\x00' + \
-        cid.to_bytes(4, byteorder='big') + b'\x91' + b''.join([b'\x00'] * 59)
-    assert len(cancel_packet) == _SEND_DATA_SIZE, (
-        f'Expected packet to be {_SEND_DATA_SIZE} '
-        'but was {len(cancel_packet)}')
-    r = self.dev.write(bytes(cancel_packet))
+    sleep()
     return r
 
   def read_and_print(self) -> int:
@@ -120,22 +112,20 @@ def get_devices(usage_page) -> Iterable[Dict]:
       yield device
 
 
-def get_device(usage_page) -> HidDevice:
-  devices = list(get_devices(usage_page))
-  if len(devices) != 1:
-    raise Exception(f'Found {len(devices)} devices')
-  return HidDevice(devices[0])
-
-
 class HidInterfaces(unittest.TestCase):
   """Tests for the Vendor and FIDO HID interfaces."""
 
   @classmethod
   def setUpClass(cls):
-    cls.fido_hid = get_device(_FIDO_USAGE_PAGE)
-    cls.fido_hid.init()
-    cls.vendor_hid = get_device(_VENDOR_USAGE_PAGE)
-    cls.vendor_hid.init()
+    cls.fido_hid = cls.get_device(_FIDO_USAGE_PAGE)
+    cls.vendor_hid = cls.get_device(_VENDOR_USAGE_PAGE)
+
+  @classmethod
+  def get_device(cls, usage_page) -> HidDevice:
+    devices = list(get_devices(usage_page))
+    if len(devices) != 1:
+      raise Exception(f'Found {len(devices)} devices')
+    return HidDevice(devices[0])
 
   def setUp(self) -> None:
     super().setUp()
@@ -353,14 +343,13 @@ class CancelTests(unittest.TestCase):
     self.assertEqual(context.exception.cause.code,
                      ctap.CtapError.ERR.KEEPALIVE_CANCEL)
 
-  def test_timeout(self):
+  def test_cancel_ignores_wrong_cid(self):
     cid = self.fido._channel_id  # pylint: disable=protected-access
-    connection = self.vendor._connection  # pylint: disable=protected-access
+    connection = self.fido._connection  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(cid, connection))
-
+        user_interaction=CliInteraction(cid + 1, connection))
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
 
@@ -383,13 +372,9 @@ class CancelTests(unittest.TestCase):
     self.assertEqual(context.exception.cause.code,
                      ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
 
-  def test_cancel_ignores_wrong_cid(self):
-    cid = self.fido._channel_id  # pylint: disable=protected-access
-    connection = self.fido._connection  # pylint: disable=protected-access
+  def test_timeout(self):
     client = Fido2Client(
-        self.fido,
-        'https://example.com',
-        user_interaction=CliInteraction(cid + 1, connection))
+        self.fido, 'https://example.com', user_interaction=CliInteraction())
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
 

@@ -2,6 +2,7 @@
 import fido2
 from fido2 import ctap
 from fido2.hid import CtapHidDevice
+from fido2.hid.base import CtapHidConnection
 from fido2.client import Fido2Client, UserInteraction, ClientError
 from fido2.server import Fido2Server
 import hid
@@ -300,16 +301,23 @@ def get_fido_device_vendor() -> CtapHidDevice:
 class CliInteraction(UserInteraction):
   """Sends cancel messages while prompting user."""
 
-  def __init__(self, device, cid):
+  def __init__(self, cid=None, connection: CtapHidConnection = None):
     super(CliInteraction).__init__()
-    self.device = device
     self.cid = cid
+    self.connection = connection
 
   def prompt_up(self) -> None:
-    # Send some cancel messages to the specified device.
-    for _ in range(10):
-      self.device.cancel(self.cid)
-    print('\n Touch your authenticator device now...\n')
+    print('\n Don\'t touch your authenticator device now...\n')
+    # Send cancel messages to the specified device.
+    if self.connection and self.cid:
+      cancel_packet = (
+          self.cid.to_bytes(4, byteorder='big') + b'\x91' +
+          b''.join([b'\x00'] * 59))
+      assert len(cancel_packet) == _PACKET_SIZE, (
+          f'Expected packet to be {_PACKET_SIZE} '
+          'but was {len(cancel_packet)}')
+
+      self.connection.write_packet(cancel_packet)
 
 
 class CancelTests(unittest.TestCase):
@@ -334,33 +342,62 @@ class CancelTests(unittest.TestCase):
 
   def test_cancel_works(self):
     cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.fido._connection  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.fido_hid, cid))
+        user_interaction=CliInteraction(cid, connection))
 
     with self.assertRaises(ClientError) as context:
       client.make_credential(self.create_options['publicKey'])
-      self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
-      self.assertEqual(context.exception.cause,
-                       ctap.CtapError.ERR.KEEPALIVE_CANCEL)
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.KEEPALIVE_CANCEL)
+
+  def test_timeout(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.vendor._connection  # pylint: disable=protected-access
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(cid, connection))
+
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
 
   def test_cancel_ignores_wrong_interface(self):
     cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.vendor._connection  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.vendor, cid))
+        user_interaction=CliInteraction(cid, connection))
 
-    client.make_credential(self.create_options['publicKey'])
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
 
   def test_cancel_ignores_wrong_cid(self):
     cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.fido._connection  # pylint: disable=protected-access
     client = Fido2Client(
         self.fido,
         'https://example.com',
-        user_interaction=CliInteraction(self.fido_hid, cid + 1))
-    client.make_credential(self.create_options['publicKey'])
+        user_interaction=CliInteraction(cid + 1, connection))
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
 
 
 if __name__ == '__main__':

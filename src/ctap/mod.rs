@@ -714,6 +714,7 @@ impl CtapState {
             }
             Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
             Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
+            Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
     }
@@ -3865,8 +3866,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "vendor_hid")]
-    fn test_main_hid() {
+    fn test_get_info_command() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -3880,9 +3880,29 @@ mod test {
             response,
             Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
+        #[cfg(feature = "vendor_hid")]
+        {
+            let response = ctap_state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetInfo,
+                VENDOR_CHANNEL,
+                CtapInstant::new(0),
+            );
+            assert!(matches!(
+                response,
+                Ok(ResponseData::AuthenticatorGetInfo(_))
+            ));
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_vendor_hid_does_not_support_fido_command() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let response = ctap_state.process_parsed_command(
             &mut env,
-            Command::AuthenticatorGetInfo,
+            Command::AuthenticatorGetNextAssertion,
             VENDOR_CHANNEL,
             CtapInstant::new(0),
         );

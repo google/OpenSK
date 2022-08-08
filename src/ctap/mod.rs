@@ -714,6 +714,7 @@ impl CtapState {
             }
             Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
             Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
+            Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
     }

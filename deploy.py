@@ -755,6 +755,7 @@ class OpenSKInstaller:
             certificate=self.args.config_cert,
             priv_key=self.args.config_pkey,
             lock=self.args.lock_device,
+            use_vendor_hid="vendor_hid" in self.args.features,
         ))
     if not configure_response:
       return None
@@ -873,11 +874,6 @@ class OpenSKInstaller:
         fatal("Unexpected arguments to configure your device. Since you "
               "selected the programmer \"none\", the device is not ready to be "
               "configured yet.")
-      return 0
-
-    if "vendor_hid" in self.args.features:
-      # vendor_hid as a work in progress and is not compatible with configure
-      # mode.
       return 0
 
     # Perform checks if OpenSK was flashed.

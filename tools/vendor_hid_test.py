@@ -282,7 +282,7 @@ def get_fido_device() -> CtapHidDevice:
 
 def get_fido_device_vendor() -> CtapHidDevice:
   # Patch for the Vendor Usage Page.
-  with patch.object(fido2.hid.base, 'FIDO_USAGE_PAGE', 0xFF00):
+  with patch.object(fido2.hid.base, 'FIDO_USAGE_PAGE', _VENDOR_USAGE_PAGE):
     return get_fido_device()
 
 

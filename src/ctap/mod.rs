@@ -3866,7 +3866,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "vendor_hid")]
     fn test_main_hid() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -3881,13 +3880,19 @@ mod test {
             response,
             Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
-        let response = ctap_state.process_parsed_command(
-            &mut env,
-            Command::AuthenticatorGetInfo,
-            VENDOR_CHANNEL,
-            CtapInstant::new(0),
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
+        #[cfg(feature = "vendor_hid")]
+        {
+            let response = ctap_state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetInfo,
+                VENDOR_CHANNEL,
+                CtapInstant::new(0),
+            );
+            assert!(matches!(
+                response,
+                Ok(ResponseData::AuthenticatorGetInfo(_))
+            ));
+        }
     }
 
     #[test]

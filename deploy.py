@@ -1081,7 +1081,7 @@ if __name__ == "__main__":
   main_parser.add_argument(
       "--configure",
       action="store_true",
-      default=False,
+      default=True,
       dest="configure",
       help="Configure.",
   )

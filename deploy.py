@@ -767,7 +767,7 @@ class OpenSKInstaller:
     self.update_rustc_if_needed()
 
     if not (self.args.tockos or self.args.application or
-            self.args.clear_storage):
+            self.args.clear_storage or self.args.configure):
       info("Nothing to do.")
       return 0
 
@@ -877,9 +877,12 @@ class OpenSKInstaller:
       return 0
 
     # Perform checks if OpenSK was flashed.
-    if self.args.application != "ctap2":
-      return 0
+    if self.args.application == "ctap2" or self.args.configure:
+      self.configure()
+    return 0
 
+  def configure(self):
+    info("Configuring device.")
     # Trying to check or configure the device. Booting might take some time.
     for i in range(5):
       # Increasing wait time, total of 10 seconds.
@@ -1074,6 +1077,13 @@ if __name__ == "__main__":
       const="with_nfc",
       dest="features",
       help=("Compiles the OpenSK application with support for nfc."),
+  )
+  main_parser.add_argument(
+      "--configure",
+      action="store_true",
+      default=True,
+      dest="configure",
+      help="Configure.",
   )
   main_parser.add_argument(
       "--vendor-hid",

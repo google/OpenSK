@@ -1,24 +1,51 @@
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::api::customization::{Customization, CustomizationImpl};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
 
 pub struct TestCustomization {
-    pub default_cred_protect: Option<CredentialProtectionPolicy>,
-    pub default_min_pin_length: u8,
-    pub default_min_pin_length_rp_ids: Vec<String>,
-    pub enforce_always_uv: bool,
-    pub enterprise_attestation_mode: Option<EnterpriseAttestationMode>,
-    pub enterprise_rp_id_list: Vec<String>,
-    pub max_msg_size: usize,
-    pub max_pin_retries: u8,
-    pub use_batch_attestation: bool,
-    pub use_signature_counter: bool,
-    pub max_cred_blob_length: usize,
-    pub max_credential_count_in_list: Option<usize>,
-    pub max_large_blob_array_size: usize,
-    pub max_rp_ids_length: usize,
-    pub max_supported_resident_keys: usize,
+    default_cred_protect: Option<CredentialProtectionPolicy>,
+    default_min_pin_length: u8,
+    default_min_pin_length_rp_ids: Vec<String>,
+    enforce_always_uv: bool,
+    enterprise_attestation_mode: Option<EnterpriseAttestationMode>,
+    enterprise_rp_id_list: Vec<String>,
+    max_msg_size: usize,
+    max_pin_retries: u8,
+    use_batch_attestation: bool,
+    use_signature_counter: bool,
+    max_cred_blob_length: usize,
+    max_credential_count_in_list: Option<usize>,
+    max_large_blob_array_size: usize,
+    max_rp_ids_length: usize,
+    max_supported_resident_keys: usize,
+}
+
+impl TestCustomization {
+    pub fn setup_enterprise_attestation(
+        &mut self,
+        mode: Option<EnterpriseAttestationMode>,
+        rp_id_list: Option<Vec<String>>,
+    ) {
+        self.enterprise_attestation_mode = mode;
+        if let Some(rp_id_list) = rp_id_list {
+            self.enterprise_rp_id_list = rp_id_list;
+        }
+    }
 }
 
 impl Customization for TestCustomization {

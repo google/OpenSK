@@ -19,17 +19,20 @@ extern crate lang_items;
 use arbitrary::{Arbitrary, Unstructured};
 use arrayref::array_ref;
 use core::convert::TryFrom;
+use ctap2::api::customization::is_valid;
 use ctap2::clock::CtapInstant;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, Command,
 };
+use ctap2::ctap::data_formats::EnterpriseAttestationMode;
 use ctap2::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
 use ctap2::ctap::{cbor_read, Channel, CtapState};
+use ctap2::env::test::customization::TestCustomization;
 use ctap2::env::test::TestEnv;
-use ctap2::{Ctap, Transport};
+use ctap2::{test_helpers, Ctap, Transport};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 
@@ -39,6 +42,19 @@ pub enum InputType {
     CborGetAssertionParameter,
     CborClientPinParameter,
     Ctap1,
+}
+
+pub enum FuzzError {
+    ArbitraryError(arbitrary::Error),
+    InvalidCustomization,
+}
+
+pub type FuzzResult<T> = Result<T, FuzzError>;
+
+impl From<arbitrary::Error> for FuzzError {
+    fn from(err: arbitrary::Error) -> Self {
+        Self::ArbitraryError(err)
+    }
 }
 
 // Converts a byte slice into Message
@@ -132,8 +148,7 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
@@ -146,6 +161,33 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     Ok(())
 }
 
+fn setup_customization(
+    unstructured: &mut Unstructured,
+    customization: &mut TestCustomization,
+) -> FuzzResult<()> {
+    customization.setup_enterprise_attestation(
+        Option::<EnterpriseAttestationMode>::arbitrary(unstructured)?,
+        // TODO: Generate arbitrary rp_id_list (but with some dummies because content doesn't
+        // matter), and use the rp ids in commands.
+        None,
+    );
+    if !is_valid(customization) {
+        return Err(FuzzError::InvalidCustomization);
+    }
+    Ok(())
+}
+
+fn setup_state(
+    unstructured: &mut Unstructured,
+    state: &mut CtapState,
+    env: &mut TestEnv,
+) -> FuzzResult<()> {
+    if bool::arbitrary(unstructured)? {
+        test_helpers::enable_enterprise_attestation(state, env).ok();
+    }
+    Ok(())
+}
+
 // Interprets the raw data as of the given input type and
 // invokes message splitting, packet processing at CTAP HID level and response assembling
 // using an initialized and allocated channel.
@@ -153,8 +195,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     if !is_type(data, input_type) {
@@ -184,24 +225,26 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     Ok(())
 }
 
-pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
+pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult<()> {
     let unstructured = &mut Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng().seed_rng_from_u64(u64::arbitrary(unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
+    setup_customization(unstructured, env.customization_mut())?;
 
     let mut state = CtapState::new(&mut env, CtapInstant::new(0));
+    setup_state(unstructured, &mut state, &mut env)?;
 
     let command = match input_type {
         InputType::CborMakeCredentialParameter => Command::AuthenticatorMakeCredential(
             AuthenticatorMakeCredentialParameters::arbitrary(unstructured)?,
         ),
-        InputType::CborGetAssertionParameter => {
-            unimplemented!()
-        }
-        InputType::CborClientPinParameter => {
-            unimplemented!()
-        }
+        InputType::CborGetAssertionParameter => Command::AuthenticatorGetAssertion(
+            AuthenticatorGetAssertionParameters::arbitrary(unstructured)?,
+        ),
+        InputType::CborClientPinParameter => Command::AuthenticatorClientPin(
+            AuthenticatorClientPinParameters::arbitrary(unstructured)?,
+        ),
         InputType::Ctap1 => {
             unimplemented!()
         }
@@ -224,8 +267,7 @@ pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::new();
-    env.rng()
-        .seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     let message = raw_to_message(data);

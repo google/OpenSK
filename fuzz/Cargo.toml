@@ -37,8 +37,20 @@ test = false
 doc = false
 
 [[bin]]
+name = "fuzz_target_process_ctap2_client_pin_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_client_pin_structured.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fuzz_target_process_ctap2_get_assertion"
 path = "fuzz_targets/fuzz_target_process_ctap2_get_assertion.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_get_assertion_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_get_assertion_structured.rs"
 test = false
 doc = false
 

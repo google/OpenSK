@@ -14,11 +14,12 @@
 
 mod key;
 
+use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
+use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
-    extract_array, extract_text_string, CredentialProtectionPolicy, PublicKeyCredentialSource,
-    PublicKeyCredentialUserEntity,
+    extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{key_material, INITIAL_SIGNATURE_COUNTER};
@@ -33,15 +34,6 @@ use persistent_store::{fragment, StoreUpdate};
 use rng256::Rng256;
 use sk_cbor::cbor_array_vec;
 
-/// Wrapper for master keys.
-pub struct MasterKeys {
-    /// Master encryption key.
-    pub encryption: [u8; 32],
-
-    /// Master hmac key.
-    pub hmac: [u8; 32],
-}
-
 /// Wrapper for PIN properties.
 struct PinProperties {
     /// 16 byte prefix of SHA256 of the currently set PIN.
@@ -53,16 +45,6 @@ struct PinProperties {
 
 /// Initializes the store by creating missing objects.
 pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    // Generate and store the master keys if they are missing.
-    if env.store().find_handle(key::MASTER_KEYS)?.is_none() {
-        let master_encryption_key = env.rng().gen_uniform_u8x32();
-        let master_hmac_key = env.rng().gen_uniform_u8x32();
-        let mut master_keys = Vec::with_capacity(64);
-        master_keys.extend_from_slice(&master_encryption_key);
-        master_keys.extend_from_slice(&master_hmac_key);
-        env.store().insert(key::MASTER_KEYS, &master_keys)?;
-    }
-
     // Generate and store the CredRandom secrets if they are missing.
     if env.store().find_handle(key::CRED_RANDOM_SECRET)?.is_none() {
         let cred_random_with_uv = env.rng().gen_uniform_u8x32();
@@ -131,16 +113,13 @@ pub fn find_credential(
     env: &mut impl Env,
     rp_id: &str,
     credential_id: &[u8],
-    check_cred_protect: bool,
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
     let credential = match find_credential_item(env, credential_id) {
         Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS) => return Ok(None),
         Err(e) => return Err(e),
         Ok((_key, credential)) => credential,
     };
-    let is_protected = credential.cred_protect_policy
-        == Some(CredentialProtectionPolicy::UserVerificationRequired);
-    if credential.rp_id != rp_id || (check_cred_protect && is_protected) {
+    if credential.rp_id != rp_id {
         return Ok(None);
     }
     Ok(Some(credential))
@@ -278,21 +257,6 @@ pub fn incr_global_signature_counter(
     env.store()
         .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
     Ok(())
-}
-
-/// Returns the master keys.
-pub fn master_keys(env: &mut impl Env) -> Result<MasterKeys, Ctap2StatusCode> {
-    let master_keys = env
-        .store()
-        .find(key::MASTER_KEYS)?
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    if master_keys.len() != 64 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    Ok(MasterKeys {
-        encryption: *array_ref![master_keys, 0, 32],
-        hmac: *array_ref![master_keys, 32, 32],
-    })
 }
 
 /// Returns the CredRandom secret.
@@ -470,58 +434,6 @@ pub fn commit_large_blob_array(
     )?)
 }
 
-/// Returns the attestation private key if defined.
-pub fn attestation_private_key(
-    env: &mut impl Env,
-) -> Result<Option<[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH]>, Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_PRIVATE_KEY)? {
-        None => Ok(None),
-        Some(key) if key.len() == key_material::ATTESTATION_PRIVATE_KEY_LENGTH => {
-            Ok(Some(*array_ref![
-                key,
-                0,
-                key_material::ATTESTATION_PRIVATE_KEY_LENGTH
-            ]))
-        }
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
-/// Sets the attestation private key.
-///
-/// If it is already defined, it is overwritten.
-pub fn set_attestation_private_key(
-    env: &mut impl Env,
-    attestation_private_key: &[u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
-) -> Result<(), Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_PRIVATE_KEY)? {
-        None => Ok(env
-            .store()
-            .insert(key::ATTESTATION_PRIVATE_KEY, attestation_private_key)?),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
-/// Returns the attestation certificate if defined.
-pub fn attestation_certificate(env: &mut impl Env) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
-    Ok(env.store().find(key::ATTESTATION_CERTIFICATE)?)
-}
-
-/// Sets the attestation certificate.
-///
-/// If it is already defined, it is overwritten.
-pub fn set_attestation_certificate(
-    env: &mut impl Env,
-    attestation_certificate: &[u8],
-) -> Result<(), Ctap2StatusCode> {
-    match env.store().find(key::ATTESTATION_CERTIFICATE)? {
-        None => Ok(env
-            .store()
-            .insert(key::ATTESTATION_CERTIFICATE, attestation_certificate)?),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
-}
-
 /// Returns the AAGUID.
 pub fn aaguid(env: &mut impl Env) -> Result<[u8; key_material::AAGUID_LENGTH], Ctap2StatusCode> {
     let aaguid = env
@@ -549,6 +461,7 @@ pub fn set_aaguid(
 /// In particular persistent entries are not reset.
 pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     env.store().clear(key::NUM_PERSISTENT_KEYS)?;
+    env.key_store().reset()?;
     init(env)?;
     Ok(())
 }
@@ -578,7 +491,11 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 
 /// Marks enterprise attestation as enabled.
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if attestation_private_key(env)?.is_none() || attestation_certificate(env)?.is_none() {
+    if env
+        .attestation_store()
+        .get(&attestation_store::Id::Enterprise)?
+        .is_none()
+    {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     if !enterprise_attestation(env)? {
@@ -728,19 +645,23 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialType};
+    use crate::api::attestation_store::{self, Attestation, AttestationStore};
+    use crate::ctap::crypto_wrapper::PrivateKey;
+    use crate::ctap::data_formats::{
+        CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
+    };
     use crate::env::test::TestEnv;
     use rng256::Rng256;
 
     fn create_credential_source(
-        rng: &mut impl Rng256,
+        env: &mut TestEnv,
         rp_id: &str,
         user_handle: Vec<u8>,
     ) -> PublicKeyCredentialSource {
-        let private_key = crypto::ecdsa::SecKey::gensk(rng);
+        let private_key = PrivateKey::new_ecdsa(env);
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: rng.gen_uniform_u8x32().to_vec(),
+            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
             private_key,
             rp_id: String::from(rp_id),
             user_handle,
@@ -758,7 +679,7 @@ mod test {
     fn test_store() {
         let mut env = TestEnv::new();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
-        let credential_source = create_credential_source(env.rng(), "example.com", vec![]);
+        let credential_source = create_credential_source(&mut env, "example.com", vec![]);
         assert!(store_credential(&mut env, credential_source).is_ok());
         assert!(count_credentials(&mut env).unwrap() > 0);
     }
@@ -771,7 +692,7 @@ mod test {
         let mut credential_ids = vec![];
         for i in 0..env.customization().max_supported_resident_keys() {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
+            let credential_source = create_credential_source(&mut env, "example.com", user_handle);
             credential_ids.push(credential_source.credential_id.clone());
             assert!(store_credential(&mut env, credential_source).is_ok());
             assert_eq!(count_credentials(&mut env).unwrap(), i + 1);
@@ -799,17 +720,17 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
         );
 
-        let credential_source = create_credential_source(env.rng(), "example.com", vec![0x1D]);
+        let credential_source = create_credential_source(&mut env, "example.com", vec![0x1D]);
         let credential_id = credential_source.credential_id.clone();
         assert!(store_credential(&mut env, credential_source).is_ok());
-        let stored_credential = find_credential(&mut env, "example.com", &credential_id, false)
+        let stored_credential = find_credential(&mut env, "example.com", &credential_id)
             .unwrap()
             .unwrap();
         assert_eq!(stored_credential.user_name, None);
         assert_eq!(stored_credential.user_display_name, None);
         assert_eq!(stored_credential.user_icon, None);
         assert!(update_credential(&mut env, &credential_id, user.clone()).is_ok());
-        let stored_credential = find_credential(&mut env, "example.com", &credential_id, false)
+        let stored_credential = find_credential(&mut env, "example.com", &credential_id)
             .unwrap()
             .unwrap();
         assert_eq!(stored_credential.user_name, user.user_name);
@@ -820,10 +741,10 @@ mod test {
     #[test]
     fn test_credential_order() {
         let mut env = TestEnv::new();
-        let credential_source = create_credential_source(env.rng(), "example.com", vec![]);
+        let credential_source = create_credential_source(&mut env, "example.com", vec![]);
         let current_latest_creation = credential_source.creation_order;
         assert!(store_credential(&mut env, credential_source).is_ok());
-        let mut credential_source = create_credential_source(env.rng(), "example.com", vec![]);
+        let mut credential_source = create_credential_source(&mut env, "example.com", vec![]);
         credential_source.creation_order = new_creation_order(&mut env).unwrap();
         assert!(credential_source.creation_order > current_latest_creation);
         let current_latest_creation = credential_source.creation_order;
@@ -839,12 +760,12 @@ mod test {
         let max_supported_resident_keys = env.customization().max_supported_resident_keys();
         for i in 0..max_supported_resident_keys {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
+            let credential_source = create_credential_source(&mut env, "example.com", user_handle);
             assert!(store_credential(&mut env, credential_source).is_ok());
             assert_eq!(count_credentials(&mut env).unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
-            env.rng(),
+            &mut env,
             "example.com",
             vec![max_supported_resident_keys as u8],
         );
@@ -865,35 +786,31 @@ mod test {
 
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
         // These should have different IDs.
-        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x00]);
+        let credential_source0 = create_credential_source(&mut env, "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(&mut env, "example.com", vec![0x00]);
         let credential_id0 = credential_source0.credential_id.clone();
         let credential_id1 = credential_source1.credential_id.clone();
 
         assert!(store_credential(&mut env, credential_source0).is_ok());
         assert!(store_credential(&mut env, credential_source1).is_ok());
         assert_eq!(count_credentials(&mut env).unwrap(), 1);
-        assert!(
-            find_credential(&mut env, "example.com", &credential_id0, false)
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            find_credential(&mut env, "example.com", &credential_id1, false)
-                .unwrap()
-                .is_some()
-        );
+        assert!(find_credential(&mut env, "example.com", &credential_id0)
+            .unwrap()
+            .is_none());
+        assert!(find_credential(&mut env, "example.com", &credential_id1)
+            .unwrap()
+            .is_some());
 
         reset(&mut env).unwrap();
         let max_supported_resident_keys = env.customization().max_supported_resident_keys();
         for i in 0..max_supported_resident_keys {
             let user_handle = (i as u32).to_ne_bytes().to_vec();
-            let credential_source = create_credential_source(env.rng(), "example.com", user_handle);
+            let credential_source = create_credential_source(&mut env, "example.com", user_handle);
             assert!(store_credential(&mut env, credential_source).is_ok());
             assert_eq!(count_credentials(&mut env).unwrap(), i + 1);
         }
         let credential_source = create_credential_source(
-            env.rng(),
+            &mut env,
             "example.com",
             vec![max_supported_resident_keys as u8],
         );
@@ -910,10 +827,10 @@ mod test {
     #[test]
     fn test_get_credential() {
         let mut env = TestEnv::new();
-        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x01]);
+        let credential_source0 = create_credential_source(&mut env, "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(&mut env, "example.com", vec![0x01]);
         let credential_source2 =
-            create_credential_source(env.rng(), "another.example.com", vec![0x02]);
+            create_credential_source(&mut env, "another.example.com", vec![0x02]);
         let credential_sources = vec![credential_source0, credential_source1, credential_source2];
         for credential_source in credential_sources.into_iter() {
             let cred_id = credential_source.credential_id.clone();
@@ -928,16 +845,16 @@ mod test {
     fn test_find() {
         let mut env = TestEnv::new();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
-        let credential_source0 = create_credential_source(env.rng(), "example.com", vec![0x00]);
-        let credential_source1 = create_credential_source(env.rng(), "example.com", vec![0x01]);
+        let credential_source0 = create_credential_source(&mut env, "example.com", vec![0x00]);
+        let credential_source1 = create_credential_source(&mut env, "example.com", vec![0x01]);
         let id0 = credential_source0.credential_id.clone();
         let key0 = credential_source0.private_key.clone();
         assert!(store_credential(&mut env, credential_source0).is_ok());
         assert!(store_credential(&mut env, credential_source1).is_ok());
 
-        let no_credential = find_credential(&mut env, "another.example.com", &id0, false).unwrap();
+        let no_credential = find_credential(&mut env, "another.example.com", &id0).unwrap();
         assert_eq!(no_credential, None);
-        let found_credential = find_credential(&mut env, "example.com", &id0, false).unwrap();
+        let found_credential = find_credential(&mut env, "example.com", &id0).unwrap();
         let expected_credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: id0,
@@ -953,52 +870,6 @@ mod test {
             large_blob_key: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
-    }
-
-    #[test]
-    fn test_find_with_cred_protect() {
-        let mut env = TestEnv::new();
-        assert_eq!(count_credentials(&mut env).unwrap(), 0);
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let credential = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
-            rp_id: String::from("example.com"),
-            user_handle: vec![0x00],
-            user_display_name: None,
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        };
-        assert!(store_credential(&mut env, credential).is_ok());
-
-        let no_credential = find_credential(&mut env, "example.com", &[0x00], true).unwrap();
-        assert_eq!(no_credential, None);
-    }
-
-    #[test]
-    fn test_master_keys() {
-        let mut env = TestEnv::new();
-        init(&mut env).unwrap();
-
-        // Master keys stay the same within the same CTAP reset cycle.
-        let master_keys_1 = master_keys(&mut env).unwrap();
-        let master_keys_2 = master_keys(&mut env).unwrap();
-        assert_eq!(master_keys_2.encryption, master_keys_1.encryption);
-        assert_eq!(master_keys_2.hmac, master_keys_1.hmac);
-
-        // Master keys change after reset. This test may fail if the random generator produces the
-        // same keys.
-        let master_encryption_key = master_keys_1.encryption.to_vec();
-        let master_hmac_key = master_keys_1.hmac.to_vec();
-        reset(&mut env).unwrap();
-        let master_keys_3 = master_keys(&mut env).unwrap();
-        assert!(master_keys_3.encryption != master_encryption_key.as_slice());
-        assert!(master_keys_3.hmac != master_hmac_key.as_slice());
     }
 
     #[test]
@@ -1085,25 +956,26 @@ mod test {
         init(&mut env).unwrap();
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
-        assert!(attestation_private_key(&mut env).unwrap().is_none());
-        assert!(attestation_certificate(&mut env).unwrap().is_none());
+        assert_eq!(
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(None)
+        );
 
         // Make sure the persistent keys are initialized to dummy values.
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        let dummy_cert = [0xddu8; 20];
-        set_attestation_private_key(&mut env, &dummy_key).unwrap();
-        set_attestation_certificate(&mut env, &dummy_cert).unwrap();
+        let dummy_attestation = Attestation {
+            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            certificate: vec![0xdd; 20],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
+            .unwrap();
         assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
 
         // The persistent keys stay initialized and preserve their value after a reset.
         reset(&mut env).unwrap();
         assert_eq!(
-            &attestation_private_key(&mut env).unwrap().unwrap(),
-            &dummy_key
-        );
-        assert_eq!(
-            attestation_certificate(&mut env).unwrap().unwrap(),
-            &dummy_cert
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(dummy_attestation))
         );
         assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
     }
@@ -1239,17 +1111,13 @@ mod test {
     fn test_enterprise_attestation() {
         let mut env = TestEnv::new();
 
-        assert!(!enterprise_attestation(&mut env).unwrap());
-        assert_eq!(
-            enable_enterprise_attestation(&mut env),
-            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-        );
-        assert!(!enterprise_attestation(&mut env).unwrap());
-
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        let dummy_cert = [0xddu8; 20];
-        set_attestation_private_key(&mut env, &dummy_key).unwrap();
-        set_attestation_certificate(&mut env, &dummy_cert).unwrap();
+        let dummy_attestation = Attestation {
+            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            certificate: vec![0xdd; 20],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Enterprise, Some(&dummy_attestation))
+            .unwrap();
 
         assert!(!enterprise_attestation(&mut env).unwrap());
         assert_eq!(enable_enterprise_attestation(&mut env), Ok(()));
@@ -1280,7 +1148,7 @@ mod test {
     #[test]
     fn test_serialize_deserialize_credential() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),

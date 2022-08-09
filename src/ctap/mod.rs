@@ -16,13 +16,14 @@ pub mod apdu;
 mod client_pin;
 pub mod command;
 mod config_command;
+mod credential_id;
 mod credential_management;
 mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 pub mod data_formats;
 pub mod hid;
-mod key_material;
+pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
@@ -40,8 +41,11 @@ use self::command::{
     AuthenticatorVendorConfigureParameters, AuthenticatorVendorUpgradeParameters, Command,
 };
 use self::config_command::process_config;
+use self::credential_id::{
+    decrypt_credential_id, encrypt_to_credential_id, MAX_CREDENTIAL_ID_SIZE,
+};
 use self::credential_management::process_credential_management;
-use self::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
+use self::crypto_wrapper::PrivateKey;
 use self::data_formats::{
     AuthenticatorTransport, CoseKey, CoseSignature, CredentialProtectionPolicy,
     EnterpriseAttestationMode, GetAssertionExtensions, PackedAttestationStatement,
@@ -49,7 +53,7 @@ use self::data_formats::{
     PublicKeyCredentialSource, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
     SignatureAlgorithm,
 };
-use self::hid::ChannelID;
+use self::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
 use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
@@ -60,11 +64,14 @@ use self::status_code::Ctap2StatusCode;
 use self::timed_permission::TimedPermission;
 #[cfg(feature = "with_ctap1")]
 use self::timed_permission::U2fUserPresenceState;
+use crate::api::attestation_store::{self, Attestation, AttestationStore};
+use crate::api::connection::{HidConnection, SendOrRecvStatus};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
-use crate::clock::{ClockInt, CtapInstant};
-use crate::env::{Env, UserPresence};
+use crate::api::user_presence::{UserPresence, UserPresenceError};
+use crate::clock::{ClockInt, CtapInstant, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
+use crate::env::Env;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -72,21 +79,16 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-use crypto::hmac::{hmac_256, verify_hmac_256};
+use crypto::hmac::hmac_256;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use embedded_time::duration::Milliseconds;
+use libtock_drivers::usb_ctap_hid::UsbEndpoint;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 
 pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
-// Our credential ID consists of
-// - 16 byte initialization vector for AES-256,
-// - 32 byte ECDSA private key for the credential,
-// - 32 byte relying party ID hashed with SHA256,
-// - 32 byte HMAC-SHA256 over everything else.
-pub const CREDENTIAL_ID_SIZE: usize = 112;
 // Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
 // Set this bit when checking user verification.
@@ -118,8 +120,28 @@ pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
-    alg: SignatureAlgorithm::ES256,
+    alg: SignatureAlgorithm::Es256,
 };
+
+#[cfg(feature = "ed25519")]
+pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
+    cred_type: PublicKeyCredentialType::PublicKey,
+    alg: SignatureAlgorithm::Eddsa,
+};
+
+const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
+    ES256_CRED_PARAM,
+    #[cfg(feature = "ed25519")]
+    EDDSA_CRED_PARAM,
+];
+
+fn get_preferred_cred_param(
+    params: &[PublicKeyCredentialParameter],
+) -> Option<&PublicKeyCredentialParameter> {
+    params
+        .iter()
+        .find(|&param| SUPPORTED_CRED_PARAMS.contains(param))
+}
 
 /// Transports supported by OpenSK.
 ///
@@ -135,6 +157,16 @@ pub enum Transport {
     /// No equivalent in CTAP, used for communication outside the specification.
     #[cfg(feature = "vendor_hid")]
     VendorHid,
+}
+
+impl Transport {
+    pub fn hid_connection<E: Env>(self, env: &mut E) -> &mut E::HidConnection {
+        match self {
+            Transport::MainHid => env.main_hid_connection(),
+            #[cfg(feature = "vendor_hid")]
+            Transport::VendorHid => env.vendor_hid_connection(),
+        }
+    }
 }
 
 /// Communication channels between authenticator and client.
@@ -226,6 +258,128 @@ fn verify_signature(
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
     }
     Ok(())
+}
+
+// Sends keepalive packet during user presence checking. If user agent replies with CANCEL response,
+// returns Err(UserPresenceError::Canceled).
+fn send_keepalive_up_needed(
+    env: &mut impl Env,
+    channel: Channel,
+    timeout: Milliseconds<ClockInt>,
+) -> Result<(), UserPresenceError> {
+    let (cid, transport) = match channel {
+        Channel::MainHid(cid) => (cid, Transport::MainHid),
+        #[cfg(feature = "vendor_hid")]
+        Channel::VendorHid(cid) => (cid, Transport::VendorHid),
+    };
+    let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
+    for mut pkt in keepalive_msg {
+        let ctap_hid_connection = transport.hid_connection(env);
+        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout) {
+            Ok(SendOrRecvStatus::Timeout) => {
+                debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
+                // TODO: abort user presence test?
+            }
+            Err(_) => panic!("Error sending KEEPALIVE packet"),
+            Ok(SendOrRecvStatus::Sent) => {
+                debug_ctap!(env, "Sent KEEPALIVE packet");
+            }
+            Ok(SendOrRecvStatus::Received(endpoint)) => {
+                let rx_transport = match endpoint {
+                    UsbEndpoint::MainHid => Transport::MainHid,
+                    #[cfg(feature = "vendor_hid")]
+                    UsbEndpoint::VendorHid => Transport::VendorHid,
+                };
+                if rx_transport != transport {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on transport {:?} while sending a KEEPALIVE packet on transport {:?}",
+                         rx_transport, transport
+                    );
+                    // Ignore this packet.
+                    // TODO(liamjm): Support receiving packets on both interfaces.
+                    continue;
+                }
+
+                // We only parse one packet, because we only care about CANCEL.
+                let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
+                if received_cid != &cid {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
+                        received_cid,
+                    );
+                    return Ok(());
+                }
+                match processed_packet {
+                    ProcessedPacket::InitPacket { cmd, .. } => {
+                        if cmd == CtapHidCommand::Cancel as u8 {
+                            // We ignore the payload, we can't answer with an error code anyway.
+                            debug_ctap!(env, "User presence check cancelled");
+                            return Err(UserPresenceError::Canceled);
+                        } else {
+                            debug_ctap!(
+                                env,
+                                "Discarded packet with command {} received while sending a KEEPALIVE packet",
+                                cmd,
+                            );
+                        }
+                    }
+                    ProcessedPacket::ContinuationPacket { .. } => {
+                        debug_ctap!(
+                            env,
+                            "Discarded continuation packet received while sending a KEEPALIVE packet",
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Blocks for user presence.
+///
+/// Returns an error in case of timeout, user declining presence request, or keepalive error.
+fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2StatusCode> {
+    env.user_presence().check_init();
+
+    // The timeout is N times the keepalive delay.
+    const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
+
+    // All fallible functions are called without '?' operator to always reach
+    // check_complete(...) cleanup function.
+
+    let mut result = Err(UserPresenceError::Timeout);
+    for i in 0..=TIMEOUT_ITERATIONS {
+        // First presence check is made without timeout. That way Env implementation may return
+        // user presence check result immediately to client, without sending any keepalive packets.
+        result = env.user_presence().wait_with_timeout(if i == 0 {
+            Milliseconds(0)
+        } else {
+            KEEPALIVE_DELAY
+        });
+        if !matches!(result, Err(UserPresenceError::Timeout)) {
+            break;
+        }
+        // TODO: this may take arbitrary time. Next wait's delay should be adjusted
+        // accordingly, so that all wait_with_timeout invocations are separated by
+        // equal time intervals. That way token indicators, such as LEDs, will blink
+        // with a consistent pattern.
+        let keepalive_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if keepalive_result.is_err() {
+            debug_ctap!(
+                env,
+                "Sending keepalive failed with error {:?}",
+                keepalive_result.as_ref().unwrap_err()
+            );
+            result = keepalive_result;
+            break;
+        }
+    }
+
+    env.user_presence().check_complete();
+    result.map_err(|e| e.into())
 }
 
 /// Holds data necessary to sign an assertion for a credential.
@@ -431,72 +585,6 @@ impl CtapState {
         Ok(!storage::has_always_uv(env)?)
     }
 
-    // Encrypts the private key and relying party ID hash into a credential ID. Other
-    // information, such as a user name, are not stored, because encrypted credential IDs
-    // are used for credentials stored server-side. Also, we want the key handle to be
-    // compatible with U2F.
-    pub fn encrypt_key_handle(
-        &mut self,
-        env: &mut impl Env,
-        private_key: crypto::ecdsa::SecKey,
-        application: &[u8; 32],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let master_keys = storage::master_keys(env)?;
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-        let mut plaintext = [0; 64];
-        private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
-        plaintext[32..64].copy_from_slice(application);
-
-        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(&master_keys.hmac, &encrypted_id[..]);
-        encrypted_id.extend(&id_hmac);
-        Ok(encrypted_id)
-    }
-
-    // Decrypts a credential ID and writes the private key into a PublicKeyCredentialSource.
-    // None is returned if the HMAC test fails or the relying party does not match the
-    // decrypted relying party ID hash.
-    pub fn decrypt_credential_source(
-        &self,
-        env: &mut impl Env,
-        credential_id: Vec<u8>,
-        rp_id_hash: &[u8],
-    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-        if credential_id.len() != CREDENTIAL_ID_SIZE {
-            return Ok(None);
-        }
-        let master_keys = storage::master_keys(env)?;
-        let payload_size = credential_id.len() - 32;
-        if !verify_hmac_256::<Sha256>(
-            &master_keys.hmac,
-            &credential_id[..payload_size],
-            array_ref![credential_id, payload_size, 32],
-        ) {
-            return Ok(None);
-        }
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&master_keys.encryption);
-
-        let decrypted_id = aes256_cbc_decrypt(&aes_enc_key, &credential_id[..payload_size], true)?;
-        if rp_id_hash != &decrypted_id[32..64] {
-            return Ok(None);
-        }
-        let sk_option = crypto::ecdsa::SecKey::from_bytes(array_ref!(decrypted_id, 0, 32));
-        Ok(sk_option.map(|sk| PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id,
-            private_key: sk,
-            rp_id: String::from(""),
-            user_handle: vec![],
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        }))
-    }
-
     pub fn process_command(
         &mut self,
         env: &mut impl Env,
@@ -626,6 +714,7 @@ impl CtapState {
             }
             Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
             Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
+            Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
     }
@@ -640,7 +729,7 @@ impl CtapState {
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
-                env.user_presence().check(channel)?;
+                check_user_presence(env, channel)?;
                 if storage::pin_hash(env)?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
@@ -650,6 +739,22 @@ impl CtapState {
             pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
         }
         Ok(())
+    }
+
+    fn check_cred_protect_for_listed_credential(
+        &mut self,
+        credential: &Option<PublicKeyCredentialSource>,
+        has_uv: bool,
+    ) -> bool {
+        if let Some(credential) = credential {
+            has_uv
+                || !matches!(
+                    credential.cred_protect_policy,
+                    Some(CredentialProtectionPolicy::UserVerificationRequired),
+                )
+        } else {
+            false
+        }
     }
 
     fn process_make_credential(
@@ -673,9 +778,10 @@ impl CtapState {
 
         self.pin_uv_auth_precheck(env, &pin_uv_auth_param, pin_uv_auth_protocol, channel)?;
 
-        if !pub_key_cred_params.contains(&ES256_CRED_PARAM) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
+        // When more algorithms are supported, iterate and pick the first match.
+        let cred_param = get_preferred_cred_param(&pub_key_cred_params)
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)?;
+        let algorithm = cred_param.alg;
 
         let rp_id = rp.rp_id;
         let ep_att = if let Some(enterprise_attestation) = enterprise_attestation {
@@ -743,20 +849,22 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if storage::find_credential(env, &rp_id, &cred_desc.key_id, !has_uv)?.is_some()
-                    || self
-                        .decrypt_credential_source(env, cred_desc.key_id, &rp_id_hash)?
-                        .is_some()
-                {
+                if self.check_cred_protect_for_listed_credential(
+                    &storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
+                    has_uv,
+                ) || self.check_cred_protect_for_listed_credential(
+                    &decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash)?,
+                    has_uv,
+                ) {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
-                    let _ = env.user_presence().check(channel);
+                    let _ = check_user_presence(env, channel);
                     return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
                 }
             }
         }
 
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
         self.client_pin.clear_token_flags();
 
         let default_cred_protect = env.customization().default_cred_protect();
@@ -790,15 +898,15 @@ impl CtapState {
             _ => None,
         };
 
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-
+        // We decide on the algorithm early, but delay key creation since it takes time.
+        // We rather do that later so all intermediate checks may return faster.
+        let private_key = PrivateKey::new(env, algorithm);
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
-                private_key: sk.clone(),
+                private_key: private_key.clone(),
                 rp_id,
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
@@ -820,18 +928,19 @@ impl CtapState {
             storage::store_credential(env, credential_source)?;
             random_id
         } else {
-            self.encrypt_key_handle(env, sk.clone(), &rp_id_hash)?
+            encrypt_to_credential_id(env, &private_key, &rp_id_hash, cred_protect_policy)?
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
         auth_data.extend(&storage::aaguid(env)?);
-        // The length is fixed to 0x20 or 0x70 and fits one byte.
+        // The length is fixed to 0x20 or 0x80 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        cbor_write(cbor::Value::from(CoseKey::from(pk)), &mut auth_data)?;
+        let public_cose_key = private_key.get_pub_key(env)?;
+        cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
                 Some(true)
@@ -856,23 +965,35 @@ impl CtapState {
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
 
-        let (signature, x5c) = if env.customization().use_batch_attestation() || ep_att {
-            let attestation_private_key = storage::attestation_private_key(env)?
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-            let attestation_key =
-                crypto::ecdsa::SecKey::from_bytes(&attestation_private_key).unwrap();
-            let attestation_certificate = storage::attestation_certificate(env)?
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-            (
-                attestation_key.sign_rfc6979::<Sha256>(&signature_data),
-                Some(vec![attestation_certificate]),
-            )
+        let attestation_id = if ep_att {
+            Some(attestation_store::Id::Enterprise)
+        } else if env.customization().use_batch_attestation() {
+            Some(attestation_store::Id::Batch)
         } else {
-            (sk.sign_rfc6979::<Sha256>(&signature_data), None)
+            None
+        };
+        let (signature, x5c) = match attestation_id {
+            Some(id) => {
+                let Attestation {
+                    private_key,
+                    certificate,
+                } = env
+                    .attestation_store()
+                    .get(&id)?
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                let attestation_key = crypto::ecdsa::SecKey::from_bytes(&private_key).unwrap();
+                (
+                    attestation_key
+                        .sign_rfc6979::<Sha256>(&signature_data)
+                        .to_asn1_der(),
+                    Some(vec![certificate]),
+                )
+            }
+            None => (private_key.sign_and_encode(env, &signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
-            alg: SignatureAlgorithm::ES256 as i64,
-            sig: signature.to_asn1_der(),
+            alg: SignatureAlgorithm::Es256 as i64,
+            sig: signature,
             x5c,
             ecdaa_key_id: None,
         };
@@ -893,13 +1014,12 @@ impl CtapState {
     fn generate_cred_random(
         &mut self,
         env: &mut impl Env,
-        private_key: &crypto::ecdsa::SecKey,
+        private_key: &PrivateKey,
         has_uv: bool,
     ) -> Result<[u8; 32], Ctap2StatusCode> {
-        let mut private_key_bytes = [0u8; 32];
-        private_key.to_bytes(&mut private_key_bytes);
+        let entropy = private_key.to_bytes();
         let key = storage::cred_random_secret(env, has_uv)?;
-        Ok(hmac_256::<Sha256>(&key, &private_key_bytes))
+        Ok(hmac_256::<Sha256>(&key, &entropy))
     }
 
     // Processes the input of a get_assertion operation for a given credential
@@ -953,7 +1073,7 @@ impl CtapState {
         signature_data.extend(client_data_hash);
         let signature = credential
             .private_key
-            .sign_rfc6979::<Sha256>(&signature_data);
+            .sign_and_encode(env, &signature_data)?;
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -979,7 +1099,7 @@ impl CtapState {
         let response_data = AuthenticatorGetAssertionResponse {
             credential: Some(cred_desc),
             auth_data,
-            signature: signature.to_asn1_der(),
+            signature,
             user,
             number_of_credentials: number_of_credentials.map(|n| n as u64),
             large_blob_key,
@@ -1002,14 +1122,12 @@ impl CtapState {
         has_uv: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
-            let credential =
-                storage::find_credential(env, rp_id, &allowed_credential.key_id, !has_uv)?;
-            if credential.is_some() {
+            let credential = storage::find_credential(env, rp_id, &allowed_credential.key_id)?;
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
-            let credential =
-                self.decrypt_credential_source(env, allowed_credential.key_id, rp_id_hash)?;
-            if credential.is_some() {
+            let credential = decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash)?;
+            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
                 return Ok(credential);
             }
         }
@@ -1121,7 +1239,7 @@ impl CtapState {
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
         if options.up {
-            env.user_presence().check(channel)?;
+            check_user_presence(env, channel)?;
             self.client_pin.clear_token_flags();
         }
 
@@ -1215,9 +1333,9 @@ impl CtapState {
                     .customization()
                     .max_credential_count_in_list()
                     .map(|c| c as u64),
-                max_credential_id_length: Some(CREDENTIAL_ID_SIZE as u64),
+                max_credential_id_length: Some(MAX_CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
-                algorithms: Some(vec![ES256_CRED_PARAM]),
+                algorithms: Some(SUPPORTED_CRED_PARAMS.to_vec()),
                 max_serialized_large_blob_array: Some(
                     env.customization().max_large_blob_array_size() as u64,
                 ),
@@ -1245,7 +1363,7 @@ impl CtapState {
             StatefulCommand::Reset => (),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
         }
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
 
         storage::reset(env)?;
         self.client_pin.reset(env.rng());
@@ -1263,7 +1381,7 @@ impl CtapState {
         env: &mut impl Env,
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        env.user_presence().check(channel)?;
+        check_user_presence(env, channel)?;
         Ok(ResponseData::AuthenticatorSelection)
     }
 
@@ -1274,43 +1392,28 @@ impl CtapState {
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         if params.attestation_material.is_some() || params.lockdown {
-            env.user_presence().check(channel)?;
+            check_user_presence(env, channel)?;
         }
+        // This command is for U2F support and we use the batch attestation there.
+        let attestation_id = attestation_store::Id::Batch;
 
         // Sanity checks
-        let current_priv_key = storage::attestation_private_key(env)?;
-        let current_cert = storage::attestation_certificate(env)?;
-
+        let current_attestation = env.attestation_store().get(&attestation_id)?;
         let response = match params.attestation_material {
-            // Only reading values.
             None => AuthenticatorVendorConfigureResponse {
-                cert_programmed: current_cert.is_some(),
-                pkey_programmed: current_priv_key.is_some(),
+                cert_programmed: current_attestation.is_some(),
+                pkey_programmed: current_attestation.is_some(),
             },
-            // Device is already fully programmed. We don't leak information.
-            Some(_) if current_cert.is_some() && current_priv_key.is_some() => {
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            }
-            // Device is partially or not programmed. We complete the process.
             Some(data) => {
-                if let Some(current_cert) = &current_cert {
-                    if current_cert != &data.certificate {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                }
-                if let Some(current_priv_key) = &current_priv_key {
-                    if current_priv_key != &data.private_key {
-                        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-                    }
-                }
-                if current_cert.is_none() {
-                    storage::set_attestation_certificate(env, &data.certificate)?;
-                }
-                if current_priv_key.is_none() {
-                    storage::set_attestation_private_key(env, &data.private_key)?;
+                // We don't overwrite the attestation if it's already set. We don't return any error
+                // to not leak information.
+                if current_attestation.is_none() {
+                    let attestation = Attestation {
+                        private_key: data.private_key,
+                        certificate: data.certificate,
+                    };
+                    env.attestation_store()
+                        .set(&attestation_id, Some(&attestation))?;
                 }
                 AuthenticatorVendorConfigureResponse {
                     cert_programmed: true,
@@ -1429,6 +1532,7 @@ mod test {
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
         AuthenticatorCredentialManagementParameters,
     };
+    use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
         ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionHmacSecretInput,
         GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
@@ -1436,7 +1540,10 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
+    use crate::api::customization;
+    use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
+    use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -1482,7 +1589,7 @@ mod test {
                     expected_extension_cbor
                 );
                 assert!(ep_att.is_none());
-                assert_eq!(att_stmt.alg, SignatureAlgorithm::ES256 as i64);
+                assert_eq!(att_stmt.alg, SignatureAlgorithm::Es256 as i64);
                 assert_eq!(large_blob_key, None);
             }
             _ => panic!("Invalid response type"),
@@ -1527,9 +1634,9 @@ mod test {
             0x05 => env.customization().max_msg_size() as u64,
             0x06 => cbor_array![2, 1],
             0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
-            0x08 => CREDENTIAL_ID_SIZE as u64,
+            0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
-            0x0A => cbor_array![ES256_CRED_PARAM],
+            0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
             0x0B => env.customization().max_large_blob_array_size() as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
@@ -1633,7 +1740,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            CREDENTIAL_ID_SIZE as u8,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -1657,7 +1764,7 @@ mod test {
     #[test]
     fn test_process_make_credential_credential_excluded() {
         let mut env = TestEnv::new();
-        let excluded_private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let excluded_private_key = PrivateKey::new_ecdsa(&mut env);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
@@ -1739,6 +1846,61 @@ mod test {
     }
 
     #[test]
+    fn test_non_resident_process_make_credential_credential_with_cred_protect() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationRequired;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+    }
+
+    #[test]
     fn test_process_make_credential_hmac_secret() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -1760,7 +1922,7 @@ mod test {
             make_credential_response,
             0xC1,
             &storage::aaguid(&mut env).unwrap(),
-            CREDENTIAL_ID_SIZE as u8,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
     }
@@ -2003,7 +2165,7 @@ mod test {
             make_credential_response,
             0x41,
             &storage::aaguid(&mut env).unwrap(),
-            0x70,
+            CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
     }
@@ -2062,17 +2224,13 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::VendorFacilitated);
-        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        env.customization_mut().setup_enterprise_attestation(
+            Some(EnterpriseAttestationMode::VendorFacilitated),
+            Some(vec!["example.com".to_string()]),
+        );
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2112,17 +2270,14 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::PlatformManaged);
-        env.customization_mut().enterprise_rp_id_list = vec!["example.com".to_string()];
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        env.customization_mut().setup_enterprise_attestation(
+            Some(EnterpriseAttestationMode::PlatformManaged),
+            Some(vec!["example.com".to_string()]),
+        );
+        assert!(customization::is_valid(env.customization()));
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(1);
@@ -2151,8 +2306,9 @@ mod test {
     #[test]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::new();
-        env.customization_mut().enterprise_attestation_mode =
-            Some(EnterpriseAttestationMode::PlatformManaged);
+        env.customization_mut()
+            .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
+
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
@@ -2164,12 +2320,7 @@ mod test {
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
-        let mut key_bytes = [0; 32];
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        private_key.to_bytes(array_mut_ref!(key_bytes, 0, 32));
-        storage::set_attestation_certificate(&mut env, &[0xCC]).unwrap();
-        storage::set_attestation_private_key(&mut env, &key_bytes).unwrap();
-        storage::enable_enterprise_attestation(&mut env).unwrap();
+        test_helpers::enable_enterprise_attestation(&mut ctap_state, &mut env).unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.enterprise_attestation = Some(3);
@@ -2184,8 +2335,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -2383,8 +2533,8 @@ mod test {
                 let auth_data = make_credential_response.auth_data;
                 let offset = 37 + storage::aaguid(&mut env).unwrap().len();
                 assert_eq!(auth_data[offset], 0x00);
-                assert_eq!(auth_data[offset + 1] as usize, CREDENTIAL_ID_SIZE);
-                auth_data[offset + 2..offset + 2 + CREDENTIAL_ID_SIZE].to_vec()
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
             }
             _ => panic!("Invalid response type"),
         };
@@ -2487,7 +2637,7 @@ mod test {
     #[test]
     fn test_resident_process_get_assertion_with_cred_protect() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -2599,9 +2749,102 @@ mod test {
     }
 
     #[test]
+    fn test_non_resident_process_get_assertion_with_cred_protect() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(get_assertion_response.is_ok());
+
+        let test_policy = CredentialProtectionPolicy::UserVerificationRequired;
+        let mut make_credential_params =
+            create_make_credential_parameters_with_cred_protect_policy(test_policy);
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = match make_credential_response.unwrap() {
+            ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
+                let auth_data = make_credential_response.auth_data;
+                let offset = 37 + storage::aaguid(&mut env).unwrap().len();
+                assert_eq!(auth_data[offset], 0x00);
+                assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
+                auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+    }
+
+    #[test]
     fn test_process_get_assertion_with_cred_blob() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -2659,7 +2902,7 @@ mod test {
     #[test]
     fn test_process_get_assertion_with_large_blob_key() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -2945,7 +3188,7 @@ mod test {
     #[test]
     fn test_process_reset() {
         let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let credential_id = vec![0x01, 0x23, 0x45, 0x67];
@@ -2976,8 +3219,7 @@ mod test {
     #[test]
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::new();
-        env.user_presence()
-            .set(|_| Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);
@@ -3026,47 +3268,6 @@ mod test {
             ctap_state.process_command(&mut env, &[0xDF], DUMMY_CHANNEL, CtapInstant::new(0));
         let expected_response = vec![Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND as u8];
         assert_eq!(reponse, expected_response);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_credential() {
-        let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-
-        // Usually, the relying party ID or its hash is provided by the client.
-        // We are not testing the correctness of our SHA256 here, only if it is checked.
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state
-            .encrypt_key_handle(&mut env, private_key.clone(), &rp_id_hash)
-            .unwrap();
-        let decrypted_source = ctap_state
-            .decrypt_credential_source(&mut env, encrypted_id, &rp_id_hash)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(private_key, decrypted_source.private_key);
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_bad_hmac() {
-        let mut env = TestEnv::new();
-        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-
-        // Same as above.
-        let rp_id_hash = [0x55; 32];
-        let encrypted_id = ctap_state
-            .encrypt_key_handle(&mut env, private_key, &rp_id_hash)
-            .unwrap();
-        for i in 0..encrypted_id.len() {
-            let mut modified_id = encrypted_id.clone();
-            modified_id[i] ^= 0x01;
-            assert!(ctap_state
-                .decrypt_credential_source(&mut env, modified_id, &rp_id_hash)
-                .unwrap()
-                .is_none());
-        }
     }
 
     #[test]
@@ -3134,12 +3335,11 @@ mod test {
             ))
         );
         assert_eq!(
-            storage::attestation_certificate(&mut env).unwrap().unwrap(),
-            dummy_cert
-        );
-        assert_eq!(
-            storage::attestation_private_key(&mut env).unwrap().unwrap(),
-            dummy_key
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(Attestation {
+                private_key: dummy_key,
+                certificate: dummy_cert.to_vec(),
+            }))
         );
 
         // Try to inject other dummy values and check that initial values are retained.
@@ -3165,12 +3365,11 @@ mod test {
             ))
         );
         assert_eq!(
-            storage::attestation_certificate(&mut env).unwrap().unwrap(),
-            dummy_cert
-        );
-        assert_eq!(
-            storage::attestation_private_key(&mut env).unwrap().unwrap(),
-            dummy_key
+            env.attestation_store().get(&attestation_store::Id::Batch),
+            Ok(Some(Attestation {
+                private_key: dummy_key,
+                certificate: dummy_cert.to_vec(),
+            }))
         );
 
         // Now try to lock the device
@@ -3242,7 +3441,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 
@@ -3278,7 +3477,7 @@ mod test {
         );
         signature_bytes[0] ^= 0x01;
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
         assert_eq!(
@@ -3315,7 +3514,7 @@ mod test {
         let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
         signature.to_bytes(&mut signature_bytes);
         let cose_signature = CoseSignature {
-            algorithm: SignatureAlgorithm::ES256,
+            algorithm: SignatureAlgorithm::Es256,
             bytes: signature_bytes,
         };
 
@@ -3492,10 +3691,11 @@ mod test {
         let client_pin =
             ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
 
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: crypto::ecdsa::SecKey::gensk(env.rng()),
+            private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),
@@ -3572,6 +3772,30 @@ mod test {
     }
 
     #[test]
+    fn test_check_user_presence() {
+        // This TestEnv always returns successful user_presence checks.
+        let mut env = TestEnv::new();
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(response, Ok(_)));
+    }
+
+    #[test]
+    fn test_check_user_presence_timeout() {
+        // This will always return timeout.
+        fn user_presence_timeout() -> UserPresenceResult {
+            Err(UserPresenceError::Timeout)
+        }
+
+        let mut env = TestEnv::new();
+        env.user_presence().set(user_presence_timeout);
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+        ));
+    }
+
+    #[test]
     fn test_channel_interleaving() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -3642,8 +3866,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "vendor_hid")]
-    fn test_main_hid() {
+    fn test_get_info_command() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -3657,9 +3880,29 @@ mod test {
             response,
             Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
+        #[cfg(feature = "vendor_hid")]
+        {
+            let response = ctap_state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetInfo,
+                VENDOR_CHANNEL,
+                CtapInstant::new(0),
+            );
+            assert!(matches!(
+                response,
+                Ok(ResponseData::AuthenticatorGetInfo(_))
+            ));
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_vendor_hid_does_not_support_fido_command() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let response = ctap_state.process_parsed_command(
             &mut env,
-            Command::AuthenticatorGetInfo,
+            Command::AuthenticatorGetNextAssertion,
             VENDOR_CHANNEL,
             CtapInstant::new(0),
         );

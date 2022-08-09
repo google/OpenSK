@@ -13,19 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-SUCCESS=0
-
 # Ensure we are at the project root directory
 cd $(readlink -f $(dirname $0))/..
 
-for file in `find . ! -path "./third_party/*" -type f -name '*.py'`
-do
-  # Output header for our custom matcher on Github workflow
-  echo "PYLINT:${file}"
-  if ! pylint --rcfile=.pylintrc --score=n "$file"
-  then
-    SUCCESS=1
-  fi
-done
-
-exit $SUCCESS
+pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`

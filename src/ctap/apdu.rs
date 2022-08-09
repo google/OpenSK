@@ -16,9 +16,11 @@ use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 
+use crate::api::attestation_store;
+
 const APDU_HEADER_LEN: usize = 4;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types, dead_code)]
 pub enum ApduStatusCode {
     SW_SUCCESS = 0x90_00,
@@ -44,6 +46,17 @@ impl From<ApduStatusCode> for u16 {
     }
 }
 
+impl From<attestation_store::Error> for ApduStatusCode {
+    fn from(error: attestation_store::Error) -> Self {
+        use attestation_store::Error;
+        match error {
+            Error::Storage => ApduStatusCode::SW_MEMERR,
+            Error::Internal => ApduStatusCode::SW_INTERNAL_EXCEPTION,
+            Error::NoSupport => ApduStatusCode::SW_INTERNAL_EXCEPTION,
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub enum ApduInstructions {
     Select = 0xA4,
@@ -51,7 +64,7 @@ pub enum ApduInstructions {
     GetResponse = 0xC0,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[allow(dead_code)]
 pub struct ApduHeader {
     pub cla: u8,
@@ -71,7 +84,7 @@ impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// The APDU cases
 pub enum Case {
     Le1,
@@ -83,7 +96,7 @@ pub enum Case {
     Le3,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum ApduType {
     Instruction,
@@ -91,7 +104,7 @@ pub enum ApduType {
     Extended(Case),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub struct Apdu {
     pub header: ApduHeader,

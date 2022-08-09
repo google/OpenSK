@@ -47,6 +47,12 @@ jobs:
           command: check
           args: --target thumbv7em-none-eabi --release --features vendor_hid
 
+      - name: Check OpenSK ed25519
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target thumbv7em-none-eabi --release --features ed25519
+
       - name: Check OpenSK debug_ctap
         uses: actions-rs/cargo@v1
         with:
@@ -77,11 +83,11 @@ jobs:
           command: check
           args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1
 
-      - name: Check OpenSK debug_ctap,with_ctap1,vendor_hid,panic_console,debug_allocations,verbose
+      - name: Check OpenSK debug_ctap,with_ctap1,vendor_hid,ed25519,panic_console,debug_allocations,verbose
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1,vendor_hid,panic_console,debug_allocations,verbose
+          args: --target thumbv7em-none-eabi --release --features debug_ctap,with_ctap1,vendor_hid,ed25519,panic_console,debug_allocations,verbose
 
       - name: Check examples
         uses: actions-rs/cargo@v1

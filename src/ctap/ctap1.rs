@@ -14,12 +14,14 @@
 
 use super::super::clock::CtapInstant;
 use super::apdu::{Apdu, ApduStatusCode};
+use super::credential_id::{decrypt_credential_id, encrypt_to_credential_id};
+use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
-use crate::ctap::storage;
+use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::array_ref;
-use core::convert::{Into, TryFrom};
+use core::convert::TryFrom;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;
@@ -27,7 +29,7 @@ pub type Ctap1StatusCode = ApduStatusCode;
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ctap1Flags {
     CheckOnly = 0x07,
     EnforceUpAndSign = 0x03,
@@ -47,21 +49,18 @@ impl TryFrom<u8> for Ctap1Flags {
     }
 }
 
-impl Into<u8> for Ctap1Flags {
-    fn into(self) -> u8 {
-        self as u8
+impl From<Ctap1Flags> for u8 {
+    fn from(flags: Ctap1Flags) -> u8 {
+        flags as u8
     }
 }
 
-#[derive(Debug, PartialEq)]
-// TODO: remove #allow when https://github.com/rust-lang/rust/issues/64362 is fixed
+#[derive(Debug, PartialEq, Eq)]
 enum U2fCommand {
-    #[allow(dead_code)]
     Register {
         challenge: [u8; 32],
         application: [u8; 32],
     },
-    #[allow(dead_code)]
     Authenticate {
         challenge: [u8; 32],
         application: [u8; 32],
@@ -69,7 +68,6 @@ enum U2fCommand {
         flags: Ctap1Flags,
     },
     Version,
-    #[allow(dead_code)]
     VendorSpecific {
         payload: Vec<u8>,
     },
@@ -81,9 +79,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
         let apdu: Apdu = match Apdu::try_from(message) {
             Ok(apdu) => apdu,
-            Err(apdu_status_code) => {
-                return Err(Ctap1StatusCode::try_from(apdu_status_code).unwrap())
-            }
+            Err(apdu_status_code) => return Err(apdu_status_code),
         };
 
         let lc = apdu.lc as usize;
@@ -199,7 +195,7 @@ impl Ctap1Command {
                 if !ctap_state.u2f_up_state.consume_up(clock_value) {
                     return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
-                Ctap1Command::process_register(env, challenge, application, ctap_state)
+                Ctap1Command::process_register(env, challenge, application)
             }
 
             U2fCommand::Authenticate {
@@ -247,23 +243,25 @@ impl Ctap1Command {
         env: &mut impl Env,
         challenge: [u8; 32],
         application: [u8; 32],
-        ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+        let private_key = PrivateKey::new_ecdsa(env);
+        let sk = private_key
+            .ecdsa_key(env)
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = sk.genpk();
-        let key_handle = ctap_state
-            .encrypt_key_handle(env, sk, &application)
+        let key_handle = encrypt_to_credential_id(env, &private_key, &application, None)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
             return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION);
         }
 
-        let certificate = storage::attestation_certificate(env)
-            .map_err(|_| Ctap1StatusCode::SW_MEMERR)?
-            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let private_key = storage::attestation_private_key(env)
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
+        let Attestation {
+            private_key,
+            certificate,
+        } = env
+            .attestation_store()
+            .get(&attestation_store::Id::Batch)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
@@ -311,10 +309,13 @@ impl Ctap1Command {
         flags: Ctap1Flags,
         ctap_state: &mut CtapState,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let credential_source = ctap_state
-            .decrypt_credential_source(env, key_handle, &application)
+        let credential_source = decrypt_credential_id(env, key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
+            let ecdsa_key = credential_source
+                .private_key
+                .ecdsa_key(env)
+                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             if flags == Ctap1Flags::CheckOnly {
                 return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }
@@ -329,9 +330,7 @@ impl Ctap1Command {
                 )
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
-            let signature = credential_source
-                .private_key
-                .sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+            let signature = ecdsa_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
 
             let mut response = signature_data[application.len()..application.len() + 5].to_vec();
             response.extend(signature.to_asn1_der());
@@ -344,10 +343,12 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::{key_material, CREDENTIAL_ID_SIZE};
+    use super::super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
+    use super::super::data_formats::SignatureAlgorithm;
     use super::*;
     use crate::api::customization::Customization;
     use crate::clock::TEST_CLOCK_FREQUENCY_HZ;
+    use crate::ctap::storage;
     use crate::env::test::TestEnv;
     use crypto::Hash256;
 
@@ -370,7 +371,7 @@ mod test {
     fn create_authenticate_message(
         application: &[u8; 32],
         flags: Ctap1Flags,
-        key_handle: &Vec<u8>,
+        key_handle: &[u8],
     ) -> Vec<u8> {
         let mut message = vec![
             Ctap1Command::CTAP1_CLA,
@@ -378,13 +379,12 @@ mod test {
             flags.into(),
             0x00,
             0x00,
-            0x00,
-            65 + CREDENTIAL_ID_SIZE as u8,
         ];
+        message.extend(&(65 + CBOR_CREDENTIAL_ID_SIZE as u16).to_be_bytes());
         let challenge = [0x0C; 32];
         message.extend(&challenge);
         message.extend(application);
-        message.push(CREDENTIAL_ID_SIZE as u8);
+        message.push(CBOR_CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);
         message
     }
@@ -393,7 +393,7 @@ mod test {
     fn test_process_allowed() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         storage::toggle_always_uv(&mut env).unwrap();
 
@@ -410,7 +410,7 @@ mod test {
     fn test_process_register() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let application = [0x0A; 32];
@@ -422,40 +422,31 @@ mod test {
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
-        let fake_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
-        assert!(storage::set_attestation_private_key(&mut env, &fake_key).is_ok());
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response = Ctap1Command::process_command(
-            &mut env,
-            &message,
-            &mut ctap_state,
-            CtapInstant::new(0_u64),
-        );
-        // Certificate is still missing
-        assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
-
-        let fake_cert = [0x99u8; 100]; // Arbitrary length
-        assert!(storage::set_attestation_certificate(&mut env, &fake_cert[..]).is_ok());
+        let attestation = Attestation {
+            private_key: [0x41; 32],
+            certificate: vec![0x99; 100],
+        };
+        env.attestation_store()
+            .set(&attestation_store::Id::Batch, Some(&attestation))
+            .unwrap();
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
         ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
         let response =
             Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
                 .unwrap();
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
-        assert_eq!(response[66], CREDENTIAL_ID_SIZE as u8);
-        assert!(ctap_state
-            .decrypt_credential_source(
-                &mut env,
-                response[67..67 + CREDENTIAL_ID_SIZE].to_vec(),
-                &application
-            )
-            .unwrap()
-            .is_some());
-        const CERT_START: usize = 67 + CREDENTIAL_ID_SIZE;
+        assert_eq!(response[66], CBOR_CREDENTIAL_ID_SIZE as u8);
+        assert!(decrypt_credential_id(
+            &mut env,
+            response[67..67 + CBOR_CREDENTIAL_ID_SIZE].to_vec(),
+            &application,
+        )
+        .unwrap()
+        .is_some());
+        const CERT_START: usize = 67 + CBOR_CREDENTIAL_ID_SIZE;
         assert_eq!(
-            &response[CERT_START..CERT_START + fake_cert.len()],
-            &fake_cert[..]
+            &response[CERT_START..][..attestation.certificate.len()],
+            &attestation.certificate
         );
     }
 
@@ -463,7 +454,7 @@ mod test {
     fn test_process_register_bad_message() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let application = [0x0A; 32];
@@ -485,7 +476,7 @@ mod test {
 
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
@@ -501,15 +492,13 @@ mod test {
     fn test_process_authenticate_check_only() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response =
@@ -521,15 +510,13 @@ mod test {
     fn test_process_authenticate_check_only_wrong_rp() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -542,15 +529,13 @@ mod test {
     fn test_process_authenticate_check_only_wrong_length() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let mut message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -582,15 +567,13 @@ mod test {
     fn test_process_authenticate_check_only_wrong_cla() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
@@ -604,15 +587,13 @@ mod test {
     fn test_process_authenticate_check_only_wrong_ins() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
@@ -626,15 +607,13 @@ mod test {
     fn test_process_authenticate_check_only_wrong_flags() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
@@ -656,15 +635,13 @@ mod test {
     fn test_process_authenticate_enforce() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -686,15 +663,13 @@ mod test {
     fn test_process_authenticate_dont_enforce() {
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
-        let key_handle = ctap_state
-            .encrypt_key_handle(&mut env, sk, &application)
-            .unwrap();
+        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None).unwrap();
         let message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -720,13 +695,13 @@ mod test {
     #[test]
     fn test_process_authenticate_bad_key_handle() {
         let application = [0x0A; 32];
-        let key_handle = vec![0x00; CREDENTIAL_ID_SIZE];
+        let key_handle = vec![0x00; CBOR_CREDENTIAL_ID_SIZE];
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
@@ -739,13 +714,13 @@ mod test {
     #[test]
     fn test_process_authenticate_without_up() {
         let application = [0x0A; 32];
-        let key_handle = vec![0x00; CREDENTIAL_ID_SIZE];
+        let key_handle = vec![0x00; CBOR_CREDENTIAL_ID_SIZE];
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
         let mut env = TestEnv::new();
         env.user_presence()
-            .set(|_| panic!("Unexpected user presence check in CTAP1"));
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));

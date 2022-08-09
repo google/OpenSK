@@ -46,12 +46,11 @@ macro_rules! debug_ctap {
 
 pub mod api;
 pub mod clock;
-// Implementation details must be public for testing (in particular fuzzing).
-#[cfg(feature = "std")]
+// TODO(kaczmarczyck): Refactor this so that ctap module isn't public.
 pub mod ctap;
-#[cfg(not(feature = "std"))]
-mod ctap;
 pub mod env;
+#[cfg(feature = "std")]
+pub mod test_helpers;
 
 /// CTAP implementation parameterized by its environment.
 pub struct Ctap<E: Env> {
@@ -88,7 +87,6 @@ impl<E: Env> Ctap<E> {
         &mut self.hid
     }
 
-    #[cfg(feature = "std")]
     pub fn env(&mut self) -> &mut E {
         &mut self.env
     }

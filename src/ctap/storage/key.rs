@@ -61,11 +61,8 @@ make_partition! {
 
     // WARNING: Keys should not be deleted but prefixed with `_` to avoid accidentally reusing them.
 
-    /// The attestation private key.
-    ATTESTATION_PRIVATE_KEY = 1;
-
-    /// The attestation certificate.
-    ATTESTATION_CERTIFICATE = 2;
+    /// Reserved for the attestation store implementation of the environment.
+    _RESERVED_ATTESTATION_STORE = 1..3;
 
     /// The aaguid.
     AAGUID = 3;
@@ -125,10 +122,8 @@ make_partition! {
     /// the length, the following are an array with the hash.
     PIN_PROPERTIES = 2045;
 
-    /// The encryption and hmac keys.
-    ///
-    /// This entry is always present. It is generated at startup if absent.
-    MASTER_KEYS = 2046;
+    /// Reserved for the key store implementation of the environment.
+    _RESERVED_KEY_STORE = 2046;
 
     /// The global signature counter.
     ///

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
+"""Tools that implements vendor-specific CTAP2 commands to configure OpenSK."""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -22,6 +23,7 @@ import argparse
 import getpass
 import datetime
 import sys
+from unittest.mock import patch
 import uuid
 
 import colorama
@@ -60,9 +62,9 @@ def get_opensk_devices(batch_mode):
     if (dev.descriptor.vid, dev.descriptor.pid) == OPENSK_VID_PID:
       if dev.capabilities & hid.CAPABILITY.CBOR:
         if batch_mode:
-          devices.append(ctap2.CTAP2(dev))
+          devices.append(ctap2.Ctap2(dev))
         else:
-          return [ctap2.CTAP2(dev)]
+          return [ctap2.Ctap2(dev)]
   return devices
 
 
@@ -121,10 +123,18 @@ def main(args):
             cert.public_bytes(serialization.Encoding.DER),
         2:
             priv_key.private_numbers().private_value.to_bytes(
-                length=32, byteorder='big', signed=False)
+                length=32, byteorder="big", signed=False)
     }
 
+  patcher = None
+  if args.use_vendor_hid:
+    patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
+    patcher.start()
+    info("Using the Vendor HID interface")
+
   devices = get_opensk_devices(args.batch)
+  if patcher:
+    patcher.stop()
   responses = []
   if not devices:
     fatal("No devices found.")
@@ -200,5 +210,12 @@ if __name__ == "__main__":
       help=("Locks the device (i.e. bootloader and JTAG access). "
             "This command can fail if the certificate or the private key "
             "haven't been both programmed yet."),
+  )
+  parser.add_argument(
+      "--use-vendor-hid",
+      default=False,
+      action="store_true",
+      dest="use_vendor_hid",
+      help=("Whether to configure the device using the Vendor HID interface"),
   )
   main(parser.parse_args())

@@ -270,7 +270,7 @@ class OpenSKInstaller:
         jlink_speed=1200,
         openocd=self.args.programmer == "openocd",
         openocd_board=board.openocd_board,
-        openocd_cmd="openocd",
+        openocd_cmd=self.args.openocd_cmd,
         openocd_commands=copy.copy(board.openocd_commands),
         openocd_options=copy.copy(board.openocd_options),
         jtag=False,
@@ -371,6 +371,8 @@ class OpenSKInstaller:
     env = os.environ.copy()
     if self.args.verbose_build:
       env["V"] = "1"
+    if "vendor_hid" in self.args.features:
+      env["CARGO_FLAGS"] = "--features=vendor_hid"
     self.checked_command(["make"], cwd=props.path, env=env)
 
   def build_example(self):
@@ -471,8 +473,12 @@ class OpenSKInstaller:
   def _check_invariants(self):
     """Runs selected unit tests to check preconditions in the code."""
     print("Testing invariants in customization.rs...")
-    self.checked_command_output(
-        ["cargo", "test", "--features=std", "--lib", "customization"])
+    features = ["std"]
+    features.extend(self.args.features)
+    self.checked_command_output([
+        "cargo", "test", f"--features={','.join(features)}", "--lib",
+        "customization"
+    ])
 
   def generate_crypto_materials(self, force_regenerate: bool):
     """Calls a shell script that generates cryptographic material."""
@@ -749,6 +755,7 @@ class OpenSKInstaller:
             certificate=self.args.config_cert,
             priv_key=self.args.config_pkey,
             lock=self.args.lock_device,
+            use_vendor_hid="vendor_hid" in self.args.features,
         ))
     if not configure_response:
       return None
@@ -763,6 +770,9 @@ class OpenSKInstaller:
             self.args.clear_storage or self.args.configure):
       info("Nothing to do.")
       return 0
+
+    if self.args.check_patches:
+      subprocess.run(["./maintainers/patches", "check"], check=False)
 
     # Compile what needs to be compiled
     board_props = SUPPORTED_BOARDS[self.args.board]
@@ -994,6 +1004,14 @@ if __name__ == "__main__":
       help=("Sets the method to be used to flash Tock OS or the application "
             "on the target board."),
   )
+  main_parser.add_argument(
+      "--openocd_cmd",
+      dest="openocd_cmd",
+      metavar="CMD",
+      default="openocd",
+      help=("Specifies a custom command to use when calling openocd. Can be "
+            "used to pass arguments i.e. 'openocd -s /tmp/openocd_scripts'."),
+  )
 
   main_parser.add_argument(
       "--no-tockos",
@@ -1092,6 +1110,25 @@ if __name__ == "__main__":
       dest="elf2tab_output",
       default=None,
       help=("When set, the output of elf2tab is appended to this file."),
+  )
+
+  main_parser.add_argument(
+      "--ed25519",
+      action="append_const",
+      const="ed25519",
+      dest="features",
+      help=("Adds support for credentials that use EdDSA algorithm over "
+            "curve Ed25519. "
+            "Current implementation is not side-channel resilient due to use "
+            "of variable-time arithmetic for computations over secret key."),
+  )
+
+  main_parser.add_argument(
+      "--disable-check-patches",
+      action="store_false",
+      default=True,
+      dest="check_patches",
+      help=("Don't check that patches are in sync with their submodules."),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

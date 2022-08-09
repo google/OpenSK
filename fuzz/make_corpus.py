@@ -1,23 +1,23 @@
+"""Creates a directory containing seed inputs from a json file having
+   the following structure:
+   [
+     {
+       "hex": "a901a1182a182a02a3626964781a6d616b655f6261645f7...",
+       "cbor": "{1: h'42', 2: {\"id\": \"make.example.com\", ...",
+       "description": "make credential parameters"
+     },
+     ...
+   ]
+
+  Usage:
+    - pass the resulting corpus directory path as the first argument
+    - pass the json file path to make the corpus from as the second argument
+  Example:
+    python make_corpus.py ./corpus ./corpus_file.json
+"""
 import argparse
 import json
 import os.path
-
-# Creates a directory containing seed inputs from a json file having
-# the following structure:
-# [
-#   {
-#     "hex": "a901a1182a182a02a3626964781a6d616b655f6261645f7...",
-#     "cbor": "{1: h'42', 2: {\"id\": \"make.example.com\", ...",
-#     "description": "make credential parameters"
-#   },
-#   ...
-# ]
-#
-# Usage:
-# - pass the resulting corpus directory path as the first argument
-# - pass the json file path to make the corpus from as the second argument
-# Example:
-#  python make_corpus.py ./corpus ./corpus_file.json
 
 
 # Creates a corpus directory to the given path from the given json file.

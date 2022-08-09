@@ -35,7 +35,13 @@ impl MainHid {
 
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     pub fn new() -> Self {
-        let hid = CtapHid::new();
+        #[cfg(feature = "with_ctap1")]
+        let capabilities = CtapHid::CAPABILITY_WINK | CtapHid::CAPABILITY_CBOR;
+        #[cfg(not(feature = "with_ctap1"))]
+        let capabilities =
+            CtapHid::CAPABILITY_WINK | CtapHid::CAPABILITY_CBOR | CtapHid::CAPABILITY_NMSG;
+
+        let hid = CtapHid::new(capabilities);
         let wink_permission = TimedPermission::waiting();
         MainHid {
             hid,

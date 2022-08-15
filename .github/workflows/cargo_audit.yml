@@ -5,7 +5,7 @@ on:
 
 jobs:
   audit:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     if: github.repository == 'google/OpenSK'
     steps:
       - uses: actions/checkout@v2

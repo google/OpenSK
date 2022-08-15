@@ -10,7 +10,7 @@ on:
 jobs:
   ctap2_test:
     name: CTAP2 unit tests
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v2

@@ -9,7 +9,7 @@ on:
     types: [opened, synchronize, reopened]
 jobs:
   pylint:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: [3.6, 3.7, 3.8, 3.9]
@@ -29,7 +29,7 @@ jobs:
         run: ./tools/run_pylint.sh
 
   yapf:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python 3.7

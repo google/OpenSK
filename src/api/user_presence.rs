@@ -15,6 +15,7 @@
 use crate::clock::ClockInt;
 use embedded_time::duration::Milliseconds;
 
+#[derive(Debug)]
 pub enum UserPresenceError {
     /// User explicitly declined user presence check.
     Declined,

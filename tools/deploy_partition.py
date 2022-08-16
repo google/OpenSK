@@ -40,8 +40,8 @@ from tockloader import tab
 from tools.configure import fatal, error, info, get_opensk_devices, get_private_key
 
 OPENSK_VID_PID = (0x1915, 0x521F)
-OPENSK_VENDOR_UPGRADE = 0x41
-OPENSK_VENDOR_UPGRADE_INFO = 0x42
+OPENSK_VENDOR_UPGRADE = 0x42
+OPENSK_VENDOR_UPGRADE_INFO = 0x43
 PAGE_SIZE = 0x1000
 KERNEL_SIZE = 0x20000
 APP_SIZE = 0x20000

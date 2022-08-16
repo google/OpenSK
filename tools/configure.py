@@ -23,6 +23,7 @@ import argparse
 import getpass
 import datetime
 import sys
+from unittest.mock import patch
 import uuid
 
 import colorama
@@ -125,7 +126,15 @@ def main(args):
                 length=32, byteorder="big", signed=False)
     }
 
+  patcher = None
+  if args.use_vendor_hid:
+    patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
+    patcher.start()
+    info("Using the Vendor HID interface")
+
   devices = get_opensk_devices(args.batch)
+  if patcher:
+    patcher.stop()
   responses = []
   if not devices:
     fatal("No devices found.")
@@ -201,5 +210,12 @@ if __name__ == "__main__":
       help=("Locks the device (i.e. bootloader and JTAG access). "
             "This command can fail if the certificate or the private key "
             "haven't been both programmed yet."),
+  )
+  parser.add_argument(
+      "--use-vendor-hid",
+      default=False,
+      action="store_true",
+      dest="use_vendor_hid",
+      help=("Whether to configure the device using the Vendor HID interface"),
   )
   main(parser.parse_args())

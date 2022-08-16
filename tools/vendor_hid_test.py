@@ -1,8 +1,15 @@
 """These tests verify the functionality of the VendorHID interface."""
-from typing import Dict, Iterable
+import fido2
+from fido2 import ctap
+from fido2.hid import CtapHidDevice
+from fido2.hid.base import CtapHidConnection
+from fido2.client import Fido2Client, UserInteraction, ClientError
+from fido2.server import Fido2Server
 import hid
 import time
+from typing import Dict, Iterable
 import unittest
+from unittest.mock import patch
 
 _OPENSK_VID = 0x1915
 _OPENSK_PID = 0x521F
@@ -12,6 +19,7 @@ _PACKETS = 4
 _PACKET_SIZE = 64
 _SEND_DATA_SIZE = _PACKET_SIZE + 1
 _BROADCAST_CID = bytes([0xFF, 0xFF, 0xFF, 0xFF])
+_TEST_USER = {'id': b'user_id', 'name': 'Foo User'}
 
 
 def sleep():
@@ -263,6 +271,116 @@ class HidInterfaces(unittest.TestCase):
   def test_11_batch_send_and_interleaved_receive_vendor_first(self):
     self._test_batch_send_and_interleaved_receive(self.vendor_hid,
                                                   self.fido_hid)
+
+
+def get_fido_device() -> CtapHidDevice:
+  for d in CtapHidDevice.list_devices():
+    if d.descriptor.vid == _OPENSK_VID and d.descriptor.pid == _OPENSK_PID:
+      return d
+  raise Exception('Unable to find Fido device')
+
+
+def get_fido_device_vendor() -> CtapHidDevice:
+  # Patch for the Vendor Usage Page.
+  with patch.object(fido2.hid.base, 'FIDO_USAGE_PAGE', _VENDOR_USAGE_PAGE):
+    return get_fido_device()
+
+
+class CliInteraction(UserInteraction):
+  """Sends cancel messages while prompting user."""
+
+  def __init__(self, cid=None, connection: CtapHidConnection = None):
+    super(CliInteraction).__init__()
+    self.cid = cid
+    self.connection = connection
+
+  def prompt_up(self) -> None:
+    print('\n Don\'t touch your authenticator device now...\n')
+    # Send cancel messages to the specified device.
+    if self.connection and self.cid:
+      cancel_packet = (
+          self.cid.to_bytes(4, byteorder='big') + b'\x91' +
+          b''.join([b'\x00'] * 59))
+      assert len(cancel_packet) == _PACKET_SIZE, (
+          f'Expected packet to be {_PACKET_SIZE} '
+          'but was {len(cancel_packet)}')
+
+      self.connection.write_packet(cancel_packet)
+
+
+class CancelTests(unittest.TestCase):
+  """Tests for the canceling while waiting for user touch."""
+
+  @classmethod
+  def setUpClass(cls):
+    cls.fido = get_fido_device()
+    cls.vendor = get_fido_device_vendor()
+
+  def setUp(self) -> None:
+    super().setUp()
+    server = Fido2Server({
+        'id': 'example.com',
+        'name': 'Example RP'
+    },
+                         attestation='direct')
+    self.create_options, _ = server.register_begin(
+        _TEST_USER,
+        user_verification='foo',
+        authenticator_attachment='cross-platform')
+
+  def test_cancel_works(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.fido._connection  # pylint: disable=protected-access
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(cid, connection))
+
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.KEEPALIVE_CANCEL)
+
+  def test_cancel_ignores_wrong_cid(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.fido._connection  # pylint: disable=protected-access
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(cid + 1, connection))
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
+
+  def test_cancel_ignores_wrong_interface(self):
+    cid = self.fido._channel_id  # pylint: disable=protected-access
+    connection = self.vendor._connection  # pylint: disable=protected-access
+    client = Fido2Client(
+        self.fido,
+        'https://example.com',
+        user_interaction=CliInteraction(cid, connection))
+
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
+
+  def test_timeout(self):
+    client = Fido2Client(
+        self.fido, 'https://example.com', user_interaction=CliInteraction())
+    with self.assertRaises(ClientError) as context:
+      client.make_credential(self.create_options['publicKey'])
+
+    self.assertEqual(context.exception.code, ClientError.ERR.TIMEOUT)
+    self.assertEqual(context.exception.cause.code,
+                     ctap.CtapError.ERR.USER_ACTION_TIMEOUT)
 
 
 if __name__ == '__main__':

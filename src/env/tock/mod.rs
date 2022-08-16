@@ -42,7 +42,7 @@ pub struct TockHidConnection {
 }
 
 impl HidConnection for TockHidConnection {
-    fn send_or_recv_with_timeout(
+    fn send_and_maybe_recv(
         &mut self,
         buf: &mut [u8; 64],
         timeout: Milliseconds<ClockInt>,
@@ -54,10 +54,8 @@ impl HidConnection for TockHidConnection {
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
             Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
-            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint))
-                if self.endpoint == recv_endpoint =>
-            {
-                Ok(SendOrRecvStatus::Received)
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
+                Ok(SendOrRecvStatus::Received(recv_endpoint))
             }
             _ => Err(SendOrRecvError),
         }

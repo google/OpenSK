@@ -70,8 +70,12 @@ impl Command {
     const AUTHENTICATOR_CONFIG: u8 = 0x0D;
     const _AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
     const AUTHENTICATOR_VENDOR_CONFIGURE: u8 = 0x40;
-    const AUTHENTICATOR_VENDOR_UPGRADE: u8 = 0x41;
-    const AUTHENTICATOR_VENDOR_UPGRADE_INFO: u8 = 0x42;
+    // This commands is the same as AUTHENTICATOR_CREDENTIAL_MANAGEMENT but is duplicated as a
+    // vendor command for legacy and compatibility reasons. See
+    // https://github.com/Yubico/libfido2/issues/628 for more information.
+    const AUTHENTICATOR_VENDOR_CREDENTIAL_MANAGEMENT: u8 = 0x41;
+    const AUTHENTICATOR_VENDOR_UPGRADE: u8 = 0x42;
+    const AUTHENTICATOR_VENDOR_UPGRADE_INFO: u8 = 0x43;
     const _AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
     pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
@@ -112,7 +116,8 @@ impl Command {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorGetNextAssertion)
             }
-            Command::AUTHENTICATOR_CREDENTIAL_MANAGEMENT => {
+            Command::AUTHENTICATOR_CREDENTIAL_MANAGEMENT
+            | Command::AUTHENTICATOR_VENDOR_CREDENTIAL_MANAGEMENT => {
                 let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorCredentialManagement(
                     AuthenticatorCredentialManagementParameters::try_from(decoded_cbor)?,

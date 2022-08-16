@@ -83,6 +83,7 @@ use crypto::hmac::hmac_256;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use embedded_time::duration::Milliseconds;
+use libtock_drivers::usb_ctap_hid::UsbEndpoint;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -274,7 +275,7 @@ fn send_keepalive_up_needed(
     let keepalive_msg = CtapHid::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let ctap_hid_connection = transport.hid_connection(env);
-        match ctap_hid_connection.send_or_recv_with_timeout(&mut pkt, timeout) {
+        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
@@ -283,7 +284,23 @@ fn send_keepalive_up_needed(
             Ok(SendOrRecvStatus::Sent) => {
                 debug_ctap!(env, "Sent KEEPALIVE packet");
             }
-            Ok(SendOrRecvStatus::Received) => {
+            Ok(SendOrRecvStatus::Received(endpoint)) => {
+                let rx_transport = match endpoint {
+                    UsbEndpoint::MainHid => Transport::MainHid,
+                    #[cfg(feature = "vendor_hid")]
+                    UsbEndpoint::VendorHid => Transport::VendorHid,
+                };
+                if rx_transport != transport {
+                    debug_ctap!(
+                        env,
+                        "Received a packet on transport {:?} while sending a KEEPALIVE packet on transport {:?}",
+                         rx_transport, transport
+                    );
+                    // Ignore this packet.
+                    // TODO(liamjm): Support receiving packets on both interfaces.
+                    continue;
+                }
+
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
                 if received_cid != &cid {
@@ -349,8 +366,14 @@ fn check_user_presence(env: &mut impl Env, channel: Channel) -> Result<(), Ctap2
         // accordingly, so that all wait_with_timeout invocations are separated by
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
-        result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
-        if result.is_err() {
+        let keepalive_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        if keepalive_result.is_err() {
+            debug_ctap!(
+                env,
+                "Sending keepalive failed with error {:?}",
+                keepalive_result.as_ref().unwrap_err()
+            );
+            result = keepalive_result;
             break;
         }
     }
@@ -691,6 +714,7 @@ impl CtapState {
             }
             Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
             Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
+            Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
     }
@@ -1523,6 +1547,7 @@ mod test {
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
     use crate::api::customization;
+    use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
@@ -3808,6 +3833,30 @@ mod test {
     }
 
     #[test]
+    fn test_check_user_presence() {
+        // This TestEnv always returns successful user_presence checks.
+        let mut env = TestEnv::new();
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(response, Ok(_)));
+    }
+
+    #[test]
+    fn test_check_user_presence_timeout() {
+        // This will always return timeout.
+        fn user_presence_timeout() -> UserPresenceResult {
+            Err(UserPresenceError::Timeout)
+        }
+
+        let mut env = TestEnv::new();
+        env.user_presence().set(user_presence_timeout);
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+        ));
+    }
+
+    #[test]
     fn test_channel_interleaving() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -3878,8 +3927,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "vendor_hid")]
-    fn test_main_hid() {
+    fn test_get_info_command() {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
@@ -3893,9 +3941,29 @@ mod test {
             response,
             Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
+        #[cfg(feature = "vendor_hid")]
+        {
+            let response = ctap_state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetInfo,
+                VENDOR_CHANNEL,
+                CtapInstant::new(0),
+            );
+            assert!(matches!(
+                response,
+                Ok(ResponseData::AuthenticatorGetInfo(_))
+            ));
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_vendor_hid_does_not_support_fido_command() {
+        let mut env = TestEnv::new();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let response = ctap_state.process_parsed_command(
             &mut env,
-            Command::AuthenticatorGetInfo,
+            Command::AuthenticatorGetNextAssertion,
             VENDOR_CHANNEL,
             CtapInstant::new(0),
         );

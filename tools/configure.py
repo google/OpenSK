@@ -212,10 +212,10 @@ if __name__ == "__main__":
             "haven't been both programmed yet."),
   )
   parser.add_argument(
-      "--use-vendor-hid",
+      "--vendor-hid",
       default=False,
       action="store_true",
       dest="use_vendor_hid",
-      help=("Whether to configure the device using the Vendor HID interface"),
+      help=("Whether to configure the device using the Vendor HID interface."),
   )
   main(parser.parse_args())

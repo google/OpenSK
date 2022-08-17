@@ -237,9 +237,34 @@ pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
     Ok(max.unwrap_or(0).wrapping_add(1))
 }
 
+fn check_and_get_key_for_slot(
+    env: &mut impl Env,
+    slot_id: usize,
+    first_key: usize,
+    key_array: core::ops::Range<usize>,
+) -> Result<usize, Ctap2StatusCode> {
+    if slot_id >= env.customization().slot_count() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
+    Ok(if slot_id == 0 {
+        first_key
+    } else {
+        key_array.start + slot_id - 1
+    })
+}
+
 /// Returns the global signature counter.
-pub fn global_signature_counter(env: &mut impl Env) -> Result<u32, Ctap2StatusCode> {
-    match env.store().find(key::GLOBAL_SIGNATURE_COUNTER)? {
+pub fn global_signature_counter(
+    env: &mut impl Env,
+    slot_id: usize,
+) -> Result<u32, Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(
+        env,
+        slot_id,
+        key::FIRST_GLOBAL_SIGNATURE_COUNTER,
+        key::GLOBAL_SIGNATURE_COUNTER,
+    )?;
+    match env.store().find(key)? {
         None => Ok(INITIAL_SIGNATURE_COUNTER),
         Some(value) if value.len() == 4 => Ok(u32::from_ne_bytes(*array_ref!(&value, 0, 4))),
         Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
@@ -249,13 +274,19 @@ pub fn global_signature_counter(env: &mut impl Env) -> Result<u32, Ctap2StatusCo
 /// Increments the global signature counter.
 pub fn incr_global_signature_counter(
     env: &mut impl Env,
+    slot_id: usize,
     increment: u32,
 ) -> Result<(), Ctap2StatusCode> {
-    let old_value = global_signature_counter(env)?;
+    let key = check_and_get_key_for_slot(
+        env,
+        slot_id,
+        key::FIRST_GLOBAL_SIGNATURE_COUNTER,
+        key::GLOBAL_SIGNATURE_COUNTER,
+    )?;
+    let old_value = global_signature_counter(env, slot_id)?;
     // In hopes that servers handle the wrapping gracefully.
     let new_value = old_value.wrapping_add(increment);
-    env.store()
-        .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
+    env.store().insert(key, &new_value.to_ne_bytes())?;
     Ok(())
 }
 
@@ -273,8 +304,13 @@ pub fn cred_random_secret(env: &mut impl Env, has_uv: bool) -> Result<[u8; 32], 
 }
 
 /// Reads the PIN properties and wraps them into PinProperties.
-fn pin_properties(env: &mut impl Env) -> Result<Option<PinProperties>, Ctap2StatusCode> {
-    let pin_properties = match env.store().find(key::PIN_PROPERTIES)? {
+fn pin_properties(
+    env: &mut impl Env,
+    slot_id: usize,
+) -> Result<Option<PinProperties>, Ctap2StatusCode> {
+    let key =
+        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
+    let pin_properties = match env.store().find(key)? {
         None => return Ok(None),
         Some(pin_properties) => pin_properties,
     };
@@ -288,14 +324,30 @@ fn pin_properties(env: &mut impl Env) -> Result<Option<PinProperties>, Ctap2Stat
     }
 }
 
+/// Returns if PIN is set for at least one slot.
+pub fn has_pin(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+    for slot_id in 0..env.customization().slot_count() {
+        if pin_hash(env, slot_id)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Returns the PIN hash if defined.
-pub fn pin_hash(env: &mut impl Env) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
-    Ok(pin_properties(env)?.map(|p| p.hash))
+pub fn pin_hash(
+    env: &mut impl Env,
+    slot_id: usize,
+) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
+    Ok(pin_properties(env, slot_id)?.map(|p| p.hash))
 }
 
 /// Returns the length of the currently set PIN if defined.
-pub fn pin_code_point_length(env: &mut impl Env) -> Result<Option<u8>, Ctap2StatusCode> {
-    Ok(pin_properties(env)?.map(|p| p.code_point_length))
+pub fn pin_code_point_length(
+    env: &mut impl Env,
+    slot_id: usize,
+) -> Result<Option<u8>, Ctap2StatusCode> {
+    Ok(pin_properties(env, slot_id)?.map(|p| p.code_point_length))
 }
 
 /// Sets the PIN hash and length.
@@ -303,26 +355,36 @@ pub fn pin_code_point_length(env: &mut impl Env) -> Result<Option<u8>, Ctap2Stat
 /// If it was already defined, it is updated.
 pub fn set_pin(
     env: &mut impl Env,
+    slot_id: usize,
     pin_hash: &[u8; PIN_AUTH_LENGTH],
     pin_code_point_length: u8,
 ) -> Result<(), Ctap2StatusCode> {
+    let properties_key =
+        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
+    let force_change_key = check_and_get_key_for_slot(
+        env,
+        slot_id,
+        key::FIRST_FORCE_PIN_CHANGE,
+        key::FORCE_PIN_CHANGE,
+    )?;
     let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
     pin_properties[0] = pin_code_point_length;
     pin_properties[1..].clone_from_slice(pin_hash);
     Ok(env.store().transaction(&[
         StoreUpdate::Insert {
-            key: key::PIN_PROPERTIES,
+            key: properties_key,
             value: &pin_properties[..],
         },
         StoreUpdate::Remove {
-            key: key::FORCE_PIN_CHANGE,
+            key: force_change_key,
         },
     ])?)
 }
 
 /// Returns the number of remaining PIN retries.
-pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
-    match env.store().find(key::PIN_RETRIES)? {
+pub fn pin_retries(env: &mut impl Env, slot_id: usize) -> Result<u8, Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
+    match env.store().find(key)? {
         None => Ok(env.customization().max_pin_retries()),
         Some(value) if value.len() == 1 => Ok(value[0]),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
@@ -330,18 +392,20 @@ pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
 }
 
 /// Decrements the number of remaining PIN retries.
-pub fn decr_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    let old_value = pin_retries(env)?;
+pub fn decr_pin_retries(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
+    let old_value = pin_retries(env, slot_id)?;
     let new_value = old_value.saturating_sub(1);
     if new_value != old_value {
-        env.store().insert(key::PIN_RETRIES, &[new_value])?;
+        env.store().insert(key, &[new_value])?;
     }
     Ok(())
 }
 
 /// Resets the number of remaining PIN retries.
-pub fn reset_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    Ok(env.store().remove(key::PIN_RETRIES)?)
+pub fn reset_pin_retries(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
+    Ok(env.store().remove(key)?)
 }
 
 /// Returns the minimum PIN length.
@@ -467,8 +531,14 @@ pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 }
 
 /// Returns whether the PIN needs to be changed before its next usage.
-pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    match env.store().find(key::FORCE_PIN_CHANGE)? {
+pub fn has_force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<bool, Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(
+        env,
+        slot_id,
+        key::FIRST_FORCE_PIN_CHANGE,
+        key::FORCE_PIN_CHANGE,
+    )?;
+    match env.store().find(key)? {
         None => Ok(false),
         Some(value) if value.is_empty() => Ok(true),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
@@ -476,8 +546,14 @@ pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode>
 }
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
-pub fn force_pin_change(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    Ok(env.store().insert(key::FORCE_PIN_CHANGE, &[])?)
+pub fn force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
+    let key = check_and_get_key_for_slot(
+        env,
+        slot_id,
+        key::FIRST_FORCE_PIN_CHANGE,
+        key::FORCE_PIN_CHANGE,
+    )?;
+    Ok(env.store().insert(key, &[])?)
 }
 
 /// Returns whether enterprise attestation is enabled.
@@ -899,8 +975,8 @@ mod test {
         let mut env = TestEnv::new();
 
         // Pin hash is initially not set.
-        assert!(pin_hash(&mut env).unwrap().is_none());
-        assert!(pin_code_point_length(&mut env).unwrap().is_none());
+        assert!(pin_hash(&mut env, 0).unwrap().is_none());
+        assert!(pin_code_point_length(&mut env, 0).unwrap().is_none());
 
         // Setting the pin sets the pin hash.
         let random_data = env.rng().gen_uniform_u8x32();
@@ -909,17 +985,23 @@ mod test {
         let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
         let pin_length_1 = 4;
         let pin_length_2 = 63;
-        set_pin(&mut env, &pin_hash_1, pin_length_1).unwrap();
-        assert_eq!(pin_hash(&mut env).unwrap(), Some(pin_hash_1));
-        assert_eq!(pin_code_point_length(&mut env).unwrap(), Some(pin_length_1));
-        set_pin(&mut env, &pin_hash_2, pin_length_2).unwrap();
-        assert_eq!(pin_hash(&mut env).unwrap(), Some(pin_hash_2));
-        assert_eq!(pin_code_point_length(&mut env).unwrap(), Some(pin_length_2));
+        set_pin(&mut env, 0, &pin_hash_1, pin_length_1).unwrap();
+        assert_eq!(pin_hash(&mut env, 0).unwrap(), Some(pin_hash_1));
+        assert_eq!(
+            pin_code_point_length(&mut env, 0).unwrap(),
+            Some(pin_length_1)
+        );
+        set_pin(&mut env, 0, &pin_hash_2, pin_length_2).unwrap();
+        assert_eq!(pin_hash(&mut env, 0).unwrap(), Some(pin_hash_2));
+        assert_eq!(
+            pin_code_point_length(&mut env, 0).unwrap(),
+            Some(pin_length_2)
+        );
 
         // Resetting the storage resets the pin hash.
         reset(&mut env).unwrap();
-        assert!(pin_hash(&mut env).unwrap().is_none());
-        assert!(pin_code_point_length(&mut env).unwrap().is_none());
+        assert!(pin_hash(&mut env, 0).unwrap().is_none());
+        assert!(pin_code_point_length(&mut env, 0).unwrap().is_none());
     }
 
     #[test]
@@ -928,24 +1010,24 @@ mod test {
 
         // The pin retries is initially at the maximum.
         assert_eq!(
-            pin_retries(&mut env),
+            pin_retries(&mut env, 0),
             Ok(env.customization().max_pin_retries())
         );
 
         // Decrementing the pin retries decrements the pin retries.
         for retries in (0..env.customization().max_pin_retries()).rev() {
-            decr_pin_retries(&mut env).unwrap();
-            assert_eq!(pin_retries(&mut env), Ok(retries));
+            decr_pin_retries(&mut env, 0).unwrap();
+            assert_eq!(pin_retries(&mut env, 0), Ok(retries));
         }
 
         // Decrementing the pin retries after zero does not modify the pin retries.
-        decr_pin_retries(&mut env).unwrap();
-        assert_eq!(pin_retries(&mut env), Ok(0));
+        decr_pin_retries(&mut env, 0).unwrap();
+        assert_eq!(pin_retries(&mut env, 0), Ok(0));
 
         // Resetting the pin retries resets the pin retries.
-        reset_pin_retries(&mut env).unwrap();
+        reset_pin_retries(&mut env, 0).unwrap();
         assert_eq!(
-            pin_retries(&mut env),
+            pin_retries(&mut env, 0),
             Ok(env.customization().max_pin_retries())
         );
     }
@@ -1088,11 +1170,17 @@ mod test {
         let mut env = TestEnv::new();
 
         let mut counter_value = 1;
-        assert_eq!(global_signature_counter(&mut env).unwrap(), counter_value);
+        assert_eq!(
+            global_signature_counter(&mut env, 0).unwrap(),
+            counter_value
+        );
         for increment in 1..10 {
-            assert!(incr_global_signature_counter(&mut env, increment).is_ok());
+            assert!(incr_global_signature_counter(&mut env, 0, increment).is_ok());
             counter_value += increment;
-            assert_eq!(global_signature_counter(&mut env).unwrap(), counter_value);
+            assert_eq!(
+                global_signature_counter(&mut env, 0).unwrap(),
+                counter_value
+            );
         }
     }
 
@@ -1100,11 +1188,11 @@ mod test {
     fn test_force_pin_change() {
         let mut env = TestEnv::new();
 
-        assert!(!has_force_pin_change(&mut env).unwrap());
-        assert_eq!(force_pin_change(&mut env), Ok(()));
-        assert!(has_force_pin_change(&mut env).unwrap());
-        assert_eq!(set_pin(&mut env, &[0x88; 16], 8), Ok(()));
-        assert!(!has_force_pin_change(&mut env).unwrap());
+        assert!(!has_force_pin_change(&mut env, 0).unwrap());
+        assert_eq!(force_pin_change(&mut env, 0), Ok(()));
+        assert!(has_force_pin_change(&mut env, 0).unwrap());
+        assert_eq!(set_pin(&mut env, 0, &[0x88; 16], 8), Ok(()));
+        assert!(!has_force_pin_change(&mut env, 0).unwrap());
     }
 
     #[test]

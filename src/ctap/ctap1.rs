@@ -320,11 +320,12 @@ impl Ctap1Command {
                 return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
             }
             ctap_state
-                .increment_global_signature_counter(env)
+                .increment_global_signature_counter(env, 0)
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             let mut signature_data = ctap_state
                 .generate_auth_data(
                     env,
+                    0,
                     &application,
                     Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
                 )
@@ -651,7 +652,7 @@ mod test {
             Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
                 .unwrap();
         assert_eq!(response[0], 0x01);
-        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
+        let global_signature_counter = storage::global_signature_counter(&mut env, 0).unwrap();
         check_signature_counter(
             &mut env,
             array_ref!(response, 1, 4),
@@ -684,7 +685,7 @@ mod test {
         )
         .unwrap();
         assert_eq!(response[0], 0x01);
-        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
+        let global_signature_counter = storage::global_signature_counter(&mut env, 0).unwrap();
         check_signature_counter(
             &mut env,
             array_ref!(response, 1, 4),

@@ -241,6 +241,8 @@ pub trait Customization {
     /// With P=20 and K=150, we have I=2M which is enough for 500 increments per day
     /// for 10 years.
     fn max_supported_resident_keys(&self) -> usize;
+
+    fn slot_count(&self) -> usize;
 }
 
 #[derive(Clone)]
@@ -260,6 +262,7 @@ pub struct CustomizationImpl {
     pub max_large_blob_array_size: usize,
     pub max_rp_ids_length: usize,
     pub max_supported_resident_keys: usize,
+    pub slot_count: usize,
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
@@ -278,6 +281,7 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     max_large_blob_array_size: 2048,
     max_rp_ids_length: 8,
     max_supported_resident_keys: 150,
+    slot_count: 1,
 };
 
 impl Customization for CustomizationImpl {
@@ -350,6 +354,10 @@ impl Customization for CustomizationImpl {
 
     fn max_supported_resident_keys(&self) -> usize {
         self.max_supported_resident_keys
+    }
+
+    fn slot_count(&self) -> usize {
+        self.slot_count
     }
 }
 

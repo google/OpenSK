@@ -22,7 +22,7 @@ set -e
 
 BOARD="$1"
 
-./deploy.py --board=${BOARD} --opensk --programmer=none $2
+./deploy.py --board="${BOARD}" --opensk --programmer=none $2
 python3 -m tools.deploy_partition --board="${BOARD}" $2
 if nrfjprog --reset --family NRF52 ; then
   echo "Upgrade finished!"

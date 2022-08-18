@@ -166,9 +166,8 @@ impl ClientPin {
         shared_secret: &dyn SharedSecret,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
-        if slot_id >= env.customization().slot_count()
-            || slot_id >= self.consecutive_pin_mismatches.len()
-        {
+        // To prevent out of bounds access in code below.
+        if slot_id >= self.consecutive_pin_mismatches.len() {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         match storage::pin_hash(env, slot_id)? {
@@ -209,9 +208,7 @@ impl ClientPin {
     ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
         // TODO: Parse slot_id from params if multi-PIN feature is enabled.
         let slot_id = 0;
-        if slot_id >= env.customization().slot_count()
-            || slot_id >= self.consecutive_pin_mismatches.len()
-        {
+        if slot_id >= self.consecutive_pin_mismatches.len() {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         Ok(AuthenticatorClientPinResponse {

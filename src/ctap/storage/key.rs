@@ -73,34 +73,11 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
-    // Start of key arrays for multi-PIN feature: these fields are separated for each slots, so
-    // a unique key is needed for each slot. However, we reuse the existing fields and rename them
-    // to `FIRST_{KEY_NAME}` so the upgrade is backward compatible.
-    // Depending on `Customization::slot_count()`, only a prefix of those keys is used.
-
-    /// Whether the PIN needs to be changed for each slot, except the first.
-    ///
-    /// If this entry exists and is empty, the PIN needs to be changed.
-    FORCE_PIN_CHANGE = 972..978;
-
-    /// The number of PIN retries for each slot, except the first.
-    ///
-    /// Depending on `Customization::slot_count()`, only a prefix of those keys is used.
-    /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
-    PIN_RETRIES = 979..985;
-
     /// The PIN hash and length for each slot, except the first.
     ///
     /// If the entry is absent, there is no PIN set. The first byte represents
     /// the length, the following are an array with the hash.
-    PIN_PROPERTIES = 986..992;
-
-    /// The global signature counters for each slot, except the first.
-    ///
-    /// If the entry is absent, the counter is 0.
-    GLOBAL_SIGNATURE_COUNTER = 993..999;
-
-    // End of key arrays for multi-PIN feature.
+    PIN_PROPERTIES = 993..1000;
 
     /// Reserved for future credential-related objects.
     ///
@@ -126,8 +103,13 @@ make_partition! {
     /// If this entry exists and is empty, enterprise attestation is enabled.
     ENTERPRISE_ATTESTATION = 2039;
 
-    /// If this entry exists and is empty, the PIN needs to be changed.
-    FIRST_FORCE_PIN_CHANGE = 2040;
+    /// Whether the PIN needs to be changed for each slot.
+    ///
+    /// The PIN at slot 0 needs to be changed if this entry exists and is empty,
+    /// for backward compatibility.
+    /// The PIN at slot x (including 0) needs to be changed if the xth element
+    /// in this entry is non-zero.
+    FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.
     CRED_RANDOM_SECRET = 2041;
@@ -143,7 +125,8 @@ make_partition! {
     /// The number of PIN retries.
     ///
     /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
-    FIRST_PIN_RETRIES = 2044;
+    /// Otherwise, the number of PIN retries at slot x is the xth element in this entry.
+    PIN_RETRIES = 2044;
 
     /// The PIN hash and length.
     ///
@@ -154,10 +137,10 @@ make_partition! {
     /// Reserved for the key store implementation of the environment.
     _RESERVED_KEY_STORE = 2046;
 
-    /// The global signature counter.
+    /// The global signature counters for each slot, except the first.
     ///
     /// If the entry is absent, the counter is 0.
-    FIRST_GLOBAL_SIGNATURE_COUNTER = 2047;
+    GLOBAL_SIGNATURE_COUNTER = 2047;
 }
 
 #[cfg(test)]

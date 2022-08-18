@@ -237,19 +237,14 @@ pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
     Ok(max.unwrap_or(0).wrapping_add(1))
 }
 
-fn check_and_get_key_for_slot(
-    env: &mut impl Env,
-    slot_id: usize,
-    first_key: usize,
-    key_array: core::ops::Range<usize>,
-) -> Result<usize, Ctap2StatusCode> {
+fn get_pin_properties_key(env: &mut impl Env, slot_id: usize) -> Result<usize, Ctap2StatusCode> {
     if slot_id >= env.customization().slot_count() {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     Ok(if slot_id == 0 {
-        first_key
+        key::FIRST_PIN_PROPERTIES
     } else {
-        key_array.start + slot_id - 1
+        key::PIN_PROPERTIES.start + slot_id - 1
     })
 }
 
@@ -258,16 +253,21 @@ pub fn global_signature_counter(
     env: &mut impl Env,
     slot_id: usize,
 ) -> Result<u32, Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(
-        env,
-        slot_id,
-        key::FIRST_GLOBAL_SIGNATURE_COUNTER,
-        key::GLOBAL_SIGNATURE_COUNTER,
-    )?;
-    match env.store().find(key)? {
+    match env.store().find(key::GLOBAL_SIGNATURE_COUNTER)? {
         None => Ok(INITIAL_SIGNATURE_COUNTER),
-        Some(value) if value.len() == 4 => Ok(u32::from_ne_bytes(*array_ref!(&value, 0, 4))),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        Some(value) => {
+            if (slot_id + 1) * 4 > value.len() {
+                Ok(INITIAL_SIGNATURE_COUNTER)
+            } else {
+                let v =
+                    u32::from_ne_bytes(value[slot_id * 4..(slot_id + 1) * 4].try_into().unwrap());
+                if v == 0 {
+                    Ok(INITIAL_SIGNATURE_COUNTER)
+                } else {
+                    Ok(v)
+                }
+            }
+        }
     }
 }
 
@@ -277,16 +277,26 @@ pub fn incr_global_signature_counter(
     slot_id: usize,
     increment: u32,
 ) -> Result<(), Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(
-        env,
-        slot_id,
-        key::FIRST_GLOBAL_SIGNATURE_COUNTER,
-        key::GLOBAL_SIGNATURE_COUNTER,
-    )?;
-    let old_value = global_signature_counter(env, slot_id)?;
+    let mut value = env
+        .store()
+        .find(key::GLOBAL_SIGNATURE_COUNTER)?
+        .unwrap_or_default();
+    // We should reset all u32's to INITIAL_SIGNATURE_COUNTER when resizing, but
+    // it's easier to resize to 0. We'll do a special check when fetching the
+    // global counter instead.
+    value.resize((env.customization().slot_count() + 1) * 4, 0);
+    if slot_id >= value.len() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
+    let mut old_value =
+        u32::from_ne_bytes(value[slot_id * 4..(slot_id + 1) * 4].try_into().unwrap());
+    if old_value == 0 {
+        old_value = INITIAL_SIGNATURE_COUNTER;
+    }
     // In hopes that servers handle the wrapping gracefully.
     let new_value = old_value.wrapping_add(increment);
-    env.store().insert(key, &new_value.to_ne_bytes())?;
+    value[slot_id * 4..(slot_id + 1) * 4].copy_from_slice(&new_value.to_ne_bytes());
+    env.store().insert(key::GLOBAL_SIGNATURE_COUNTER, &value)?;
     Ok(())
 }
 
@@ -308,8 +318,7 @@ fn pin_properties(
     env: &mut impl Env,
     slot_id: usize,
 ) -> Result<Option<PinProperties>, Ctap2StatusCode> {
-    let key =
-        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
+    let key = get_pin_properties_key(env, slot_id)?;
     let pin_properties = match env.store().find(key)? {
         None => return Ok(None),
         Some(pin_properties) => pin_properties,
@@ -359,14 +368,12 @@ pub fn set_pin(
     pin_hash: &[u8; PIN_AUTH_LENGTH],
     pin_code_point_length: u8,
 ) -> Result<(), Ctap2StatusCode> {
-    let properties_key =
-        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
-    let force_change_key = check_and_get_key_for_slot(
-        env,
-        slot_id,
-        key::FIRST_FORCE_PIN_CHANGE,
-        key::FORCE_PIN_CHANGE,
-    )?;
+    let properties_key = get_pin_properties_key(env, slot_id)?;
+    let mut value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
+    value.resize(env.customization().slot_count(), 0);
+    *(value
+        .get_mut(slot_id)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?) = 0;
     let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
     pin_properties[0] = pin_code_point_length;
     pin_properties[1..].clone_from_slice(pin_hash);
@@ -375,37 +382,60 @@ pub fn set_pin(
             key: properties_key,
             value: &pin_properties[..],
         },
-        StoreUpdate::Remove {
-            key: force_change_key,
+        StoreUpdate::Insert {
+            key: key::FORCE_PIN_CHANGE,
+            value: &value,
         },
     ])?)
 }
 
 /// Returns the number of remaining PIN retries.
 pub fn pin_retries(env: &mut impl Env, slot_id: usize) -> Result<u8, Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
-    match env.store().find(key)? {
+    match env.store().find(key::PIN_RETRIES)? {
         None => Ok(env.customization().max_pin_retries()),
-        Some(value) if value.len() == 1 => Ok(value[0]),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        Some(value) => {
+            if slot_id >= value.len() {
+                Ok(env.customization().max_pin_retries())
+            } else {
+                Ok(value[slot_id])
+            }
+        }
     }
 }
 
 /// Decrements the number of remaining PIN retries.
 pub fn decr_pin_retries(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
-    let old_value = pin_retries(env, slot_id)?;
-    let new_value = old_value.saturating_sub(1);
-    if new_value != old_value {
-        env.store().insert(key, &[new_value])?;
+    let mut values = env.store().find(key::PIN_RETRIES)?.unwrap_or_default();
+    values.resize(
+        env.customization().slot_count(),
+        env.customization().max_pin_retries(),
+    );
+    let value = values
+        .get_mut(slot_id)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+    let new_value = value.saturating_sub(1);
+    if new_value != *value {
+        *value = new_value;
+        env.store().insert(key::PIN_RETRIES, &values)?;
     }
     Ok(())
 }
 
 /// Resets the number of remaining PIN retries.
 pub fn reset_pin_retries(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_RETRIES, key::PIN_RETRIES)?;
-    Ok(env.store().remove(key)?)
+    let mut values = env.store().find(key::PIN_RETRIES)?.unwrap_or_default();
+    values.resize(
+        env.customization().slot_count(),
+        env.customization().max_pin_retries(),
+    );
+    let value = values
+        .get_mut(slot_id)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+    if *value != env.customization().max_pin_retries() {
+        *value = env.customization().max_pin_retries();
+        env.store().insert(key::PIN_RETRIES, &values)?;
+    }
+    Ok(())
 }
 
 /// Returns the minimum PIN length.
@@ -532,28 +562,28 @@ pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 
 /// Returns whether the PIN needs to be changed before its next usage.
 pub fn has_force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<bool, Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(
-        env,
-        slot_id,
-        key::FIRST_FORCE_PIN_CHANGE,
-        key::FORCE_PIN_CHANGE,
-    )?;
-    match env.store().find(key)? {
+    match env.store().find(key::FORCE_PIN_CHANGE)? {
         None => Ok(false),
-        Some(value) if value.is_empty() => Ok(true),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        Some(value) => {
+            if value.is_empty() && slot_id == 0 {
+                Ok(true)
+            } else if slot_id >= value.len() {
+                Ok(false)
+            } else {
+                Ok(value[slot_id] > 0)
+            }
+        }
     }
 }
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
 pub fn force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
-    let key = check_and_get_key_for_slot(
-        env,
-        slot_id,
-        key::FIRST_FORCE_PIN_CHANGE,
-        key::FORCE_PIN_CHANGE,
-    )?;
-    Ok(env.store().insert(key, &[])?)
+    let mut value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
+    value.resize(env.customization().slot_count(), 0);
+    *(value
+        .get_mut(slot_id)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?) = 1;
+    Ok(env.store().insert(key::FORCE_PIN_CHANGE, &value)?)
 }
 
 /// Returns whether enterprise attestation is enabled.

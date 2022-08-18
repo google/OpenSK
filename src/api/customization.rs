@@ -242,6 +242,14 @@ pub trait Customization {
     /// for 10 years.
     fn max_supported_resident_keys(&self) -> usize;
 
+    /// Sets the slot count of the multi-PIN feature.
+    ///
+    /// # Invariant
+    ///
+    /// - The slot count may not make the storage entries that concatenate data
+    ///   of each slots become larger than the storage page size, or exceed the
+    ///   number of keys we reserve for the storage entries that use unique keys
+    ///   for each slot. The upper bound of this is currently 8.
     fn slot_count(&self) -> usize;
 }
 
@@ -428,6 +436,11 @@ pub fn is_valid(customization: &impl Customization) -> bool {
     if customization.max_rp_ids_length() == 0
         && customization.default_min_pin_length_rp_ids().is_empty()
     {
+        return false;
+    }
+
+    // Slot count should be at most 8.
+    if customization.slot_count() > 8 {
         return false;
     }
 

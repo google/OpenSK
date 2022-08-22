@@ -363,6 +363,7 @@ extern crate alloc;
 
 #[cfg(feature = "std")]
 mod buffer;
+pub mod concat;
 #[cfg(feature = "std")]
 mod driver;
 #[cfg(feature = "std")]

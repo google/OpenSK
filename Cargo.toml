@@ -20,12 +20,13 @@ persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
-# This import explicitly locks the version.
-serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 embedded-time = "0.12.1"
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
+# We import to explicitly lock the version.
+# Remove these dependencies once CTAP is a library.
+serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]

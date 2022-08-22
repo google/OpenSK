@@ -25,7 +25,6 @@ arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 # We import to explicitly lock the version.
-# Remove these dependencies once CTAP is a library.
 serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 
 [features]

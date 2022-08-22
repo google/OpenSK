@@ -17,10 +17,8 @@ byteorder = { version = "1", default-features = false }
 hex = { version = "0.3.2", default-features = false, optional = true }
 ring = { version = "0.16.11", optional = true }
 untrusted = { version = "0.7.0", optional = true }
-serde = { version = "1.0", optional = true, features = ["derive"] }
-serde_json = { version = "=1.0.69", optional = true }
 regex = { version = "1", optional = true }
 
 [features]
-std = ["hex", "ring", "rng256/std", "untrusted", "serde", "serde_json", "regex"]
+std = ["hex", "ring", "rng256/std", "untrusted", "regex"]
 with_ctap1 = []

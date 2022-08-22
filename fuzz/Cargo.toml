@@ -12,8 +12,7 @@ cargo-fuzz = true
 libfuzzer-sys = { version = "0.3" }
 fuzz_helper = { path = "fuzz_helper" }
 # We import to explicitly lock the version.
-# Remove these dependencies once CTAP is a library.
-serde_json = "=1.0.69"
+# Remove this dependency once CTAP is a library.
 bumpalo = "=3.8.0"
 
 # Prevent this from interfering with workspaces

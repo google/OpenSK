@@ -39,8 +39,6 @@ ed25519 = ["ed25519-compact"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"
-# We import to explicitly lock the version.
-serde_json = { version = "=1.0.69", default-features = false, features = ["alloc"] }
 
 [build-dependencies]
 sk-cbor = { path = "libraries/cbor" }

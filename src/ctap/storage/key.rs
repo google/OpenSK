@@ -73,11 +73,26 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
+    // Start of key arrays for multi-PIN feature: these fields are separated for each slots, so
+    // a unique key is needed for each slot. However, we reuse the existing fields and rename them
+    // to `FIRST_{KEY_NAME}` so the upgrade is backward compatible.
+    // Depending on `Customization::slot_count()`, only a prefix of those keys is used.
+
+    /// The number of PIN retries for each slot, except the first.
+    PIN_RETRIES = 979..986;
+
     /// The PIN hash and length for each slot, except the first.
     ///
     /// If the entry is absent, there is no PIN set. The first byte represents
     /// the length, the following are an array with the hash.
-    PIN_PROPERTIES = 993..1000;
+    PIN_PROPERTIES = 986..993;
+
+    /// The global signature counters for each slot, except the first.
+    ///
+    /// If the entry is absent, the counter is 0.
+    GLOBAL_SIGNATURE_COUNTER = 993..1000;
+
+    // End of key arrays for multi-PIN feature.
 
     /// Reserved for future credential-related objects.
     ///
@@ -125,8 +140,7 @@ make_partition! {
     /// The number of PIN retries.
     ///
     /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
-    /// Otherwise, the number of PIN retries at slot x is the xth element in this entry.
-    PIN_RETRIES = 2044;
+    FIRST_PIN_RETRIES = 2044;
 
     /// The PIN hash and length.
     ///
@@ -137,10 +151,8 @@ make_partition! {
     /// Reserved for the key store implementation of the environment.
     _RESERVED_KEY_STORE = 2046;
 
-    /// The global signature counters for each slot, except the first.
-    ///
-    /// If the entry is absent, the counter is 0.
-    GLOBAL_SIGNATURE_COUNTER = 2047;
+    /// The global signature counter.
+    FIRST_GLOBAL_SIGNATURE_COUNTER = 2047;
 }
 
 #[cfg(test)]

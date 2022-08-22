@@ -13,6 +13,7 @@ libfuzzer-sys = { version = "0.3" }
 fuzz_helper = { path = "fuzz_helper" }
 # This import explicitly locks the version.
 serde_json = { version = "=1.0.69" }
+bumpalo = "=3.8.0"
 
 # Prevent this from interfering with workspaces
 [workspace]

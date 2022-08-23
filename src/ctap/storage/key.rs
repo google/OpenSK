@@ -78,6 +78,11 @@ make_partition! {
     // to `FIRST_{KEY_NAME}` so the upgrade is backward compatible.
     // Depending on `Customization::slot_count()`, only a prefix of those keys is used.
 
+    /// Whether the PIN needs to be changed each slot.
+    ///
+    /// The PIN needs to be changed if the slot exists and its data is empty.
+    FORCE_PIN_CHANGE = 984;
+
     /// The number of PIN retries for each slot, except the first.
     PIN_RETRIES = 985..992;
 
@@ -118,13 +123,10 @@ make_partition! {
     /// If this entry exists and is empty, enterprise attestation is enabled.
     ENTERPRISE_ATTESTATION = 2039;
 
-    /// Whether the PIN needs to be changed for each slot.
+    /// Whether the PIN needs to be changed for the first slot.
     ///
-    /// The PIN at slot 0 needs to be changed if this entry exists and is empty,
-    /// for backward compatibility.
-    /// The PIN at slot x (including 0) needs to be changed if the xth element
-    /// in this entry is non-zero.
-    FORCE_PIN_CHANGE = 2040;
+    /// The PIN needs to be changed if this entry exists and is empty.
+    FIRST_FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.
     CRED_RANDOM_SECRET = 2041;
@@ -137,7 +139,7 @@ make_partition! {
     /// If the entry is absent, the minimum PIN length is `Customization::default_min_pin_length()`.
     MIN_PIN_LENGTH = 2043;
 
-    /// The number of PIN retries.
+    /// The number of PIN retries for the first slot.
     ///
     /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
     FIRST_PIN_RETRIES = 2044;
@@ -151,7 +153,7 @@ make_partition! {
     /// Reserved for the key store implementation of the environment.
     _RESERVED_KEY_STORE = 2046;
 
-    /// The global signature counter.
+    /// The global signature counter for the first slot.
     FIRST_GLOBAL_SIGNATURE_COUNTER = 2047;
 }
 

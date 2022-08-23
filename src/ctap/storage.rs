@@ -310,7 +310,7 @@ fn pin_properties(
 ) -> Result<Option<PinProperties>, Ctap2StatusCode> {
     let pin_properties = match concat::read(env.store(), key::PIN_PROPERTIES, slot_id as u8)? {
         None => {
-            // Backware compatibility: old implementation where there is only 1 PIN slot
+            // Backward compatibility: old implementation where there is only 1 PIN slot
             // uses the entry with key `FIRST_PIN_PROPERTIES`.
             if slot_id != 0 {
                 return Ok(None);
@@ -367,11 +367,11 @@ pub fn set_pin(
     pin_hash: &[u8; PIN_AUTH_LENGTH],
     pin_code_point_length: u8,
 ) -> Result<(), Ctap2StatusCode> {
-    let mut force_pin_change_value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
-    force_pin_change_value.resize(env.customization().slot_count(), 0);
-    *(force_pin_change_value
-        .get_mut(slot_id)
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?) = 0;
+    concat::delete(env.store(), key::FORCE_PIN_CHANGE, slot_id as u8)?;
+    if slot_id == 0 {
+        // Backward compatibility: data might be stored in this entry for slot 0 as well.
+        env.store().remove(key::FIRST_FORCE_PIN_CHANGE)?;
+    }
     let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
     pin_properties[0] = pin_code_point_length;
     pin_properties[1..].clone_from_slice(pin_hash);
@@ -381,8 +381,6 @@ pub fn set_pin(
         slot_id as u8,
         &pin_properties[..],
     )?;
-    env.store()
-        .insert(key::FORCE_PIN_CHANGE, &force_pin_change_value)?;
     Ok(())
 }
 
@@ -537,28 +535,28 @@ pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 
 /// Returns whether the PIN needs to be changed before its next usage.
 pub fn has_force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<bool, Ctap2StatusCode> {
-    match env.store().find(key::FORCE_PIN_CHANGE)? {
-        None => Ok(false),
-        Some(value) => {
-            if value.is_empty() && slot_id == 0 {
-                Ok(true)
-            } else if slot_id >= value.len() {
+    match concat::read(env.store(), key::FORCE_PIN_CHANGE, slot_id as u8)? {
+        None => {
+            if slot_id != 0 {
                 Ok(false)
             } else {
-                Ok(value[slot_id] > 0)
+                // Backward compatibility: old implementation where there is only 1 PIN slot
+                // uses the entry with key `FIRST_FORCE_PIN_CHANGE`.
+                match env.store().find(key::FIRST_FORCE_PIN_CHANGE)? {
+                    None => Ok(false),
+                    Some(value) if value.is_empty() => Ok(true),
+                    _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+                }
             }
         }
+        Some(value) if value.is_empty() => Ok(true),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
     }
 }
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
 pub fn force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
-    let mut value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
-    value.resize(env.customization().slot_count(), 0);
-    *(value
-        .get_mut(slot_id)
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?) = 1;
-    Ok(env.store().insert(key::FORCE_PIN_CHANGE, &value)?)
+    Ok(concat::write(env.store(), key::FORCE_PIN_CHANGE, slot_id as u8, &[])?)
 }
 
 /// Returns whether enterprise attestation is enabled.

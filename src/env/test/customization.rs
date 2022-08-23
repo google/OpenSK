@@ -33,6 +33,7 @@ pub struct TestCustomization {
     max_large_blob_array_size: usize,
     max_rp_ids_length: usize,
     max_supported_resident_keys: usize,
+    slot_count: usize,
 }
 
 impl TestCustomization {
@@ -112,6 +113,10 @@ impl Customization for TestCustomization {
     fn max_supported_resident_keys(&self) -> usize {
         self.max_supported_resident_keys
     }
+
+    fn slot_count(&self) -> usize {
+        self.slot_count
+    }
 }
 
 impl From<CustomizationImpl> for TestCustomization {
@@ -132,6 +137,7 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
+            slot_count,
         } = c;
 
         let default_min_pin_length_rp_ids = default_min_pin_length_rp_ids
@@ -160,6 +166,7 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
+            slot_count,
         }
     }
 }

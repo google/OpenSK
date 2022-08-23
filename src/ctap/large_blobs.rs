@@ -87,7 +87,9 @@ impl LargeBlobs {
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
             }
-            if storage::pin_hash(env)?.is_some() || storage::has_always_uv(env)? {
+            // TODO: Get the slot id from active token state when multi-PIN is enabled.
+            let slot_id = 0;
+            if storage::pin_hash(env, slot_id)?.is_some() || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =
@@ -147,8 +149,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         let large_blob = vec![
@@ -178,8 +184,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -240,8 +250,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -286,8 +300,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 200;
@@ -332,8 +350,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
@@ -355,8 +377,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 20;
@@ -383,8 +409,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let mut client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
+        let mut client_pin = ClientPin::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
         let mut large_blobs = LargeBlobs::new();
 
         const BLOB_LEN: usize = 20;
@@ -392,7 +422,7 @@ mod test {
         let mut large_blob = vec![0x1B; DATA_LEN];
         large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        storage::set_pin(&mut env, 0, &[0u8; 16], 4).unwrap();
         let mut large_blob_data = vec![0xFF; 32];
         // Command constant and offset bytes.
         large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);

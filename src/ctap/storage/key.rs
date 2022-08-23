@@ -73,6 +73,32 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
+    // Start of key arrays for multi-PIN feature: these fields are separated for each slots, so
+    // a unique key is needed for each slot. However, we reuse the existing fields and rename them
+    // to `FIRST_{KEY_NAME}` so the upgrade is backward compatible.
+    // Depending on `Customization::slot_count()`, only a prefix of those keys is used.
+
+    /// Whether the PIN needs to be changed each slot.
+    ///
+    /// The PIN needs to be changed if the slot exists and its data is empty.
+    FORCE_PIN_CHANGE = 984;
+
+    /// The number of PIN retries for each slot, except the first.
+    PIN_RETRIES = 985..992;
+
+    /// The PIN hash and length for each slot.
+    ///
+    /// If a slot is absent, there is no PIN set for that slot. The first byte represents
+    /// the length, the following are an array with the hash.
+    PIN_PROPERTIES = 992;
+
+    /// The global signature counters for each slot, except the first.
+    ///
+    /// If the entry is absent, the counter is 0.
+    GLOBAL_SIGNATURE_COUNTER = 993..1000;
+
+    // End of key arrays for multi-PIN feature.
+
     /// Reserved for future credential-related objects.
     ///
     /// In particular, additional credentials could be added there by reducing the lower bound of
@@ -97,8 +123,10 @@ make_partition! {
     /// If this entry exists and is empty, enterprise attestation is enabled.
     ENTERPRISE_ATTESTATION = 2039;
 
-    /// If this entry exists and is empty, the PIN needs to be changed.
-    FORCE_PIN_CHANGE = 2040;
+    /// Whether the PIN needs to be changed for the first slot.
+    ///
+    /// The PIN needs to be changed if this entry exists and is empty.
+    FIRST_FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.
     CRED_RANDOM_SECRET = 2041;
@@ -111,24 +139,22 @@ make_partition! {
     /// If the entry is absent, the minimum PIN length is `Customization::default_min_pin_length()`.
     MIN_PIN_LENGTH = 2043;
 
-    /// The number of PIN retries.
+    /// The number of PIN retries for the first slot.
     ///
     /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
-    PIN_RETRIES = 2044;
+    FIRST_PIN_RETRIES = 2044;
 
-    /// The PIN hash and length.
+    /// The PIN hash and length for the first slot.
     ///
     /// If the entry is absent, there is no PIN set. The first byte represents
     /// the length, the following are an array with the hash.
-    PIN_PROPERTIES = 2045;
+    FIRST_PIN_PROPERTIES = 2045;
 
     /// Reserved for the key store implementation of the environment.
     _RESERVED_KEY_STORE = 2046;
 
-    /// The global signature counter.
-    ///
-    /// If the entry is absent, the counter is 0.
-    GLOBAL_SIGNATURE_COUNTER = 2047;
+    /// The global signature counter for the first slot.
+    FIRST_GLOBAL_SIGNATURE_COUNTER = 2047;
 }
 
 #[cfg(test)]

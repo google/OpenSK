@@ -21,6 +21,11 @@ serde = { version = "1.0", optional = true, features = ["derive"] }
 serde_json = { version = "=1.0.69", optional = true }
 regex = { version = "1", optional = true }
 
+# We explicitly lock the version of those transitive dependencies because their
+# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
+# whole block once CTAP is a library.
+bumpalo = "=3.8.0" # transitive dependency of ring
+
 [features]
 std = ["hex", "ring", "rng256/std", "untrusted", "serde", "serde_json", "regex"]
 with_ctap1 = []

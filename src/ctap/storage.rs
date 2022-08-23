@@ -556,7 +556,12 @@ pub fn has_force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<bool, 
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
 pub fn force_pin_change(env: &mut impl Env, slot_id: usize) -> Result<(), Ctap2StatusCode> {
-    Ok(concat::write(env.store(), key::FORCE_PIN_CHANGE, slot_id as u8, &[])?)
+    Ok(concat::write(
+        env.store(),
+        key::FORCE_PIN_CHANGE,
+        slot_id as u8,
+        &[],
+    )?)
 }
 
 /// Returns whether enterprise attestation is enabled.

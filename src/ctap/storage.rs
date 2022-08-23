@@ -30,7 +30,7 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::cmp;
 use core::convert::TryInto;
-use persistent_store::{fragment, StoreUpdate};
+use persistent_store::{concat, fragment};
 use rng256::Rng256;
 use sk_cbor::cbor_array_vec;
 
@@ -308,10 +308,18 @@ fn pin_properties(
     env: &mut impl Env,
     slot_id: usize,
 ) -> Result<Option<PinProperties>, Ctap2StatusCode> {
-    let key =
-        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
-    let pin_properties = match env.store().find(key)? {
-        None => return Ok(None),
+    let pin_properties = match concat::read(env.store(), key::PIN_PROPERTIES, slot_id as u8)? {
+        None => {
+            // Backware compatibility: old implementation where there is only 1 PIN slot
+            // uses the entry with key `FIRST_PIN_PROPERTIES`.
+            if slot_id != 0 {
+                return Ok(None);
+            }
+            match env.store().find(key::FIRST_PIN_PROPERTIES)? {
+                None => return Ok(None),
+                Some(pin_properties) => pin_properties,
+            }
+        }
         Some(pin_properties) => pin_properties,
     };
     const PROPERTIES_LENGTH: usize = PIN_AUTH_LENGTH + 1;
@@ -359,26 +367,23 @@ pub fn set_pin(
     pin_hash: &[u8; PIN_AUTH_LENGTH],
     pin_code_point_length: u8,
 ) -> Result<(), Ctap2StatusCode> {
-    let properties_key =
-        check_and_get_key_for_slot(env, slot_id, key::FIRST_PIN_PROPERTIES, key::PIN_PROPERTIES)?;
-    let mut value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
-    value.resize(env.customization().slot_count(), 0);
-    *(value
+    let mut force_pin_change_value = env.store().find(key::FORCE_PIN_CHANGE)?.unwrap_or_default();
+    force_pin_change_value.resize(env.customization().slot_count(), 0);
+    *(force_pin_change_value
         .get_mut(slot_id)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?) = 0;
     let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
     pin_properties[0] = pin_code_point_length;
     pin_properties[1..].clone_from_slice(pin_hash);
-    Ok(env.store().transaction(&[
-        StoreUpdate::Insert {
-            key: properties_key,
-            value: &pin_properties[..],
-        },
-        StoreUpdate::Insert {
-            key: key::FORCE_PIN_CHANGE,
-            value: &value,
-        },
-    ])?)
+    concat::write(
+        env.store(),
+        key::PIN_PROPERTIES,
+        slot_id as u8,
+        &pin_properties[..],
+    )?;
+    env.store()
+        .insert(key::FORCE_PIN_CHANGE, &force_pin_change_value)?;
+    Ok(())
 }
 
 /// Returns the number of remaining PIN retries.

@@ -246,10 +246,15 @@ pub trait Customization {
     ///
     /// # Invariant
     ///
-    /// - The slot count may not make the storage entries that concatenate data
-    ///   of each slots become larger than the storage page size, or exceed the
-    ///   number of keys we reserve for the storage entries that use unique keys
-    ///   for each slot. The upper bound of this is currently 8.
+    /// - The slot count may not:
+    ///   - make the storage entries that concatenate data of each slots
+    ///     become larger than the storage page size,
+    ///   - go over u8, as we only reserve 1 byte for the array index for
+    ///     concatenated entries, or
+    ///   - exceed the number of keys we reserve for the storage entries
+    ///     that use unique keys for each slot.
+    ///
+    /// The upper bound of this is currently 8.
     fn slot_count(&self) -> usize;
 }
 

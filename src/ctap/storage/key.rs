@@ -79,13 +79,13 @@ make_partition! {
     // Depending on `Customization::slot_count()`, only a prefix of those keys is used.
 
     /// The number of PIN retries for each slot, except the first.
-    PIN_RETRIES = 979..986;
+    PIN_RETRIES = 985..992;
 
-    /// The PIN hash and length for each slot, except the first.
+    /// The PIN hash and length for each slot.
     ///
-    /// If the entry is absent, there is no PIN set. The first byte represents
+    /// If a slot is absent, there is no PIN set for that slot. The first byte represents
     /// the length, the following are an array with the hash.
-    PIN_PROPERTIES = 986..993;
+    PIN_PROPERTIES = 992;
 
     /// The global signature counters for each slot, except the first.
     ///
@@ -142,7 +142,7 @@ make_partition! {
     /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
     FIRST_PIN_RETRIES = 2044;
 
-    /// The PIN hash and length.
+    /// The PIN hash and length for the first slot.
     ///
     /// If the entry is absent, there is no PIN set. The first byte represents
     /// the length, the following are an array with the hash.

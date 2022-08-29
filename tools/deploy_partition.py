@@ -150,8 +150,8 @@ def load_priv_key(priv_key_filename: str) -> Any:
         fatal("Private key must be 256 bits long.")
       info("Private key is valid.")
       return priv_key
-  except IOError:
-    fatal(f"Unable to open file: {priv_key_filename}")
+  except IOError as e:
+    fatal(f"Unable to open file: {priv_key_filename}\n{e}")
 
 
 def sign_firmware(data: bytes, priv_key: Any) -> bytes:

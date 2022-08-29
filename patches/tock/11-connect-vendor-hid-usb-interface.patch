@@ -108,7 +108,7 @@ index e8f1a87a4..2c91c0968 100644
                              } else {
                                  // Cannot cancel now because the transaction is already in process.
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index f6762b4b9..16b80cb10 100644
+index d47e5f644..76f6af73b 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -18,13 +18,27 @@ use core::cell::Cell;

@@ -16,28 +16,28 @@ static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 5] = [
     kernel::StorageLocation {
         address: 0xC0000,
         size: 0x10000, // 16 pages
-        storage_type: kernel::StorageType::STORE,
+        storage_type: kernel::StorageType::Store,
     },
     kernel::StorageLocation {
         address: 0xD0000,
         size: 0x4000, // 4 pages
-        storage_type: kernel::StorageType::STORE,
+        storage_type: kernel::StorageType::Store,
     },
     // Partitions can also be split to maximize MPU happiness.
     kernel::StorageLocation {
+        address: 0x4000,
+        size: 0x1000,
+        storage_type: kernel::StorageType::Partition,
+    },
+    kernel::StorageLocation {
         address: 0x20000,
         size: 0x20000,
-        storage_type: kernel::StorageType::PARTITION,
+        storage_type: kernel::StorageType::Partition,
     },
     kernel::StorageLocation {
         address: 0x40000,
         size: 0x20000,
-        storage_type: kernel::StorageType::PARTITION,
-    },
-    kernel::StorageLocation {
-        address: 0x4000,
-        size: 0x1000,
-        storage_type: kernel::StorageType::METADATA,
+        storage_type: kernel::StorageType::Partition,
     },
 ];
 "

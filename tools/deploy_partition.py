@@ -97,7 +97,7 @@ def check_info(partition_address: int, authenticator: Any):
     if result[0x01] != partition_address:
       fatal("Identifiers do not match.")
   except ctap.CtapError as ex:
-    fatal(f"Failed to read OpenSK upgrade info (error: {ex}")
+    fatal(f"Failed to read OpenSK upgrade info (error: {ex})")
 
 
 def get_kernel(board: str) -> bytes:
@@ -139,16 +139,19 @@ def generate_firmware_image(board: str) -> bytes:
 
 def load_priv_key(priv_key_filename: str) -> Any:
   """Loads the ECDSA private key from the specified file."""
-  with open(priv_key_filename, "rb") as priv_key_file:
-    priv_key = get_private_key(priv_key_file.read())
-    if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
-      fatal("Private key must be an Elliptic Curve one.")
-    if not isinstance(priv_key.curve, ec.SECP256R1):
-      fatal("Private key must use Secp256r1 curve.")
-    if priv_key.key_size != 256:
-      fatal("Private key must be 256 bits long.")
-    info("Private key is valid.")
-    return priv_key
+  try:
+    with open(priv_key_filename, "rb") as priv_key_file:
+      priv_key = get_private_key(priv_key_file.read())
+      if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
+        fatal("Private key must be an Elliptic Curve one.")
+      if not isinstance(priv_key.curve, ec.SECP256R1):
+        fatal("Private key must use Secp256r1 curve.")
+      if priv_key.key_size != 256:
+        fatal("Private key must be 256 bits long.")
+      info("Private key is valid.")
+      return priv_key
+  except:
+    fatal(f"Unable to open file: {priv_key_filename}")
 
 
 def sign_firmware(data: bytes, priv_key: Any) -> bytes:
@@ -160,8 +163,6 @@ def sign_firmware(data: bytes, priv_key: Any) -> bytes:
 
 def main(args):
   colorama.init()
-  if not args.priv_key:
-    fatal("Please pass in a private key file using --private-key.")
 
   firmware_image = generate_firmware_image(args.board)
   partition_address = PARTITION_ADDRESS[args.board]

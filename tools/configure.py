@@ -169,7 +169,7 @@ def main(args):
             ("Failed to configure OpenSK (device is partially programmed but "
              "the given cert/key don't match the ones currently programmed)."))
       else:
-        error(f"Failed to configure OpenSK (unknown error: {ex}")
+        error(f"Failed to configure OpenSK (unknown error: {ex})")
   return responses
 
 

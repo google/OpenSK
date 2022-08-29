@@ -150,7 +150,7 @@ def load_priv_key(priv_key_filename: str) -> Any:
         fatal("Private key must be 256 bits long.")
       info("Private key is valid.")
       return priv_key
-  except:
+  except IOError:
     fatal(f"Unable to open file: {priv_key_filename}")
 
 

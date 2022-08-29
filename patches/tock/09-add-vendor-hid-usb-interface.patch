@@ -156,7 +156,7 @@ index f7899d8c5..6956523c6 100644
                          hil::usb::CtrlSetupResult::ErrGeneric
                      }
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index 642039120..adb7fde14 100644
+index 642039120..abf224f97 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -44,21 +44,59 @@ static CTAP_REPORT_DESCRIPTOR: &'static [u8] = &[

@@ -262,7 +262,7 @@ index da3d16d85..e8f1a87a4 100644
                                  if !app.waiting {
                                      // The call to receive_packet() collected a pending packet.
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
-index adb7fde14..f6762b4b9 100644
+index abf224f97..d47e5f644 100644
 --- a/capsules/src/usb/usbc_ctap_hid.rs
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
 @@ -11,6 +11,7 @@ use super::descriptors::HIDSubordinateDescriptor;

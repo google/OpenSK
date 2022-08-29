@@ -52,7 +52,6 @@ mod memop_nr {
 mod storage_type {
     pub const STORE: usize = 1;
     pub const PARTITION: usize = 2;
-    pub const METADATA: usize = 3;
 }
 
 fn get_info(nr: usize, arg: usize) -> StorageResult<usize> {
@@ -225,6 +224,9 @@ pub struct TockUpgradeStorage {
 }
 
 impl TockUpgradeStorage {
+    const METADATA_ADDRESS_A: usize = 0x4000;
+    const METADATA_ADDRESS_B: usize = 0x5000;
+
     /// Provides access to the other upgrade partition and metadata if available.
     ///
     /// The implementation assumes that storage locations returned by the kernel through
@@ -250,9 +252,8 @@ impl TockUpgradeStorage {
         }
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
             let storage_type = memop(memop_nr::STORAGE_TYPE, i)?;
-            match storage_type {
-                storage_type::PARTITION | storage_type::METADATA => (),
-                _ => continue,
+            if !matches!(storage_type, storage_type::PARTITION) {
+                continue;
             };
             let storage_ptr = memop(memop_nr::STORAGE_PTR, i)?;
             let storage_len = memop(memop_nr::STORAGE_LEN, i)?;
@@ -260,27 +261,20 @@ impl TockUpgradeStorage {
                 return Err(StorageError::CustomError);
             }
             let range = ModRange::new(storage_ptr, storage_len);
-            match storage_type {
-                storage_type::PARTITION => {
+            match range.start() {
+                Self::METADATA_ADDRESS_A | Self::METADATA_ADDRESS_B => locations.metadata = range,
+                _ => {
                     locations.partition = locations
                         .partition
                         .append(range)
                         .ok_or(StorageError::NotAligned)?
                 }
-                storage_type::METADATA => {
-                    locations.metadata = locations
-                        .metadata
-                        .append(range)
-                        .ok_or(StorageError::NotAligned)?
-                }
-                _ => (),
-            };
+            }
         }
-        if locations.partition.is_empty() || locations.metadata.is_empty() {
-            Err(StorageError::CustomError)
-        } else {
-            Ok(locations)
+        if locations.partition.is_empty() {
+            return Err(StorageError::CustomError);
         }
+        Ok(locations)
     }
 
     fn is_page_aligned(&self, x: usize) -> bool {

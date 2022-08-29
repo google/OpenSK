@@ -31,19 +31,18 @@ index 5465c95f4..e596648f7 100644
      }
  }
 diff --git a/kernel/src/sched.rs b/kernel/src/sched.rs
-index 8844bc6c3..692bad2d3 100644
+index 8844bc6c3..00c13a7c6 100644
 --- a/kernel/src/sched.rs
 +++ b/kernel/src/sched.rs
-@@ -118,10 +118,19 @@ pub enum SchedulingDecision {
+@@ -118,10 +118,18 @@ pub enum SchedulingDecision {
      TrySleep,
  }
  
 +/// Represents the type of a storage slice.
 +#[derive(Copy, Clone)]
 +pub enum StorageType {
-+    STORE = 1,
-+    PARTITION = 2,
-+    METADATA = 3,
++    Store = 1,
++    Partition = 2,
 +}
 +
  /// Represents a storage location in flash.

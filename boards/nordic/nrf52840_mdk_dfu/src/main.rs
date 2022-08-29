@@ -63,12 +63,12 @@ static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 2] = [
     kernel::StorageLocation {
         address: 0xC0000,
         size: 0x10000, // 16 pages
-        storage_type: kernel::StorageType::STORE,
+        storage_type: kernel::StorageType::Store,
     },
     kernel::StorageLocation {
         address: 0xD0000,
         size: 0x4000, // 4 pages
-        storage_type: kernel::StorageType::STORE,
+        storage_type: kernel::StorageType::Store,
     },
 ];
 

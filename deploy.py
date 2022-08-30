@@ -38,7 +38,7 @@ from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
 
 import tools.configure
-from tools.deploy_partition import create_metadata, pad_to
+from tools.deploy_partition import create_metadata, load_priv_key, pad_to
 
 PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
 
@@ -622,7 +622,9 @@ class OpenSKInstaller:
     # The kernel is already padded when read.
     firmware_image = kernel + pad_to(app, app_size)
 
-    metadata = create_metadata(firmware_image, board_props.kernel_address)
+    priv_key = load_priv_key(self.args.upgrade_priv_key)
+    metadata = create_metadata(firmware_image, board_props.kernel_address,
+                               self.args.version, priv_key)
     if self.args.verbose_build:
       info(f"Metadata bytes: {metadata}")
 
@@ -1129,6 +1131,22 @@ if __name__ == "__main__":
       default=True,
       dest="check_patches",
       help=("Don't check that patches are in sync with their submodules."),
+  )
+
+  main_parser.add_argument(
+      "--private-key",
+      type=str,
+      default="crypto_data/opensk_upgrade.key",
+      dest="upgrade_priv_key",
+      help=("PEM file for signing the firmware."),
+  )
+
+  main_parser.add_argument(
+      "--version",
+      type=int,
+      default=-1,
+      dest="version",
+      help=("Firmware version that is built."),
   )
 
   main_parser.set_defaults(features=["with_ctap1"])

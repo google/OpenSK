@@ -20,7 +20,6 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import datetime
 import hashlib
 import os
 import struct
@@ -54,7 +53,15 @@ ES256_ALGORITHM = -7
 ARCH = "thumbv7em-none-eabi"
 
 
-def create_metadata(firmware_image: bytes, partition_address: int) -> bytes:
+def hash_message(message: bytes) -> bytes:
+  """Uses SHA256 to hash a message."""
+  sha256_hash = hashlib.sha256()
+  sha256_hash.update(message)
+  return sha256_hash.digest()
+
+
+def create_metadata(firmware_image: bytes, partition_address: int, version: int,
+                    priv_key: Any) -> bytes:
   """Creates the matching metadata for the given firmware.
 
   The metadata consists of a timestamp, the expected address and a hash of
@@ -65,25 +72,24 @@ def create_metadata(firmware_image: bytes, partition_address: int) -> bytes:
     partition_address: The address to be written as a metadata property.
 
   Returns:
-    A byte array consisting of 32B hash, 4B timestamp and 4B partition address
-    in little endian encoding.
+    A byte array consisting of
+    - 32 B hash,
+    - 64 B signature,
+    - 32 B padding,
+    - 20 B version and
+    -  4 B partition address in little endian encoding.
   """
-  t = datetime.datetime.utcnow().timestamp()
-  timestamp = struct.pack("<I", int(t))
+  if version < 0 or version >= 2**63:
+    fatal("The version must fit into an unsigned integer with 63 bit.\n"
+          "Please pass it using --version")
+  version_bytes = bytes([0xFF] * 12) + struct.pack("<Q", version)
   partition_start = struct.pack("<I", partition_address)
-  sha256_hash = hashlib.sha256()
-  sha256_hash.update(firmware_image)
-  sha256_hash.update(timestamp)
-  sha256_hash.update(partition_start)
-  checksum = sha256_hash.digest()
-  return checksum + timestamp + partition_start
-
-
-def hash_message(message: bytes) -> bytes:
-  """Uses SHA256 to hash a message."""
-  sha256_hash = hashlib.sha256()
-  sha256_hash.update(message)
-  return sha256_hash.digest()
+  # Prefix sizes that are a multiple of 64 suit our bootloader's SHA.
+  signed_metadata = pad_to(version_bytes + partition_start, PAGE_SIZE - 128)
+  signed_data = signed_metadata + firmware_image
+  checksum = hash_message(signed_data)
+  signature = sign_firmware(signed_data, priv_key)
+  return pad_to(checksum + signature, 128) + signed_metadata
 
 
 def check_info(partition_address: int, authenticator: Any):
@@ -95,7 +101,8 @@ def check_info(partition_address: int, authenticator: Any):
         data={},
     )
     if result[0x01] != partition_address:
-      fatal("Identifiers do not match.")
+      fatal(f"Identifiers do not match, received 0x{result[0x01]:0x}, "
+            f"expected 0x{partition_address:0x}.")
   except ctap.CtapError as ex:
     fatal(f"Failed to read OpenSK upgrade info (error: {ex})")
 
@@ -163,19 +170,14 @@ def sign_firmware(data: bytes, priv_key: Any) -> bytes:
 
 def main(args):
   colorama.init()
+  if not args.priv_key:
+    fatal("Please pass in a private key file using --private-key.")
 
   firmware_image = generate_firmware_image(args.board)
   partition_address = PARTITION_ADDRESS[args.board]
-  metadata = create_metadata(firmware_image, partition_address)
-
-  if not args.priv_key:
-    fatal("Please pass in a private key file using --private-key.")
   priv_key = load_priv_key(args.priv_key)
-  signed_data = firmware_image + metadata[32:40]
-  signature = {
-      "alg": ES256_ALGORITHM,
-      "signature": sign_firmware(signed_data, priv_key)
-  }
+  metadata = create_metadata(firmware_image, partition_address, args.version,
+                             priv_key)
 
   if args.use_vendor_hid:
     patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
@@ -206,11 +208,13 @@ def main(args):
         )
 
       info("Writing metadata...")
-      cbor_data = {2: metadata, 3: hash_message(metadata), 4: signature}
+      # TODO Write the correct address when the metadata is transparent.
+      cbor_data = {2: metadata, 3: hash_message(metadata)}
       authenticator.send_cbor(
           OPENSK_VENDOR_UPGRADE,
           data=cbor_data,
       )
+
     except ctap.CtapError as ex:
       message = "Failed to upgrade OpenSK"
       if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
@@ -262,5 +266,11 @@ if __name__ == "__main__":
       action="store_true",
       dest="use_vendor_hid",
       help=("Whether to upgrade the device using the Vendor HID interface."),
+  )
+  parser.add_argument(
+      "--version",
+      type=int,
+      dest="version",
+      help=("Firmware version that is built."),
   )
   main(parser.parse_args())

@@ -74,7 +74,7 @@ struct BootPartition {
 impl BootPartition {
     const FIRMWARE_LENGTH: usize = 0x00040000;
 
-    /// Reads the metadata, returns the timestamp if all checks pass.
+    /// Reads the metadata, returns the firmware version if all checks pass.
     pub fn read_version(&self) -> Result<u64, ()> {
         let metadata_page = unsafe { read_page(self.metadata_address) };
         let hash_value = self.compute_upgrade_hash(&metadata_page);

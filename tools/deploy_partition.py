@@ -87,7 +87,8 @@ def create_metadata(firmware_image: bytes, partition_address: int, version: int,
   version_bytes = struct.pack("<Q", version)
   partition_start = struct.pack("<I", partition_address)
   # Prefix sizes that are a multiple of 64 suit our bootloader's SHA.
-  signed_metadata = pad_to(version_bytes + partition_start, PAGE_SIZE - METADATA_SIGN_OFFSET)
+  signed_metadata = pad_to(version_bytes + partition_start,
+                           PAGE_SIZE - METADATA_SIGN_OFFSET)
   signed_data = signed_metadata + firmware_image
   checksum = hash_message(signed_data)
   signature = sign_firmware(signed_data, priv_key)

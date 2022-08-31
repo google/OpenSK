@@ -912,53 +912,6 @@ impl TryFrom<CoseKey> for ecdsa::PubKey {
     }
 }
 
-/// Data structure for receiving a signature.
-///
-/// See https://datatracker.ietf.org/doc/html/rfc8152#appendix-C.1.1 for reference.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CoseSignature {
-    pub algorithm: SignatureAlgorithm,
-    pub bytes: [u8; ecdsa::Signature::BYTES_LENGTH],
-}
-
-impl TryFrom<cbor::Value> for CoseSignature {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        destructure_cbor_map! {
-            let {
-                "alg" => algorithm,
-                "signature" => bytes,
-            } = extract_map(cbor_value)?;
-        }
-
-        let algorithm = SignatureAlgorithm::try_from(ok_or_missing(algorithm)?)?;
-        let bytes = extract_byte_string(ok_or_missing(bytes)?)?;
-        if bytes.len() != ecdsa::Signature::BYTES_LENGTH {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-
-        Ok(CoseSignature {
-            algorithm,
-            bytes: *array_ref![bytes.as_slice(), 0, ecdsa::Signature::BYTES_LENGTH],
-        })
-    }
-}
-
-impl TryFrom<CoseSignature> for ecdsa::Signature {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cose_signature: CoseSignature) -> Result<Self, Ctap2StatusCode> {
-        match cose_signature.algorithm {
-            SignatureAlgorithm::Es256 => ecdsa::Signature::from_bytes(&cose_signature.bytes)
-                .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
-            #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
-            SignatureAlgorithm::Unknown => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum PinUvAuthProtocol {
@@ -1292,7 +1245,6 @@ mod test {
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
     };
-    use crypto::sha256::Sha256;
     use rng256::Rng256;
 
     #[test]
@@ -2001,64 +1953,6 @@ mod test {
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
-    }
-
-    #[test]
-    fn test_from_into_cose_signature() {
-        let mut env = TestEnv::new();
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
-        let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
-        let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
-        dummy_signature.to_bytes(&mut bytes);
-        let cbor_value = cbor_map! {
-            "alg" => ES256_ALGORITHM,
-            "signature" => bytes,
-        };
-        let cose_signature = CoseSignature::try_from(cbor_value).unwrap();
-        let created_signature = crypto::ecdsa::Signature::try_from(cose_signature).unwrap();
-        let mut created_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
-        created_signature.to_bytes(&mut created_bytes);
-        assert_eq!(bytes[..], created_bytes[..]);
-    }
-
-    #[test]
-    fn test_cose_signature_wrong_algorithm() {
-        let mut env = TestEnv::new();
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
-        let dummy_signature = sk.sign_rfc6979::<Sha256>(&[]);
-        let mut bytes = [0; ecdsa::Signature::BYTES_LENGTH];
-        dummy_signature.to_bytes(&mut bytes);
-        let cbor_value = cbor_map! {
-            "alg" => -1, // unused algorithm
-            "signature" => bytes,
-        };
-        let cose_signature = CoseSignature::try_from(cbor_value).unwrap();
-        let created_signature = crypto::ecdsa::Signature::try_from(cose_signature);
-        // Can not compare directly, since ecdsa::Signature does not implement Debug.
-        assert_eq!(
-            created_signature.err(),
-            Some(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
-        );
-    }
-
-    #[test]
-    fn test_cose_signature_wrong_signature_length() {
-        let cbor_value = cbor_map! {
-            "alg" => ES256_ALGORITHM,
-            "signature" => [0; ecdsa::Signature::BYTES_LENGTH - 1],
-        };
-        assert_eq!(
-            CoseSignature::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
-        let cbor_value = cbor_map! {
-            "alg" => ES256_ALGORITHM,
-            "signature" => [0; ecdsa::Signature::BYTES_LENGTH + 1],
-        };
-        assert_eq!(
-            CoseSignature::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
     }
 
     #[test]

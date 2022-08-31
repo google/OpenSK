@@ -34,6 +34,7 @@ use rtt_target::{rprintln, rtt_init_print};
 
 /// Size of a flash page in bytes.
 const PAGE_SIZE: usize = 0x1000;
+const METADATA_SIGN_OFFSET: usize = 0x800;
 
 /// A flash page.
 type Page = [u8; PAGE_SIZE];
@@ -48,12 +49,9 @@ unsafe fn read_page(address: usize) -> Page {
 /// Parsed metadata for a firmware partition.
 struct Metadata {
     checksum: [u8; 32],
-    timestamp: u32,
+    _signature: [u8; 64],
+    version: u64,
     address: u32,
-}
-
-impl Metadata {
-    pub const DATA_LEN: usize = 40;
 }
 
 /// Reads the metadata from a flash page.
@@ -61,8 +59,9 @@ impl From<Page> for Metadata {
     fn from(page: Page) -> Self {
         Metadata {
             checksum: page[0..32].try_into().unwrap(),
-            timestamp: LittleEndian::read_u32(&page[32..36]),
-            address: LittleEndian::read_u32(&page[36..Metadata::DATA_LEN]),
+            _signature: page[32..96].try_into().unwrap(),
+            version: LittleEndian::read_u64(&page[METADATA_SIGN_OFFSET..][..8]),
+            address: LittleEndian::read_u32(&page[METADATA_SIGN_OFFSET + 8..][..4]),
         }
     }
 }
@@ -76,15 +75,15 @@ struct BootPartition {
 impl BootPartition {
     const FIRMWARE_LENGTH: usize = 0x00040000;
 
-    /// Reads the metadata, returns the timestamp if all checks pass.
-    pub fn read_timestamp(&self) -> Result<u32, ()> {
+    /// Reads the metadata, returns the firmware version if all checks pass.
+    pub fn read_version(&self) -> Result<u64, ()> {
         let metadata_page = unsafe { read_page(self.metadata_address) };
         let hash_value = self.compute_upgrade_hash(&metadata_page);
         let metadata = Metadata::from(metadata_page);
         if self.firmware_address != metadata.address as usize {
             #[cfg(debug_assertions)]
             rprintln!(
-                "Firmware address mismatch: expected 0x{:08X}, metadata 0x{:08X}",
+                "Partition address mismatch: expected 0x{:08X}, metadata 0x{:08X}",
                 self.firmware_address,
                 metadata.address as usize
             );
@@ -95,7 +94,7 @@ impl BootPartition {
             rprintln!("Hash mismatch");
             return Err(());
         }
-        Ok(metadata.timestamp)
+        Ok(metadata.version)
     }
 
     /// Computes the SHA256 of metadata information and partition data.
@@ -107,11 +106,14 @@ impl BootPartition {
         debug_assert!(self.firmware_address % PAGE_SIZE == 0);
         debug_assert!(BootPartition::FIRMWARE_LENGTH % PAGE_SIZE == 0);
         let cc310 = crypto_cell::CryptoCell310::new();
+        cc310.update(&metadata_page[METADATA_SIGN_OFFSET..], false);
         for page_offset in (0..BootPartition::FIRMWARE_LENGTH).step_by(PAGE_SIZE) {
             let page = unsafe { read_page(self.firmware_address + page_offset) };
-            cc310.update(&page, false);
+            cc310.update(
+                &page,
+                page_offset + PAGE_SIZE == BootPartition::FIRMWARE_LENGTH,
+            );
         }
-        cc310.update(&metadata_page[32..Metadata::DATA_LEN], true);
         cc310.finalize_and_clear()
     }
 
@@ -156,12 +158,12 @@ fn main() -> ! {
     };
     #[cfg(debug_assertions)]
     rprintln!("Reading partition A");
-    let timestamp_a = partition_a.read_timestamp();
+    let version_a = partition_a.read_version();
     #[cfg(debug_assertions)]
     rprintln!("Reading partition B");
-    let timestamp_b = partition_b.read_timestamp();
+    let version_b = partition_b.read_version();
 
-    match (timestamp_a, timestamp_b) {
+    match (version_a, version_b) {
         (Ok(t1), Ok(t2)) => {
             if t1 >= t2 {
                 partition_a.boot()

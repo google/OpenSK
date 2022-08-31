@@ -15,11 +15,10 @@
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
-    CoseKey, CoseSignature, CredentialManagementSubCommand,
-    CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
-    MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialUserEntity, SetMinPinLengthParams,
+    CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
+    GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
+    PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
 use super::status_code::Ctap2StatusCode;
 use super::{cbor_read, key_material};
@@ -596,7 +595,6 @@ pub struct AuthenticatorVendorUpgradeParameters {
     pub address: Option<usize>,
     pub data: Vec<u8>,
     pub hash: Vec<u8>,
-    pub signature: Option<CoseSignature>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
@@ -608,7 +606,6 @@ impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
                 0x01 => address,
                 0x02 => data,
                 0x03 => hash,
-                0x04 => signature,
             } = extract_map(cbor_value)?;
         }
         let address = address
@@ -617,12 +614,10 @@ impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
             .map(|u| u as usize);
         let data = extract_byte_string(ok_or_missing(data)?)?;
         let hash = extract_byte_string(ok_or_missing(hash)?)?;
-        let signature = signature.map(CoseSignature::try_from).transpose()?;
         Ok(AuthenticatorVendorUpgradeParameters {
             address,
             data,
             hash,
-            signature,
         })
     }
 }
@@ -631,7 +626,7 @@ impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
 mod test {
     use super::super::data_formats::{
         AuthenticatorTransport, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
-        PublicKeyCredentialUserEntity, SignatureAlgorithm,
+        PublicKeyCredentialUserEntity,
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
@@ -1096,10 +1091,6 @@ mod test {
         let cbor_value = cbor_map! {
             0x02 => [0xFF; 0x100],
             0x03 => [0x44; 32],
-            0x04 => cbor_map! {
-                "alg" => -7,
-                "signature" => [0x55; 64],
-            },
         };
         assert_eq!(
             AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
@@ -1107,14 +1098,10 @@ mod test {
                 address: None,
                 data: vec![0xFF; 0x100],
                 hash: vec![0x44; 32],
-                signature: Some(CoseSignature {
-                    algorithm: SignatureAlgorithm::Es256,
-                    bytes: [0x55; 64],
-                }),
             })
         );
 
-        // Valid without signature
+        // Valid with address
         let cbor_value = cbor_map! {
             0x01 => 0x1000,
             0x02 => [0xFF; 0x100],
@@ -1126,7 +1113,6 @@ mod test {
                 address: Some(0x1000),
                 data: vec![0xFF; 0x100],
                 hash: vec![0x44; 32],
-                signature: None,
             })
         );
     }

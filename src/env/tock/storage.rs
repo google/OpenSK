@@ -16,11 +16,18 @@ use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange};
 use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
+use arrayref::array_ref;
+use byteorder::{ByteOrder, LittleEndian};
 use core::cell::Cell;
+use crypto::sha256::Sha256;
+use crypto::{ecdsa, Hash256};
 use libtock_core::{callback, syscalls};
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const DRIVER_NUMBER: usize = 0x50003;
+
+const UPGRADE_PUBLIC_KEY: &[u8; 65] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_upgrade_pubkey.bin"));
 
 mod subscribe_nr {
     pub const DONE: usize = 0;
@@ -331,14 +338,192 @@ impl UpgradeStorage for TockUpgradeStorage {
     }
 
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
-        // If less data is passed in than is reserved, assume the rest is 0xFF.
-        if data.len() <= self.metadata.length() {
-            for address in self.metadata.aligned_iter(self.page_size) {
-                erase_page(address, self.page_size)?;
-            }
-            write_slice(self.metadata.start(), data)
-        } else {
-            Err(StorageError::OutOfBounds)
+        if data.len() != self.metadata.length() {
+            return Err(StorageError::CustomError);
         }
+        // Compares the hash inside the metadata to the actual hash.
+        parse_metadata(self, UPGRADE_PUBLIC_KEY, &data)?;
+        for address in self.metadata.aligned_iter(self.page_size) {
+            erase_page(address, self.page_size)?;
+        }
+        write_slice(self.metadata.start(), data)
+    }
+}
+
+/// Parses the metadata of an upgrade, and checks its correctness.
+///
+/// The metadata is a page starting with:
+/// - 32 B upgrade hash (SHA256)
+/// - 64 B signature,
+/// that are not signed over. The second part is included in the signature with
+/// -  8 B version and
+/// -  4 B partition address in little endian encoding
+/// written at METADATA_SIGN_OFFSET.
+///
+/// Checks hash and signature correctness, and whether the partition offset matches.
+fn parse_metadata(
+    upgrade_locations: &impl UpgradeStorage,
+    public_key_bytes: &[u8],
+    metadata: &[u8],
+) -> StorageResult<()> {
+    const METADATA_LEN: usize = 0x1000;
+    const METADATA_SIGN_OFFSET: usize = 0x800;
+    if metadata.len() != METADATA_LEN {
+        return Err(StorageError::CustomError);
+    }
+
+    let metadata_address = LittleEndian::read_u32(&metadata[METADATA_SIGN_OFFSET + 8..][..4]);
+    if metadata_address as usize != upgrade_locations.partition_address() {
+        return Err(StorageError::CustomError);
+    }
+
+    // The hash implementation handles this in chunks, so no memory issues.
+    let partition_slice =
+        upgrade_locations.read_partition(0, upgrade_locations.partition_length())?;
+    let mut hasher = Sha256::new();
+    hasher.update(&metadata[METADATA_SIGN_OFFSET..]);
+    hasher.update(partition_slice);
+    let computed_hash = hasher.finalize();
+    if &computed_hash != array_ref!(metadata, 0, 32) {
+        return Err(StorageError::CustomError);
+    }
+
+    verify_signature(
+        array_ref!(metadata, 32, 64),
+        public_key_bytes,
+        &computed_hash,
+    )?;
+    Ok(())
+}
+
+/// Verifies the signature over the given hash.
+///
+/// The public key is COSE encoded, and the hash is a SHA256.
+fn verify_signature(
+    signature_bytes: &[u8; 64],
+    public_key_bytes: &[u8],
+    signed_hash: &[u8; 32],
+) -> StorageResult<()> {
+    let signature =
+        ecdsa::Signature::from_bytes(signature_bytes).ok_or(StorageError::CustomError)?;
+    let public_key = ecdsa::PubKey::from_bytes_uncompressed(public_key_bytes)
+        .ok_or(StorageError::CustomError)?;
+    if !public_key.verify_hash_vartime(signed_hash, &signature) {
+        return Err(StorageError::CustomError);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::env::test::TestEnv;
+    use crate::env::Env;
+
+    #[test]
+    fn test_parse_metadata() {
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let upgrade_locations = env.upgrade_storage().unwrap();
+
+        const METADATA_LEN: usize = 0x1000;
+        const METADATA_SIGN_OFFSET: usize = 0x800;
+        let mut metadata = vec![0xFF; METADATA_LEN];
+        LittleEndian::write_u32(&mut metadata[METADATA_SIGN_OFFSET + 8..][..4], 0x60000);
+
+        let partition_length = upgrade_locations.partition_length();
+        let mut signed_over_data = metadata[METADATA_SIGN_OFFSET..].to_vec();
+        signed_over_data.extend(
+            upgrade_locations
+                .read_partition(0, partition_length)
+                .unwrap(),
+        );
+        let signed_hash = Sha256::hash(&signed_over_data);
+
+        metadata[..32].copy_from_slice(&signed_hash);
+        let signature = private_key.sign_rfc6979::<Sha256>(&signed_over_data);
+        let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        signature.to_bytes(&mut signature_bytes);
+        metadata[32..96].copy_from_slice(&signature_bytes);
+
+        let public_key = private_key.genpk();
+        let mut public_key_bytes = [0; 65];
+        public_key.to_bytes_uncompressed(&mut public_key_bytes);
+
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Ok(())
+        );
+
+        // Manipulating the partition address fails.
+        metadata[METADATA_SIGN_OFFSET] = 0x88;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Err(StorageError::CustomError)
+        );
+        metadata[METADATA_SIGN_OFFSET] = 0x00;
+        // Any manipulation of signed data fails.
+        metadata[METADATA_LEN - 1] = 0x88;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Err(StorageError::CustomError)
+        );
+        metadata[METADATA_LEN - 1] = 0xFF;
+        // Manipulating the hash fails.
+        metadata[0] ^= 0x01;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Err(StorageError::CustomError)
+        );
+        metadata[0] ^= 0x01;
+        // Manipulating the signature fails.
+        metadata[32] ^= 0x01;
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Err(StorageError::CustomError)
+        );
+        metadata[32] ^= 0x01;
+        // Manipulating the partition data fails.
+        upgrade_locations.write_partition(0, &[0x88; 1]).unwrap();
+        assert_eq!(
+            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            Err(StorageError::CustomError)
+        );
+    }
+
+    #[test]
+    fn test_verify_signature() {
+        let mut env = TestEnv::new();
+        let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
+        let message = [0x44; 64];
+        let signed_hash = Sha256::hash(&message);
+        let signature = private_key.sign_rfc6979::<Sha256>(&message);
+
+        let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
+        signature.to_bytes(&mut signature_bytes);
+
+        let public_key = private_key.genpk();
+        let mut public_key_bytes = [0; 65];
+        public_key.to_bytes_uncompressed(&mut public_key_bytes);
+
+        assert_eq!(
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
+            Ok(())
+        );
+        assert_eq!(
+            verify_signature(&signature_bytes, &public_key_bytes, &[0x55; 32]),
+            Err(StorageError::CustomError)
+        );
+        public_key_bytes[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
+            Err(StorageError::CustomError)
+        );
+        public_key_bytes[0] ^= 0x01;
+        signature_bytes[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
+            Err(StorageError::CustomError)
+        );
     }
 }

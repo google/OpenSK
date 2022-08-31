@@ -231,13 +231,12 @@ impl PubKey {
             .map(|p| PubKey { p })
     }
 
-    #[cfg(feature = "std")]
     pub fn from_bytes_uncompressed(bytes: &[u8]) -> Option<PubKey> {
         PointP256::from_bytes_uncompressed_vartime(bytes).map(|p| PubKey { p })
     }
 
-    #[cfg(test)]
-    fn to_bytes_uncompressed(&self, bytes: &mut [u8; 65]) {
+    #[cfg(feature = "std")]
+    pub fn to_bytes_uncompressed(&self, bytes: &mut [u8; 65]) {
         self.p.to_bytes_uncompressed(bytes);
     }
 

@@ -51,10 +51,7 @@ fn main() {
         .public_key()
         .to_bytes(&group, conversion_form, &mut ctx)
         .unwrap();
-    const POINT_LEN: usize = 32;
-    assert_eq!(raw_bytes.len(), 1 + 2 * POINT_LEN);
-    assert_eq!(raw_bytes[0], 0x04);
     let upgrade_pubkey_path = Path::new(&out_dir).join("opensk_upgrade_pubkey.bin");
     let mut upgrade_pub_bin_file = File::create(&upgrade_pubkey_path).unwrap();
-    upgrade_pub_bin_file.write_all(&raw_bytes[1..]).unwrap();
+    upgrade_pub_bin_file.write_all(&raw_bytes).unwrap();
 }

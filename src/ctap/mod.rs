@@ -222,7 +222,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 /// Checks hash and signature correctness, and whether the partition offset matches.
 fn parse_metadata(
     upgrade_locations: &impl UpgradeStorage,
-    public_key_bytes: &[u8; 64],
+    public_key_bytes: &[u8],
     metadata: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
     const METADATA_LEN: usize = 0x1000;
@@ -261,14 +261,12 @@ fn parse_metadata(
 /// The public key is COSE encoded, and the hash is a SHA256.
 fn verify_signature(
     signature_bytes: &[u8; 64],
-    public_key_bytes: &[u8; 64],
+    public_key_bytes: &[u8],
     signed_hash: &[u8; 32],
 ) -> Result<(), Ctap2StatusCode> {
     let signature = ecdsa::Signature::from_bytes(signature_bytes)
         .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-    let x = array_ref!(public_key_bytes, 0, 32);
-    let y = array_ref!(public_key_bytes, 32, 32);
-    let public_key = ecdsa::PubKey::from_coordinates(x, y)
+    let public_key = ecdsa::PubKey::from_bytes_uncompressed(public_key_bytes)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
     if !public_key.verify_hash_vartime(signed_hash, &signature) {
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
@@ -3493,18 +3491,13 @@ mod test {
         metadata[32..96].copy_from_slice(&signature_bytes);
 
         let public_key = private_key.genpk();
-        let mut public_key_bytes = [0; 64];
-        let (x_bytes, y_bytes) = public_key_bytes.split_at_mut(32);
-        public_key.to_coordinates(
-            array_mut_ref!(x_bytes, 0, 32),
-            array_mut_ref!(y_bytes, 0, 32),
-        );
+        let mut public_key_bytes = [0; 65];
+        public_key.to_bytes_uncompressed(&mut public_key_bytes);
 
         assert_eq!(
             parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Ok(())
         );
-
         // Any manipulation of data fails.
         metadata[METADATA_SIGN_OFFSET] = 0x88;
         assert_eq!(
@@ -3543,12 +3536,8 @@ mod test {
         signature.to_bytes(&mut signature_bytes);
 
         let public_key = private_key.genpk();
-        let mut public_key_bytes = [0; 64];
-        let (x_bytes, y_bytes) = public_key_bytes.split_at_mut(32);
-        public_key.to_coordinates(
-            array_mut_ref!(x_bytes, 0, 32),
-            array_mut_ref!(y_bytes, 0, 32),
-        );
+        let mut public_key_bytes = [0; 65];
+        public_key.to_bytes_uncompressed(&mut public_key_bytes);
 
         assert_eq!(
             verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),

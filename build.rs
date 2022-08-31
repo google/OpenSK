@@ -15,7 +15,6 @@
 extern crate alloc;
 
 use openssl::{bn, ec, nid};
-use sk_cbor::cbor_map;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -52,25 +51,7 @@ fn main() {
         .public_key()
         .to_bytes(&group, conversion_form, &mut ctx)
         .unwrap();
-    const POINT_LEN: usize = 32;
-    assert_eq!(raw_bytes.len(), 1 + 2 * POINT_LEN);
-    assert_eq!(raw_bytes[0], 0x04);
-    let x_bytes = &raw_bytes[1..][..POINT_LEN];
-    let y_bytes = &raw_bytes[1 + POINT_LEN..][..POINT_LEN];
-
-    const EC2_KEY_TYPE: i64 = 2;
-    const P_256_CURVE: i64 = 1;
-    const ES256_ALGORITHM: i64 = -7;
-    let pub_key_cbor = sk_cbor::cbor_map! {
-        1 => EC2_KEY_TYPE,
-        3 => ES256_ALGORITHM,
-        -1 => P_256_CURVE,
-        -2 => x_bytes,
-        -3 => y_bytes,
-    };
-    let mut cbor_bytes = vec![];
-    sk_cbor::writer::write(pub_key_cbor, &mut cbor_bytes).unwrap();
-    let upgrade_pubkey_path = Path::new(&out_dir).join("opensk_upgrade_pubkey_cbor.bin");
+    let upgrade_pubkey_path = Path::new(&out_dir).join("opensk_upgrade_pubkey.bin");
     let mut upgrade_pub_bin_file = File::create(&upgrade_pubkey_path).unwrap();
-    upgrade_pub_bin_file.write_all(&cbor_bytes).unwrap();
+    upgrade_pub_bin_file.write_all(&raw_bytes).unwrap();
 }

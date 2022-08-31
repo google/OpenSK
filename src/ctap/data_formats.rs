@@ -836,8 +836,8 @@ impl From<ecdh::PubKey> for CoseKey {
 
 impl From<ecdsa::PubKey> for CoseKey {
     fn from(pk: ecdsa::PubKey) -> Self {
-        let mut x_bytes = [0; ecdh::NBYTES];
-        let mut y_bytes = [0; ecdh::NBYTES];
+        let mut x_bytes = [0; ecdsa::NBYTES];
+        let mut y_bytes = [0; ecdsa::NBYTES];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,

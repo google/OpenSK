@@ -84,6 +84,10 @@ impl UpgradeStorage for BufferUpgradeStorage {
             Err(StorageError::OutOfBounds)
         }
     }
+
+    fn running_firmware_version(&self) -> u64 {
+        0
+    }
 }
 
 #[cfg(test)]

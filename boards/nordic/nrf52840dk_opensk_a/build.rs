@@ -11,7 +11,7 @@ fn main() {
     fs::write(
         &dest_path,
         "
-static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 5] = [
+static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 6] = [
     // We implement NUM_PAGES = 20 as 16 + 4 to satisfy the MPU.
     kernel::StorageLocation {
         address: 0xC0000,
@@ -24,6 +24,11 @@ static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 5] = [
         storage_type: kernel::StorageType::Store,
     },
     // Partitions can also be split to maximize MPU happiness.
+    kernel::StorageLocation {
+        address: 0x4000,
+        size: 0x1000,
+        storage_type: kernel::StorageType::Partition,
+    },
     kernel::StorageLocation {
         address: 0x5000,
         size: 0x1000,

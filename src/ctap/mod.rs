@@ -1295,7 +1295,7 @@ impl CtapState {
                 ),
                 force_pin_change: Some(storage::has_force_pin_change(env)?),
                 min_pin_length: storage::min_pin_length(env)?,
-                firmware_version: None,
+                firmware_version: env.upgrade_storage().map(|u| u.running_firmware_version()),
                 max_cred_blob_length: Some(env.customization().max_cred_blob_length() as u64),
                 max_rp_ids_for_set_min_pin_length: Some(
                     env.customization().max_rp_ids_length() as u64
@@ -1590,6 +1590,7 @@ mod test {
             0x0B => env.customization().max_large_blob_array_size() as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
+            0x0E => 0,
             0x0F => env.customization().max_cred_blob_length() as u64,
             0x10 => env.customization().max_rp_ids_length() as u64,
             0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,

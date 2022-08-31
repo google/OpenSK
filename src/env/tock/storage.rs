@@ -25,6 +25,7 @@ use libtock_core::{callback, syscalls};
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const DRIVER_NUMBER: usize = 0x50003;
+const METADATA_SIGN_OFFSET: usize = 0x800;
 
 const UPGRADE_PUBLIC_KEY: &[u8; 65] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_upgrade_pubkey.bin"));
@@ -98,6 +99,10 @@ fn block_command(driver: usize, cmd: usize, arg1: usize, arg2: usize) -> Storage
     } else {
         Err(StorageError::CustomError)
     }
+}
+
+fn read_slice(address: usize, length: usize) -> &'static [u8] {
+    unsafe { core::slice::from_raw_parts(address as *const u8, length) }
 }
 
 fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
@@ -228,11 +233,14 @@ pub struct TockUpgradeStorage {
     page_size: usize,
     partition: ModRange,
     metadata: ModRange,
+    running_metadata: ModRange,
 }
 
 impl TockUpgradeStorage {
     const METADATA_ADDRESS_A: usize = 0x4000;
     const METADATA_ADDRESS_B: usize = 0x5000;
+    const _PARTITION_ADDRESS_A: usize = 0x20000;
+    const PARTITION_ADDRESS_B: usize = 0x60000;
 
     /// Provides access to the other upgrade partition and metadata if available.
     ///
@@ -244,7 +252,7 @@ impl TockUpgradeStorage {
     /// Returns `CustomError` if any of the following conditions do not hold:
     /// - The page size is a power of two.
     /// - The storage slices are page-aligned.
-    /// - There are not partition or metadata slices.
+    /// - There are no partition or no metadata slices.
     /// Returns a `NotAligned` error if partitions or metadata ranges are
     /// - not exclusive or,
     /// - not consecutive.
@@ -253,6 +261,7 @@ impl TockUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
             partition: ModRange::new_empty(),
             metadata: ModRange::new_empty(),
+            running_metadata: ModRange::new_empty(),
         };
         if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
@@ -269,7 +278,19 @@ impl TockUpgradeStorage {
             }
             let range = ModRange::new(storage_ptr, storage_len);
             match range.start() {
-                Self::METADATA_ADDRESS_A | Self::METADATA_ADDRESS_B => locations.metadata = range,
+                Self::METADATA_ADDRESS_A => {
+                    locations.metadata = range;
+                }
+                Self::METADATA_ADDRESS_B => {
+                    locations.running_metadata = range;
+                }
+                Self::PARTITION_ADDRESS_B => {
+                    core::mem::swap(&mut locations.metadata, &mut locations.running_metadata);
+                    locations.partition = locations
+                        .partition
+                        .append(range)
+                        .ok_or(StorageError::NotAligned)?
+                }
                 _ => {
                     locations.partition = locations
                         .partition
@@ -278,7 +299,10 @@ impl TockUpgradeStorage {
                 }
             }
         }
-        if locations.partition.is_empty() {
+        if locations.partition.is_empty()
+            || locations.metadata.is_empty()
+            || locations.running_metadata.is_empty()
+        {
             return Err(StorageError::CustomError);
         }
         Ok(locations)
@@ -299,7 +323,7 @@ impl UpgradeStorage for TockUpgradeStorage {
             .partition
             .contains_range(&ModRange::new(address, length))
         {
-            Ok(unsafe { core::slice::from_raw_parts(address as *const u8, length) })
+            Ok(read_slice(address, length))
         } else {
             Err(StorageError::OutOfBounds)
         }
@@ -332,9 +356,7 @@ impl UpgradeStorage for TockUpgradeStorage {
     }
 
     fn read_metadata(&self) -> StorageResult<&[u8]> {
-        Ok(unsafe {
-            core::slice::from_raw_parts(self.metadata.start() as *const u8, self.metadata.length())
-        })
+        Ok(read_slice(self.metadata.start(), self.metadata.length()))
     }
 
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
@@ -347,6 +369,14 @@ impl UpgradeStorage for TockUpgradeStorage {
             erase_page(address, self.page_size)?;
         }
         write_slice(self.metadata.start(), data)
+    }
+
+    fn running_firmware_version(&self) -> u64 {
+        let running_metadata = read_slice(
+            self.running_metadata.start(),
+            self.running_metadata.length(),
+        );
+        parse_metadata_version(running_metadata)
     }
 }
 
@@ -367,8 +397,12 @@ fn parse_metadata(
     metadata: &[u8],
 ) -> StorageResult<()> {
     const METADATA_LEN: usize = 0x1000;
-    const METADATA_SIGN_OFFSET: usize = 0x800;
     if metadata.len() != METADATA_LEN {
+        return Err(StorageError::CustomError);
+    }
+
+    let version = parse_metadata_version(metadata);
+    if version < upgrade_locations.running_firmware_version() {
         return Err(StorageError::CustomError);
     }
 
@@ -394,6 +428,11 @@ fn parse_metadata(
         &computed_hash,
     )?;
     Ok(())
+}
+
+/// Parses the metadata, returns the firmware version.
+fn parse_metadata_version(data: &[u8]) -> u64 {
+    LittleEndian::read_u64(&data[METADATA_SIGN_OFFSET..][..8])
 }
 
 /// Verifies the signature over the given hash.

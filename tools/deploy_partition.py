@@ -198,6 +198,13 @@ def main(args):
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
     info(f"Upgrading OpenSK device AAGUID {aaguid} ({authenticator.device}).")
 
+    running_version = authenticator.get_info().firmware_version
+    if args.version < running_version:
+      fatal(f"Can not write version {args.version} when version"
+            f"{running_version} is running.")
+    else:
+      info(f"Running version: {running_version}")
+
     try:
       check_info(partition_address, authenticator)
       offset = 0
@@ -225,7 +232,7 @@ def main(args):
       elif ex.code.value == ctap.CtapError.ERR.INVALID_PARAMETER:
         error(f"{message} (invalid parameter, maybe a wrong byte array size?).")
       elif ex.code.value == ctap.CtapError.ERR.INTEGRITY_FAILURE:
-        error(f"{message} (hashes or signature don't match).")
+        error(f"{message} (metadata parsing failed).")
       elif ex.code.value == 0xF2:  # VENDOR_INTERNAL_ERROR
         error(f"{message} (internal conditions not met).")
       elif ex.code.value == 0xF3:  # VENDOR_HARDWARE_FAILURE

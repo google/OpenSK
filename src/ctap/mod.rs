@@ -47,7 +47,7 @@ use self::credential_id::{
 use self::credential_management::process_credential_management;
 use self::crypto_wrapper::PrivateKey;
 use self::data_formats::{
-    AuthenticatorTransport, CoseKey, CredentialProtectionPolicy, EnterpriseAttestationMode,
+    AuthenticatorTransport, CredentialProtectionPolicy, EnterpriseAttestationMode,
     GetAssertionExtensions, PackedAttestationStatement, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
     PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
@@ -222,7 +222,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 /// Checks hash and signature correctness, and whether the partition offset matches.
 fn parse_metadata(
     upgrade_locations: &impl UpgradeStorage,
-    public_key_bytes: &[u8],
+    public_key_bytes: &[u8; 64],
     metadata: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
     const METADATA_LEN: usize = 0x1000;
@@ -261,14 +261,15 @@ fn parse_metadata(
 /// The public key is COSE encoded, and the hash is a SHA256.
 fn verify_signature(
     signature_bytes: &[u8; 64],
-    public_key_bytes: &[u8],
+    public_key_bytes: &[u8; 64],
     signed_hash: &[u8; 32],
 ) -> Result<(), Ctap2StatusCode> {
     let signature = ecdsa::Signature::from_bytes(signature_bytes)
         .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-    let cbor_public_key = cbor_read(public_key_bytes)?;
-    let cose_key = CoseKey::try_from(cbor_public_key)?;
-    let public_key = ecdsa::PubKey::try_from(cose_key)?;
+    let x = array_ref!(public_key_bytes, 0, 32);
+    let y = array_ref!(public_key_bytes, 32, 32);
+    let public_key = ecdsa::PubKey::from_coordinates(x, y)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
     if !public_key.verify_hash_vartime(signed_hash, &signature) {
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
     }
@@ -3492,12 +3493,12 @@ mod test {
         metadata[32..96].copy_from_slice(&signature_bytes);
 
         let public_key = private_key.genpk();
-        let mut public_key_bytes = vec![];
-        cbor_write(
-            cbor::Value::from(CoseKey::from(public_key)),
-            &mut public_key_bytes,
-        )
-        .unwrap();
+        let mut public_key_bytes = [0; 64];
+        let (x_bytes, y_bytes) = public_key_bytes.split_at_mut(32);
+        public_key.to_coordinates(
+            array_mut_ref!(x_bytes, 0, 32),
+            array_mut_ref!(y_bytes, 0, 32),
+        );
 
         assert_eq!(
             parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
@@ -3542,12 +3543,12 @@ mod test {
         signature.to_bytes(&mut signature_bytes);
 
         let public_key = private_key.genpk();
-        let mut public_key_bytes = vec![];
-        cbor_write(
-            cbor::Value::from(CoseKey::from(public_key)),
-            &mut public_key_bytes,
-        )
-        .unwrap();
+        let mut public_key_bytes = [0; 64];
+        let (x_bytes, y_bytes) = public_key_bytes.split_at_mut(32);
+        public_key.to_coordinates(
+            array_mut_ref!(x_bytes, 0, 32),
+            array_mut_ref!(y_bytes, 0, 32),
+        );
 
         assert_eq!(
             verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
@@ -3560,7 +3561,7 @@ mod test {
         public_key_bytes[0] ^= 0x01;
         assert_eq!(
             verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
-            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
         public_key_bytes[0] ^= 0x01;
         signature_bytes[0] ^= 0x01;

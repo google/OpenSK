@@ -34,6 +34,7 @@ use rtt_target::{rprintln, rtt_init_print};
 
 /// Size of a flash page in bytes.
 const PAGE_SIZE: usize = 0x1000;
+const METADATA_SIGN_OFFSET: usize = 0x800;
 
 /// A flash page.
 type Page = [u8; PAGE_SIZE];
@@ -59,8 +60,8 @@ impl From<Page> for Metadata {
         Metadata {
             checksum: page[0..32].try_into().unwrap(),
             _signature: page[32..96].try_into().unwrap(),
-            version: LittleEndian::read_u64(&page[140..][..8]),
-            address: LittleEndian::read_u32(&page[148..][..4]),
+            version: LittleEndian::read_u64(&page[METADATA_SIGN_OFFSET..][..8]),
+            address: LittleEndian::read_u32(&page[METADATA_SIGN_OFFSET + 8..][..4]),
         }
     }
 }
@@ -105,7 +106,7 @@ impl BootPartition {
         debug_assert!(self.firmware_address % PAGE_SIZE == 0);
         debug_assert!(BootPartition::FIRMWARE_LENGTH % PAGE_SIZE == 0);
         let cc310 = crypto_cell::CryptoCell310::new();
-        cc310.update(&metadata_page[128..], false);
+        cc310.update(&metadata_page[METADATA_SIGN_OFFSET..], false);
         for page_offset in (0..BootPartition::FIRMWARE_LENGTH).step_by(PAGE_SIZE) {
             let page = unsafe { read_page(self.firmware_address + page_offset) };
             cc310.update(

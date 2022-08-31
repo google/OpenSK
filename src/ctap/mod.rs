@@ -211,37 +211,43 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 
 /// Parses the metadata of an upgrade, and checks its correctness.
 ///
-/// The metadata consists of:
+/// The metadata is a page starting with:
 /// - 32 B upgrade hash (SHA256)
 /// - 64 B signature,
-/// - 32 B padding,
-/// - 20 B version and
-/// -  4 B partition address in little endian encoding.
-/// Checks the hash and whether the signature is correct.
+/// that are not signed over. The second part is included in the signature with
+/// -  8 B version and
+/// -  4 B partition address in little endian encoding
+/// written at METADATA_SIGN_OFFSET.
+///
+/// Checks hash and signature correctness, and whether the partition offset matches.
 fn parse_metadata(
     upgrade_locations: &impl UpgradeStorage,
     public_key_bytes: &[u8],
     metadata: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
     const METADATA_LEN: usize = 0x1000;
+    const METADATA_SIGN_OFFSET: usize = 0x800;
     if metadata.len() != METADATA_LEN {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
-    let metadata_address = LittleEndian::read_u32(&metadata[148..][..4]);
+
+    let metadata_address = LittleEndian::read_u32(&metadata[METADATA_SIGN_OFFSET + 8..][..4]);
     if metadata_address as usize != upgrade_locations.partition_address() {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
+
     // The hash implementation handles this in chunks, so no memory issues.
     let partition_slice = upgrade_locations
         .read_partition(0, upgrade_locations.partition_length())
         .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
     let mut hasher = Sha256::new();
-    hasher.update(&metadata[128..METADATA_LEN]);
+    hasher.update(&metadata[METADATA_SIGN_OFFSET..]);
     hasher.update(partition_slice);
     let computed_hash = hasher.finalize();
     if &computed_hash != array_ref!(metadata, 0, 32) {
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
     }
+
     verify_signature(
         array_ref!(metadata, 32, 64),
         public_key_bytes,
@@ -3466,11 +3472,12 @@ mod test {
         let upgrade_locations = env.upgrade_storage().unwrap();
 
         const METADATA_LEN: usize = 0x1000;
+        const METADATA_SIGN_OFFSET: usize = 0x800;
         let mut metadata = vec![0xFF; METADATA_LEN];
-        LittleEndian::write_u32(&mut metadata[148..][..4], 0x60000);
+        LittleEndian::write_u32(&mut metadata[METADATA_SIGN_OFFSET + 8..][..4], 0x60000);
 
         let partition_length = upgrade_locations.partition_length();
-        let mut signed_over_data = metadata[128..].to_vec();
+        let mut signed_over_data = metadata[METADATA_SIGN_OFFSET..].to_vec();
         signed_over_data.extend(
             upgrade_locations
                 .read_partition(0, partition_length)
@@ -3498,12 +3505,12 @@ mod test {
         );
 
         // Any manipulation of data fails.
-        metadata[128] = 0x88;
+        metadata[METADATA_SIGN_OFFSET] = 0x88;
         assert_eq!(
             parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)
         );
-        metadata[128] = 0xFF;
+        metadata[METADATA_SIGN_OFFSET] = 0xFF;
         metadata[0] ^= 0x01;
         assert_eq!(
             parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
@@ -3572,14 +3579,15 @@ mod test {
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         const METADATA_LEN: usize = 0x1000;
+        const METADATA_SIGN_OFFSET: usize = 0x800;
         let mut metadata = vec![0xFF; METADATA_LEN];
-        LittleEndian::write_u32(&mut metadata[148..][..4], 0x60000);
+        LittleEndian::write_u32(&mut metadata[METADATA_SIGN_OFFSET + 8..][..4], 0x60000);
 
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
         let upgrade_locations = env.upgrade_storage().unwrap();
         let partition_length = upgrade_locations.partition_length();
-        let mut signed_over_data = metadata[128..].to_vec();
+        let mut signed_over_data = metadata[METADATA_SIGN_OFFSET..].to_vec();
         signed_over_data.extend(
             upgrade_locations
                 .read_partition(0, partition_length)

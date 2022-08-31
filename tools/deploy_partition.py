@@ -43,6 +43,7 @@ OPENSK_VID_PID = (0x1915, 0x521F)
 OPENSK_VENDOR_UPGRADE = 0x42
 OPENSK_VENDOR_UPGRADE_INFO = 0x43
 PAGE_SIZE = 0x1000
+METADATA_SIGN_OFFSET = 0x800
 KERNEL_SIZE = 0x20000
 APP_SIZE = 0x20000
 PARTITION_ADDRESS = {
@@ -72,24 +73,25 @@ def create_metadata(firmware_image: bytes, partition_address: int, version: int,
     partition_address: The address to be written as a metadata property.
 
   Returns:
-    A byte array consisting of
+    A byte array of page size, consisting of
     - 32 B hash,
     - 64 B signature,
-    - 32 B padding,
-    - 20 B version and
-    -  4 B partition address in little endian encoding.
+    at the beginning and
+    -  8 B version and
+    -  4 B partition address in little endian encoding
+    after METADATA_SIGN_OFFSET. All other bytes are 0xFF.
   """
   if version < 0 or version >= 2**63:
     fatal("The version must fit into an unsigned integer with 63 bit.\n"
           "Please pass it using --version")
-  version_bytes = bytes([0xFF] * 12) + struct.pack("<Q", version)
+  version_bytes = struct.pack("<Q", version)
   partition_start = struct.pack("<I", partition_address)
   # Prefix sizes that are a multiple of 64 suit our bootloader's SHA.
-  signed_metadata = pad_to(version_bytes + partition_start, PAGE_SIZE - 128)
+  signed_metadata = pad_to(version_bytes + partition_start, PAGE_SIZE - METADATA_SIGN_OFFSET)
   signed_data = signed_metadata + firmware_image
   checksum = hash_message(signed_data)
   signature = sign_firmware(signed_data, priv_key)
-  return pad_to(checksum + signature, 128) + signed_metadata
+  return pad_to(checksum + signature, METADATA_SIGN_OFFSET) + signed_metadata
 
 
 def check_info(partition_address: int, authenticator: Any):

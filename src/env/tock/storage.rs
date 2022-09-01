@@ -237,8 +237,10 @@ pub struct TockUpgradeStorage {
 }
 
 impl TockUpgradeStorage {
+    // Ideally, the kernel should tell us metadata and partitions directly.
+    // This code only works for one layout, refactor this into the storage driver to support more.
     const METADATA_ADDRESS: usize = 0x4000;
-    const PARTITION_ADDRESS_A: usize = 0x20000;
+    const _PARTITION_ADDRESS_A: usize = 0x20000;
     const PARTITION_ADDRESS_B: usize = 0x60000;
 
     /// Provides access to the other upgrade partition and metadata if available.
@@ -265,7 +267,6 @@ impl TockUpgradeStorage {
         if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
         }
-        let mut metadata_range = ModRange::new_empty();
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
             let storage_type = memop(memop_nr::STORAGE_TYPE, i)?;
             if !matches!(storage_type, storage_type::PARTITION) {
@@ -277,35 +278,12 @@ impl TockUpgradeStorage {
                 return Err(StorageError::CustomError);
             }
             let range = ModRange::new(storage_ptr, storage_len);
-            // First match: If we now know if A or B, write the metadata accordingly.
-            match range.start() {
-                Self::METADATA_ADDRESS => (),
-                Self::PARTITION_ADDRESS_A => {
-                    if metadata_range.is_empty() {
-                        return Err(StorageError::NotAligned);
-                    }
-                    locations.metadata = ModRange::new(metadata_range.start(), locations.page_size);
-                    locations.running_metadata = ModRange::new(
-                        metadata_range.start() + locations.page_size,
-                        locations.page_size,
-                    );
-                }
-                Self::PARTITION_ADDRESS_B => {
-                    if metadata_range.is_empty() {
-                        return Err(StorageError::NotAligned);
-                    }
-                    locations.running_metadata =
-                        ModRange::new(metadata_range.start(), locations.page_size);
-                    locations.metadata = ModRange::new(
-                        metadata_range.start() + locations.page_size,
-                        locations.page_size,
-                    );
-                }
-                _ => (),
-            }
             match range.start() {
                 Self::METADATA_ADDRESS => {
-                    metadata_range = range;
+                    // Will be swapped if we are on B.
+                    locations.metadata = ModRange::new(range.start(), locations.page_size);
+                    locations.running_metadata =
+                        ModRange::new(range.start() + locations.page_size, locations.page_size);
                 }
                 _ => {
                     locations.partition = locations
@@ -320,6 +298,9 @@ impl TockUpgradeStorage {
             || locations.running_metadata.is_empty()
         {
             return Err(StorageError::CustomError);
+        }
+        if locations.partition.start() == Self::PARTITION_ADDRESS_B {
+            core::mem::swap(&mut locations.metadata, &mut locations.running_metadata);
         }
         Ok(locations)
     }

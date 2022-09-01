@@ -181,6 +181,7 @@ def main(args):
   priv_key = load_priv_key(args.priv_key)
   metadata = create_metadata(firmware_image, partition_address, args.version,
                              priv_key)
+  partition = metadata + firmware_image
 
   if args.use_vendor_hid:
     patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
@@ -200,7 +201,7 @@ def main(args):
 
     running_version = authenticator.get_info().firmware_version
     if args.version < running_version:
-      fatal(f"Can not write version {args.version} when version"
+      fatal(f"Can not write version {args.version} when version "
             f"{running_version} is running.")
     else:
       info(f"Running version: {running_version}")
@@ -208,8 +209,8 @@ def main(args):
     try:
       check_info(partition_address, authenticator)
       offset = 0
-      for offset in range(0, len(firmware_image), PAGE_SIZE):
-        page = firmware_image[offset:][:PAGE_SIZE]
+      for offset in range(0, len(partition), PAGE_SIZE):
+        page = partition[offset:][:PAGE_SIZE]
         info(f"Writing at offset 0x{offset:08X}...")
         cbor_data = {1: offset, 2: page, 3: hash_message(page)}
         authenticator.send_cbor(
@@ -217,22 +218,14 @@ def main(args):
             data=cbor_data,
         )
 
-      info("Writing metadata...")
-      # TODO Write the correct address when the metadata is transparent.
-      cbor_data = {2: metadata, 3: hash_message(metadata)}
-      authenticator.send_cbor(
-          OPENSK_VENDOR_UPGRADE,
-          data=cbor_data,
-      )
-
     except ctap.CtapError as ex:
       message = "Failed to upgrade OpenSK"
       if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
         error(f"{message} (unsupported command).")
       elif ex.code.value == ctap.CtapError.ERR.INVALID_PARAMETER:
-        error(f"{message} (invalid parameter, maybe a wrong byte array size?).")
+        error(f"{message} (invalid parameter).")
       elif ex.code.value == ctap.CtapError.ERR.INTEGRITY_FAILURE:
-        error(f"{message} (metadata parsing failed).")
+        error(f"{message} (data hash does not match slice).")
       elif ex.code.value == 0xF2:  # VENDOR_INTERNAL_ERROR
         error(f"{message} (internal conditions not met).")
       elif ex.code.value == 0xF3:  # VENDOR_HARDWARE_FAILURE

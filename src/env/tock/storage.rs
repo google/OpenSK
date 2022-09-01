@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange};
+use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange, Partition};
 use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
@@ -231,16 +231,17 @@ impl Storage for TockStorage {
 
 pub struct TockUpgradeStorage {
     page_size: usize,
-    partition: ModRange,
+    partition: Partition,
     metadata: ModRange,
     running_metadata: ModRange,
+    identifier: u32,
 }
 
 impl TockUpgradeStorage {
     // Ideally, the kernel should tell us metadata and partitions directly.
     // This code only works for one layout, refactor this into the storage driver to support more.
     const METADATA_ADDRESS: usize = 0x4000;
-    const _PARTITION_ADDRESS_A: usize = 0x20000;
+    const PARTITION_ADDRESS_A: usize = 0x20000;
     const PARTITION_ADDRESS_B: usize = 0x60000;
 
     /// Provides access to the other upgrade partition and metadata if available.
@@ -260,13 +261,15 @@ impl TockUpgradeStorage {
     pub fn new() -> StorageResult<TockUpgradeStorage> {
         let mut locations = TockUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
-            partition: ModRange::new_empty(),
+            partition: Partition::new(),
             metadata: ModRange::new_empty(),
             running_metadata: ModRange::new_empty(),
+            identifier: Self::PARTITION_ADDRESS_A as u32,
         };
         if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
         }
+        let mut firmware_range = ModRange::new_empty();
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
             let storage_type = memop(memop_nr::STORAGE_TYPE, i)?;
             if !matches!(storage_type, storage_type::PARTITION) {
@@ -286,27 +289,65 @@ impl TockUpgradeStorage {
                         ModRange::new(range.start() + locations.page_size, locations.page_size);
                 }
                 _ => {
-                    locations.partition = locations
-                        .partition
-                        .append(range)
-                        .ok_or(StorageError::NotAligned)?
+                    if !firmware_range.append(&range) {
+                        return Err(StorageError::NotAligned);
+                    }
                 }
             }
         }
-        if locations.partition.is_empty()
+        if firmware_range.is_empty()
             || locations.metadata.is_empty()
             || locations.running_metadata.is_empty()
         {
             return Err(StorageError::CustomError);
         }
-        if locations.partition.start() == Self::PARTITION_ADDRESS_B {
+        if firmware_range.start() == Self::PARTITION_ADDRESS_B {
             core::mem::swap(&mut locations.metadata, &mut locations.running_metadata);
+            locations.identifier = Self::PARTITION_ADDRESS_B as u32;
+        }
+        if !locations.partition.append(locations.metadata.clone()) {
+            return Err(StorageError::NotAligned);
+        }
+        if !locations.partition.append(firmware_range) {
+            return Err(StorageError::NotAligned);
         }
         Ok(locations)
     }
 
     fn is_page_aligned(&self, x: usize) -> bool {
         is_aligned(self.page_size, x)
+    }
+
+    /// Returns whether the metadata is contained in this range or not.
+    ///
+    /// Assumes that metadata is written in one call per range. If the metadata is only partially
+    /// contained, returns an error.
+    fn contains_metadata(&self, checked_range: &ModRange) -> StorageResult<bool> {
+        if checked_range.intersects_range(&self.metadata) {
+            if checked_range.contains_range(&self.metadata) {
+                Ok(true)
+            } else {
+                Err(StorageError::NotAligned)
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Checks if the metadata's hash matches the partition's content.
+    fn check_partition_hash(&self, metadata: &[u8]) -> StorageResult<()> {
+        let start_address = self.metadata.start() + METADATA_SIGN_OFFSET;
+        let mut hasher = Sha256::new();
+        for range in self.partition.ranges_from(start_address) {
+            let partition_slice = unsafe { read_slice(range.start(), range.length()) };
+            // The hash implementation handles this in chunks, so no memory issues.
+            hasher.update(partition_slice);
+        }
+        let computed_hash = hasher.finalize();
+        if &computed_hash != parse_metadata_hash(metadata) {
+            return Err(StorageError::CustomError);
+        }
+        Ok(())
     }
 }
 
@@ -315,11 +356,7 @@ impl UpgradeStorage for TockUpgradeStorage {
         if length == 0 {
             return Err(StorageError::OutOfBounds);
         }
-        let address = self.partition.start() + offset;
-        if self
-            .partition
-            .contains_range(&ModRange::new(address, length))
-        {
+        if let Some(address) = self.partition.find_address(offset, length) {
             Ok(unsafe { read_slice(address, length) })
         } else {
             Err(StorageError::OutOfBounds)
@@ -330,42 +367,37 @@ impl UpgradeStorage for TockUpgradeStorage {
         if data.is_empty() {
             return Err(StorageError::OutOfBounds);
         }
-        let address = self.partition.start() + offset;
-        let write_range = ModRange::new(address, data.len());
-        if self.partition.contains_range(&write_range) {
+        if let Some(address) = self.partition.find_address(offset, data.len()) {
+            let write_range = ModRange::new(address, data.len());
+            if self.contains_metadata(&write_range)? {
+                let new_metadata =
+                    &data[self.metadata.start() - address..][..self.metadata.length()];
+                check_metadata(self, UPGRADE_PUBLIC_KEY, new_metadata)?;
+            }
+
             // Erases all pages that have their first byte in the write range.
             // Since we expect calls in order, we don't want to erase half-written pages.
             for address in write_range.aligned_iter(self.page_size) {
                 erase_page(address, self.page_size)?;
             }
-            write_slice(address, data)
+            write_slice(address, data)?;
+            // Case: Last slice is written.
+            if data.len() == self.partition_length() - offset {
+                let metadata = unsafe { read_slice(self.metadata.start(), self.metadata.length()) };
+                self.check_partition_hash(&metadata)?;
+            }
+            Ok(())
         } else {
             Err(StorageError::OutOfBounds)
         }
     }
 
-    fn partition_address(&self) -> usize {
-        self.partition.start()
+    fn partition_identifier(&self) -> u32 {
+        self.identifier
     }
 
     fn partition_length(&self) -> usize {
         self.partition.length()
-    }
-
-    fn read_metadata(&self) -> StorageResult<&[u8]> {
-        Ok(unsafe { read_slice(self.metadata.start(), self.metadata.length()) })
-    }
-
-    fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
-        if data.len() != self.metadata.length() {
-            return Err(StorageError::CustomError);
-        }
-        // Compares the hash inside the metadata to the actual hash.
-        parse_metadata(self, UPGRADE_PUBLIC_KEY, &data)?;
-        for address in self.metadata.aligned_iter(self.page_size) {
-            erase_page(address, self.page_size)?;
-        }
-        write_slice(self.metadata.start(), data)
     }
 
     fn running_firmware_version(&self) -> u64 {
@@ -389,8 +421,9 @@ impl UpgradeStorage for TockUpgradeStorage {
 /// -  4 B partition address in little endian encoding
 /// written at METADATA_SIGN_OFFSET.
 ///
-/// Checks hash and signature correctness, and whether the partition offset matches.
-fn parse_metadata(
+/// Checks signature correctness against the hash, and whether the partition offset matches.
+/// Whether the hash matches the partition content is not tested here!
+fn check_metadata(
     upgrade_locations: &impl UpgradeStorage,
     public_key_bytes: &[u8],
     metadata: &[u8],
@@ -406,27 +439,21 @@ fn parse_metadata(
     }
 
     let metadata_address = LittleEndian::read_u32(&metadata[METADATA_SIGN_OFFSET + 8..][..4]);
-    if metadata_address as usize != upgrade_locations.partition_address() {
-        return Err(StorageError::CustomError);
-    }
-
-    // The hash implementation handles this in chunks, so no memory issues.
-    let partition_slice =
-        upgrade_locations.read_partition(0, upgrade_locations.partition_length())?;
-    let mut hasher = Sha256::new();
-    hasher.update(&metadata[METADATA_SIGN_OFFSET..]);
-    hasher.update(partition_slice);
-    let computed_hash = hasher.finalize();
-    if &computed_hash != array_ref!(metadata, 0, 32) {
+    if metadata_address != upgrade_locations.partition_identifier() {
         return Err(StorageError::CustomError);
     }
 
     verify_signature(
         array_ref!(metadata, 32, 64),
         public_key_bytes,
-        &computed_hash,
+        parse_metadata_hash(metadata),
     )?;
     Ok(())
+}
+
+/// Parses the metadata, returns the hash.
+fn parse_metadata_hash(data: &[u8]) -> &[u8; 32] {
+    array_ref!(data, 0, 32)
 }
 
 /// Parses the metadata, returns the firmware version.
@@ -459,7 +486,7 @@ mod test {
     use crate::env::Env;
 
     #[test]
-    fn test_parse_metadata() {
+    fn test_check_metadata() {
         let mut env = TestEnv::new();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let upgrade_locations = env.upgrade_storage().unwrap();
@@ -489,42 +516,37 @@ mod test {
         public_key.to_bytes_uncompressed(&mut public_key_bytes);
 
         assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Ok(())
         );
 
         // Manipulating the partition address fails.
-        metadata[METADATA_SIGN_OFFSET] = 0x88;
+        metadata[METADATA_SIGN_OFFSET + 8] = 0x88;
         assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Err(StorageError::CustomError)
         );
-        metadata[METADATA_SIGN_OFFSET] = 0x00;
-        // Any manipulation of signed data fails.
-        metadata[METADATA_LEN - 1] = 0x88;
+        metadata[METADATA_SIGN_OFFSET + 8] = 0x00;
+        // Wrong metadata length fails.
         assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata(
+                upgrade_locations,
+                &public_key_bytes,
+                &metadata[..METADATA_LEN - 1]
+            ),
             Err(StorageError::CustomError)
         );
-        metadata[METADATA_LEN - 1] = 0xFF;
         // Manipulating the hash fails.
         metadata[0] ^= 0x01;
         assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Err(StorageError::CustomError)
         );
         metadata[0] ^= 0x01;
         // Manipulating the signature fails.
         metadata[32] ^= 0x01;
         assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
-            Err(StorageError::CustomError)
-        );
-        metadata[32] ^= 0x01;
-        // Manipulating the partition data fails.
-        upgrade_locations.write_partition(0, &[0x88; 1]).unwrap();
-        assert_eq!(
-            parse_metadata(upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata(upgrade_locations, &public_key_bytes, &metadata),
             Err(StorageError::CustomError)
         );
     }

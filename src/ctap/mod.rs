@@ -1398,30 +1398,16 @@ impl CtapState {
         env: &mut impl Env,
         params: AuthenticatorVendorUpgradeParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        let AuthenticatorVendorUpgradeParameters {
-            address,
-            data,
-            hash,
-        } = params;
+        let AuthenticatorVendorUpgradeParameters { offset, data, hash } = params;
         let upgrade_locations = env
             .upgrade_storage()
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
-        let written_slice = if let Some(address) = address {
-            upgrade_locations
-                .write_partition(address, &data)
-                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-            upgrade_locations
-                .read_partition(address, data.len())
-                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?
-        } else {
-            // Write the metadata page after verifying it.
-            upgrade_locations
-                .write_metadata(&data)
-                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE)?;
-            &upgrade_locations
-                .read_metadata()
-                .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?[..data.len()]
-        };
+        upgrade_locations
+            .write_partition(offset, &data)
+            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let written_slice = upgrade_locations
+            .read_partition(offset, data.len())
+            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
         let written_hash = Sha256::hash(written_slice);
         if hash != written_hash {
             return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
@@ -1438,7 +1424,7 @@ impl CtapState {
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
         Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
             AuthenticatorVendorUpgradeInfoResponse {
-                info: upgrade_locations.partition_address() as u32,
+                info: upgrade_locations.partition_identifier(),
             },
         ))
     }
@@ -1493,7 +1479,6 @@ mod test {
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::test_helpers;
-    use byteorder::LittleEndian;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -3404,50 +3389,43 @@ mod test {
         // The test metadata storage has size 0x1000.
         // The test identifier matches partition B.
         let mut env = TestEnv::new();
-        let private_key = ecdsa::SecKey::gensk(env.rng());
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        const METADATA_LEN: usize = 0x1000;
-        const METADATA_SIGN_OFFSET: usize = 0x800;
-        let mut metadata = vec![0xFF; METADATA_LEN];
-        LittleEndian::write_u32(&mut metadata[METADATA_SIGN_OFFSET + 8..][..4], 0x60000);
 
+        const METADATA_LEN: usize = 0x1000;
+        let metadata = vec![0xFF; METADATA_LEN];
+        let metadata_hash = Sha256::hash(&metadata).to_vec();
         let data = vec![0xFF; 0x1000];
         let hash = Sha256::hash(&data).to_vec();
-        let upgrade_locations = env.upgrade_storage().unwrap();
-        let partition_length = upgrade_locations.partition_length();
-        let mut signed_over_data = metadata[METADATA_SIGN_OFFSET..].to_vec();
-        signed_over_data.extend(
-            upgrade_locations
-                .read_partition(0, partition_length)
-                .unwrap(),
-        );
-        let signed_hash = Sha256::hash(&signed_over_data);
-
-        metadata[..32].copy_from_slice(&signed_hash);
-        let signature = private_key.sign_rfc6979::<Sha256>(&signed_over_data);
-        let mut signature_bytes = [0; ecdsa::Signature::BYTES_LENGTH];
-        signature.to_bytes(&mut signature_bytes);
-        metadata[32..96].copy_from_slice(&signature_bytes);
-        let metadata_hash = Sha256::hash(&metadata).to_vec();
 
         // Write to partition.
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: Some(0x20000),
+                offset: 0x20000,
                 data: data.clone(),
                 hash: hash.clone(),
             },
         );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
 
-        // TestEnv doesn't check the metadata, test parsing that in your Env.
+        // TestEnv doesn't check the metadata, test its parser in your Env.
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: None,
+                offset: 0,
                 data: metadata.clone(),
                 hash: metadata_hash.clone(),
+            },
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
+
+        // TestEnv doesn't check the metadata, test its parser in your Env.
+        let response = ctap_state.process_vendor_upgrade(
+            &mut env,
+            AuthenticatorVendorUpgradeParameters {
+                offset: METADATA_LEN,
+                data: data.clone(),
+                hash: hash.clone(),
             },
         );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
@@ -3456,18 +3434,18 @@ mod test {
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: None,
+                offset: 0,
                 data: metadata[..METADATA_LEN - 1].to_vec(),
                 hash: metadata_hash,
             },
         );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
 
         // Write outside of the partition.
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: Some(0x40000),
+                offset: 0x41000,
                 data: data.clone(),
                 hash,
             },
@@ -3478,7 +3456,7 @@ mod test {
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: Some(0x20000),
+                offset: 0x20000,
                 data,
                 hash: [0xEE; 32].to_vec(),
             },
@@ -3497,7 +3475,7 @@ mod test {
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {
-                address: Some(0),
+                offset: 0,
                 data,
                 hash,
             },
@@ -3509,14 +3487,14 @@ mod test {
     fn test_vendor_upgrade_info() {
         let mut env = TestEnv::new();
         let ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        let partition_address = env.upgrade_storage().unwrap().partition_address();
+        let partition_identifier = env.upgrade_storage().unwrap().partition_identifier();
 
         let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info(&mut env);
         assert_eq!(
             upgrade_info_reponse,
             Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
                 AuthenticatorVendorUpgradeInfoResponse {
-                    info: partition_address as u32,
+                    info: partition_identifier,
                 }
             ))
         );

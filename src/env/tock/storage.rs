@@ -101,8 +101,8 @@ fn block_command(driver: usize, cmd: usize, arg1: usize, arg2: usize) -> Storage
     }
 }
 
-fn read_slice(address: usize, length: usize) -> &'static [u8] {
-    unsafe { core::slice::from_raw_parts(address as *const u8, length) }
+unsafe fn read_slice(address: usize, length: usize) -> &'static [u8] {
+    core::slice::from_raw_parts(address as *const u8, length)
 }
 
 fn write_slice(ptr: usize, value: &[u8]) -> StorageResult<()> {
@@ -237,9 +237,8 @@ pub struct TockUpgradeStorage {
 }
 
 impl TockUpgradeStorage {
-    const METADATA_ADDRESS_A: usize = 0x4000;
-    const METADATA_ADDRESS_B: usize = 0x5000;
-    const _PARTITION_ADDRESS_A: usize = 0x20000;
+    const METADATA_ADDRESS: usize = 0x4000;
+    const PARTITION_ADDRESS_A: usize = 0x20000;
     const PARTITION_ADDRESS_B: usize = 0x60000;
 
     /// Provides access to the other upgrade partition and metadata if available.
@@ -266,6 +265,7 @@ impl TockUpgradeStorage {
         if !locations.page_size.is_power_of_two() {
             return Err(StorageError::CustomError);
         }
+        let mut metadata_range = ModRange::new_empty();
         for i in 0..memop(memop_nr::STORAGE_CNT, 0)? {
             let storage_type = memop(memop_nr::STORAGE_TYPE, i)?;
             if !matches!(storage_type, storage_type::PARTITION) {
@@ -277,19 +277,35 @@ impl TockUpgradeStorage {
                 return Err(StorageError::CustomError);
             }
             let range = ModRange::new(storage_ptr, storage_len);
+            // First match: If we now know if A or B, write the metadata accordingly.
             match range.start() {
-                Self::METADATA_ADDRESS_A => {
-                    locations.metadata = range;
-                }
-                Self::METADATA_ADDRESS_B => {
-                    locations.running_metadata = range;
+                Self::METADATA_ADDRESS => (),
+                Self::PARTITION_ADDRESS_A => {
+                    if metadata_range.is_empty() {
+                        return Err(StorageError::NotAligned);
+                    }
+                    locations.metadata = ModRange::new(metadata_range.start(), locations.page_size);
+                    locations.running_metadata = ModRange::new(
+                        metadata_range.start() + locations.page_size,
+                        locations.page_size,
+                    );
                 }
                 Self::PARTITION_ADDRESS_B => {
-                    core::mem::swap(&mut locations.metadata, &mut locations.running_metadata);
-                    locations.partition = locations
-                        .partition
-                        .append(range)
-                        .ok_or(StorageError::NotAligned)?
+                    if metadata_range.is_empty() {
+                        return Err(StorageError::NotAligned);
+                    }
+                    locations.running_metadata =
+                        ModRange::new(metadata_range.start(), locations.page_size);
+                    locations.metadata = ModRange::new(
+                        metadata_range.start() + locations.page_size,
+                        locations.page_size,
+                    );
+                }
+                _ => (),
+            }
+            match range.start() {
+                Self::METADATA_ADDRESS => {
+                    metadata_range = range;
                 }
                 _ => {
                     locations.partition = locations
@@ -323,7 +339,7 @@ impl UpgradeStorage for TockUpgradeStorage {
             .partition
             .contains_range(&ModRange::new(address, length))
         {
-            Ok(read_slice(address, length))
+            Ok(unsafe { read_slice(address, length) })
         } else {
             Err(StorageError::OutOfBounds)
         }
@@ -356,7 +372,7 @@ impl UpgradeStorage for TockUpgradeStorage {
     }
 
     fn read_metadata(&self) -> StorageResult<&[u8]> {
-        Ok(read_slice(self.metadata.start(), self.metadata.length()))
+        Ok(unsafe { read_slice(self.metadata.start(), self.metadata.length()) })
     }
 
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()> {
@@ -372,10 +388,12 @@ impl UpgradeStorage for TockUpgradeStorage {
     }
 
     fn running_firmware_version(&self) -> u64 {
-        let running_metadata = read_slice(
-            self.running_metadata.start(),
-            self.running_metadata.length(),
-        );
+        let running_metadata = unsafe {
+            read_slice(
+                self.running_metadata.start(),
+                self.running_metadata.length(),
+            )
+        };
         parse_metadata_version(running_metadata)
     }
 }

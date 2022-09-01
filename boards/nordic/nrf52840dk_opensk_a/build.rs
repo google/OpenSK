@@ -25,8 +25,8 @@ static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 5] = [
     },
     // Partitions can also be split to maximize MPU happiness.
     kernel::StorageLocation {
-        address: 0x5000,
-        size: 0x1000,
+        address: 0x4000,
+        size: 0x2000,
         storage_type: kernel::StorageType::Partition,
     },
     kernel::StorageLocation {

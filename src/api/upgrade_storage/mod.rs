@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2021-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,4 +53,7 @@ pub trait UpgradeStorage {
     ///
     /// Returns [`StorageError::OutOfBounds`] if the data is too long to fit the metadata storage.
     fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()>;
+
+    /// Returns the currently running firmware version.
+    fn running_firmware_version(&self) -> u64;
 }

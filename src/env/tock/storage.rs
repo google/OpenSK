@@ -367,29 +367,28 @@ impl UpgradeStorage for TockUpgradeStorage {
         if data.is_empty() {
             return Err(StorageError::OutOfBounds);
         }
-        if let Some(address) = self.partition.find_address(offset, data.len()) {
-            let write_range = ModRange::new(address, data.len());
-            if self.contains_metadata(&write_range)? {
-                let new_metadata =
-                    &data[self.metadata.start() - address..][..self.metadata.length()];
-                check_metadata(self, UPGRADE_PUBLIC_KEY, new_metadata)?;
-            }
-
-            // Erases all pages that have their first byte in the write range.
-            // Since we expect calls in order, we don't want to erase half-written pages.
-            for address in write_range.aligned_iter(self.page_size) {
-                erase_page(address, self.page_size)?;
-            }
-            write_slice(address, data)?;
-            // Case: Last slice is written.
-            if data.len() == self.partition_length() - offset {
-                let metadata = unsafe { read_slice(self.metadata.start(), self.metadata.length()) };
-                self.check_partition_hash(&metadata)?;
-            }
-            Ok(())
-        } else {
-            Err(StorageError::OutOfBounds)
+        let address = self
+            .partition
+            .find_address(offset, data.len())
+            .ok_or(StorageError::OutOfBounds)?;
+        let write_range = ModRange::new(address, data.len());
+        if self.contains_metadata(&write_range)? {
+            let new_metadata = &data[self.metadata.start() - address..][..self.metadata.length()];
+            check_metadata(self, UPGRADE_PUBLIC_KEY, new_metadata)?;
         }
+
+        // Erases all pages that have their first byte in the write range.
+        // Since we expect calls in order, we don't want to erase half-written pages.
+        for address in write_range.aligned_iter(self.page_size) {
+            erase_page(address, self.page_size)?;
+        }
+        write_slice(address, data)?;
+        // Case: Last slice is written.
+        if data.len() == self.partition_length() - offset {
+            let metadata = unsafe { read_slice(self.metadata.start(), self.metadata.length()) };
+            self.check_partition_hash(&metadata)?;
+        }
+        Ok(())
     }
 
     fn partition_identifier(&self) -> u32 {

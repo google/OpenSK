@@ -204,16 +204,13 @@ impl Partition {
     pub fn ranges_from(&self, start_address: usize) -> Vec<ModRange> {
         let mut result = Vec::new();
         for range in &self.ranges {
-            if start_address >= range.start() && start_address - range.start() >= range.length() {
-                continue;
-            }
-            if start_address > range.start() {
-                if start_address - range.start() < range.length() {
-                    let length = range.length() - (start_address - range.start());
-                    result.push(ModRange::new(start_address, length));
+            match start_address.checked_sub(range.start()) {
+                None | Some(0) => result.push(range.clone()),
+                Some(offset) => {
+                    if range.length() > offset {
+                        result.push(ModRange::new(start_address, range.length() - offset));
+                    }
                 }
-            } else {
-                result.push(range.clone());
             }
         }
         result

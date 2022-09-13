@@ -20,7 +20,9 @@ pub(crate) mod helper;
 pub trait UpgradeStorage {
     /// Reads a slice of the partition, if within bounds.
     ///
-    /// The offset is relative to the start of the partition.
+    /// The offset is relative to the start of the partition, excluding holes. The partition is
+    /// presented as one connected component. Therefore, the offset does not easily translate
+    /// to physical memory address address of the slice.
     ///
     /// # Errors
     ///
@@ -29,30 +31,22 @@ pub trait UpgradeStorage {
 
     /// Writes the given data to the given offset address, if within bounds of the partition.
     ///
-    /// The offset is relative to the start of the partition.
+    /// The offset is relative to the start of the partition, excluding holes.
+    /// See `read_partition`.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
+    /// - Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
+    /// - Returns [`StorageError::CustomError`] if any Metadata check fails.
     fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()>;
 
-    /// Returns the address of the partition.
-    fn partition_address(&self) -> usize;
+    /// Returns an identifier for the partition.
+    ///
+    /// Use this to determine whether you are writing to A or B.
+    fn partition_identifier(&self) -> u32;
 
     /// Returns the length of the partition.
     fn partition_length(&self) -> usize;
-
-    /// Reads the metadata location.
-    fn read_metadata(&self) -> StorageResult<&[u8]>;
-
-    /// Writes the given data into the metadata location.
-    ///
-    /// The passed in data is appended with 0xFF bytes if shorter than the metadata storage.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StorageError::OutOfBounds`] if the data is too long to fit the metadata storage.
-    fn write_metadata(&mut self, data: &[u8]) -> StorageResult<()>;
 
     /// Returns the currently running firmware version.
     fn running_firmware_version(&self) -> u64;

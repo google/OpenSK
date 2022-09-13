@@ -15,6 +15,7 @@
 // For compiling with std outside of tests.
 #![cfg_attr(feature = "std", allow(dead_code))]
 
+use alloc::vec::Vec;
 use core::iter::Iterator;
 use persistent_store::{StorageError, StorageResult};
 
@@ -55,6 +56,7 @@ pub fn is_aligned(block_size: usize, address: usize) -> bool {
 ///
 /// The range is treated as the interval `[start, start + length)`.
 /// All objects with length of 0, regardless of the start value, are considered empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModRange {
     start: usize,
     length: usize,
@@ -86,25 +88,45 @@ impl ModRange {
         self.length == 0
     }
 
-    /// Returns the disjoint union with the other range, if is consecutive.
+    /// Returns the disjoint union with the other range, if consecutive.
     ///
     /// Appending empty ranges is not possible.
     /// Appending to the empty range returns the other range.
-    pub fn append(&self, other: ModRange) -> Option<ModRange> {
+    ///
+    /// Returns true if successful.
+    pub fn append(&mut self, other: &ModRange) -> bool {
         if self.is_empty() {
-            return Some(other);
+            self.start = other.start;
+            self.length = other.length;
+            return true;
         }
         if other.is_empty() {
-            return None;
+            return false;
         }
         if self.start >= other.start {
-            return None;
+            return false;
         }
         if self.length != other.start - self.start {
-            return None;
+            return false;
         }
-        let new_length = self.length.checked_add(other.length);
-        new_length.map(|l| ModRange::new(self.start, l))
+        if let Some(new_length) = self.length.checked_add(other.length) {
+            self.length = new_length;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Helper function to check whether a range starts within another.
+    fn starts_inside(&self, range: &ModRange) -> bool {
+        !range.is_empty() && self.start >= range.start && self.start - range.start < range.length
+    }
+
+    /// Returns whether the given range has intersects.
+    ///
+    /// Mathematically, we calculate whether: `self ∩ range ≠ ∅`.
+    pub fn intersects_range(&self, range: &ModRange) -> bool {
+        self.starts_inside(range) || range.starts_inside(self)
     }
 
     /// Returns whether the given range is fully contained.
@@ -125,6 +147,73 @@ impl ModRange {
             .skip((modulus - self.start % modulus) % modulus)
             // Only return aligned elements.
             .step_by(modulus)
+    }
+}
+
+pub struct Partition {
+    ranges: Vec<ModRange>,
+}
+
+impl Partition {
+    pub fn new() -> Partition {
+        Partition { ranges: Vec::new() }
+    }
+
+    /// Total length of all ranges.
+    pub fn length(&self) -> usize {
+        self.ranges.iter().map(|r| r.length()).sum()
+    }
+
+    /// Appends the given range.
+    ///
+    /// Ranges should be appending with ascending start addresses.
+    pub fn append(&mut self, range: ModRange) -> bool {
+        if let Some(last_range) = self.ranges.last_mut() {
+            if range.start() <= last_range.start()
+                || range.start() - last_range.start() < last_range.length()
+            {
+                return false;
+            }
+            if !last_range.append(&range) {
+                self.ranges.push(range);
+            }
+        } else {
+            self.ranges.push(range);
+        }
+        true
+    }
+
+    /// Returns the start address that corresponds to the given offset.
+    ///
+    /// If the offset bigger than the accumulated length or the requested slice doesn't fit a
+    /// connected component, return `None`.
+    pub fn find_address(&self, mut offset: usize, length: usize) -> Option<usize> {
+        for range in &self.ranges {
+            if offset < range.length() {
+                return if range.length() - offset >= length {
+                    Some(range.start() + offset)
+                } else {
+                    None
+                };
+            }
+            offset -= range.length()
+        }
+        None
+    }
+
+    pub fn ranges_from(&self, start_address: usize) -> Vec<ModRange> {
+        let mut result = Vec::new();
+        for range in &self.ranges {
+            match start_address.checked_sub(range.start()) {
+                None | Some(0) => result.push(range.clone()),
+                Some(offset) => {
+                    if range.length() > offset {
+                        result.push(ModRange::new(start_address, range.length() - offset));
+                    }
+                }
+            }
+        }
+        result
     }
 }
 
@@ -186,18 +275,17 @@ mod tests {
 
     #[test]
     fn mod_range_append() {
-        let range = ModRange::new(200, 100);
-        let new_range = range.append(ModRange::new(300, 400)).unwrap();
-        assert!(new_range.start() == 200);
-        assert!(new_range.length() == 500);
-        assert!(range.append(ModRange::new(299, 400)).is_none());
-        assert!(range.append(ModRange::new(301, 400)).is_none());
-        assert!(range.append(ModRange::new(200, 400)).is_none());
-        let empty_append = ModRange::new_empty()
-            .append(ModRange::new(200, 100))
-            .unwrap();
-        assert!(empty_append.start() == 200);
-        assert!(empty_append.length() == 100);
+        let mut range = ModRange::new(200, 100);
+        assert!(range.append(&ModRange::new(300, 400)));
+        assert!(range.start() == 200);
+        assert!(range.length() == 500);
+        assert!(!range.append(&ModRange::new(499, 400)));
+        assert!(!range.append(&ModRange::new(501, 400)));
+        assert!(!range.append(&ModRange::new(300, 400)));
+        let mut range = ModRange::new_empty();
+        assert!(range.append(&ModRange::new(200, 100)));
+        assert!(range.start() == 200);
+        assert!(range.length() == 100);
     }
 
     #[test]
@@ -217,6 +305,20 @@ mod tests {
     }
 
     #[test]
+    fn mod_range_intersects_range() {
+        let range = ModRange::new(200, 100);
+        assert!(range.intersects_range(&ModRange::new(200, 1)));
+        assert!(range.intersects_range(&ModRange::new(299, 1)));
+        assert!(!range.intersects_range(&ModRange::new(199, 1)));
+        assert!(!range.intersects_range(&ModRange::new(300, 1)));
+        assert!(!ModRange::new_empty().intersects_range(&ModRange::new_empty()));
+        assert!(!ModRange::new_empty().intersects_range(&ModRange::new(200, 100)));
+        assert!(!ModRange::new(200, 100).intersects_range(&ModRange::new_empty()));
+        assert!(ModRange::new(usize::MAX, 1).intersects_range(&ModRange::new(usize::MAX, 1)));
+        assert!(ModRange::new(usize::MAX, 2).intersects_range(&ModRange::new(usize::MAX, 2)));
+    }
+
+    #[test]
     fn mod_range_aligned_iter() {
         let mut iter = ModRange::new(200, 100).aligned_iter(100);
         assert_eq!(iter.next(), Some(200));
@@ -233,5 +335,50 @@ mod tests {
         let mut iter = ModRange::new(usize::MAX - 16, 20).aligned_iter(16);
         assert_eq!(iter.next(), Some(0xffff_ffff_ffff_fff0));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn partition_append() {
+        let mut partition = Partition::new();
+        partition.append(ModRange::new(0x4000, 0x1000));
+        partition.append(ModRange::new(0x20000, 0x20000));
+        partition.append(ModRange::new(0x40000, 0x20000));
+        assert_eq!(partition.find_address(0, 1), Some(0x4000));
+        assert_eq!(partition.length(), 0x41000);
+    }
+
+    #[test]
+    fn partition_find_address() {
+        let mut partition = Partition::new();
+        partition.append(ModRange::new(0x4000, 0x1000));
+        partition.append(ModRange::new(0x20000, 0x20000));
+        partition.append(ModRange::new(0x40000, 0x20000));
+        assert_eq!(partition.find_address(0, 0x1000), Some(0x4000));
+        assert_eq!(partition.find_address(0x1000, 0x1000), Some(0x20000));
+        assert_eq!(partition.find_address(0x20000, 0x1000), Some(0x3F000));
+        assert_eq!(partition.find_address(0x21000, 0x1000), Some(0x40000));
+        assert_eq!(partition.find_address(0x40000, 0x1000), Some(0x5F000));
+        assert_eq!(partition.find_address(0x41000, 0x1000), None);
+        assert_eq!(partition.find_address(0x40000, 0x2000), None);
+    }
+
+    #[test]
+    fn partition_ranges_from() {
+        let mut partition = Partition::new();
+        partition.append(ModRange::new(0x4000, 0x1000));
+        partition.append(ModRange::new(0x20000, 0x20000));
+        partition.append(ModRange::new(0x40000, 0x20000));
+        let all_ranges = partition.ranges_from(0);
+        let from_start_ranges = partition.ranges_from(0x4000);
+        assert_eq!(&all_ranges, &from_start_ranges);
+        assert_eq!(all_ranges.len(), 2);
+        assert_eq!(all_ranges[0], ModRange::new(0x4000, 0x1000));
+        assert_eq!(all_ranges[1], ModRange::new(0x20000, 0x40000));
+        let second_range = partition.ranges_from(0x20000);
+        let same_second_range = partition.ranges_from(0x1F000);
+        assert_eq!(&second_range, &same_second_range);
+        assert_eq!(&second_range, &all_ranges[1..]);
+        let partial_range = partition.ranges_from(0x30000);
+        assert_eq!(partial_range[0], ModRange::new(0x30000, 0x30000));
     }
 }

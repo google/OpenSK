@@ -25,6 +25,7 @@ regex = { version = "1", optional = true }
 # Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
 # whole block once CTAP is a library.
 bumpalo = "=3.8.0" # transitive dependency of ring
+once_cell = { version = "=1.14", optional = true } # transitive dependency of ring
 
 [features]
 std = ["hex", "ring", "rng256/std", "untrusted", "serde", "serde_json", "regex"]

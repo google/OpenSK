@@ -394,6 +394,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             pin_uv_auth_protocol,
@@ -480,6 +481,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -578,6 +580,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -663,6 +666,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -769,6 +773,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -843,6 +848,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,

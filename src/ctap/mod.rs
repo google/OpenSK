@@ -778,8 +778,11 @@ impl CtapState {
             enterprise_attestation,
         } = make_credential_params;
 
-        // TODO: Get the slot id from active token state when multi-PIN is enabled.
-        let slot_id = Some(0);
+        let slot_id = if storage::has_multi_pin(env)? {
+            self.client_pin.get_slot_id_in_use()
+        } else {
+            Some(0)
+        };
 
         self.pin_uv_auth_precheck(
             env,
@@ -1175,8 +1178,11 @@ impl CtapState {
             pin_uv_auth_protocol,
         } = get_assertion_params;
 
-        // TODO: Get the slot id from active token state when multi-PIN is enabled.
-        let slot_id = Some(0);
+        let slot_id = if storage::has_multi_pin(env)? {
+            self.client_pin.get_slot_id_in_use()
+        } else {
+            Some(0)
+        };
 
         self.pin_uv_auth_precheck(
             env,
@@ -2154,6 +2160,7 @@ mod test {
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             pin_uv_auth_protocol,
@@ -3067,6 +3074,7 @@ mod test {
         let pin_uv_auth_token = [0x88; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             pin_uv_auth_protocol,
@@ -3800,6 +3808,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,

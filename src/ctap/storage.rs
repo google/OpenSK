@@ -612,6 +612,25 @@ pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     }
 }
 
+/// Returns whether multi-PIN is enabled.
+pub fn has_multi_pin(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+    match env.store().find(key::MULTI_PIN)? {
+        None => Ok(false),
+        Some(value) if value.is_empty() => Ok(true),
+        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+    }
+}
+
+// TODO: Call this in config_commands after the whole multi-PIN feature is ready.
+// Before that, this function should stay private, only for testing purpose.
+/// Enables multi-PIN, when disabled.
+fn _enable_multi_pin(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    if !has_multi_pin(env)? {
+        env.store().insert(key::MULTI_PIN, &[])?;
+    }
+    Ok(())
+}
+
 impl From<persistent_store::StoreError> for Ctap2StatusCode {
     fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
         use persistent_store::StoreError;
@@ -1239,6 +1258,15 @@ mod test {
             assert_eq!(toggle_always_uv(&mut env), Ok(()));
             assert!(!has_always_uv(&mut env).unwrap());
         }
+    }
+
+    #[test]
+    fn test_multi_pin() {
+        let mut env = TestEnv::new();
+
+        assert!(!has_multi_pin(&mut env).unwrap());
+        assert_eq!(_enable_multi_pin(&mut env), Ok(()));
+        assert!(has_multi_pin(&mut env).unwrap());
     }
 
     #[test]

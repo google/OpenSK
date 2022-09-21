@@ -12,12 +12,6 @@ cargo-fuzz = true
 libfuzzer-sys = { version = "0.3" }
 fuzz_helper = { path = "fuzz_helper" }
 
-[build-dependencies]
-# We explicitly lock the version of those transitive dependencies because their
-# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
-# whole block once CTAP is a library.
-once_cell = { version = "=1.14", optional = true } # transitive dependency of openssl
-
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]

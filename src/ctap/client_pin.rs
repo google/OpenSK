@@ -344,9 +344,8 @@ impl ClientPin {
 
         self.pin_protocol_v1.reset_pin_uv_auth_token(env.rng());
         self.pin_protocol_v2.reset_pin_uv_auth_token(env.rng());
-        // TODO: pass the slot_id parameter and store it in the state too.
         self.pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(now);
+            .begin_using_pin_uv_auth_token(now, slot_id);
         self.pin_uv_auth_token_state.set_default_permissions();
         let pin_uv_auth_token = shared_secret.encrypt(
             env.rng(),
@@ -581,9 +580,23 @@ impl ClientPin {
         self.pin_uv_auth_token_state.has_permissions_rp_id(rp_id)
     }
 
+    /// Get the slot_id_in_use of the current pin_uv_auth_token_state if multi-PIN
+    /// feature is enabled. Otherwise return the default slot (0).
+    pub fn get_slot_id_in_use_or_default(
+        &self,
+        env: &mut impl Env,
+    ) -> Result<Option<usize>, Ctap2StatusCode> {
+        if storage::has_multi_pin(env)? {
+            Ok(self.pin_uv_auth_token_state.slot_id_in_use())
+        } else {
+            Ok(Some(0))
+        }
+    }
+
     #[cfg(test)]
     pub fn new_test(
         env: &mut impl Env,
+        slot_id: usize,
         key_agreement_key: crypto::ecdh::SecKey,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
         pin_uv_auth_protocol: PinUvAuthProtocol,
@@ -594,7 +607,7 @@ impl ClientPin {
         };
         let mut pin_uv_auth_token_state = PinUvAuthTokenState::new();
         pin_uv_auth_token_state.set_permissions(0xFF);
-        pin_uv_auth_token_state.begin_using_pin_uv_auth_token(CtapInstant::new(0));
+        pin_uv_auth_token_state.begin_using_pin_uv_auth_token(CtapInstant::new(0), slot_id);
         ClientPin {
             pin_protocol_v1: PinProtocol::new_test(key_agreement_key_v1, pin_uv_auth_token),
             pin_protocol_v2: PinProtocol::new_test(key_agreement_key_v2, pin_uv_auth_token),
@@ -637,6 +650,7 @@ mod test {
     /// tests using the wrong combination of PIN protocol and shared secret
     /// should fail.
     fn create_client_pin_and_shared_secret(
+        slot_id: usize,
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> (ClientPin, Box<dyn SharedSecret>) {
         let mut env = TestEnv::new();
@@ -646,6 +660,7 @@ mod test {
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::new_test(
             &mut env,
+            slot_id,
             key_agreement_key,
             pin_uv_auth_token,
             pin_uv_auth_protocol,
@@ -665,7 +680,9 @@ mod test {
         sub_command: ClientPinSubCommand,
     ) -> (ClientPin, AuthenticatorClientPinParameters) {
         let mut env = TestEnv::new();
-        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
+        // TODO: Make slot_id a passed parameter once we include it in AuthenticatorClientPinParameters.
+        let (client_pin, shared_secret) =
+            create_client_pin_and_shared_secret(0, pin_uv_auth_protocol);
 
         let pin = b"1234";
         let mut padded_pin = [0u8; 64];
@@ -1284,7 +1301,8 @@ mod test {
         salt: Vec<u8>,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let mut env = TestEnv::new();
-        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
+        let (client_pin, shared_secret) =
+            create_client_pin_and_shared_secret(0, pin_uv_auth_protocol);
 
         let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
@@ -1302,7 +1320,8 @@ mod test {
 
     fn test_helper_process_hmac_secret_bad_salt_auth(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::new();
-        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
+        let (client_pin, shared_secret) =
+            create_client_pin_and_shared_secret(0, pin_uv_auth_protocol);
         let cred_random = [0xC9; 32];
 
         let salt_enc = vec![0x01; 32];
@@ -1515,7 +1534,7 @@ mod test {
         let message = [0xAA];
         client_pin
             .pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(CtapInstant::new(0));
+            .begin_using_pin_uv_auth_token(CtapInstant::new(0), 0);
 
         let pin_uv_auth_token_v1 = client_pin
             .get_pin_protocol(PinUvAuthProtocol::V1)
@@ -1532,6 +1551,7 @@ mod test {
         let pin_uv_auth_param_v2_from_v1_token =
             authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
 
+        assert_eq!(client_pin.pin_uv_auth_token_state.slot_id_in_use(), Some(0));
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
                 &message,

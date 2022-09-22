@@ -41,7 +41,7 @@ pub struct PinUvAuthTokenState {
     permissions_rp_id: Option<String>,
     usage_timer: TimedPermission,
     user_verified: bool,
-    in_use: bool,
+    slot_id_in_use: Option<usize>,
 }
 
 impl PinUvAuthTokenState {
@@ -52,13 +52,18 @@ impl PinUvAuthTokenState {
             permissions_rp_id: None,
             usage_timer: TimedPermission::waiting(),
             user_verified: false,
-            in_use: false,
+            slot_id_in_use: None,
         }
     }
 
     /// Returns whether the pinUvAuthToken is active.
     pub fn is_in_use(&self) -> bool {
-        self.in_use
+        self.slot_id_in_use.is_some()
+    }
+
+    /// Returns the slot id in use.
+    pub fn slot_id_in_use(&self) -> Option<usize> {
+        self.slot_id_in_use
     }
 
     /// Checks if the permission is granted.
@@ -113,15 +118,15 @@ impl PinUvAuthTokenState {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self, now: CtapInstant) {
+    pub fn begin_using_pin_uv_auth_token(&mut self, now: CtapInstant, slot_id: usize) {
         self.user_verified = true;
         self.usage_timer = TimedPermission::granted(now, INITIAL_USAGE_TIME_LIMIT);
-        self.in_use = true;
+        self.slot_id_in_use = Some(slot_id);
     }
 
     /// Updates the usage timer, and disables the pinUvAuthToken on timeout.
     pub fn pin_uv_auth_token_usage_timer_observer(&mut self, now: CtapInstant) {
-        if !self.in_use {
+        if !self.is_in_use() {
             return;
         }
         self.usage_timer = self.usage_timer.check_expiration(now);
@@ -132,7 +137,7 @@ impl PinUvAuthTokenState {
 
     /// Returns whether the user is verified.
     pub fn get_user_verified_flag_value(&self) -> bool {
-        self.in_use && self.user_verified
+        self.is_in_use() && self.user_verified
     }
 
     /// Consumes the user verification.
@@ -151,7 +156,7 @@ impl PinUvAuthTokenState {
         self.permissions_set = 0;
         self.usage_timer = TimedPermission::waiting();
         self.user_verified = false;
-        self.in_use = false;
+        self.slot_id_in_use = None;
     }
 }
 
@@ -164,24 +169,28 @@ mod test {
     fn test_observer() {
         let mut token_state = PinUvAuthTokenState::new();
         let mut now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(now, 0);
         assert!(token_state.is_in_use());
+        assert_eq!(token_state.slot_id_in_use(), Some(0));
         now = now + Milliseconds(100_u32);
         token_state.pin_uv_auth_token_usage_timer_observer(now);
         assert!(token_state.is_in_use());
         now = now + INITIAL_USAGE_TIME_LIMIT;
         token_state.pin_uv_auth_token_usage_timer_observer(now);
         assert!(!token_state.is_in_use());
+        assert!(token_state.slot_id_in_use().is_none());
     }
 
     #[test]
     fn test_stop() {
         let mut token_state = PinUvAuthTokenState::new();
         let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(now, 0);
         assert!(token_state.is_in_use());
+        assert_eq!(token_state.slot_id_in_use(), Some(0));
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.is_in_use());
+        assert!(token_state.slot_id_in_use().is_none());
     }
 
     #[test]
@@ -265,11 +274,11 @@ mod test {
         let mut token_state = PinUvAuthTokenState::new();
         assert!(!token_state.get_user_verified_flag_value());
         let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(now, 0);
         assert!(token_state.get_user_verified_flag_value());
         token_state.clear_user_verified_flag();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(now, 0);
         assert!(token_state.get_user_verified_flag_value());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.get_user_verified_flag_value());

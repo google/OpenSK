@@ -294,7 +294,7 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     max_large_blob_array_size: 2048,
     max_rp_ids_length: 8,
     max_supported_resident_keys: 150,
-    slot_count: 1,
+    slot_count: 8,
 };
 
 impl Customization for CustomizationImpl {

@@ -87,9 +87,9 @@ impl LargeBlobs {
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
             }
-            // TODO: Get the slot id from active token state when multi-PIN is enabled.
-            let slot_id = 0;
-            if storage::pin_hash(env, slot_id)?.is_some() || storage::has_always_uv(env)? {
+            // We only check whether slot 0 has a PIN here because if multi-PIN is enabled,
+            // has_always_uv will always be true and the condition will always pass.
+            if storage::pin_hash(env, 0)?.is_some() || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =
@@ -151,6 +151,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -186,6 +187,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -252,6 +254,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -302,6 +305,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -352,6 +356,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -379,6 +384,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
@@ -411,6 +417,7 @@ mod test {
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::new_test(
             &mut env,
+            0,
             key_agreement_key,
             pin_uv_auth_token,
             pin_uv_auth_protocol,

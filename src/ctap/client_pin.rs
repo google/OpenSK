@@ -580,9 +580,17 @@ impl ClientPin {
         self.pin_uv_auth_token_state.has_permissions_rp_id(rp_id)
     }
 
-    /// Get the slot_id_in_use of the current pin_uv_auth_token_state, if any.
-    pub fn get_slot_id_in_use(&self) -> Option<usize> {
-        self.pin_uv_auth_token_state.slot_id_in_use()
+    /// Get the slot_id_in_use of the current pin_uv_auth_token_state if multi-PIN
+    /// feature is enabled. Otherwise return the default slot (0).
+    pub fn get_slot_id_in_use_or_default(
+        &self,
+        env: &mut impl Env,
+    ) -> Result<Option<usize>, Ctap2StatusCode> {
+        if storage::has_multi_pin(env)? {
+            Ok(self.pin_uv_auth_token_state.slot_id_in_use())
+        } else {
+            Ok(Some(0))
+        }
     }
 
     #[cfg(test)]
@@ -1543,7 +1551,7 @@ mod test {
         let pin_uv_auth_param_v2_from_v1_token =
             authenticate_pin_uv_auth_token(pin_uv_auth_token_v1, &message, PinUvAuthProtocol::V2);
 
-        assert_eq!(client_pin.get_slot_id_in_use(), Some(0));
+        assert_eq!(client_pin.pin_uv_auth_token_state.slot_id_in_use(), Some(0));
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
                 &message,

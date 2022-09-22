@@ -91,14 +91,10 @@ pub fn process_config(
         pin_uv_auth_protocol,
     } = params;
 
-    let slot_id = if storage::has_multi_pin(env)? {
-        client_pin.get_slot_id_in_use()
-    } else {
-        Some(0)
-    };
+    let slot_id = client_pin.get_slot_id_in_use_or_default(env)?;
     let enforce_uv =
         !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && storage::has_always_uv(env)?;
-    // If multi-PIN feature is enabled, no PIN is in used, and the command is to turn off alwaysUv,
+    // If multi-PIN feature is enabled, no PIN is in use, and the command is to turn off alwaysUv,
     // the PIN check will be skipped here but an OPERATION_DENIED will still be returned later,
     // which is correct behavior.
     if (slot_id.is_some() && storage::pin_hash(env, slot_id.unwrap())?.is_some()) || enforce_uv {

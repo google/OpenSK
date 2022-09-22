@@ -73,7 +73,9 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
-    /// If this entry exists and is empty, multi-PIN is enabled.
+    /// Whether multi-PIN is enabled.
+    ///
+    /// The value must be empty. Only presence of the value matters.
     MULTI_PIN = 983;
 
     // Start of key arrays for multi-PIN feature: these fields are separated for each slots, so

@@ -778,11 +778,7 @@ impl CtapState {
             enterprise_attestation,
         } = make_credential_params;
 
-        let slot_id = if storage::has_multi_pin(env)? {
-            self.client_pin.get_slot_id_in_use()
-        } else {
-            Some(0)
-        };
+        let slot_id = self.client_pin.get_slot_id_in_use_or_default(env)?;
 
         self.pin_uv_auth_precheck(
             env,
@@ -1178,11 +1174,7 @@ impl CtapState {
             pin_uv_auth_protocol,
         } = get_assertion_params;
 
-        let slot_id = if storage::has_multi_pin(env)? {
-            self.client_pin.get_slot_id_in_use()
-        } else {
-            Some(0)
-        };
+        let slot_id = self.client_pin.get_slot_id_in_use_or_default(env)?;
 
         self.pin_uv_auth_precheck(
             env,

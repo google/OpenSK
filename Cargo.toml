@@ -40,21 +40,10 @@ ed25519 = ["ed25519-compact"]
 [dev-dependencies]
 enum-iterator = "0.6.0"
 
-# We explicitly lock the version of those transitive dependencies because their
-# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
-# whole block once CTAP is a library.
-proc-macro2 = "=1.0.43"
-
 [build-dependencies]
 sk-cbor = { path = "libraries/cbor" }
 uuid = { version = "0.8", features = ["v4"] }
 openssl = "0.10.36"
-
-# We explicitly lock the version of those transitive dependencies because their
-# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
-# whole block once CTAP is a library.
-once_cell = "=1.14" # transitive dependency of openssl
-proc-macro2 = "=1.0.43"
 
 [profile.dev]
 panic = "abort"

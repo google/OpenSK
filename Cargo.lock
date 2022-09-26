@@ -85,7 +85,6 @@ name = "crypto"
 version = "0.1.0"
 dependencies = [
  "arrayref",
- "bumpalo",
  "byteorder",
  "hex",
  "regex",
@@ -111,10 +110,8 @@ dependencies = [
  "lang_items",
  "libtock_core",
  "libtock_drivers",
- "once_cell",
  "openssl",
  "persistent_store",
- "proc-macro2",
  "rand 0.8.5",
  "rng256",
  "sk-cbor",

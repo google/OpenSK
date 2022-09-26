@@ -76,10 +76,8 @@ name = "crypto"
 version = "0.1.0"
 dependencies = [
  "arrayref",
- "bumpalo",
  "byteorder",
  "hex",
- "once_cell",
  "regex",
  "ring",
  "rng256",

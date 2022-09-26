@@ -212,7 +212,6 @@ version = "0.1.0"
 dependencies = [
  "arrayref",
  "libtock_drivers",
- "proc-macro2",
  "rand",
 ]
 

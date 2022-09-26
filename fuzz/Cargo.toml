@@ -12,6 +12,11 @@ cargo-fuzz = true
 libfuzzer-sys = { version = "0.3" }
 fuzz_helper = { path = "fuzz_helper" }
 
+# We explicitly lock the version of those transitive dependencies because their
+# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
+# whole block once CTAP is a library.
+proc-macro2 = "=1.0.43"
+
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]

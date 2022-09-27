@@ -45,11 +45,6 @@ sk-cbor = { path = "libraries/cbor" }
 uuid = { version = "0.8", features = ["v4"] }
 openssl = "0.10.36"
 
-# We explicitly lock the version of those transitive dependencies because their
-# Cargo.toml don't parse with the nightly compiler used by Tock. Remove this
-# whole block once CTAP is a library.
-once_cell = "=1.14" # transitive dependency of openssl
-
 [profile.dev]
 panic = "abort"
 lto = true # Link Time Optimization usually reduces size of binaries and static libraries

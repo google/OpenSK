@@ -352,18 +352,12 @@ impl TockUpgradeStorage {
 }
 
 impl UpgradeStorage for TockUpgradeStorage {
-    fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
-        if length == 0 {
-            return Err(StorageError::OutOfBounds);
-        }
-        if let Some(address) = self.partition.find_address(offset, length) {
-            Ok(unsafe { read_slice(address, length) })
-        } else {
-            Err(StorageError::OutOfBounds)
-        }
-    }
-
-    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+    fn write_partition(
+        &mut self,
+        offset: usize,
+        data: &[u8],
+        hash: &[u8; 32],
+    ) -> StorageResult<()> {
         if data.is_empty() {
             return Err(StorageError::OutOfBounds);
         }
@@ -383,8 +377,13 @@ impl UpgradeStorage for TockUpgradeStorage {
             erase_page(address, self.page_size)?;
         }
         write_slice(address, data)?;
+        let written_slice = unsafe { read_slice(address, data.len()) };
+        let written_hash = Sha256::hash(written_slice);
+        if hash != &written_hash {
+            return Err(StorageError::CustomError);
+        }
         // Case: Last slice is written.
-        if data.len() == self.partition_length() - offset {
+        if data.len() == self.partition.length() - offset {
             let metadata = unsafe { read_slice(self.metadata.start(), self.metadata.length()) };
             self.check_partition_hash(&metadata)?;
         }
@@ -393,10 +392,6 @@ impl UpgradeStorage for TockUpgradeStorage {
 
     fn partition_identifier(&self) -> u32 {
         self.identifier
-    }
-
-    fn partition_length(&self) -> usize {
-        self.partition.length()
     }
 
     fn running_firmware_version(&self) -> u64 {
@@ -495,13 +490,8 @@ mod test {
         let mut metadata = vec![0xFF; METADATA_LEN];
         LittleEndian::write_u32(&mut metadata[METADATA_SIGN_OFFSET + 8..][..4], 0x60000);
 
-        let partition_length = upgrade_locations.partition_length();
         let mut signed_over_data = metadata[METADATA_SIGN_OFFSET..].to_vec();
-        signed_over_data.extend(
-            upgrade_locations
-                .read_partition(0, partition_length)
-                .unwrap(),
-        );
+        signed_over_data.extend(&[0xFF; 0x20000]);
         let signed_hash = Sha256::hash(&signed_over_data);
 
         metadata[..32].copy_from_slice(&signed_hash);

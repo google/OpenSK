@@ -1399,19 +1399,10 @@ impl CtapState {
         params: AuthenticatorVendorUpgradeParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorVendorUpgradeParameters { offset, data, hash } = params;
-        let upgrade_locations = env
-            .upgrade_storage()
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
-        upgrade_locations
-            .write_partition(offset, &data)
+        env.upgrade_storage()
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?
+            .write_partition(offset, &data, &hash)
             .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        let written_slice = upgrade_locations
-            .read_partition(offset, data.len())
-            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        let written_hash = Sha256::hash(written_slice);
-        if hash != written_hash {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
-        }
         Ok(ResponseData::AuthenticatorVendorUpgrade)
     }
 
@@ -3393,9 +3384,9 @@ mod test {
 
         const METADATA_LEN: usize = 0x1000;
         let metadata = vec![0xFF; METADATA_LEN];
-        let metadata_hash = Sha256::hash(&metadata).to_vec();
+        let metadata_hash = Sha256::hash(&metadata);
         let data = vec![0xFF; 0x1000];
-        let hash = Sha256::hash(&data).to_vec();
+        let hash = Sha256::hash(&data);
 
         // Write to partition.
         let response = ctap_state.process_vendor_upgrade(
@@ -3403,7 +3394,7 @@ mod test {
             AuthenticatorVendorUpgradeParameters {
                 offset: 0x20000,
                 data: data.clone(),
-                hash: hash.clone(),
+                hash,
             },
         );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
@@ -3414,7 +3405,7 @@ mod test {
             AuthenticatorVendorUpgradeParameters {
                 offset: 0,
                 data: metadata.clone(),
-                hash: metadata_hash.clone(),
+                hash: metadata_hash,
             },
         );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
@@ -3425,7 +3416,7 @@ mod test {
             AuthenticatorVendorUpgradeParameters {
                 offset: METADATA_LEN,
                 data: data.clone(),
-                hash: hash.clone(),
+                hash,
             },
         );
         assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
@@ -3458,10 +3449,10 @@ mod test {
             AuthenticatorVendorUpgradeParameters {
                 offset: 0x20000,
                 data,
-                hash: [0xEE; 32].to_vec(),
+                hash: [0xEE; 32],
             },
         );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
     }
 
     #[test]
@@ -3471,7 +3462,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
         let data = vec![0xFF; 0x1000];
-        let hash = Sha256::hash(&data).to_vec();
+        let hash = Sha256::hash(&data);
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {

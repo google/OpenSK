@@ -18,35 +18,25 @@ pub(crate) mod helper;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {
-    /// Reads a slice of the partition, if within bounds.
-    ///
-    /// The offset is relative to the start of the partition, excluding holes. The partition is
-    /// presented as one connected component. Therefore, the offset does not easily translate
-    /// to physical memory address address of the slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StorageError::OutOfBounds`] if the requested slice is not inside the partition.
-    fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]>;
-
     /// Writes the given data to the given offset address, if within bounds of the partition.
     ///
     /// The offset is relative to the start of the partition, excluding holes.
     /// See `read_partition`.
     ///
+    /// The hash is the SHA256 of the data slice. This hash is not a security feature, use it to
+    /// check your data integrity.
+    ///
     /// # Errors
     ///
     /// - Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
-    /// - Returns [`StorageError::CustomError`] if any Metadata check fails.
-    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()>;
+    /// - Returns [`StorageError::CustomError`] if any Metadata or hash check fails.
+    fn write_partition(&mut self, offset: usize, data: &[u8], hash: &[u8; 32])
+        -> StorageResult<()>;
 
     /// Returns an identifier for the partition.
     ///
     /// Use this to determine whether you are writing to A or B.
     fn partition_identifier(&self) -> u32;
-
-    /// Returns the length of the partition.
-    fn partition_length(&self) -> usize;
 
     /// Returns the currently running firmware version.
     fn running_firmware_version(&self) -> u64;

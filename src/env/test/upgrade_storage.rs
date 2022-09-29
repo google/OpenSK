@@ -15,6 +15,8 @@
 use crate::api::upgrade_storage::helper::ModRange;
 use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::boxed::Box;
+use crypto::sha256::Sha256;
+use crypto::Hash256;
 use persistent_store::{StorageError, StorageResult};
 
 const PARTITION_LENGTH: usize = 0x41000;
@@ -31,9 +33,8 @@ impl BufferUpgradeStorage {
             partition: vec![0xff; PARTITION_LENGTH].into_boxed_slice(),
         })
     }
-}
 
-impl UpgradeStorage for BufferUpgradeStorage {
+    #[cfg(test)]
     fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]> {
         if length == 0 {
             return Err(StorageError::OutOfBounds);
@@ -45,8 +46,15 @@ impl UpgradeStorage for BufferUpgradeStorage {
             Err(StorageError::OutOfBounds)
         }
     }
+}
 
-    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()> {
+impl UpgradeStorage for BufferUpgradeStorage {
+    fn write_partition(
+        &mut self,
+        offset: usize,
+        data: &[u8],
+        hash: &[u8; 32],
+    ) -> StorageResult<()> {
         if offset == 0 && data.len() != METADATA_LENGTH {
             return Err(StorageError::OutOfBounds);
         }
@@ -56,6 +64,10 @@ impl UpgradeStorage for BufferUpgradeStorage {
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, data.len())) {
             self.partition[offset..][..data.len()].copy_from_slice(data);
+            let written_hash = Sha256::hash(&self.partition[offset..][..data.len()]);
+            if hash != &written_hash {
+                return Err(StorageError::CustomError);
+            }
             Ok(())
         } else {
             Err(StorageError::OutOfBounds)
@@ -64,10 +76,6 @@ impl UpgradeStorage for BufferUpgradeStorage {
 
     fn partition_identifier(&self) -> u32 {
         0x60000
-    }
-
-    fn partition_length(&self) -> usize {
-        PARTITION_LENGTH
     }
 
     fn running_firmware_version(&self) -> u64 {
@@ -83,10 +91,16 @@ mod tests {
     fn read_write_partition() {
         let mut storage = BufferUpgradeStorage::new().unwrap();
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0xFF]);
-        assert!(storage.write_partition(1, &[0x88, 0x88]).is_ok());
+        assert!(storage
+            .write_partition(1, &[0x88, 0x88], &Sha256::hash(&[0x88, 0x88]))
+            .is_ok());
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0x88]);
         assert_eq!(
-            storage.write_partition(PARTITION_LENGTH - 1, &[0x88, 0x88]),
+            storage.write_partition(
+                PARTITION_LENGTH - 1,
+                &[0x88, 0x88],
+                &Sha256::hash(&[0x88, 0x88])
+            ),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
@@ -98,11 +112,11 @@ mod tests {
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
-            storage.write_partition(4, &[]),
+            storage.write_partition(4, &[], &Sha256::hash(&[])),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
-            storage.write_partition(PARTITION_LENGTH + 4, &[]),
+            storage.write_partition(PARTITION_LENGTH + 4, &[], &Sha256::hash(&[])),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(storage.read_partition(4, 0), Err(StorageError::OutOfBounds));
@@ -110,12 +124,15 @@ mod tests {
             storage.read_partition(PARTITION_LENGTH + 4, 0),
             Err(StorageError::OutOfBounds)
         );
+        assert_eq!(
+            storage.write_partition(1, &[0x88, 0x88], &[0x44; 32]),
+            Err(StorageError::CustomError)
+        );
     }
 
     #[test]
     fn partition_slice() {
         let storage = BufferUpgradeStorage::new().unwrap();
         assert_eq!(storage.partition_identifier(), 0x60000);
-        assert_eq!(storage.partition_length(), PARTITION_LENGTH);
     }
 }

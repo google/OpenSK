@@ -352,7 +352,7 @@ impl TockUpgradeStorage {
 }
 
 impl UpgradeStorage for TockUpgradeStorage {
-    fn write_bundle(&mut self, offset: usize, data: Vec<u8>, hash: &[u8; 32]) -> StorageResult<()> {
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()> {
         if data.is_empty() {
             return Err(StorageError::OutOfBounds);
         }
@@ -373,8 +373,7 @@ impl UpgradeStorage for TockUpgradeStorage {
         }
         write_slice(address, &data)?;
         let written_slice = unsafe { read_slice(address, data.len()) };
-        let written_hash = Sha256::hash(written_slice);
-        if hash != &written_hash {
+        if written_slice != data {
             return Err(StorageError::CustomError);
         }
         // Case: Last slice is written.

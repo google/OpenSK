@@ -15,8 +15,6 @@
 use crate::api::upgrade_storage::helper::ModRange;
 use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::boxed::Box;
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 use persistent_store::{StorageError, StorageResult};
 
 const PARTITION_LENGTH: usize = 0x41000;
@@ -49,7 +47,7 @@ impl BufferUpgradeStorage {
 }
 
 impl UpgradeStorage for BufferUpgradeStorage {
-    fn write_bundle(&mut self, offset: usize, data: Vec<u8>, hash: &[u8; 32]) -> StorageResult<()> {
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()> {
         if offset == 0 && data.len() != METADATA_LENGTH {
             return Err(StorageError::OutOfBounds);
         }
@@ -59,10 +57,6 @@ impl UpgradeStorage for BufferUpgradeStorage {
         let partition_range = ModRange::new(0, self.partition.len());
         if partition_range.contains_range(&ModRange::new(offset, data.len())) {
             self.partition[offset..][..data.len()].copy_from_slice(&data);
-            let written_hash = Sha256::hash(&self.partition[offset..][..data.len()]);
-            if hash != &written_hash {
-                return Err(StorageError::CustomError);
-            }
             Ok(())
         } else {
             Err(StorageError::OutOfBounds)
@@ -86,16 +80,10 @@ mod tests {
     fn read_write_bundle() {
         let mut storage = BufferUpgradeStorage::new().unwrap();
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0xFF]);
-        assert!(storage
-            .write_bundle(1, vec![0x88, 0x88], &Sha256::hash(&[0x88, 0x88]))
-            .is_ok());
+        assert!(storage.write_bundle(1, vec![0x88, 0x88]).is_ok());
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0x88]);
         assert_eq!(
-            storage.write_bundle(
-                PARTITION_LENGTH - 1,
-                vec![0x88, 0x88],
-                &Sha256::hash(&[0x88, 0x88])
-            ),
+            storage.write_bundle(PARTITION_LENGTH - 1, vec![0x88, 0x88],),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
@@ -107,21 +95,17 @@ mod tests {
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
-            storage.write_bundle(4, vec![], &Sha256::hash(&[])),
+            storage.write_bundle(4, vec![]),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(
-            storage.write_bundle(PARTITION_LENGTH + 4, vec![], &Sha256::hash(&[])),
+            storage.write_bundle(PARTITION_LENGTH + 4, vec![]),
             Err(StorageError::OutOfBounds)
         );
         assert_eq!(storage.read_partition(4, 0), Err(StorageError::OutOfBounds));
         assert_eq!(
             storage.read_partition(PARTITION_LENGTH + 4, 0),
             Err(StorageError::OutOfBounds)
-        );
-        assert_eq!(
-            storage.write_bundle(1, vec![0x88, 0x88], &[0x44; 32]),
-            Err(StorageError::CustomError)
         );
     }
 

@@ -19,22 +19,20 @@ pub(crate) mod helper;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {
-    /// Writes the given data to the given offset address, if within bounds of the partition.
+    /// Writes the given data as part of an upgrade.
     ///
-    /// The offset is relative to the start of the partition, excluding holes. The partition is
-    /// presented as one connected component. Therefore, the offset does not easily translate
-    /// to physical memory address address of the slice.
+    /// The offset indicates the data location inside the bundle.
     ///
     /// The hash is the SHA256 of the data slice. This hash is not a security feature, use it to
     /// check your data integrity.
     ///
     /// # Errors
     ///
-    /// - Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
+    /// - Returns [`StorageError::OutOfBounds`] if the data does not fit.
     /// - Returns [`StorageError::CustomError`] if any Metadata or hash check fails.
-    fn write_bundle(&mut self, offset: usize, data: Vec<u8>, hash: &[u8; 32]) -> StorageResult<()>;
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()>;
 
-    /// Returns an identifier for the partition.
+    /// Returns an identifier for the requested bundle.
     ///
     /// Use this to determine whether you are writing to A or B.
     fn bundle_identifier(&self) -> u32;

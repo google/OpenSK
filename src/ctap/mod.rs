@@ -1401,7 +1401,7 @@ impl CtapState {
         let AuthenticatorVendorUpgradeParameters { offset, data, hash } = params;
         env.upgrade_storage()
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?
-            .write_partition(offset, &data, &hash)
+            .write_bundle(offset, data, &hash)
             .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
         Ok(ResponseData::AuthenticatorVendorUpgrade)
     }
@@ -1415,7 +1415,7 @@ impl CtapState {
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
         Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
             AuthenticatorVendorUpgradeInfoResponse {
-                info: upgrade_locations.partition_identifier(),
+                info: upgrade_locations.bundle_identifier(),
             },
         ))
     }
@@ -3478,14 +3478,14 @@ mod test {
     fn test_vendor_upgrade_info() {
         let mut env = TestEnv::new();
         let ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        let partition_identifier = env.upgrade_storage().unwrap().partition_identifier();
+        let bundle_identifier = env.upgrade_storage().unwrap().bundle_identifier();
 
         let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info(&mut env);
         assert_eq!(
             upgrade_info_reponse,
             Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
                 AuthenticatorVendorUpgradeInfoResponse {
-                    info: partition_identifier,
+                    info: bundle_identifier,
                 }
             ))
         );

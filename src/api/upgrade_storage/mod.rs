@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use alloc::vec::Vec;
 use persistent_store::StorageResult;
 
 pub(crate) mod helper;
@@ -20,8 +21,9 @@ pub(crate) mod helper;
 pub trait UpgradeStorage {
     /// Writes the given data to the given offset address, if within bounds of the partition.
     ///
-    /// The offset is relative to the start of the partition, excluding holes.
-    /// See `read_partition`.
+    /// The offset is relative to the start of the partition, excluding holes. The partition is
+    /// presented as one connected component. Therefore, the offset does not easily translate
+    /// to physical memory address address of the slice.
     ///
     /// The hash is the SHA256 of the data slice. This hash is not a security feature, use it to
     /// check your data integrity.
@@ -30,13 +32,12 @@ pub trait UpgradeStorage {
     ///
     /// - Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
     /// - Returns [`StorageError::CustomError`] if any Metadata or hash check fails.
-    fn write_partition(&mut self, offset: usize, data: &[u8], hash: &[u8; 32])
-        -> StorageResult<()>;
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>, hash: &[u8; 32]) -> StorageResult<()>;
 
     /// Returns an identifier for the partition.
     ///
     /// Use this to determine whether you are writing to A or B.
-    fn partition_identifier(&self) -> u32;
+    fn bundle_identifier(&self) -> u32;
 
     /// Returns the currently running firmware version.
     fn running_firmware_version(&self) -> u64;

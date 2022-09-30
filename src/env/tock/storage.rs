@@ -352,12 +352,7 @@ impl TockUpgradeStorage {
 }
 
 impl UpgradeStorage for TockUpgradeStorage {
-    fn write_partition(
-        &mut self,
-        offset: usize,
-        data: &[u8],
-        hash: &[u8; 32],
-    ) -> StorageResult<()> {
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>, hash: &[u8; 32]) -> StorageResult<()> {
         if data.is_empty() {
             return Err(StorageError::OutOfBounds);
         }
@@ -376,7 +371,7 @@ impl UpgradeStorage for TockUpgradeStorage {
         for address in write_range.aligned_iter(self.page_size) {
             erase_page(address, self.page_size)?;
         }
-        write_slice(address, data)?;
+        write_slice(address, &data)?;
         let written_slice = unsafe { read_slice(address, data.len()) };
         let written_hash = Sha256::hash(written_slice);
         if hash != &written_hash {
@@ -390,7 +385,7 @@ impl UpgradeStorage for TockUpgradeStorage {
         Ok(())
     }
 
-    fn partition_identifier(&self) -> u32 {
+    fn bundle_identifier(&self) -> u32 {
         self.identifier
     }
 
@@ -433,7 +428,7 @@ fn check_metadata(
     }
 
     let metadata_address = LittleEndian::read_u32(&metadata[METADATA_SIGN_OFFSET + 8..][..4]);
-    if metadata_address != upgrade_locations.partition_identifier() {
+    if metadata_address != upgrade_locations.bundle_identifier() {
         return Err(StorageError::CustomError);
     }
 

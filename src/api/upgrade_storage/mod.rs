@@ -12,41 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use alloc::vec::Vec;
 use persistent_store::StorageResult;
 
 pub(crate) mod helper;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {
-    /// Reads a slice of the partition, if within bounds.
+    /// Processes the given data as part of an upgrade.
     ///
-    /// The offset is relative to the start of the partition, excluding holes. The partition is
-    /// presented as one connected component. Therefore, the offset does not easily translate
-    /// to physical memory address address of the slice.
+    /// The offset indicates the data location inside the bundle.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::OutOfBounds`] if the requested slice is not inside the partition.
-    fn read_partition(&self, offset: usize, length: usize) -> StorageResult<&[u8]>;
+    /// - Returns [`StorageError::OutOfBounds`] if the data does not fit.
+    /// - Returns [`StorageError::CustomError`] if any Metadata or other check fails.
+    fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()>;
 
-    /// Writes the given data to the given offset address, if within bounds of the partition.
-    ///
-    /// The offset is relative to the start of the partition, excluding holes.
-    /// See `read_partition`.
-    ///
-    /// # Errors
-    ///
-    /// - Returns [`StorageError::OutOfBounds`] if the data does not fit the partition.
-    /// - Returns [`StorageError::CustomError`] if any Metadata check fails.
-    fn write_partition(&mut self, offset: usize, data: &[u8]) -> StorageResult<()>;
-
-    /// Returns an identifier for the partition.
+    /// Returns an identifier for the requested bundle.
     ///
     /// Use this to determine whether you are writing to A or B.
-    fn partition_identifier(&self) -> u32;
-
-    /// Returns the length of the partition.
-    fn partition_length(&self) -> usize;
+    fn bundle_identifier(&self) -> u32;
 
     /// Returns the currently running firmware version.
     fn running_firmware_version(&self) -> u64;

@@ -19,17 +19,14 @@ pub(crate) mod helper;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {
-    /// Writes the given data as part of an upgrade.
+    /// Processes the given data as part of an upgrade.
     ///
     /// The offset indicates the data location inside the bundle.
-    ///
-    /// The hash is the SHA256 of the data slice. This hash is not a security feature, use it to
-    /// check your data integrity.
     ///
     /// # Errors
     ///
     /// - Returns [`StorageError::OutOfBounds`] if the data does not fit.
-    /// - Returns [`StorageError::CustomError`] if any Metadata or hash check fails.
+    /// - Returns [`StorageError::CustomError`] if any Metadata or other check fails.
     fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()>;
 
     /// Returns an identifier for the requested bundle.

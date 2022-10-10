@@ -56,19 +56,16 @@ echo $done_text
 )
 
 # Now apply patches to libtock-rs. Do that in a sub-shell.
-#
-# Commented out as there are not patches at the moment, and the pattern fails in
-# that case.
-#(
-#  cd third_party/libtock-rs/ && \
-#  for p in ../../patches/libtock-rs/[0-9][0-9]-*.patch
-#  do
-#    echo -n '[-] Applying patch "'$(basename $p)'"... '
-#    if git apply "$p"
-#    then
-#      echo $done_text
-#    else
-#      patch_conflict_detected
-#    fi
-#  done
-#)
+(
+  cd third_party/libtock-rs/ && \
+  for p in ../../patches/libtock-rs/[0-9][0-9]-*.patch
+  do
+    echo -n '[-] Applying patch "'$(basename $p)'"... '
+    if git apply "$p"
+    then
+      echo $done_text
+    else
+      patch_conflict_detected
+    fi
+  done
+)

@@ -1,0 +1,12 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index f5cb932..38119b5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -62,6 +62,6 @@ exclude = [ "tock" ]
+ members = [
+     "codegen",
+     "core",
+-    "test_runner",
++    # "test_runner",
+     "tools/print_sizes",
+ ]

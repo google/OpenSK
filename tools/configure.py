@@ -60,9 +60,9 @@ def get_opensk_devices(batch_mode):
     if (dev.descriptor.vid, dev.descriptor.pid) == OPENSK_VID_PID:
       if dev.capabilities & hid.CAPABILITY.CBOR:
         if batch_mode:
-          devices.append(ctap2.CTAP2(dev))
+          devices.append(ctap2.Ctap2(dev))
         else:
-          return [ctap2.CTAP2(dev)]
+          return [ctap2.Ctap2(dev)]
   return devices
 
 

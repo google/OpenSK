@@ -1,5 +1,4 @@
 target/
-Cargo.lock
 
 # Local installation of elf2tab.
 /elf2tab/

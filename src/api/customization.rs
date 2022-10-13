@@ -26,6 +26,12 @@ pub trait Customization {
     // Constants for adjusting privacy and protection levels.
     // ###########################################################################
 
+    /// Removes support for PIN protocol v1.
+    ///
+    /// We support PIN protocol v2, "intended to aid FIPS certification".
+    /// To certify, you might want to remove support for v1 using this customization.
+    fn allows_pin_protocol_v1(&self) -> bool;
+
     /// Changes the default level for the credProtect extension.
     ///
     /// You can change this value to one of the following for more privacy:
@@ -245,6 +251,7 @@ pub trait Customization {
 
 #[derive(Clone)]
 pub struct CustomizationImpl {
+    pub allows_pin_protocol_v1: bool,
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub default_min_pin_length: u8,
     pub default_min_pin_length_rp_ids: &'static [&'static str],
@@ -263,6 +270,7 @@ pub struct CustomizationImpl {
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
+    allows_pin_protocol_v1: true,
     default_cred_protect: None,
     default_min_pin_length: 4,
     default_min_pin_length_rp_ids: &[],
@@ -281,6 +289,10 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
 };
 
 impl Customization for CustomizationImpl {
+    fn allows_pin_protocol_v1(&self) -> bool {
+        self.allows_pin_protocol_v1
+    }
+
     fn default_cred_protect(&self) -> Option<CredentialProtectionPolicy> {
         self.default_cred_protect
     }

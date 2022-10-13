@@ -21,6 +21,7 @@ use super::pin_protocol::{verify_pin_uv_auth_token, PinProtocol, SharedSecret};
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
+use crate::api::customization::Customization;
 use crate::ctap::storage;
 use crate::env::Env;
 use alloc::boxed::Box;
@@ -390,6 +391,11 @@ impl ClientPin {
         client_pin_params: AuthenticatorClientPinParameters,
         now: CtapInstant,
     ) -> Result<ResponseData, Ctap2StatusCode> {
+        if !env.customization().allows_pin_protocol_v1()
+            && client_pin_params.pin_uv_auth_protocol == PinUvAuthProtocol::V1
+        {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
         let response = match client_pin_params.sub_command {
             ClientPinSubCommand::GetPinRetries => Some(self.process_get_pin_retries(env)?),
             ClientPinSubCommand::GetKeyAgreement => {
@@ -870,6 +876,20 @@ mod test {
     #[test]
     fn test_process_get_key_agreement_v2() {
         test_helper_process_get_key_agreement(PinUvAuthProtocol::V2);
+    }
+
+    #[test]
+    fn test_process_get_key_agreement_v1_not_allowed() {
+        let (mut client_pin, params) = create_client_pin_and_parameters(
+            PinUvAuthProtocol::V1,
+            ClientPinSubCommand::GetKeyAgreement,
+        );
+        let mut env = TestEnv::new();
+        env.customization_mut().set_allows_pin_protocol_v1(false);
+        assert_eq!(
+            client_pin.process_command(&mut env, params, CtapInstant::new(0)),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 
     fn test_helper_process_set_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {

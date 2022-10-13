@@ -18,6 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 pub struct TestCustomization {
+    allows_pin_protocol_v1: bool,
     default_cred_protect: Option<CredentialProtectionPolicy>,
     default_min_pin_length: u8,
     default_min_pin_length_rp_ids: Vec<String>,
@@ -36,6 +37,10 @@ pub struct TestCustomization {
 }
 
 impl TestCustomization {
+    pub fn set_allows_pin_protocol_v1(&mut self, is_allowed: bool) {
+        self.allows_pin_protocol_v1 = is_allowed;
+    }
+
     pub fn setup_enterprise_attestation(
         &mut self,
         mode: Option<EnterpriseAttestationMode>,
@@ -49,6 +54,10 @@ impl TestCustomization {
 }
 
 impl Customization for TestCustomization {
+    fn allows_pin_protocol_v1(&self) -> bool {
+        self.allows_pin_protocol_v1
+    }
+
     fn default_cred_protect(&self) -> Option<CredentialProtectionPolicy> {
         self.default_cred_protect
     }
@@ -117,6 +126,7 @@ impl Customization for TestCustomization {
 impl From<CustomizationImpl> for TestCustomization {
     fn from(c: CustomizationImpl) -> Self {
         let CustomizationImpl {
+            allows_pin_protocol_v1,
             default_cred_protect,
             default_min_pin_length,
             default_min_pin_length_rp_ids,
@@ -145,6 +155,7 @@ impl From<CustomizationImpl> for TestCustomization {
             .collect::<Vec<_>>();
 
         Self {
+            allows_pin_protocol_v1,
             default_cred_protect,
             default_min_pin_length,
             default_min_pin_length_rp_ids,

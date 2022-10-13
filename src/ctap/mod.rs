@@ -1264,6 +1264,10 @@ impl CtapState {
             (String::from("setMinPINLength"), true),
             (String::from("makeCredUvNotRqd"), !has_always_uv),
         ]);
+        let mut pin_protocols = vec![PinUvAuthProtocol::V2 as u64];
+        if env.customization().allows_pin_protocol_v1() {
+            pin_protocols.push(PinUvAuthProtocol::V1 as u64);
+        }
 
         Ok(ResponseData::AuthenticatorGetInfo(
             AuthenticatorGetInfoResponse {
@@ -1279,10 +1283,7 @@ impl CtapState {
                 options: Some(options),
                 max_msg_size: Some(env.customization().max_msg_size() as u64),
                 // The order implies preference. We favor the new V2.
-                pin_protocols: Some(vec![
-                    PinUvAuthProtocol::V2 as u64,
-                    PinUvAuthProtocol::V1 as u64,
-                ]),
+                pin_protocols: Some(pin_protocols),
                 max_credential_count_in_list: env
                     .customization()
                     .max_credential_count_in_list()
@@ -1579,6 +1580,23 @@ mod test {
         let mut response_cbor = vec![0x00];
         assert!(cbor_write(expected_cbor, &mut response_cbor).is_ok());
         assert_eq!(info_reponse, response_cbor);
+    }
+
+    #[test]
+    fn test_get_info_no_pin_protocol_v1() {
+        let mut env = TestEnv::new();
+        env.customization_mut().set_allows_pin_protocol_v1(false);
+        let ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let info_response = ctap_state.process_get_info(&mut env).unwrap();
+        match info_response {
+            ResponseData::AuthenticatorGetInfo(response) => {
+                assert_eq!(
+                    response.pin_protocols,
+                    Some(vec![PinUvAuthProtocol::V2 as u64])
+                );
+            }
+            _ => panic!("Invalid response type"),
+        }
     }
 
     fn create_minimal_make_credential_parameters() -> AuthenticatorMakeCredentialParameters {

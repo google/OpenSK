@@ -20,8 +20,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
-use crypto::ecdsa;
 use crypto::sha256::Sha256;
+use crypto::{ecdsa, hybrid};
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
@@ -82,6 +82,7 @@ pub enum PrivateKey {
     Ecdsa([u8; 32]),
     #[cfg(feature = "ed25519")]
     Ed25519(ed25519_compact::SecretKey),
+    Hybrid(hybrid::SecKey),
 }
 
 impl PrivateKey {
@@ -99,6 +100,34 @@ impl PrivateKey {
             SignatureAlgorithm::Eddsa => {
                 let bytes = env.rng().gen_uniform_u8x32();
                 Self::new_ed25519_from_bytes(&bytes).unwrap()
+            }
+            SignatureAlgorithm::Hybrid => PrivateKey::Hybrid(hybrid::SecKey::gensk(env.rng())),
+            SignatureAlgorithm::Unknown => unreachable!(),
+        }
+    }
+
+    /// Creates a new private / public key pair for the given algorithm.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
+    pub fn new_with_pub_key(env: &mut impl Env, alg: SignatureAlgorithm) -> (Self, CoseKey) {
+        match alg {
+            SignatureAlgorithm::Es256 => {
+                let private_key = PrivateKey::Ecdsa(env.key_store().generate_ecdsa_seed().unwrap());
+                let pub_key = private_key.get_pub_key(env).unwrap();
+                (private_key, pub_key)
+            }
+            #[cfg(feature = "ed25519")]
+            SignatureAlgorithm::Eddsa => {
+                let bytes = env.rng().gen_uniform_u8x32();
+                let private_key = Self::new_ed25519_from_bytes(&bytes).unwrap();
+                let pub_key = private_key.get_pub_key(env).unwrap();
+                (private_key, pub_key)
+            }
+            SignatureAlgorithm::Hybrid => {
+                let (hybrid_key, pub_key) = hybrid::SecKey::gensk_with_pk(env.rng());
+                (PrivateKey::Hybrid(hybrid_key), CoseKey::from(pub_key))
             }
             SignatureAlgorithm::Unknown => unreachable!(),
         }
@@ -137,6 +166,15 @@ impl PrivateKey {
         }
     }
 
+    /// Helper function that creates a private key of type Hybrid.
+    fn new_hybrid_from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != hybrid::SecKey::BYTES_LENGTH {
+            return None;
+        }
+        hybrid::SecKey::from_bytes(array_ref!(bytes, 0, hybrid::SecKey::BYTES_LENGTH))
+            .map(PrivateKey::from)
+    }
+
     /// Returns the corresponding public key.
     pub fn get_pub_key(&self, env: &mut impl Env) -> Result<CoseKey, Ctap2StatusCode> {
         Ok(match self {
@@ -145,6 +183,7 @@ impl PrivateKey {
             }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
+            PrivateKey::Hybrid(hybrid_key) => CoseKey::from(hybrid_key.genpk()),
         })
     }
 
@@ -160,6 +199,9 @@ impl PrivateKey {
                 .to_asn1_der(),
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message, None).to_vec(),
+            PrivateKey::Hybrid(hybrid_key) => {
+                hybrid_key.sign_rfc6979::<Sha256>(message).to_asn1_der()
+            }
         })
     }
 
@@ -169,6 +211,7 @@ impl PrivateKey {
             PrivateKey::Ecdsa(_) => SignatureAlgorithm::Es256,
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(_) => SignatureAlgorithm::Eddsa,
+            PrivateKey::Hybrid(_) => SignatureAlgorithm::Hybrid,
         }
     }
 
@@ -178,6 +221,11 @@ impl PrivateKey {
             PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_seed.to_vec(),
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
+            PrivateKey::Hybrid(hybrid_key) => {
+                let mut key_bytes = vec![0u8; hybrid::SecKey::BYTES_LENGTH];
+                hybrid_key.to_bytes(array_mut_ref!(key_bytes, 0, hybrid::SecKey::BYTES_LENGTH));
+                key_bytes
+            }
         }
     }
 }
@@ -214,8 +262,16 @@ impl TryFrom<cbor::Value> for PrivateKey {
             #[cfg(feature = "ed25519")]
             SignatureAlgorithm::Eddsa => PrivateKey::new_ed25519_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
+            SignatureAlgorithm::Hybrid => PrivateKey::new_hybrid_from_bytes(&key_bytes)
+                .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         }
+    }
+}
+
+impl From<hybrid::SecKey> for PrivateKey {
+    fn from(hybrid_key: hybrid::SecKey) -> Self {
+        PrivateKey::Hybrid(hybrid_key)
     }
 }
 

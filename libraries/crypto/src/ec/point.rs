@@ -25,7 +25,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 // A point on the elliptic curve is represented by two field elements.
 // The "direct" representation with GFP256 (integer modulo p) is used for serialization of public
 // keys.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PointP256 {
     x: GFP256,
     y: GFP256,
@@ -545,12 +545,6 @@ impl core::fmt::Debug for PointP256 {
             .field("x", &self.x)
             .field("y", &self.y)
             .finish()
-    }
-}
-
-impl PartialEq for PointP256 {
-    fn eq(&self, other: &PointP256) -> bool {
-        self.x == other.x && self.y == other.y
     }
 }
 

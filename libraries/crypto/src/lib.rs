@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 #![feature(wrapping_int_impl)]
 
 extern crate alloc;
+#[macro_use]
+extern crate arrayref;
 
 pub mod aes256;
 pub mod cbc;
@@ -24,6 +26,7 @@ pub mod ecdh;
 pub mod ecdsa;
 pub mod hkdf;
 pub mod hmac;
+pub mod hybrid;
 pub mod sha256;
 pub mod util;
 

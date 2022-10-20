@@ -21,6 +21,8 @@ use rand::Rng;
 
 // Lightweight RNG trait to generate uniformly distributed 256 bits.
 pub trait Rng256 {
+    fn fill_bytes(&mut self, buf: &mut [u8]);
+
     fn gen_uniform_u8x32(&mut self) -> [u8; 32];
 
     fn gen_uniform_u32x8(&mut self) -> [u32; 8] {
@@ -45,6 +47,10 @@ fn bytes_to_u32(bytes: [u8; 32]) -> [u32; 8] {
 pub struct TockRng256 {}
 
 impl Rng256 for TockRng256 {
+    fn fill_bytes(&mut self, buf: &mut [u8]) {
+        libtock_drivers::rng::fill_buffer(buf);
+    }
+
     fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
         let mut buf: [u8; 32] = [Default::default(); 32];
         rng::fill_buffer(&mut buf);
@@ -58,6 +64,11 @@ pub struct ThreadRng256 {}
 
 #[cfg(feature = "std")]
 impl Rng256 for ThreadRng256 {
+    fn fill_bytes(&mut self, buf: &mut [u8]) {
+        let mut rng = rand::thread_rng();
+        rng.fill(buf);
+    }
+
     fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
         let mut rng = rand::thread_rng();
         let mut result = [Default::default(); 32];

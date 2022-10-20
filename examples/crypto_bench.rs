@@ -17,26 +17,41 @@
 extern crate alloc;
 extern crate lang_items;
 
-use alloc::format;
-use alloc::vec::Vec;
 use core::fmt::Write;
-use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
+use crypto::sha256::Sha256;
+use crypto::{ecdsa, hybrid};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
-use rng256::TockRng256;
+use rng256::Rng256;
+// use ctap2::env::tock::{take_storage, TockStorage};
+// use persistent_store::Store;
 
-libtock_core::stack_size! {0x800}
+libtock_core::stack_size! {0x11800}
+
+/*fn boot_store(mut storage: TockStorage, erase: bool) -> Store<TockStorage> {
+    use persistent_store::Storage;
+    let num_pages = storage.num_pages();
+    if erase {
+        for page in 0..num_pages {
+            storage.erase_page(page).unwrap();
+        }
+    }
+    Store::new(storage).ok().unwrap()
+}*/
 
 fn main() {
+    // Fix to be faster.
+    //let storage = take_storage().unwrap();
+    //let mut _store = boot_store(storage, true);
+
     let mut console = Console::new();
+    let mut rng = rng256::TockRng256 {};
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().flex_unwrap();
-
-    let mut rng = TockRng256 {};
 
     writeln!(console, "****************************************").unwrap();
     writeln!(
@@ -46,136 +61,133 @@ fn main() {
     )
     .unwrap();
 
-    // AES
-    bench(&mut console, &timer, "aes256::EncryptionKey::new", || {
-        aes256::EncryptionKey::new(&[0; 32]);
-    });
-    let ek = aes256::EncryptionKey::new(&[0; 32]);
-    bench(&mut console, &timer, "aes256::DecryptionKey::new", || {
-        aes256::DecryptionKey::new(&ek);
-    });
-    let dk = aes256::DecryptionKey::new(&ek);
-
-    bench(
+    custom_bench(
         &mut console,
         &timer,
-        "aes256::EncryptionKey::encrypt_block",
-        || {
-            ek.encrypt_block(&mut [0; 16]);
-        },
-    );
-    bench(
-        &mut console,
-        &timer,
-        "aes256::DecryptionKey::decrypt_block",
-        || {
-            dk.decrypt_block(&mut [0; 16]);
+        "ECDSA keygen",
+        1000,
+        || {},
+        |()| {
+            let k = ecdsa::SecKey::gensk(&mut rng);
+            k.genpk();
         },
     );
 
-    // CBC
-    let mut blocks = Vec::new();
-    for i in 0..8 {
-        blocks.resize(1 << (i + 4), 0);
-        bench(
-            &mut console,
-            &timer,
-            &format!("cbc::cbc_encrypt({} bytes)", blocks.len()),
-            || {
-                cbc::cbc_encrypt(&ek, [0; 16], &mut blocks);
-            },
-        );
-    }
-    drop(blocks);
-
-    let mut blocks = Vec::new();
-    for i in 0..8 {
-        blocks.resize(1 << (i + 4), 0);
-        bench(
-            &mut console,
-            &timer,
-            &format!("cbc::cbc_decrypt({} bytes)", blocks.len()),
-            || {
-                cbc::cbc_decrypt(&dk, [0; 16], &mut blocks);
-            },
-        );
-    }
-    drop(blocks);
-
-    // SHA-256
-    let mut contents = Vec::new();
-    for i in 0..8 {
-        contents.resize(16 << i, 0);
-        bench(
-            &mut console,
-            &timer,
-            &format!("sha256::Sha256::update({} bytes)", contents.len()),
-            || {
-                let mut sha = sha256::Sha256::new();
-                sha.update(&contents);
-                sha.finalize();
-            },
-        );
-    }
-    drop(contents);
-
-    // ECDSA
-    bench(&mut console, &timer, "ecdsa::SecKey::gensk", || {
-        ecdsa::SecKey::gensk(&mut rng);
-    });
-    let k = ecdsa::SecKey::gensk(&mut rng);
-    bench(&mut console, &timer, "ecdsa::SecKey::genpk", || {
-        k.genpk();
-    });
-    bench(
+    custom_bench(
         &mut console,
         &timer,
-        "ecdsa::SecKey::sign_rng::<sha256::Sha256, _>",
+        "ECDSA sign",
+        1000,
         || {
-            k.sign_rng::<sha256::Sha256, _>(&[], &mut rng);
+            let k = ecdsa::SecKey::gensk(&mut rng);
+            let mut m = [0; 64];
+            rng.fill_bytes(&mut m);
+            (k, m)
         },
-    );
-    bench(
-        &mut console,
-        &timer,
-        "ecdsa::SecKey::sign_rfc6979::<sha256::Sha256>",
-        || {
-            k.sign_rfc6979::<sha256::Sha256>(&[]);
+        |(k, m)| {
+            k.sign_rfc6979::<Sha256>(&m);
         },
     );
 
-    writeln!(console, "****************************************").unwrap();
-    writeln!(console, "All the benchmarks are done.\nHave a nice day!").unwrap();
-    writeln!(console, "****************************************").unwrap();
+    custom_bench(
+        &mut console,
+        &timer,
+        "dilithium::SecKey::gensk_with_pk",
+        1000,
+        || {},
+        |()| {
+            dilithium::sign::SecKey::gensk_with_pk(&mut rng);
+        },
+    );
+
+    custom_bench(
+        &mut console,
+        &timer,
+        "dilithium::SecKey::sign",
+        1000,
+        || {
+            let sk = dilithium::sign::SecKey::gensk(&mut rng);
+            let mut m = [0; 64];
+            rng.fill_bytes(&mut m);
+            (sk, m)
+        },
+        |(sk, m)| {
+            sk.sign(&m);
+        },
+    );
+
+    custom_bench(
+        &mut console,
+        &timer,
+        "hybrid::SecKey::gensk_with_pk",
+        1000,
+        || {},
+        |()| {
+            hybrid::SecKey::gensk_with_pk(&mut rng);
+        },
+    );
+
+    custom_bench(
+        &mut console,
+        &timer,
+        "hybrid::SecKey::sign",
+        1000,
+        || {
+            let sk = hybrid::SecKey::gensk(&mut rng);
+            let mut m = [0; 64];
+            rng.fill_bytes(&mut m);
+            (sk, m)
+        },
+        |(sk, m)| {
+            sk.sign_rfc6979::<Sha256>(&m).to_asn1_der();
+        },
+    );
 }
 
-fn bench<F>(console: &mut Console, timer: &Timer, title: &str, mut f: F)
-where
-    F: FnMut(),
+fn custom_bench<I, O, F, S>(
+    console: &mut Console,
+    timer: &Timer,
+    title: &str,
+    iter_count: usize,
+    mut setup: S,
+    mut f: F,
+) where
+    S: FnMut() -> I,
+    F: FnMut(I) -> O,
 {
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "Benchmarking: {}", title).unwrap();
     writeln!(console, "----------------------------------------").unwrap();
-    let mut count = 1;
-    for _ in 0..30 {
+
+    let mut elapsed = 0.0;
+
+    for _ in 1..(iter_count + 1) {
+        let inputs = setup();
         let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
-        for _ in 0..count {
-            f();
-        }
+        f(inputs);
         let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
-        let elapsed = (end - start).ms();
-        writeln!(
-            console,
-            "{} ms elapsed for {} iterations ({} ms/iter)",
-            elapsed,
-            count,
-            elapsed / (count as f64)
-        )
-        .unwrap();
-        console.flush();
-        if elapsed > 1000.0 {
-            break;
+
+        let mut run_duration = (end - start).ms();
+
+        // After 512 seconds, we get a negative difference between the start
+        // time and the end time.
+        if run_duration < 0.0 {
+            run_duration += 512.0 * 1000.0;
         }
-        count <<= 1;
+
+        elapsed += run_duration;
+
+        writeln!(console, "{},", run_duration).unwrap();
+        console.flush();
     }
+
+    writeln!(
+        console,
+        "Total: {} ms elapsed for {} iterations ({} ms/iter)",
+        elapsed,
+        iter_count,
+        elapsed / (iter_count as f64)
+    )
+    .unwrap();
+    console.flush();
 }

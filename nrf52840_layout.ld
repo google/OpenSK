@@ -14,7 +14,7 @@ MEMORY {
  * Any change to STACK_SIZE should be accompanied by a corresponding change to
  * `elf2tab`'s `--stack` option
  */
-STACK_SIZE = 16384;
+STACK_SIZE = 71680;
 
 MPU_MIN_ALIGN = 8K;
 

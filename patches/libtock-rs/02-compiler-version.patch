@@ -1,0 +1,13 @@
+diff --git a/rust-toolchain b/rust-toolchain
+index 1674405..2ba073e 100644
+--- a/rust-toolchain
++++ b/rust-toolchain
+@@ -1,7 +1,7 @@
+ [toolchain]
+ # See https://rust-lang.github.io/rustup-components-history/ for a list of
+ # recently nightlies and what components are available for them.
+-channel = "nightly-2021-03-25"
++channel = "nightly-2021-06-25"
+ components = ["clippy", "miri", "rustfmt"]
+ targets = ["thumbv7em-none-eabi",
+            "riscv32imac-unknown-none-elf",

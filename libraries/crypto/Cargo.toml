@@ -13,6 +13,7 @@ edition = "2018"
 rng256 = { path = "../rng256" }
 arrayref = "0.3.6"
 subtle = { version = "2.2.3", default-features = false, features = ["nightly"] }
+dilithium = { path = "../../third_party/dilithium" }
 byteorder = { version = "1", default-features = false }
 hex = { version = "0.3.2", default-features = false, optional = true }
 ring = { version = "0.16.11", optional = true }

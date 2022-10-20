@@ -117,7 +117,7 @@ impl UserPresence for TockEnv {
     }
     fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
         if timeout.integer() == 0 {
-            return Err(UserPresenceError::Timeout);
+            return Ok(());
         }
         blink_leds(self.blink_pattern);
         self.blink_pattern += 1;

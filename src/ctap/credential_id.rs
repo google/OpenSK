@@ -171,7 +171,7 @@ pub fn encrypt_to_credential_id(
     let mut payload = Vec::new();
     let cbor = cbor_map_options! {
       CredentialSourceField::PrivateKey => private_key,
-      CredentialSourceField::RpIdHash=> rp_id_hash,
+      CredentialSourceField::RpIdHash => rp_id_hash,
       CredentialSourceField::CredProtectPolicy => cred_protect_policy,
       CredentialSourceField::CredBlob => cred_blob,
     };

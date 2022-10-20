@@ -1,0 +1,34 @@
+[package]
+name = "dilithium"
+version = "0.2.0-alpha.3"
+authors = ["quininer <quininer@live.com>"]
+description = "Digital Signatures from Module Lattices"
+repository = "https://github.com/quininer/dilithium"
+license = "MIT"
+
+[dependencies]
+rng256 = { path = "../../libraries/rng256" }
+rand_core = { version = "0.6", default-features = false }
+arrayref = {version = "0.3", default-features = false}
+itertools = { version = "0.7", default-features = false }
+byteorder = { version = "1", default-features = false }
+sha3 = { version = "0.7.3", default-features = false }
+digest =  { version = "0.7", default-features = false }
+
+[dev-dependencies]
+hex = "0.3"
+structopt = "0.3.25"
+criterion = "0.3"
+
+[features]
+std = [ "rng256/std" ]
+default = [ "dilithium5", "optimize_stack" ]
+dilithium2 = []
+dilithium3 = []
+dilithium5 = []
+optimize_stack = []
+derive_debug = []
+
+[[bench]]
+name = "sign_bench"
+harness = false

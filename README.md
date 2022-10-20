@@ -1,84 +1,114 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=develop)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=develop)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=develop)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=develop)
-[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=develop)](https://coveralls.io/github/google/OpenSK?branch=develop)
-
 ## OpenSK
 
-This repository contains a Rust implementation of a
-[FIDO2](https://fidoalliance.org/fido2/) authenticator.
-We developed OpenSK as a [Tock OS](https://tockos.org) application.
+This is an OpenSK fork that allows signing with a PQC Hybrid scheme. If you are looking for the original documentation, please check the
+[develop branch of its GitHub page](https://github.com/google/OpenSK/tree/develop).
 
-We intend to bring a full open source experience to security keys, from
-application to operating system. You can even 3D print your own open source
-enclosure!
-You can see OpenSK in action in this
-[video on YouTube](https://www.youtube.com/watch?v=klEozvpw0xg)!
-
-You are viewing the branch for developers. New features are developed here
-before they are stabilized. If you instead want to use the FIDO certified
-firmware, please go back to the
-[stable branch](https://github.com/google/OpenSK).
-
-### FIDO2
-
-The develop branch implements the
-[CTAP2.1 specification](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html).
-This branch is not FIDO certified. The implementation is backwards compatible
-to CTAP2.0. Additionally, OpenSK supports U2F, and non-discoverable credentials
-created with either protocol are compatible with the other.
-
-### :warning: Disclaimer
-
-This project is **proof-of-concept and a research platform**. It is **NOT**
-meant for a daily usage. It comes with a few limitations:
-
-*   This branch is under development, and therefore less rigorously tested than the stable branch.
-*   The cryptography implementations are not resistent against side-channel attacks.
-
-We're still in the process of integrating the
-[ARM&reg; CryptoCell-310](https://developer.arm.com/ip-products/security-ip/cryptocell-300-family)
-embedded in the
-[Nordic nRF52840 chip](https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fcryptocell.html)
-to enable hardware-accelerated cryptography. Our placeholder implementations of required
-cryptography algorithms (ECDSA, ECC secp256r1, HMAC-SHA256 and AES256) in Rust are research-quality
-code. They haven't been reviewed and don't provide constant-time guarantees.
-  
 ## Hardware
 
-You will need one the following supported boards:
-
-*   [Nordic nRF52840-DK](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-DK)
-    development kit. This board is more convenient for development and debug
-    scenarios as the JTAG probe is already on the board.
-*   [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
-    to have a more practical form factor.
-*   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
-*   [Feitian OpenSK dongle](https://feitiantech.github.io/OpenSK_USB/).
+You will need a
+[Nordic nRF52840-DK](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-DK)
+development kit.
 
 ## Installation
 
 To install OpenSK,
+
 1.  follow the [general setup steps](docs/install.md),
 1.  then continue with the instructions for your specific hardware:
-	* [Nordic nRF52840-DK](docs/boards/nrf52840dk.md)
-	* [Nordic nRF52840 Dongle](docs/boards/nrf52840_dongle.md)
-	* [Makerdiary nRF52840-MDK USB dongle](docs/boards/nrf52840_mdk.md)
-	* [Feitian OpenSK dongle](docs/boards/nrf52840_feitian.md)
+	[Nordic nRF52840-DK](docs/boards/nrf52840dk.md)
 
-To test whether the installation was successful, visit a
-[demo website](https://webauthn.io/) and try to register and login.
-Please check our [Troubleshooting and Debugging](docs/debugging.md) section if you
-have problems with the installation process or during development. To find out what
-else you can do with your OpenSK, see [Customization](docs/customization.md).
+## PQC Experiments
 
-## Contributing
+### Modes
 
-See [Contributing.md](docs/contributing.md).
+The Dilithium mode is set at compile time. If you want to perform experiments for different modes,
+you will need to recompile. The mode is a feature, defined in
+`third_party/dilithium/Cargo.toml`. By default, it is set to
+`default = [ "dilithium5", "optimize_stack" ]`. You can change the default mode by either changing
+the number 5 to 2 or 3. Or you remove the feature for stack optimizations, e.g.
+`default = [ "dilithium2" ]`.
 
-## Reporting a Vulnerability
+Note that some benchmarks will not run in all modes without stack optimizations. You can try to
+play with the stack size in these cases. As an example, stack painting for speed mode Dilithium2
+works if you apply the following changes:
 
-See [SECURITY.md](SECURITY.md).
+*   `APP_HEAP_SIZE = 16384` in `deploy.py`
+*   `libtock_core::stack_size! {0x1A000}` in `examples/measure_stack.rs`
+*   `STACK_SIZE = 106496;` in `nrf52840_layout.ld`
+*   Change the app break from `70 * 1024` to `104 * 1024` in `patches/tock/07-app-break-fix.patch`.
+
+For your convenience, you can also simply try:
+
+```
+git apply increase_stack.patch
+```
+
+### Compiler flags
+
+To trade binary size for speed, you can play with `[profile.release]` in `Cargo.toml`.
+For example, try a different compiler optimization level:
+
+```
+opt-level = 3
+```
+
+### Debug output
+
+Only the CTAP commands tests are measured end to end on the host. All other experiments are
+measured on the embedded device itself and output over RTT. You can either use a client to print
+results by running the following commands in different terminals:
+
+```
+JLinkExe -device nrf52 -if swd -speed 1000 -autoconnect 1
+JLinkRTTClient
+```
+
+Or you directly output all messages to a file:
+
+```
+JLinkRTTLogger -device NRF52840_XXAA -if swd -speed 1000 -RTTchannel 0
+```
+
+### Perform Experiments
+
+The paper contains the following experiments:
+
+#### Crypto benchmarks
+
+Deploy the `crypto_bench` example and read the debug output with one of the methods above:
+
+```
+./deploy.py --board=nrf52840dk_opensk --crypto_bench
+```
+
+#### CTAP benchmarks
+
+To measure the speed of FIDO commands, run:
+
+```
+python benchmarks.py --runs=2000
+```
+
+Aggregate results will be printed, and the raw data is written to `make_durations.txt` and
+`get_durations.txt`.
+
+
+#### Stack painting
+
+Deploy the `measure_stack` example and read the debug output with one of the methods above:
+
+```
+./deploy.py --board=nrf52840dk_opensk --measure_stack
+```
+
+#### x86 benchmarks
+
+You don't need your embedded hardware for those, run:
+
+```
+cd third_party/dilithium/
+cargo bench --features std
+```
+

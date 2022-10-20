@@ -379,7 +379,7 @@ impl UpgradeStorage for TockUpgradeStorage {
         // Case: Last slice is written.
         if data.len() == self.partition.length() - offset {
             let metadata = unsafe { read_slice(self.metadata.start(), self.metadata.length()) };
-            self.check_partition_hash(&metadata)?;
+            self.check_partition_hash(metadata)?;
         }
         Ok(())
     }

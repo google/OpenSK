@@ -156,9 +156,7 @@ SUPPORTED_BOARDS = {
         ),
 }
 
-# The following value must match the one used in the file
-# `src/entry_point.rs`
-APP_HEAP_SIZE = 90000
+APP_HEAP_SIZE = 32768
 
 
 def get_supported_boards() -> Tuple[str]:
@@ -1177,6 +1175,12 @@ if __name__ == "__main__":
       const="crypto_bench",
       help=("Compiles and installs the crypto_bench example that benchmarks "
             "the performance of the cryptographic algorithms on the board."))
+  apps_group.add_argument(
+      "--measure_stack",
+      dest="application",
+      action="store_const",
+      const="measure_stack",
+      help=("Measures stack usage of Dilithium."))
   apps_group.add_argument(
       "--store_latency",
       dest="application",

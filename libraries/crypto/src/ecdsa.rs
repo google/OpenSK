@@ -33,12 +33,13 @@ pub struct SecKey {
     k: NonZeroExponentP256,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature {
     r: NonZeroExponentP256,
     s: NonZeroExponentP256,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PubKey {
     p: PointP256,
 }

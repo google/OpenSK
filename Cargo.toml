@@ -24,12 +24,13 @@ embedded-time = "0.12.1"
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
+dilithium = { path = "third_party/dilithium" }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["crypto/std", "lang_items/std", "persistent_store/std", "rng256/std", "rand"]
+std = ["crypto/std", "dilithium/std", "lang_items/std", "persistent_store/std", "rng256/std", "rand"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]

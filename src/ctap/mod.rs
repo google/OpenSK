@@ -114,8 +114,6 @@ pub const U2F_VERSION_STRING: &str = "U2F_V2";
 // TODO(#106) change to final string when ready
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
-// We currently only support one algorithm for signatures: ES256.
-// This algorithm is requested in MakeCredential and advertized in GetInfo.
 pub const ES256_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
     cred_type: PublicKeyCredentialType::PublicKey,
     alg: SignatureAlgorithm::Es256,
@@ -127,10 +125,16 @@ pub const EDDSA_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialPa
     alg: SignatureAlgorithm::Eddsa,
 };
 
+pub const HYBRID_CRED_PARAM: PublicKeyCredentialParameter = PublicKeyCredentialParameter {
+    cred_type: PublicKeyCredentialType::PublicKey,
+    alg: SignatureAlgorithm::Hybrid,
+};
+
 const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
     ES256_CRED_PARAM,
     #[cfg(feature = "ed25519")]
     EDDSA_CRED_PARAM,
+    HYBRID_CRED_PARAM,
 ];
 
 fn get_preferred_cred_param(
@@ -261,6 +265,8 @@ fn send_keepalive_up_needed(
                 }
                 match processed_packet {
                     ProcessedPacket::InitPacket { cmd, .. } => {
+                        // Clippy doesn't understand the macro.
+                        #[allow(clippy::branches_sharing_code)]
                         if cmd == CtapHidCommand::Cancel as u8 {
                             // We ignore the payload, we can't answer with an error code anyway.
                             debug_ctap!(env, "User presence check cancelled");
@@ -848,7 +854,7 @@ impl CtapState {
 
         // We decide on the algorithm early, but delay key creation since it takes time.
         // We rather do that later so all intermediate checks may return faster.
-        let private_key = PrivateKey::new(env, algorithm);
+        let (private_key, public_cose_key) = PrivateKey::new_with_pub_key(env, algorithm);
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
@@ -887,13 +893,11 @@ impl CtapState {
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
         auth_data.extend(&storage::aaguid(env)?);
-        // The length is fixed to 0x20 or 0x80 and fits one byte.
-        if credential_id.len() > 0xFF {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        auth_data.extend(vec![0x00, credential_id.len() as u8]);
+        auth_data.extend(vec![
+            (credential_id.len() >> 8) as u8,
+            credential_id.len() as u8,
+        ]);
         auth_data.extend(&credential_id);
-        let public_cose_key = private_key.get_pub_key(env)?;
         cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
@@ -943,7 +947,20 @@ impl CtapState {
                     Some(vec![certificate]),
                 )
             }
-            None => (private_key.sign_and_encode(env, &signature_data)?, None),
+            None => {
+                if matches!(algorithm, SignatureAlgorithm::Hybrid) {
+                    // We can't attest with Dilithium due to message size limits.
+                    let new_ecdsa_key = ecdsa::SecKey::gensk(env.rng());
+                    (
+                        new_ecdsa_key
+                            .sign_rfc6979::<Sha256>(&signature_data)
+                            .to_asn1_der(),
+                        None,
+                    )
+                } else {
+                    (private_key.sign_and_encode(env, &signature_data)?, None)
+                }
+            }
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::Es256 as i64,

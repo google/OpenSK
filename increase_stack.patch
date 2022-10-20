@@ -1,0 +1,52 @@
+diff --git a/deploy.py b/deploy.py
+index 7f91a2b..f7b1e9a 100755
+--- a/deploy.py
++++ b/deploy.py
+@@ -156,7 +156,7 @@ SUPPORTED_BOARDS = {
+         ),
+ }
+ 
+-APP_HEAP_SIZE = 32768
++APP_HEAP_SIZE = 16384
+ 
+ 
+ def get_supported_boards() -> Tuple[str]:
+diff --git a/examples/measure_stack.rs b/examples/measure_stack.rs
+index 88f9ebc..d285a80 100644
+--- a/examples/measure_stack.rs
++++ b/examples/measure_stack.rs
+@@ -26,7 +26,7 @@ use crypto::{ecdsa, hybrid, sha256};
+ use crypto::sha256::Sha256;
+ use libtock_drivers::console::Console;
+ 
+-libtock_core::stack_size! {0x11800}
++libtock_core::stack_size! {0x1A000}
+ 
+ #[inline(never)]
+ fn read_stack_pointer() -> u32 {
+diff --git a/nrf52840_layout.ld b/nrf52840_layout.ld
+index 538a2a8..c7dd5e7 100644
+--- a/nrf52840_layout.ld
++++ b/nrf52840_layout.ld
+@@ -14,7 +14,7 @@ MEMORY {
+  * Any change to STACK_SIZE should be accompanied by a corresponding change to
+  * `elf2tab`'s `--stack` option
+  */
+-STACK_SIZE = 71680;
++STACK_SIZE = 106496;
+ 
+ MPU_MIN_ALIGN = 8K;
+ 
+diff --git a/patches/tock/07-app-break-fix.patch b/patches/tock/07-app-break-fix.patch
+index fcf46fd..4048b59 100644
+--- a/patches/tock/07-app-break-fix.patch
++++ b/patches/tock/07-app-break-fix.patch
+@@ -7,7 +7,7 @@ index c78b1c9fb..2769d0138 100644
+          // The 1.x Tock kernel allocates at least 3 kB to processes, and we need
+          // to ensure that happens as userspace may expect it.
+ -        3 * 1024
+-+        70 * 1024
+++        104 * 1024
+  
+          // TOCK 2.0
+          //

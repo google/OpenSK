@@ -309,6 +309,11 @@ pub mod test {
 
     impl Rng256 for StressTestingRng {
         // This function is unused, as we redefine gen_uniform_u32x8.
+        fn fill_bytes(&mut self, _buf: &mut [u8]) {
+            unreachable!()
+        }
+
+        // This function is unused, as we redefine gen_uniform_u32x8.
         fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
             unreachable!()
         }

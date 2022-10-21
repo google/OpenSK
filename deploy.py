@@ -160,7 +160,8 @@ SUPPORTED_BOARDS = {
 # `src/entry_point.rs`
 APP_HEAP_SIZE = 90000
 
-CARGO_TARGET_DIR = os.environ["CARGO_TARGET_DIR"] if os.environ.get("CARGO_TARGET_DIR") else "target"
+CARGO_TARGET_DIR = os.environ["CARGO_TARGET_DIR"] \
+  if os.environ.get("CARGO_TARGET_DIR") else "target"
 
 
 def get_supported_boards() -> Tuple[str]:
@@ -403,7 +404,9 @@ class OpenSKInstaller:
     env["RUSTFLAGS"] = " ".join(rust_flags)
     cargo_command = ["cargo", "build", "--release", f"--target={props.arch}"]
     self.checked_command(cargo_command, cwd="bootloader", env=env)
-    binary_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release", "bootloader")
+    binary_path = os.path.join(
+      CARGO_TARGET_DIR, props.arch, "release", "bootloader"
+    )
     objcopy_command = [
         "llvm-objcopy", "-O", "binary", binary_path, f"{binary_path}.bin"
     ]
@@ -812,7 +815,9 @@ class OpenSKInstaller:
       # Install padding and application if needed
       if self.args.application:
         self.install_padding()
-        self.install_tab_file(f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab")
+        self.install_tab_file(
+          f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab"
+        )
         self.install_metadata()
         if not self.verify_flashed_app(self.args.application):
           error(("It seems that something went wrong. App/example not found "

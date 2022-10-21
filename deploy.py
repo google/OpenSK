@@ -160,9 +160,7 @@ SUPPORTED_BOARDS = {
 # `src/entry_point.rs`
 APP_HEAP_SIZE = 90000
 
-CARGO_TARGET_DIR = os.environ["CARGO_TARGET_DIR"] \
-  if os.environ.get("CARGO_TARGET_DIR") else "target"
-
+CARGO_TARGET_DIR = os.environ.get("CARGO_TARGET_DIR", "target")
 
 def get_supported_boards() -> Tuple[str]:
   """Returns a tuple all valid supported boards."""

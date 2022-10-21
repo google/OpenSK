@@ -160,6 +160,8 @@ SUPPORTED_BOARDS = {
 # `src/entry_point.rs`
 APP_HEAP_SIZE = 90000
 
+CARGO_TARGET_DIR = os.environ["CARGO_TARGET_DIR"] if os.environ.get("CARGO_TARGET_DIR") else "target"
+
 
 def get_supported_boards() -> Tuple[str]:
   """Returns a tuple all valid supported boards."""
@@ -254,7 +256,7 @@ class OpenSKInstaller:
   def __init__(self, args):
     self.args = args
     # Where all the TAB files should go
-    self.tab_folder = os.path.join("target", "tab")
+    self.tab_folder = os.path.join(CARGO_TARGET_DIR, "tab")
     board = SUPPORTED_BOARDS[self.args.board]
     self.tockloader_default_args = argparse.Namespace(
         app_address=board.app_address,
@@ -401,7 +403,7 @@ class OpenSKInstaller:
     env["RUSTFLAGS"] = " ".join(rust_flags)
     cargo_command = ["cargo", "build", "--release", f"--target={props.arch}"]
     self.checked_command(cargo_command, cwd="bootloader", env=env)
-    binary_path = os.path.join("target", props.arch, "release", "bootloader")
+    binary_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release", "bootloader")
     objcopy_command = [
         "llvm-objcopy", "-O", "binary", binary_path, f"{binary_path}.bin"
     ]
@@ -463,7 +465,7 @@ class OpenSKInstaller:
     if self.args.verbose_build:
       command.append("--verbose")
     self.checked_command(command, env=env)
-    app_path = os.path.join("target", props.arch, "release")
+    app_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release")
     if is_example:
       app_path = os.path.join(app_path, "examples")
     app_path = os.path.join(app_path, self.args.application)
@@ -608,7 +610,7 @@ class OpenSKInstaller:
       return
 
     kernel = self.read_kernel()
-    app_tab_path = "target/tab/ctap2.tab"
+    app_tab_path = f"{CARGO_TARGET_DIR}/tab/ctap2.tab"
     if not os.path.exists(app_tab_path):
       fatal(f"File not found: {app_tab_path}")
     app_tab = tab.TAB(app_tab_path)
@@ -702,7 +704,7 @@ class OpenSKInstaller:
         final_hex.merge(padding_hex, overlap="error")
 
       # Now we can add the application from the TAB file
-      app_tab_path = f"target/tab/{self.args.application}.tab"
+      app_tab_path = f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab"
       assert os.path.exists(app_tab_path)
       app_tab = tab.TAB(app_tab_path)
       if board_props.arch not in app_tab.get_supported_architectures():
@@ -810,7 +812,7 @@ class OpenSKInstaller:
       # Install padding and application if needed
       if self.args.application:
         self.install_padding()
-        self.install_tab_file(f"target/tab/{self.args.application}.tab")
+        self.install_tab_file(f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab")
         self.install_metadata()
         if not self.verify_flashed_app(self.args.application):
           error(("It seems that something went wrong. App/example not found "
@@ -819,8 +821,8 @@ class OpenSKInstaller:
           return 1
 
     elif self.args.programmer in ("pyocd", "nordicdfu", "none"):
-      dest_file = f"target/{self.args.board}_merged.hex"
-      os.makedirs("target", exist_ok=True)
+      dest_file = f"{CARGO_TARGET_DIR}/{self.args.board}_merged.hex"
+      os.makedirs(CARGO_TARGET_DIR, exist_ok=True)
       self.create_hex_file(dest_file)
 
       if self.args.programmer == "pyocd":
@@ -831,7 +833,7 @@ class OpenSKInstaller:
         ])
       if self.args.programmer == "nordicdfu":
         info("Creating DFU package")
-        dfu_pkg_file = f"target/{self.args.board}_dfu.zip"
+        dfu_pkg_file = f"{CARGO_TARGET_DIR}/{self.args.board}_dfu.zip"
         self.checked_command([
             "nrfutil", "pkg", "generate", "--hw-version=52", "--sd-req=0",
             "--application-version=1", f"--application={dest_file}",

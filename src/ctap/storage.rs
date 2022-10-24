@@ -369,8 +369,9 @@ pub fn set_pin(
 ) -> Result<(), Ctap2StatusCode> {
     concat::delete(env.store(), key::FORCE_PIN_CHANGE, slot_id as u8)?;
     if slot_id == 0 {
-        // Backward compatibility: data might be stored in this entry for slot 0 as well.
+        // Backward compatibility: data might be stored in these entries for slot 0 as well.
         env.store().remove(key::FIRST_FORCE_PIN_CHANGE)?;
+        env.store().remove(key::FIRST_PIN_PROPERTIES)?;
     }
     let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
     pin_properties[0] = pin_code_point_length;
@@ -754,6 +755,7 @@ mod test {
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
     use crate::env::test::TestEnv;
+    use persistent_store::StoreUpdate;
     use rng256::Rng256;
 
     fn create_credential_source(
@@ -1032,6 +1034,114 @@ mod test {
     }
 
     #[test]
+    fn test_pin_hash_and_length_multi_pin() {
+        let mut env = TestEnv::new();
+
+        for i in 0..env.customization().slot_count() {
+            // Pin hash is initially not set.
+            assert!(pin_hash(&mut env, i).unwrap().is_none());
+            assert!(pin_code_point_length(&mut env, i).unwrap().is_none());
+        }
+
+        // Setting the pin sets the pin hash.
+        let random_data = env.rng().gen_uniform_u8x32();
+        assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
+        let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
+        let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
+        let pin_length_1 = 4;
+        let pin_length_2 = 63;
+        set_pin(&mut env, 1, &pin_hash_1, pin_length_1).unwrap();
+        assert_eq!(pin_hash(&mut env, 1).unwrap(), Some(pin_hash_1));
+        assert_eq!(
+            pin_code_point_length(&mut env, 1).unwrap(),
+            Some(pin_length_1)
+        );
+        // Other slots aren't affected.
+        assert!(pin_hash(&mut env, 0).unwrap().is_none());
+        assert!(pin_code_point_length(&mut env, 0).unwrap().is_none());
+
+        set_pin(&mut env, 1, &pin_hash_2, pin_length_2).unwrap();
+        assert_eq!(pin_hash(&mut env, 1).unwrap(), Some(pin_hash_2));
+        assert_eq!(
+            pin_code_point_length(&mut env, 1).unwrap(),
+            Some(pin_length_2)
+        );
+        // Other slots aren't affected.
+        assert!(pin_hash(&mut env, 0).unwrap().is_none());
+        assert!(pin_code_point_length(&mut env, 0).unwrap().is_none());
+
+        // Set PIN for multiple slots is supported.
+        set_pin(&mut env, 2, &pin_hash_1, pin_length_1).unwrap();
+        assert_eq!(pin_hash(&mut env, 2).unwrap(), Some(pin_hash_1));
+        assert_eq!(
+            pin_code_point_length(&mut env, 2).unwrap(),
+            Some(pin_length_1)
+        );
+
+        // Resetting the storage resets the pin hash.
+        reset(&mut env).unwrap();
+        for i in 0..env.customization().slot_count() {
+            assert!(pin_hash(&mut env, i).unwrap().is_none());
+            assert!(pin_code_point_length(&mut env, i).unwrap().is_none());
+        }
+    }
+
+    fn set_pin_legacy(
+        env: &mut impl Env,
+        pin_hash: &[u8; PIN_AUTH_LENGTH],
+        pin_code_point_length: u8,
+    ) -> Result<(), Ctap2StatusCode> {
+        let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
+        pin_properties[0] = pin_code_point_length;
+        pin_properties[1..].clone_from_slice(pin_hash);
+        Ok(env.store().transaction(&[
+            StoreUpdate::Insert {
+                key: key::FIRST_PIN_PROPERTIES,
+                value: &pin_properties[..],
+            },
+            StoreUpdate::Remove {
+                key: key::FIRST_FORCE_PIN_CHANGE,
+            },
+        ])?)
+    }
+
+    #[test]
+    fn test_pin_hash_and_length_backward_compat() {
+        let mut env = TestEnv::new();
+
+        // Setting the pin sets the pin hash.
+        let random_data = env.rng().gen_uniform_u8x32();
+        assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
+
+        let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
+        let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
+        let pin_length_1 = 4;
+        let pin_length_2 = 63;
+
+        assert!(set_pin_legacy(&mut env, &pin_hash_1, pin_length_1).is_ok());
+
+        // Should fallback to read from legacy storage location successfully.
+        assert_eq!(pin_hash(&mut env, 0).unwrap(), Some(pin_hash_1));
+        assert_eq!(
+            pin_code_point_length(&mut env, 0).unwrap(),
+            Some(pin_length_1)
+        );
+        // Fallback logic should only apply to slot 0.
+        assert!(pin_hash(&mut env, 1).unwrap().is_none());
+        assert!(pin_code_point_length(&mut env, 1).unwrap().is_none());
+
+        // Setting PIN again should use the new storage location, and erase the old one.
+        set_pin(&mut env, 0, &pin_hash_2, pin_length_2).unwrap();
+        assert_eq!(pin_hash(&mut env, 0).unwrap(), Some(pin_hash_2));
+        assert_eq!(
+            pin_code_point_length(&mut env, 0).unwrap(),
+            Some(pin_length_2)
+        );
+        assert_eq!(env.store().find(key::FIRST_PIN_PROPERTIES), Ok(None));
+        assert_eq!(env.store().find(key::FIRST_FORCE_PIN_CHANGE), Ok(None));
+    }
+
+    #[test]
     fn test_pin_retries() {
         let mut env = TestEnv::new();
 
@@ -1055,6 +1165,58 @@ mod test {
         reset_pin_retries(&mut env, 0).unwrap();
         assert_eq!(
             pin_retries(&mut env, 0),
+            Ok(env.customization().max_pin_retries())
+        );
+    }
+
+    #[test]
+    fn test_pin_retries_multi_pin() {
+        let mut env = TestEnv::new();
+
+        for i in 0..env.customization().slot_count() {
+            // The pin retries is initially at the maximum.
+            assert_eq!(
+                pin_retries(&mut env, i),
+                Ok(env.customization().max_pin_retries())
+            );
+        }
+
+        // Decrementing the pin retries decrements the pin retries.
+        for retries in (0..env.customization().max_pin_retries()).rev() {
+            decr_pin_retries(&mut env, 1).unwrap();
+            assert_eq!(pin_retries(&mut env, 1), Ok(retries));
+            // Other slots shouldn't be affected.
+            assert_eq!(
+                pin_retries(&mut env, 2),
+                Ok(env.customization().max_pin_retries())
+            );
+        }
+
+        // Decrementing the pin retries after zero does not modify the pin retries.
+        decr_pin_retries(&mut env, 1).unwrap();
+        assert_eq!(pin_retries(&mut env, 1), Ok(0));
+
+        // Operating on multiple slots is supported.
+        decr_pin_retries(&mut env, 2).unwrap();
+        assert_eq!(
+            pin_retries(&mut env, 2),
+            Ok(env.customization().max_pin_retries() - 1)
+        );
+
+        // Resetting the pin retries resets the pin retries.
+        reset_pin_retries(&mut env, 1).unwrap();
+        assert_eq!(
+            pin_retries(&mut env, 1),
+            Ok(env.customization().max_pin_retries())
+        );
+
+        // Other slots shouldn't be affected.
+        assert_eq!(
+            pin_retries(&mut env, 2),
+            Ok(env.customization().max_pin_retries() - 1)
+        );
+        assert_eq!(
+            pin_retries(&mut env, 3),
             Ok(env.customization().max_pin_retries())
         );
     }
@@ -1212,6 +1374,45 @@ mod test {
     }
 
     #[test]
+    fn test_global_signature_counter_multi_pin() {
+        let mut env = TestEnv::new();
+
+        let mut counter_value = 1;
+        for i in 0..env.customization().slot_count() {
+            assert_eq!(
+                global_signature_counter(&mut env, i).unwrap(),
+                counter_value
+            );
+        }
+        for increment in 1..10 {
+            assert!(incr_global_signature_counter(&mut env, 1, increment).is_ok());
+            counter_value += increment;
+            assert_eq!(
+                global_signature_counter(&mut env, 1).unwrap(),
+                counter_value
+            );
+            // Other slots aren't affected.
+            assert_eq!(global_signature_counter(&mut env, 2).unwrap(), 1);
+        }
+        let counter_value_for_slot_1 = counter_value;
+        counter_value = 1;
+
+        for increment in 1..10 {
+            assert!(incr_global_signature_counter(&mut env, 2, increment).is_ok());
+            counter_value += increment;
+            assert_eq!(
+                global_signature_counter(&mut env, 2).unwrap(),
+                counter_value
+            );
+            // Other slots aren't affected.
+            assert_eq!(
+                global_signature_counter(&mut env, 1).unwrap(),
+                counter_value_for_slot_1
+            );
+        }
+    }
+
+    #[test]
     fn test_force_pin_change() {
         let mut env = TestEnv::new();
 
@@ -1220,6 +1421,55 @@ mod test {
         assert!(has_force_pin_change(&mut env, 0).unwrap());
         assert_eq!(set_pin(&mut env, 0, &[0x88; 16], 8), Ok(()));
         assert!(!has_force_pin_change(&mut env, 0).unwrap());
+    }
+
+    #[test]
+    fn test_force_pin_change_multi_pin() {
+        let mut env = TestEnv::new();
+
+        for i in 0..env.customization().slot_count() {
+            assert!(!has_force_pin_change(&mut env, i).unwrap());
+        }
+
+        assert_eq!(force_pin_change(&mut env, 1), Ok(()));
+        assert!(has_force_pin_change(&mut env, 1).unwrap());
+        // Other slots shouldn't be affected.
+        assert!(!has_force_pin_change(&mut env, 2).unwrap());
+
+        assert_eq!(set_pin(&mut env, 1, &[0x88; 16], 8), Ok(()));
+        assert!(!has_force_pin_change(&mut env, 1).unwrap());
+        // Other slots shouldn't be affected.
+        assert!(!has_force_pin_change(&mut env, 2).unwrap());
+
+        // Operating on multiple slots is supported.
+        assert_eq!(force_pin_change(&mut env, 2), Ok(()));
+        assert!(has_force_pin_change(&mut env, 2).unwrap());
+        assert!(!has_force_pin_change(&mut env, 1).unwrap());
+    }
+
+    fn force_pin_change_legacy(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+        Ok(env.store().insert(key::FIRST_FORCE_PIN_CHANGE, &[])?)
+    }
+
+    #[test]
+    fn test_force_pin_change_backward_compat() {
+        let mut env = TestEnv::new();
+
+        assert!(!has_force_pin_change(&mut env, 0).unwrap());
+        assert!(!has_force_pin_change(&mut env, 1).unwrap());
+        assert_eq!(force_pin_change_legacy(&mut env), Ok(()));
+        // Should fallback to read from legacy storage location successfully.
+        assert!(has_force_pin_change(&mut env, 0).unwrap());
+        // Fallback logic should only apply to slot 0.
+        assert!(!has_force_pin_change(&mut env, 1).unwrap());
+
+        assert_eq!(set_pin(&mut env, 0, &[0x88; 16], 8), Ok(()));
+        assert!(!has_force_pin_change(&mut env, 0).unwrap());
+        // Old storage location should be cleared.
+        assert_eq!(env.store().find(key::FIRST_FORCE_PIN_CHANGE), Ok(None));
+
+        assert_eq!(force_pin_change(&mut env, 0), Ok(()));
+        assert!(has_force_pin_change(&mut env, 0).unwrap());
     }
 
     #[test]

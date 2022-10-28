@@ -623,9 +623,9 @@ pub fn has_multi_pin(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
 }
 
 // TODO: Call this in config_commands after the whole multi-PIN feature is ready.
-// Before that, this function should stay private, only for testing purpose.
+// Before that, this function only be used for testing purpose.
 /// Enables multi-PIN, when disabled.
-fn _enable_multi_pin(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn _enable_multi_pin_for_test(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     if !has_multi_pin(env)? {
         env.store().insert(key::MULTI_PIN, &[])?;
     }
@@ -777,6 +777,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         }
     }
 
@@ -973,6 +974,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
     }
@@ -1515,7 +1517,7 @@ mod test {
         let mut env = TestEnv::new();
 
         assert!(!has_multi_pin(&mut env).unwrap());
-        assert_eq!(_enable_multi_pin(&mut env), Ok(()));
+        assert_eq!(_enable_multi_pin_for_test(&mut env), Ok(()));
         assert!(has_multi_pin(&mut env).unwrap());
     }
 
@@ -1536,6 +1538,7 @@ mod test {
             user_icon: Some(String::from("icon")),
             cred_blob: Some(vec![0xCB]),
             large_blob_key: Some(vec![0x1B]),
+            slot_id: Some(1),
         };
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();

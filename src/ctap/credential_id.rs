@@ -19,7 +19,7 @@ use super::data_formats::{
 use super::status_code::Ctap2StatusCode;
 use super::{cbor_read, cbor_write};
 use crate::api::key_store::KeyStore;
-use crate::ctap::data_formats::{extract_byte_string, extract_map};
+use crate::ctap::data_formats::{extract_byte_string, extract_map, extract_unsigned};
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -48,6 +48,7 @@ struct CredentialSource {
     rp_id_hash: [u8; 32],
     cred_protect_policy: Option<CredentialProtectionPolicy>,
     cred_blob: Option<Vec<u8>>,
+    slot_id: Option<usize>,
 }
 
 // The data fields contained in the credential ID are serialized using CBOR maps.
@@ -57,6 +58,7 @@ enum CredentialSourceField {
     RpIdHash = 1,
     CredProtectPolicy = 2,
     CredBlob = 3,
+    SlotId = 4,
 }
 
 impl From<CredentialSourceField> for sk_cbor::Value {
@@ -84,6 +86,7 @@ fn decrypt_legacy_credential_id(
         rp_id_hash: plaintext[32..64].try_into().unwrap(),
         cred_protect_policy: None,
         cred_blob: None,
+        slot_id: None,
     }))
 }
 
@@ -102,6 +105,7 @@ fn decrypt_cbor_credential_id(
           CredentialSourceField::RpIdHash=> rp_id_hash,
           CredentialSourceField::CredProtectPolicy => cred_protect_policy,
           CredentialSourceField::CredBlob => cred_blob,
+          CredentialSourceField::SlotId => slot_id,
       } = extract_map(cbor_credential_source)?;
     }
     Ok(match (private_key, rp_id_hash) {
@@ -115,11 +119,19 @@ fn decrypt_cbor_credential_id(
                 .map(CredentialProtectionPolicy::try_from)
                 .transpose()?;
             let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
+            let slot_id = match slot_id.map(extract_unsigned).transpose()? {
+                Some(x) => Some(
+                    usize::try_from(x)
+                        .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
+                ),
+                None => None,
+            };
             Some(CredentialSource {
                 private_key,
                 rp_id_hash: rp_id_hash.try_into().unwrap(),
                 cred_protect_policy,
                 cred_blob,
+                slot_id,
             })
         }
         _ => None,
@@ -167,6 +179,7 @@ pub fn encrypt_to_credential_id(
     rp_id_hash: &[u8; 32],
     cred_protect_policy: Option<CredentialProtectionPolicy>,
     cred_blob: Option<Vec<u8>>,
+    slot_id: usize,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut payload = Vec::new();
     let cbor = cbor_map_options! {
@@ -174,6 +187,7 @@ pub fn encrypt_to_credential_id(
       CredentialSourceField::RpIdHash=> rp_id_hash,
       CredentialSourceField::CredProtectPolicy => cred_protect_policy,
       CredentialSourceField::CredBlob => cred_blob,
+      CredentialSourceField::SlotId => slot_id as u64,
     };
     cbor_write(cbor, &mut payload)?;
     add_padding(&mut payload)?;
@@ -262,6 +276,7 @@ pub fn decrypt_credential_id(
         user_icon: None,
         cred_blob: credential_source.cred_blob,
         large_blob_key: None,
+        slot_id: credential_source.slot_id,
     }))
 }
 
@@ -282,7 +297,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None).unwrap();
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, 0).unwrap();
         let decrypted_source = decrypt_credential_id(&mut env, encrypted_id, &rp_id_hash)
             .unwrap()
             .unwrap();
@@ -308,7 +323,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let mut encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None).unwrap();
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, 0).unwrap();
         encrypted_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
@@ -328,7 +343,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None).unwrap();
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, 0).unwrap();
         for i in 0..encrypted_id.len() {
             let mut modified_id = encrypted_id.clone();
             modified_id[i] ^= 0x01;
@@ -356,7 +371,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None).unwrap();
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, 0).unwrap();
 
         for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
             assert_eq!(
@@ -423,7 +438,7 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None).unwrap();
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, 0).unwrap();
         assert_eq!(encrypted_id.len(), CBOR_CREDENTIAL_ID_SIZE);
     }
 
@@ -444,6 +459,7 @@ mod test {
             &rp_id_hash,
             cred_protect_policy,
             cred_blob,
+            0,
         );
 
         assert!(encrypted_id.is_ok());
@@ -461,6 +477,7 @@ mod test {
             &rp_id_hash,
             Some(CredentialProtectionPolicy::UserVerificationRequired),
             None,
+            0,
         )
         .unwrap();
 
@@ -481,14 +498,38 @@ mod test {
 
         let rp_id_hash = [0x55; 32];
         let cred_blob = Some(vec![0x55; env.customization().max_cred_blob_length()]);
-        let encrypted_id =
-            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, cred_blob.clone())
-                .unwrap();
+        let encrypted_id = encrypt_to_credential_id(
+            &mut env,
+            &private_key,
+            &rp_id_hash,
+            None,
+            cred_blob.clone(),
+            0,
+        )
+        .unwrap();
 
         let decrypted_source = decrypt_credential_id(&mut env, encrypted_id, &rp_id_hash)
             .unwrap()
             .unwrap();
         assert_eq!(decrypted_source.private_key, private_key);
         assert_eq!(decrypted_source.cred_blob, cred_blob);
+    }
+
+    #[test]
+    fn test_slot_id_persisted() {
+        let mut env = TestEnv::new();
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
+
+        let rp_id_hash = [0x55; 32];
+        let slot_id = 1;
+        let encrypted_id =
+            encrypt_to_credential_id(&mut env, &private_key, &rp_id_hash, None, None, slot_id)
+                .unwrap();
+
+        let decrypted_source = decrypt_credential_id(&mut env, encrypted_id, &rp_id_hash)
+            .unwrap()
+            .unwrap();
+        assert_eq!(decrypted_source.private_key, private_key);
+        assert_eq!(decrypted_source.slot_id, Some(slot_id));
     }
 }

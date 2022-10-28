@@ -81,6 +81,7 @@ fn enumerate_credentials_response(
         user_icon,
         cred_blob: _,
         large_blob_key,
+        slot_id: _,
     } = credential;
     let user = PublicKeyCredentialUserEntity {
         user_id: user_handle,
@@ -183,12 +184,23 @@ fn process_enumerate_credentials_begin(
         .rp_id_hash
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
     client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash[..])?;
+    let slot_id = if let Some(slot_id) = client_pin.get_slot_id_in_use_or_default(env)? {
+        slot_id
+    } else {
+        // enumerateCredentials needs UV, so slot_id must not be None.
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    };
     let mut iter_result = Ok(());
     let iter = storage::iter_credentials(env, &mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
         .filter_map(|(key, credential)| {
             let cred_rp_id_hash = Sha256::hash(credential.rp_id.as_bytes());
-            if cred_rp_id_hash == rp_id_hash.as_slice() {
+            let slot_id_matches = if let Some(cred_slot_id) = credential.slot_id {
+                cred_slot_id == slot_id
+            } else {
+                slot_id == 0
+            };
+            if cred_rp_id_hash == rp_id_hash.as_slice() && slot_id_matches {
                 Some(key)
             } else {
                 None
@@ -385,6 +397,7 @@ mod test {
             user_icon: Some("icon".to_string()),
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         }
     }
 
@@ -746,6 +759,120 @@ mod test {
         };
 
         assert!(first_credential_id != second_credential_id);
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
+            sub_command_params: None,
+            pin_uv_auth_protocol: None,
+            pin_uv_auth_param: None,
+        };
+        let cred_management_response = process_credential_management(
+            &mut env,
+            &mut ctap_state.stateful_command_permission,
+            &mut ctap_state.client_pin,
+            cred_management_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            cred_management_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn test_process_enumerate_credentials_multi_pin() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let client_pin = ClientPin::new_test(
+            &mut env,
+            1,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+
+        // credential_source1 has no slot_id, so should be treated as slot 0. Only credential_source 2 and 4
+        // should be discovered.
+        let credential_source1 = create_credential_source(&mut env);
+        let mut credential_source2 = create_credential_source(&mut env);
+        credential_source2.user_handle = vec![0x02];
+        credential_source2.slot_id = Some(1);
+        let mut credential_source3 = create_credential_source(&mut env);
+        credential_source3.user_handle = vec![0x03];
+        credential_source3.slot_id = Some(2);
+        let mut credential_source4 = create_credential_source(&mut env);
+        credential_source4.user_handle = vec![0x04];
+        credential_source4.slot_id = Some(1);
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        ctap_state.client_pin = client_pin;
+
+        storage::store_credential(&mut env, credential_source1).unwrap();
+        storage::store_credential(&mut env, credential_source2).unwrap();
+        storage::store_credential(&mut env, credential_source3).unwrap();
+        storage::store_credential(&mut env, credential_source4).unwrap();
+
+        storage::set_pin(&mut env, 1, &[0u8; 16], 4).unwrap();
+        let pin_uv_auth_param = Some(vec![
+            0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
+            0x2B, 0x68,
+        ]);
+
+        let sub_command_params = CredentialManagementSubCommandParameters {
+            rp_id_hash: Some(Sha256::hash(b"example.com").to_vec()),
+            credential_id: None,
+            user: None,
+        };
+        // RP ID hash:
+        // A379A6F6EEAFB9A55E378C118034E2751E682FAB9F2D30AB13D2125586CE1947
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,
+            sub_command_params: Some(sub_command_params),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
+        };
+        let cred_management_response = process_credential_management(
+            &mut env,
+            &mut ctap_state.stateful_command_permission,
+            &mut ctap_state.client_pin,
+            cred_management_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        match cred_management_response.unwrap() {
+            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
+                assert!(response.user.is_some());
+                assert!(response.public_key.is_some());
+                assert_eq!(response.total_credentials, Some(2));
+            }
+            _ => panic!("Invalid response type"),
+        };
+
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
+            sub_command_params: None,
+            pin_uv_auth_protocol: None,
+            pin_uv_auth_param: None,
+        };
+        let cred_management_response = process_credential_management(
+            &mut env,
+            &mut ctap_state.stateful_command_permission,
+            &mut ctap_state.client_pin,
+            cred_management_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        match cred_management_response.unwrap() {
+            ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
+                assert!(response.user.is_some());
+                assert!(response.public_key.is_some());
+                assert_eq!(response.total_credentials, None);
+            }
+            _ => panic!("Invalid response type"),
+        };
+
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
             sub_command_params: None,

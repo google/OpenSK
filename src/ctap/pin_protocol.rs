@@ -20,7 +20,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::convert::TryInto;
 use crypto::hkdf::hkdf_empty_salt_256;
-#[cfg(test)]
+#[cfg(feature = "std")]
 use crypto::hmac::hmac_256;
 use crypto::hmac::{verify_hmac_256, verify_hmac_256_first_128bits};
 use crypto::sha256::Sha256;
@@ -81,7 +81,7 @@ impl PinProtocol {
     }
 
     /// This is used for debugging to inject key material.
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn new_test(
         key_agreement_key: crypto::ecdh::SecKey,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
@@ -94,7 +94,7 @@ impl PinProtocol {
 }
 
 /// Authenticates the pinUvAuthToken for the given PIN protocol.
-#[cfg(test)]
+#[cfg(feature = "std")]
 pub fn authenticate_pin_uv_auth_token(
     token: &[u8; PIN_TOKEN_LENGTH],
     message: &[u8],

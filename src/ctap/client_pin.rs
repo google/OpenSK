@@ -593,7 +593,7 @@ impl ClientPin {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn new_test(
         env: &mut impl Env,
         slot_id: usize,

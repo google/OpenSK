@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use crate::clock::CtapInstant;
+use crate::ctap::client_pin::{ClientPin, PIN_TOKEN_LENGTH};
 use crate::ctap::command::{
     AuthenticatorAttestationMaterial, AuthenticatorConfigParameters,
     AuthenticatorVendorConfigureParameters, Command,
 };
-use crate::ctap::data_formats::ConfigSubCommand;
+use crate::ctap::data_formats::{ConfigSubCommand, PinUvAuthProtocol};
+use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::{key_material, Channel, CtapState};
+use crate::ctap::{key_material, storage, Channel, CtapState};
 use crate::env::Env;
 
 // In tests where we define a dummy user-presence check that immediately returns, the channel
@@ -27,6 +29,8 @@ use crate::env::Env;
 const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 #[cfg(feature = "vendor_hid")]
 const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
+
+pub const DUMMY_CLIENT_DATA_HASH: [u8; 1] = [0xCD];
 
 pub fn enable_enterprise_attestation(
     state: &mut CtapState,
@@ -59,4 +63,29 @@ pub fn enable_enterprise_attestation(
     state.process_parsed_command(env, config_command, DUMMY_CHANNEL, CtapInstant::new(0))?;
 
     Ok(attestation_material)
+}
+
+pub fn enable_pin_uv(
+    state: &mut CtapState,
+    env: &mut impl Env,
+    pin_uv_auth_protocol: PinUvAuthProtocol,
+    slot_id: usize,
+) -> Result<Vec<u8>, Ctap2StatusCode> {
+    let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+    let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
+    let client_pin = ClientPin::new_test(
+        env,
+        slot_id,
+        key_agreement_key,
+        pin_uv_auth_token,
+        pin_uv_auth_protocol,
+    );
+    state.set_client_pin_for_test(client_pin);
+    storage::set_pin(env, slot_id, &[0x88; 16], 4)?;
+
+    Ok(authenticate_pin_uv_auth_token(
+        &pin_uv_auth_token,
+        &DUMMY_CLIENT_DATA_HASH,
+        pin_uv_auth_protocol,
+    ))
 }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod apdu;
-mod client_pin;
+pub(crate) mod client_pin;
 pub mod command;
 mod config_command;
 mod credential_id;
@@ -26,10 +26,10 @@ pub mod hid;
 pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
-mod pin_protocol;
+pub(crate) mod pin_protocol;
 pub mod response;
 pub mod status_code;
-mod storage;
+pub(crate) mod storage;
 mod timed_permission;
 mod token_state;
 #[cfg(feature = "vendor_hid")]
@@ -743,7 +743,7 @@ impl CtapState {
         Ok(())
     }
 
-    fn check_cred_protect_for_listed_credential(
+    fn check_cred_protect(
         &mut self,
         credential: &Option<PublicKeyCredentialSource>,
         has_uv: bool,
@@ -757,6 +757,33 @@ impl CtapState {
         } else {
             false
         }
+    }
+
+    // This checks that either the credential contains no slot id and the expected slot id
+    // is 0, or the credential contains the expected slot id.
+    fn check_slot_id_matches(
+        &mut self,
+        credential: &PublicKeyCredentialSource,
+        slot_id: usize,
+    ) -> bool {
+        if let Some(cred_slot_id) = credential.slot_id {
+            cred_slot_id == slot_id
+        } else {
+            slot_id == 0
+        }
+    }
+
+    // Perform cred protect and slot id checks on a credential to determine whether it is
+    // "visible".
+    fn check_listed_credential_is_visible(
+        &mut self,
+        credential: &Option<PublicKeyCredentialSource>,
+        has_uv: bool,
+        slot_id: usize,
+    ) -> bool {
+        credential.is_some()
+            && self.check_cred_protect(credential, has_uv)
+            && self.check_slot_id_matches(credential.as_ref().unwrap(), slot_id)
     }
 
     fn process_make_credential(
@@ -865,12 +892,14 @@ impl CtapState {
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if self.check_cred_protect_for_listed_credential(
+                if self.check_listed_credential_is_visible(
                     &storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
                     has_uv,
-                ) || self.check_cred_protect_for_listed_credential(
+                    slot_id,
+                ) || self.check_listed_credential_is_visible(
                     &decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash)?,
                     has_uv,
+                    slot_id,
                 ) {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
@@ -917,7 +946,6 @@ impl CtapState {
         // We decide on the algorithm early, but delay key creation since it takes time.
         // We rather do that later so all intermediate checks may return faster.
         let private_key = PrivateKey::new(env, algorithm);
-        // TODO: persist slot_id in the credential.
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
@@ -941,6 +969,7 @@ impl CtapState {
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_blob,
                 large_blob_key: large_blob_key.clone(),
+                slot_id: Some(slot_id),
             };
             storage::store_credential(env, credential_source)?;
             random_id
@@ -951,6 +980,7 @@ impl CtapState {
                 &rp_id_hash,
                 cred_protect_policy,
                 cred_blob,
+                slot_id,
             )?
         };
 
@@ -1143,14 +1173,15 @@ impl CtapState {
         rp_id: &str,
         rp_id_hash: &[u8],
         has_uv: bool,
+        slot_id: usize,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
             let credential = storage::find_credential(env, rp_id, &allowed_credential.key_id)?;
-            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
+            if self.check_listed_credential_is_visible(&credential, has_uv, slot_id) {
                 return Ok(credential);
             }
             let credential = decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash)?;
-            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
+            if self.check_listed_credential_is_visible(&credential, has_uv, slot_id) {
                 return Ok(credential);
             }
         }
@@ -1233,7 +1264,6 @@ impl CtapState {
         let slot_id = slot_id.ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
 
         let rp_id_hash = Sha256::hash(rp_id.as_bytes());
-        // TODO: check slot_id in the credential matches.
         let (credential, next_credential_keys) = if let Some(allow_list) = allow_list {
             (
                 self.get_any_credential_from_allow_list(
@@ -1242,6 +1272,7 @@ impl CtapState {
                     &rp_id,
                     &rp_id_hash,
                     has_uv,
+                    slot_id,
                 )?,
                 vec![],
             )
@@ -1250,7 +1281,10 @@ impl CtapState {
             let iter = storage::iter_credentials(env, &mut iter_result)?;
             let mut stored_credentials: Vec<(usize, u64)> = iter
                 .filter_map(|(key, credential)| {
-                    if credential.rp_id == rp_id && (has_uv || credential.is_discoverable()) {
+                    if credential.rp_id == rp_id
+                        && (has_uv || credential.is_discoverable())
+                        && self.check_slot_id_matches(&credential, slot_id)
+                    {
                         Some((key, credential.creation_order))
                     } else {
                         None
@@ -1568,11 +1602,15 @@ impl CtapState {
     pub fn u2f_needs_user_presence(&mut self, now: CtapInstant) -> bool {
         self.u2f_up_state.is_up_needed(now)
     }
+
+    #[cfg(feature = "std")]
+    pub fn set_client_pin_for_test(&mut self, client_pin: ClientPin) {
+        self.client_pin = client_pin;
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::client_pin::PIN_TOKEN_LENGTH;
     use super::command::{
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
         AuthenticatorCredentialManagementParameters,
@@ -1589,6 +1627,7 @@ mod test {
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::test_helpers;
+    use crate::test_helpers::DUMMY_CLIENT_DATA_HASH;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -1696,7 +1735,7 @@ mod test {
     }
 
     fn create_minimal_make_credential_parameters() -> AuthenticatorMakeCredentialParameters {
-        let client_data_hash = vec![0xCD];
+        let client_data_hash = DUMMY_CLIENT_DATA_HASH.to_vec();
         let rp = PublicKeyCredentialRpEntity {
             rp_id: String::from("example.com"),
             rp_name: None,
@@ -1725,6 +1764,16 @@ mod test {
             pin_uv_auth_protocol: None,
             enterprise_attestation: None,
         }
+    }
+
+    fn add_pin_uv_to_make_credential_parameters(
+        params: &mut AuthenticatorMakeCredentialParameters,
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+        pin_uv_auth_param: Vec<u8>,
+    ) {
+        params.options.uv = true;
+        params.pin_uv_auth_param = Some(pin_uv_auth_param);
+        params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
     }
 
     fn create_make_credential_parameters_with_exclude_list(
@@ -1844,6 +1893,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
 
@@ -1852,6 +1902,106 @@ mod test {
         assert_eq!(
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+    }
+
+    #[test]
+    fn test_process_make_credential_credential_excluded_multi_pin_slot_matched() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let excluded_private_key = PrivateKey::new_ecdsa(&mut env);
+        let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
+        let slot_id = 1;
+
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id)
+                .unwrap();
+
+        let mut make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+
+        let excluded_credential_source = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: excluded_credential_id,
+            private_key: excluded_private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+            slot_id: Some(slot_id),
+        };
+        assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
+
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+    }
+
+    #[test]
+    fn test_process_make_credential_credential_excluded_multi_pin_slot_mismatched() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let excluded_private_key = PrivateKey::new_ecdsa(&mut env);
+        let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
+        let slot_id = 1;
+
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id)
+                .unwrap();
+
+        let mut make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+
+        let excluded_credential_source = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: excluded_credential_id,
+            private_key: excluded_private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+            // Doesn't match the current slot_id.
+            slot_id: Some(2),
+        };
+        assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
+
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        check_make_response(
+            &make_credential_response,
+            0x45,
+            &storage::aaguid(&mut env).unwrap(),
+            0x20,
+            &[],
         );
     }
 
@@ -1944,6 +2094,132 @@ mod test {
         );
         let make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+    }
+
+    #[test]
+    fn test_process_make_credential_multi_pin() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let slot_id_1 = 1;
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let mut pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
+                .unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param.clone(),
+        );
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+
+        let mut iter_result = Ok(());
+        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        // There is only 1 credential, so last is good enough.
+        let (_, stored_credential) = iter.last().unwrap();
+        iter_result.unwrap();
+        let credential_id = stored_credential.credential_id;
+        assert_eq!(stored_credential.slot_id, Some(slot_id_1));
+
+        make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
+                .unwrap();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let slot_id_2 = 2;
+        pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_2)
+                .unwrap();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+    }
+
+    #[test]
+    fn test_non_resident_process_make_credential_multi_pin() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let slot_id_1 = 1;
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let mut pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
+                .unwrap();
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param.clone(),
+        );
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
+
+        make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
+                .unwrap();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        make_credential_params =
+            create_make_credential_parameters_with_exclude_list(&credential_id);
+        let slot_id_2 = 2;
+        pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_2)
+                .unwrap();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
+        make_credential_params.options.rk = false;
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert!(make_credential_response.is_ok());
@@ -2148,30 +2424,17 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::new();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
-        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
-        let client_pin = ClientPin::new_test(
-            &mut env,
-            0,
-            key_agreement_key,
-            pin_uv_auth_token,
-            pin_uv_auth_protocol,
-        );
-
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
-        ctap_state.client_pin = client_pin;
-        storage::set_pin(&mut env, 0, &[0x88; 16], 4).unwrap();
 
-        let client_data_hash = [0xCD];
-        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
-            &pin_uv_auth_token,
-            &client_data_hash,
-            pin_uv_auth_protocol,
-        );
+        let pin_uv_auth_param =
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, 0)
+                .unwrap();
         let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.options.uv = true;
-        make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
-        make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+        );
         let make_credential_response = ctap_state.process_make_credential(
             &mut env,
             make_credential_params.clone(),
@@ -2460,9 +2723,10 @@ mod test {
         );
     }
 
-    fn check_assertion_response(
+    fn check_assertion_response_with_flags(
         response: Result<ResponseData, Ctap2StatusCode>,
         expected_user_id: Vec<u8>,
+        flags: u8,
         signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
     ) {
@@ -2475,11 +2739,26 @@ mod test {
         check_assertion_response_with_user(
             response,
             Some(expected_user),
-            0x00,
+            flags,
             signature_counter,
             expected_number_of_credentials,
             &[],
         );
+    }
+
+    fn check_assertion_response(
+        response: Result<ResponseData, Ctap2StatusCode>,
+        expected_user_id: Vec<u8>,
+        signature_counter: u32,
+        expected_number_of_credentials: Option<u64>,
+    ) {
+        check_assertion_response_with_flags(
+            response,
+            expected_user_id,
+            0x00,
+            signature_counter,
+            expected_number_of_credentials,
+        )
     }
 
     #[test]
@@ -2494,7 +2773,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2555,7 +2834,7 @@ mod test {
         let allow_list = credential_descriptor.map(|c| vec![c]);
         AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list,
             extensions: get_extensions,
             options: GetAssertionOptions {
@@ -2709,12 +2988,13 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2737,7 +3017,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: Some(vec![cred_desc.clone()]),
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2769,12 +3049,13 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: Some(vec![cred_desc]),
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2819,7 +3100,7 @@ mod test {
         };
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: Some(vec![cred_desc]),
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2855,7 +3136,7 @@ mod test {
         };
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: Some(vec![cred_desc]),
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -2864,6 +3145,277 @@ mod test {
             },
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+    }
+
+    #[test]
+    fn test_resident_process_get_assertion_multi_pin() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let credential_id = env.rng().gen_uniform_u8x32().to_vec();
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let slot_id_1 = 1;
+        let slot_id_2 = 2;
+
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id.clone(),
+            transports: None,
+        };
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: credential_id.clone(),
+            private_key: private_key.clone(),
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x1D],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+            slot_id: Some(slot_id_1),
+        };
+        assert!(storage::store_credential(&mut env, credential).is_ok());
+
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc.clone()]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    slot_id_2,
+                )
+                .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc.clone()]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    slot_id_1,
+                )
+                .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        let signature_counter = storage::global_signature_counter(&mut env, slot_id_1).unwrap();
+        check_assertion_response_with_flags(
+            get_assertion_response,
+            vec![0x1D],
+            UV_FLAG,
+            signature_counter,
+            None,
+        );
+
+        // No slot_id should be treated as a credential of slot 0, so the credential shouldn't be found
+        // if we're using slot 1's UV.
+        let credential = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id,
+            private_key,
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x1D],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+            slot_id: None,
+        };
+        assert!(storage::store_credential(&mut env, credential).is_ok());
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc.clone()]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    slot_id_1,
+                )
+                .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS),
+        );
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, 0)
+                    .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        let signature_counter = storage::global_signature_counter(&mut env, 0).unwrap();
+        check_assertion_response_with_flags(
+            get_assertion_response,
+            vec![0x1D],
+            UV_FLAG,
+            signature_counter,
+            None,
+        );
+    }
+
+    #[test]
+    fn test_non_resident_process_get_assertion_multi_pin() {
+        let mut env = TestEnv::new();
+        storage::_enable_multi_pin_for_test(&mut env).unwrap();
+
+        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
+        let slot_id_1 = 1;
+        let slot_id_2 = 2;
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        add_pin_uv_to_make_credential_parameters(
+            &mut make_credential_params,
+            pin_uv_auth_protocol,
+            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
+                .unwrap(),
+        );
+        make_credential_params.options.rk = false;
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert!(make_credential_response.is_ok());
+        let credential_id = parse_credential_id_from_non_resident_make_credential_response(
+            &mut env,
+            make_credential_response.unwrap(),
+        );
+        let cred_desc = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::PublicKey,
+            key_id: credential_id,
+            transports: None,
+        };
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc.clone()]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    slot_id_1,
+                )
+                .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response = ctap_state.process_get_assertion(
+            &mut env,
+            get_assertion_params,
+            DUMMY_CHANNEL,
+            CtapInstant::new(0),
+        );
+        assert!(get_assertion_response.is_ok());
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
+            allow_list: Some(vec![cred_desc]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: false,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    slot_id_2,
+                )
+                .unwrap(),
+            ),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
         let get_assertion_response = ctap_state.process_get_assertion(
             &mut env,
@@ -2897,6 +3449,7 @@ mod test {
             user_icon: None,
             cred_blob: Some(vec![0xCB]),
             large_blob_key: None,
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, credential).is_ok());
 
@@ -2906,7 +3459,7 @@ mod test {
         };
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions,
             options: GetAssertionOptions {
@@ -2975,7 +3528,7 @@ mod test {
         };
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: Some(vec![cred_desc]),
             extensions,
             options: GetAssertionOptions {
@@ -3024,6 +3577,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: Some(vec![0x1C; 32]),
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, credential).is_ok());
 
@@ -3033,7 +3587,7 @@ mod test {
         };
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions,
             options: GetAssertionOptions {
@@ -3100,7 +3654,7 @@ mod test {
         ctap_state.client_pin = client_pin;
         // The PIN length is outside of the test scope and most likely incorrect.
         storage::set_pin(&mut env, 0, &[0u8; 16], 4).unwrap();
-        let client_data_hash = vec![0xCD];
+        let client_data_hash = DUMMY_CLIENT_DATA_HASH.to_vec();
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
             &client_data_hash,
@@ -3194,7 +3748,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -3255,7 +3809,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -3315,6 +3869,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
         assert!(storage::store_credential(&mut env, credential_source).is_ok());
         assert!(storage::count_credentials(&mut env).unwrap() > 0);
@@ -3743,7 +4298,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {
@@ -3820,6 +4375,7 @@ mod test {
             user_icon: Some("icon".to_string()),
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
 
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
@@ -3927,7 +4483,7 @@ mod test {
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
+            client_data_hash: DUMMY_CLIENT_DATA_HASH.to_vec(),
             allow_list: None,
             extensions: GetAssertionExtensions::default(),
             options: GetAssertionOptions {

@@ -184,22 +184,16 @@ fn process_enumerate_credentials_begin(
         .rp_id_hash
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
     client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash[..])?;
-    let slot_id = if let Some(slot_id) = client_pin.get_slot_id_in_use_or_default(env)? {
-        slot_id
-    } else {
-        // enumerateCredentials needs UV, so slot_id must not be None.
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    };
+    // enumerateCredentials needs UV, so slot_id must not be None.
+    let slot_id = client_pin
+        .get_slot_id_in_use_or_default(env)?
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
     let mut iter_result = Ok(());
     let iter = storage::iter_credentials(env, &mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
         .filter_map(|(key, credential)| {
             let cred_rp_id_hash = Sha256::hash(credential.rp_id.as_bytes());
-            let slot_id_matches = if let Some(cred_slot_id) = credential.slot_id {
-                cred_slot_id == slot_id
-            } else {
-                slot_id == 0
-            };
+            let slot_id_matches = credential.slot_id.unwrap_or(0) == slot_id;
             if cred_rp_id_hash == rp_id_hash.as_slice() && slot_id_matches {
                 Some(key)
             } else {

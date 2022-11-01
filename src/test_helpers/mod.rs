@@ -30,8 +30,6 @@ const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 #[cfg(feature = "vendor_hid")]
 const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
-pub const DUMMY_CLIENT_DATA_HASH: [u8; 1] = [0xCD];
-
 pub fn enable_enterprise_attestation(
     state: &mut CtapState,
     env: &mut impl Env,
@@ -70,6 +68,7 @@ pub fn enable_pin_uv(
     env: &mut impl Env,
     pin_uv_auth_protocol: PinUvAuthProtocol,
     slot_id: usize,
+    client_data_hash: &[u8],
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
     let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
@@ -85,7 +84,7 @@ pub fn enable_pin_uv(
 
     Ok(authenticate_pin_uv_auth_token(
         &pin_uv_auth_token,
-        &DUMMY_CLIENT_DATA_HASH,
+        client_data_hash,
         pin_uv_auth_protocol,
     ))
 }

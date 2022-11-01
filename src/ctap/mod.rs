@@ -766,11 +766,7 @@ impl CtapState {
         credential: &PublicKeyCredentialSource,
         slot_id: usize,
     ) -> bool {
-        if let Some(cred_slot_id) = credential.slot_id {
-            cred_slot_id == slot_id
-        } else {
-            slot_id == 0
-        }
+        credential.slot_id.unwrap_or(0) == slot_id
     }
 
     // Perform cred protect and slot id checks on a credential to determine whether it is
@@ -1627,7 +1623,6 @@ mod test {
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::test_helpers;
-    use crate::test_helpers::DUMMY_CLIENT_DATA_HASH;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
     // The keep-alive logic in the processing of some commands needs a channel ID to send
@@ -1637,6 +1632,8 @@ mod test {
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
     #[cfg(feature = "vendor_hid")]
     const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
+
+    const DUMMY_CLIENT_DATA_HASH: [u8; 1] = [0xCD];
 
     fn check_make_response(
         make_credential_response: &Result<ResponseData, Ctap2StatusCode>,
@@ -1916,9 +1913,14 @@ mod test {
         let slot_id = 1;
 
         let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
-        let pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id)
-                .unwrap();
+        let pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
 
         let mut make_credential_params =
             create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
@@ -1964,9 +1966,14 @@ mod test {
         let slot_id = 1;
 
         let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
-        let pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id)
-                .unwrap();
+        let pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
 
         let mut make_credential_params =
             create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
@@ -2107,9 +2114,14 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let slot_id_1 = 1;
         let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
-        let mut pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
-                .unwrap();
+        let mut pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_1,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         add_pin_uv_to_make_credential_parameters(
@@ -2131,9 +2143,14 @@ mod test {
 
         make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
-        pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
-                .unwrap();
+        pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_1,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
             pin_uv_auth_protocol,
@@ -2149,9 +2166,14 @@ mod test {
         make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let slot_id_2 = 2;
-        pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_2)
-                .unwrap();
+        pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_2,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
             pin_uv_auth_protocol,
@@ -2170,9 +2192,14 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
         let slot_id_1 = 1;
         let pin_uv_auth_protocol = PinUvAuthProtocol::V1;
-        let mut pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
-                .unwrap();
+        let mut pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_1,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
 
         let mut make_credential_params = create_minimal_make_credential_parameters();
         add_pin_uv_to_make_credential_parameters(
@@ -2192,9 +2219,14 @@ mod test {
 
         make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
-        pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
-                .unwrap();
+        pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_1,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
             pin_uv_auth_protocol,
@@ -2211,9 +2243,14 @@ mod test {
         make_credential_params =
             create_make_credential_parameters_with_exclude_list(&credential_id);
         let slot_id_2 = 2;
-        pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_2)
-                .unwrap();
+        pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            slot_id_2,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
             pin_uv_auth_protocol,
@@ -2426,9 +2463,14 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
 
-        let pin_uv_auth_param =
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, 0)
-                .unwrap();
+        let pin_uv_auth_param = test_helpers::enable_pin_uv(
+            &mut ctap_state,
+            &mut env,
+            pin_uv_auth_protocol,
+            0,
+            &DUMMY_CLIENT_DATA_HASH,
+        )
+        .unwrap();
         let mut make_credential_params = create_minimal_make_credential_parameters();
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
@@ -3207,6 +3249,7 @@ mod test {
                     &mut env,
                     pin_uv_auth_protocol,
                     slot_id_2,
+                    &DUMMY_CLIENT_DATA_HASH,
                 )
                 .unwrap(),
             ),
@@ -3238,6 +3281,7 @@ mod test {
                     &mut env,
                     pin_uv_auth_protocol,
                     slot_id_1,
+                    &DUMMY_CLIENT_DATA_HASH,
                 )
                 .unwrap(),
             ),
@@ -3292,6 +3336,7 @@ mod test {
                     &mut env,
                     pin_uv_auth_protocol,
                     slot_id_1,
+                    &DUMMY_CLIENT_DATA_HASH,
                 )
                 .unwrap(),
             ),
@@ -3318,8 +3363,14 @@ mod test {
                 uv: false,
             },
             pin_uv_auth_param: Some(
-                test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, 0)
-                    .unwrap(),
+                test_helpers::enable_pin_uv(
+                    &mut ctap_state,
+                    &mut env,
+                    pin_uv_auth_protocol,
+                    0,
+                    &DUMMY_CLIENT_DATA_HASH,
+                )
+                .unwrap(),
             ),
             pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
         };
@@ -3353,8 +3404,14 @@ mod test {
         add_pin_uv_to_make_credential_parameters(
             &mut make_credential_params,
             pin_uv_auth_protocol,
-            test_helpers::enable_pin_uv(&mut ctap_state, &mut env, pin_uv_auth_protocol, slot_id_1)
-                .unwrap(),
+            test_helpers::enable_pin_uv(
+                &mut ctap_state,
+                &mut env,
+                pin_uv_auth_protocol,
+                slot_id_1,
+                &DUMMY_CLIENT_DATA_HASH,
+            )
+            .unwrap(),
         );
         make_credential_params.options.rk = false;
         let make_credential_response =
@@ -3384,6 +3441,7 @@ mod test {
                     &mut env,
                     pin_uv_auth_protocol,
                     slot_id_1,
+                    &DUMMY_CLIENT_DATA_HASH,
                 )
                 .unwrap(),
             ),
@@ -3412,6 +3470,7 @@ mod test {
                     &mut env,
                     pin_uv_auth_protocol,
                     slot_id_2,
+                    &DUMMY_CLIENT_DATA_HASH,
                 )
                 .unwrap(),
             ),

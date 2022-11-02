@@ -595,6 +595,7 @@ pub struct PublicKeyCredentialSource {
     pub user_icon: Option<String>,
     pub cred_blob: Option<Vec<u8>>,
     pub large_blob_key: Option<Vec<u8>>,
+    pub slot_id: Option<usize>,
 }
 
 // We serialize credentials for the persistent storage using CBOR maps. Each field of a credential
@@ -613,6 +614,7 @@ enum PublicKeyCredentialSourceField {
     CredBlob = 10,
     LargeBlobKey = 11,
     PrivateKey = 12,
+    SlotId = 13,
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags:
@@ -639,6 +641,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
             PublicKeyCredentialSourceField::CredBlob => credential.cred_blob,
             PublicKeyCredentialSourceField::LargeBlobKey => credential.large_blob_key,
             PublicKeyCredentialSourceField::PrivateKey => credential.private_key,
+            PublicKeyCredentialSourceField::SlotId => credential.slot_id.map(|x| x as u64),
         }
     }
 }
@@ -661,6 +664,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 PublicKeyCredentialSourceField::CredBlob => cred_blob,
                 PublicKeyCredentialSourceField::LargeBlobKey => large_blob_key,
                 PublicKeyCredentialSourceField::PrivateKey => private_key,
+                PublicKeyCredentialSourceField::SlotId => slot_id,
             } = extract_map(cbor_value)?;
         }
 
@@ -687,6 +691,12 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
             (None, Some(k)) => k,
         };
+        let slot_id = match slot_id.map(extract_unsigned).transpose()? {
+            Some(x) => Some(
+                usize::try_from(x).map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
+            ),
+            None => None,
+        };
 
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
@@ -711,6 +721,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             user_icon,
             cred_blob,
             large_blob_key,
+            slot_id,
         })
     }
 }
@@ -2229,6 +2240,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
 
         assert_eq!(
@@ -2293,6 +2305,16 @@ mod test {
 
         assert_eq!(
             PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            Ok(credential.clone())
+        );
+
+        let credential = PublicKeyCredentialSource {
+            slot_id: Some(1),
+            ..credential
+        };
+
+        assert_eq!(
+            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
             Ok(credential)
         );
     }
@@ -2315,6 +2337,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
 
         let source_cbor = cbor_map! {
@@ -2347,6 +2370,7 @@ mod test {
             user_icon: None,
             cred_blob: None,
             large_blob_key: None,
+            slot_id: None,
         };
 
         let source_cbor = cbor_map! {

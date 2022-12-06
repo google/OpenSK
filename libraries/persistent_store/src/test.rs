@@ -16,27 +16,32 @@ use crate::{BufferOptions, BufferStorage, Store, StoreDriverOff};
 
 #[derive(Clone)]
 pub struct Config {
-    word_size: usize,
-    page_size: usize,
-    num_pages: usize,
-    max_word_writes: usize,
-    max_page_erases: usize,
+    pub word_size: usize,
+    pub page_size: usize,
+    pub num_pages: usize,
+    pub max_word_writes: usize,
+    pub max_page_erases: usize,
 }
 
 impl Config {
     pub fn new_driver(&self) -> StoreDriverOff {
-        let options = BufferOptions {
-            word_size: self.word_size,
-            page_size: self.page_size,
-            max_word_writes: self.max_word_writes,
-            max_page_erases: self.max_page_erases,
-            strict_mode: true,
-        };
-        StoreDriverOff::new(options, self.num_pages)
+        StoreDriverOff::new(self.into(), self.num_pages)
     }
 
     pub fn new_store(&self) -> Store<BufferStorage> {
         self.new_driver().power_on().unwrap().extract_store()
+    }
+}
+
+impl<'a> From<&'a Config> for BufferOptions {
+    fn from(config: &'a Config) -> Self {
+        BufferOptions {
+            word_size: config.word_size,
+            page_size: config.page_size,
+            max_word_writes: config.max_word_writes,
+            max_page_erases: config.max_page_erases,
+            strict_mode: true,
+        }
     }
 }
 

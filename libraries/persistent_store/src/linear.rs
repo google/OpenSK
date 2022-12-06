@@ -43,6 +43,9 @@ impl<S: Storage> Linear<S> {
     /// This function may allocate if the slice spans multiple pages (because they may not be
     /// contiguous). However, a slice is returned if the range fits within a page.
     pub fn read(&self, range: Range<usize>) -> StorageResult<Cow<[u8]>> {
+        if range.is_empty() {
+            return Ok(Cow::Borrowed(&[]));
+        }
         let Range { start, end } = range;
         if end < start {
             return Err(StorageError::OutOfBounds);
@@ -242,9 +245,6 @@ mod tests {
                                 ranges.push(start..start + length);
                                 let end = storage_length - start;
                                 let start = end - length;
-                                if start == storage_length {
-                                    continue; // not considered valid
-                                }
                                 ranges.push(start..end);
                             }
                         }
@@ -291,7 +291,6 @@ mod tests {
     fn out_of_bound() {
         let mut linear = new_linear();
         let length = linear.length();
-        assert!(linear.read(length..length).is_err());
         assert!(linear.read(length..length + 1).is_err());
         assert!(linear.read(length + 1..length + 5).is_err());
         assert!(linear.read(0..length + 1).is_err());
@@ -332,10 +331,9 @@ mod tests {
     #[test]
     fn erase_after() {
         let mut linear = new_linear();
-        let length = linear.length();
         let pattern: Vec<u8> = (0..255).collect();
         for mut range in ranges(&linear) {
-            if range.is_empty() || range.start == length - 1 {
+            if range.is_empty() {
                 continue;
             }
             let value = &pattern[..range.len()];

@@ -123,23 +123,17 @@ impl<S: Storage> Linear<S> {
     ///
     /// This function will erase the page if needed and restore the non-overwritten part. This is
     /// not power-loss resistant.
-    fn write_within(&mut self, mut index: StorageIndex, value: &[u8]) -> StorageResult<()> {
-        let page_size = self.storage.page_size();
+    fn write_within(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
         let previous_value = self.storage.read_slice(index, value.len())?;
         if previous_value.iter().all(|&x| x == 0xff) {
             // The slice is erased so we can write directly.
             return self.write_unaligned(index, value);
         }
         // We must erase the page, so we save the rest.
-        let prefix = self.save_slice(index.page, 0..index.byte)?;
-        let suffix = self.save_slice(index.page, index.byte + value.len()..page_size)?;
+        let complement = self.save_complement(index, value.len())?;
         self.storage.erase_page(index.page)?;
-        index.byte = 0;
-        self.write_unaligned(index, &prefix)?;
-        index.byte += prefix.len();
-        self.write_unaligned(index, value)?;
-        index.byte += value.len();
-        self.write_unaligned(index, &suffix)
+        self.restore_complement(index.page, complement)?;
+        self.write_unaligned(index, value)
     }
 
     /// Writes a slice fitting a page (assuming erased but not necessarily word-aligned).
@@ -174,36 +168,64 @@ impl<S: Storage> Linear<S> {
     ///
     /// This function will erase the page if needed and restore the non-overwritten part. This is
     /// not power-loss resistant.
-    fn erase_within(&mut self, mut index: StorageIndex, length: usize) -> StorageResult<()> {
-        let page_size = self.storage.page_size();
+    fn erase_within(&mut self, index: StorageIndex, length: usize) -> StorageResult<()> {
         let previous_value = self.storage.read_slice(index, length)?;
         if previous_value.iter().all(|&x| x == 0xff) {
             // The slice is already erased, so nothing to do.
             return Ok(());
         }
         // We must erase the page, so we save the rest.
-        let prefix = self.save_slice(index.page, 0..index.byte)?;
-        let suffix = self.save_slice(index.page, index.byte + length..page_size)?;
+        let complement = self.save_complement(index, length)?;
         self.storage.erase_page(index.page)?;
-        index.byte = 0;
-        self.write_unaligned(index, &prefix)?;
-        index.byte += prefix.len() + length;
-        self.write_unaligned(index, &suffix)
+        self.restore_complement(index.page, complement)
     }
 
-    /// Reads a slice fitting a page.
-    fn save_slice(&self, page: usize, range: Range<usize>) -> StorageResult<Vec<u8>> {
-        if range.is_empty() {
-            return Ok(Vec::new());
-        }
-        let index = StorageIndex {
-            page,
-            byte: range.start,
-        };
-        self.storage
-            .read_slice(index, range.len())
-            .map(|x| x.into_owned())
+    /// Saves the complement of a slice fitting a page.
+    fn save_complement(&self, index: StorageIndex, length: usize) -> StorageResult<Complement> {
+        let page_size = self.storage.page_size();
+        let prefix = self
+            .storage
+            .read_slice(
+                StorageIndex {
+                    page: index.page,
+                    byte: 0,
+                },
+                index.byte,
+            )?
+            .into_owned();
+        let suffix = self
+            .storage
+            .read_slice(
+                StorageIndex {
+                    page: index.page,
+                    byte: index.byte + length,
+                },
+                page_size - index.byte - length,
+            )?
+            .into_owned();
+        Ok(Complement { prefix, suffix })
     }
+
+    /// Restores the complement of a slice fitting a page.
+    fn restore_complement(&mut self, page: usize, complement: Complement) -> StorageResult<()> {
+        let page_size = self.storage.page_size();
+        let Complement { prefix, suffix } = complement;
+        self.write_unaligned(StorageIndex { page, byte: 0 }, &prefix)?;
+        self.write_unaligned(
+            StorageIndex {
+                page,
+                byte: page_size - suffix.len(),
+            },
+            &suffix,
+        )?;
+        Ok(())
+    }
+}
+
+/// Represents the complement of a slice within a page.
+struct Complement {
+    prefix: Vec<u8>,
+    suffix: Vec<u8>,
 }
 
 #[cfg(test)]

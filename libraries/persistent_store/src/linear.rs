@@ -124,15 +124,7 @@ impl<S: Storage> Linear<S> {
     /// This function will erase the page if needed and restore the non-overwritten part. This is
     /// not power-loss resistant.
     fn write_within(&mut self, index: StorageIndex, value: &[u8]) -> StorageResult<()> {
-        let previous_value = self.storage.read_slice(index, value.len())?;
-        if previous_value.iter().all(|&x| x == 0xff) {
-            // The slice is erased so we can write directly.
-            return self.write_unaligned(index, value);
-        }
-        // We must erase the page, so we save the rest.
-        let complement = self.save_complement(index, value.len())?;
-        self.storage.erase_page(index.page)?;
-        self.restore_complement(index.page, complement)?;
+        self.erase_within(index, value.len())?;
         self.write_unaligned(index, value)
     }
 

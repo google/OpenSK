@@ -370,6 +370,7 @@ mod driver;
 mod file;
 mod format;
 pub mod fragment;
+mod linear;
 #[cfg(feature = "std")]
 mod model;
 mod storage;
@@ -385,6 +386,7 @@ pub use self::driver::{
 };
 #[cfg(feature = "std")]
 pub use self::file::{FileOptions, FileStorage};
+pub use self::linear::Linear;
 #[cfg(feature = "std")]
 pub use self::model::{StoreModel, StoreOperation};
 pub use self::storage::{Storage, StorageError, StorageIndex, StorageResult};

@@ -16,7 +16,7 @@ static mut HEAP: Heap = Heap::empty();
 
 #[no_mangle]
 unsafe fn libtock_alloc_init(app_heap_start: usize, app_heap_size: usize) {
-    HEAP.init(app_heap_start, app_heap_size);
+    HEAP.init(app_heap_start as *mut u8, app_heap_size);
 }
 
 // With the "debug_allocations" feature, we use `AtomicUsize` to store the

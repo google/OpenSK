@@ -344,8 +344,8 @@ impl CtapHid {
     }
 
     /// Helper function to parse a raw packet.
-    pub fn process_single_packet(packet: &HidPacket) -> (&ChannelID, ProcessedPacket) {
-        let (cid, rest) = array_refs![packet, 4, 60];
+    pub fn process_single_packet(packet: &HidPacket) -> (ChannelID, ProcessedPacket) {
+        let (&cid, rest) = array_refs![packet, 4, 60];
         if rest[0] & CtapHid::PACKET_TYPE_MASK != 0 {
             let cmd = rest[0] & !CtapHid::PACKET_TYPE_MASK;
             let len = (rest[1] as usize) << 8 | (rest[2] as usize);
@@ -605,7 +605,7 @@ mod test {
         packet[..4].copy_from_slice(&cid);
         packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
         let (processed_cid, processed_packet) = CtapHid::process_single_packet(&packet);
-        assert_eq!(processed_cid, &cid);
+        assert_eq!(processed_cid, cid);
         let expected_packet = ProcessedPacket::InitPacket {
             cmd: CtapHidCommand::Ping as u8,
             len: 2,

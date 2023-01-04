@@ -251,7 +251,7 @@ fn send_keepalive_up_needed(
 
                 // We only parse one packet, because we only care about CANCEL.
                 let (received_cid, processed_packet) = CtapHid::process_single_packet(&pkt);
-                if received_cid != &cid {
+                if received_cid != cid {
                     debug_ctap!(
                         env,
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",

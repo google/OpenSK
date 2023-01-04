@@ -89,8 +89,8 @@ impl MessageAssembler {
 
             // If the packet is from the timed-out channel, send back a timeout error.
             // Otherwise, proceed with processing the packet.
-            if *cid == current_cid {
-                return Err((*cid, CtapHidError::MsgTimeout));
+            if cid == current_cid {
+                return Err((cid, CtapHidError::MsgTimeout));
             }
         }
 
@@ -98,12 +98,12 @@ impl MessageAssembler {
             // Expecting an initialization packet.
             match processed_packet {
                 ProcessedPacket::InitPacket { cmd, len, data } => {
-                    self.parse_init_packet(env, *cid, cmd, len, data, timestamp)
+                    self.parse_init_packet(env, cid, cmd, len, data, timestamp)
                 }
                 ProcessedPacket::ContinuationPacket { .. } => {
                     // CTAP specification (version 20190130) section 8.1.5.4
                     // Spurious continuation packets will be ignored.
-                    Err((*cid, CtapHidError::UnexpectedContinuation))
+                    Err((cid, CtapHidError::UnexpectedContinuation))
                 }
             }
         } else {
@@ -111,8 +111,8 @@ impl MessageAssembler {
 
             // CTAP specification (version 20190130) section 8.1.5.1
             // Reject packets from other channels.
-            if *cid != self.cid {
-                return Err((*cid, CtapHidError::ChannelBusy));
+            if cid != self.cid {
+                return Err((cid, CtapHidError::ChannelBusy));
             }
 
             match processed_packet {
@@ -120,16 +120,16 @@ impl MessageAssembler {
                 ProcessedPacket::InitPacket { cmd, len, data } => {
                     self.reset();
                     if cmd == CtapHidCommand::Init as u8 {
-                        self.parse_init_packet(env, *cid, cmd, len, data, timestamp)
+                        self.parse_init_packet(env, cid, cmd, len, data, timestamp)
                     } else {
-                        Err((*cid, CtapHidError::InvalidSeq))
+                        Err((cid, CtapHidError::InvalidSeq))
                     }
                 }
                 ProcessedPacket::ContinuationPacket { seq, data } => {
                     if seq != self.seq {
                         // Reject packets with the wrong sequence number.
                         self.reset();
-                        Err((*cid, CtapHidError::InvalidSeq))
+                        Err((cid, CtapHidError::InvalidSeq))
                     } else {
                         // Update the last timestamp.
                         self.last_timestamp = timestamp;

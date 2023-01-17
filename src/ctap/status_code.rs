@@ -91,6 +91,7 @@ impl From<UserPresenceError> for Ctap2StatusCode {
             UserPresenceError::Timeout => Self::CTAP2_ERR_USER_ACTION_TIMEOUT,
             UserPresenceError::Declined => Self::CTAP2_ERR_OPERATION_DENIED,
             UserPresenceError::Canceled => Self::CTAP2_ERR_KEEPALIVE_CANCEL,
+            UserPresenceError::ButtonListenerFailed => Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
         }
     }
 }

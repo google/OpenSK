@@ -14,6 +14,7 @@
 
 use crate::clock::ClockInt;
 use embedded_time::duration::Milliseconds;
+use libtock_platform::ErrorCode;
 
 #[derive(Debug)]
 pub enum UserPresenceError {
@@ -23,6 +24,14 @@ pub enum UserPresenceError {
     Canceled,
     /// User presence check timed out.
     Timeout,
+    /// The button listener failed
+    ButtonListenerFailed,
+}
+
+impl From<ErrorCode> for UserPresenceError {
+    fn from(_: ErrorCode) -> Self {
+        UserPresenceError::ButtonListenerFailed
+    }
 }
 
 pub type UserPresenceResult = Result<(), UserPresenceError>;

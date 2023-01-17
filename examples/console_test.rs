@@ -16,20 +16,27 @@
 
 extern crate lang_items;
 
-use libtock_drivers::console::{Console, BUFFER_SIZE};
+use libtock_console::Console;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
 
-libtock_core::stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+set_main! {main}
 
 fn main() {
     // Write messages of length up to the console driver's buffer size.
-    let mut buf = [0; BUFFER_SIZE];
+    let mut buf = [0; 1024];
     loop {
         for i in 1..buf.len() {
             for byte in buf.iter_mut().take(i) {
                 *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
-            Console::write_unbuffered(&mut buf[..(i + 1)]);
+            Console::<TockSyscalls>::write(&mut buf[..(i + 1)])
+                .ok()
+                .unwrap();
         }
     }
 }

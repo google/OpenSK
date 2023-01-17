@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![no_main]
 
 extern crate alloc;
 extern crate arrayref;
@@ -21,8 +22,6 @@ extern crate byteorder;
 extern crate core;
 extern crate lang_items;
 
-#[cfg(feature = "with_ctap1")]
-use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::convert::TryFrom;
 use core::convert::TryInto;
@@ -41,15 +40,24 @@ use ctap2::Transport;
 use embedded_time::duration::Microseconds;
 use embedded_time::duration::Milliseconds;
 #[cfg(feature = "with_ctap1")]
-use libtock_drivers::buttons::{self, ButtonState};
+use libtock_buttons::Buttons;
 #[cfg(feature = "debug_ctap")]
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+#[cfg(feature = "debug_ctap")]
+use libtock_console::ConsoleWriter;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
 use usb_ctap_hid::UsbEndpoint;
 
-libtock_core::stack_size! {0x4000}
+#[cfg(not(feature = "std"))]
+stack_size! {0x4000}
+#[cfg(not(feature = "std"))]
+set_main! {main}
 
 const SEND_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(1000);
 const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
@@ -65,6 +73,11 @@ struct EndpointReply {
     transport: Transport,
     reply: HidPacketIterator,
 }
+
+#[cfg(feature = "std")]
+type SyscallImplementation = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type SyscallImplementation = TockSyscalls;
 
 impl EndpointReply {
     pub fn new(endpoint: UsbEndpoint) -> Self {
@@ -113,16 +126,24 @@ impl EndpointReplies {
         None
     }
 }
+
 fn main() {
     let clock = new_clock();
+    #[cfg(feature = "debug_ctap")]
+    let mut writer = Console::<SyscallImplementation>::writer();
+
+    #[cfg(feature = "debug_ctap")]
+    {
+        writeln!(writer, "Hello world from ctap2!").ok().unwrap();
+    }
 
     // Setup USB driver.
-    if !usb_ctap_hid::setup() {
+    if !usb_ctap_hid::UsbCtapHid::<SyscallImplementation>::setup() {
         panic!("Cannot setup USB driver");
     }
 
     let boot_time = clock.try_now().unwrap();
-    let env = TockEnv::new();
+    let env = TockEnv::<SyscallImplementation>::new();
     let mut ctap = ctap2::Ctap::new(env, boot_time);
 
     let mut led_counter = 0;
@@ -133,24 +154,35 @@ fn main() {
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
     // making consistent blinking patterns and sending keepalives harder.
+
+    #[cfg(feature = "debug_ctap")]
+    writeln!(writer, "Entering main ctap loop").unwrap();
     loop {
         // Create the button callback, used for CTAP1.
+        // #[cfg(feature = "with_ctap1")]
+        // let button_touched = Cell::new(false);
+        // #[cfg(feature = "with_ctap1")]
+        // let buttons_listener = ButtonListener(|_button_num, state| {
+        //     match state {
+        //         ButtonState::Pressed => button_touched.set(true),
+        //         ButtonState::Released => (),
+        //     };
+        // });
+        // #[cfg(feature = "with_ctap1")]
+        // share::scope(|subscribe| {
+        //     Buttons::<SyscallImplementation>::register_listener(&buttons_listener, subscribe)
+        // })
+        // .ok()
+        // .unwrap();
         #[cfg(feature = "with_ctap1")]
-        let button_touched = Cell::new(false);
-        #[cfg(feature = "with_ctap1")]
-        let mut buttons_callback = buttons::with_callback(|_button_num, state| {
-            match state {
-                ButtonState::Pressed => button_touched.set(true),
-                ButtonState::Released => (),
-            };
-        });
-        #[cfg(feature = "with_ctap1")]
-        let mut buttons = buttons_callback.init().flex_unwrap();
-        // At the moment, all buttons are accepted. You can customize your setup here.
-        #[cfg(feature = "with_ctap1")]
-        for mut button in &mut buttons {
-            button.enable().flex_unwrap();
-        }
+        let num_buttons = Buttons::<SyscallImplementation>::count().ok().unwrap();
+        // // At the moment, all buttons are accepted. You can customize your setup here.
+        // #[cfg(feature = "with_ctap1")]
+        // for n in 0..num_buttons {
+        //     Buttons::<SyscallImplementation>::enable_interrupts(n)
+        //         .ok()
+        //         .unwrap();
+        // }
 
         // Variable for use in both the send_and_maybe_recv and recv cases.
         let mut usb_endpoint: Option<UsbEndpoint> = None;
@@ -162,18 +194,30 @@ fn main() {
             match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT) {
                 Ok(SendOrRecvStatus::Timeout) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Sending packet timed out", &clock);
+                    print_packet_notice::<SyscallImplementation>(
+                        "Sending packet timed out",
+                        &clock,
+                        &mut writer,
+                    );
                     // TODO: reset the ctap_hid state.
                     // Since sending the packet timed out, we cancel this reply.
                     break;
                 }
                 Ok(SendOrRecvStatus::Sent) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Sent packet", &clock);
+                    print_packet_notice::<SyscallImplementation>(
+                        "Sent packet",
+                        &clock,
+                        &mut writer,
+                    );
                 }
                 Ok(SendOrRecvStatus::Received(ep)) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Received another packet", &clock);
+                    print_packet_notice::<SyscallImplementation>(
+                        "Received another packet",
+                        &clock,
+                        &mut writer,
+                    );
                     usb_endpoint = Some(ep);
 
                     // Copy to incoming packet to local buffer to be consistent
@@ -185,12 +229,19 @@ fn main() {
         } else {
             // receive
             usb_endpoint =
-                match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK)
-                    .flex_unwrap()
+                match usb_ctap_hid::UsbCtapHid::<SyscallImplementation>::recv_with_timeout(
+                    &mut pkt_request,
+                    KEEPALIVE_DELAY_TOCK,
+                )
+                .flex_unwrap()
                 {
                     usb_ctap_hid::SendOrRecvStatus::Received(endpoint) => {
                         #[cfg(feature = "debug_ctap")]
-                        print_packet_notice("Received packet", &clock);
+                        print_packet_notice::<SyscallImplementation>(
+                            "Received packet",
+                            &clock,
+                            &mut writer,
+                        );
                         Some(endpoint)
                     }
                     usb_ctap_hid::SendOrRecvStatus::Sent => {
@@ -203,17 +254,22 @@ fn main() {
         let now = clock.try_now().unwrap();
         #[cfg(feature = "with_ctap1")]
         {
-            if button_touched.get() {
+            // check if any button has been pressed
+            let button_touched = (0..num_buttons)
+                .into_iter()
+                .any(Buttons::<SyscallImplementation>::is_pressed);
+            if button_touched {
                 ctap.state().u2f_grant_user_presence(now);
             }
             // Cleanup button callbacks. We miss button presses while processing though.
             // Heavy computation mostly follows a registered touch luckily. Unregistering
             // callbacks is important to not clash with those from check_user_presence.
-            for mut button in &mut buttons {
-                button.disable().flex_unwrap();
-            }
-            drop(buttons);
-            drop(buttons_callback);
+            // for n in 0..num_buttons {
+            //     Buttons::<SyscallImplementation>::disable_interrupts(n)
+            //         .ok()
+            //         .unwrap();
+            // }
+            // Buttons::<SyscallImplementation>::unregister_listener();
         }
 
         // These calls are making sure that even for long inactivity, wrapping clock values
@@ -234,7 +290,7 @@ fn main() {
                         if ep.reply.has_data() {
                             #[cfg(feature = "debug_ctap")]
                             writeln!(
-                                Console::new(),
+                                Console::<SyscallImplementation>::writer(),
                                 "Warning overwriting existing reply for endpoint {}",
                                 endpoint as usize
                             )
@@ -263,30 +319,34 @@ fn main() {
         }
 
         if ctap.hid().should_wink(now) {
-            wink_leds(led_counter);
+            wink_leds::<SyscallImplementation>(led_counter);
         } else {
             #[cfg(not(feature = "with_ctap1"))]
-            switch_off_leds();
+            switch_off_leds::<SyscallImplementation>();
             #[cfg(feature = "with_ctap1")]
             if ctap.state().u2f_needs_user_presence(now) {
                 // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
                 // delay caused by processing and sending of packets.
-                blink_leds(led_counter);
+                blink_leds::<SyscallImplementation>(led_counter);
             } else {
-                switch_off_leds();
+                switch_off_leds::<SyscallImplementation>();
             }
         }
     }
 }
 
 #[cfg(feature = "debug_ctap")]
-fn print_packet_notice(notice_text: &str, clock: &CtapClock) {
+fn print_packet_notice<S: libtock_platform::Syscalls>(
+    notice_text: &str,
+    clock: &CtapClock,
+    writer: &mut ConsoleWriter<S>,
+) {
     let now = clock.try_now().unwrap();
     let now_us = Microseconds::<u64>::try_from(now.duration_since_epoch())
         .unwrap()
         .0;
     writeln!(
-        Console::new(),
+        writer,
         "{} at {}.{:06} s",
         notice_text,
         now_us / 1_000_000,

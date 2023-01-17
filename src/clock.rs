@@ -18,13 +18,15 @@ use embedded_time::duration::Milliseconds;
 pub use embedded_time::Clock;
 #[cfg(not(feature = "std"))]
 use libtock_drivers::result::FlexUnwrap;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::TockSyscalls;
 
 #[cfg(not(feature = "std"))]
-pub struct LibtockClock<const CLOCK_FREQUENCY: u32>(libtock_drivers::timer::Timer<'static>);
+pub struct LibtockClock<const CLOCK_FREQUENCY: u32>(libtock_drivers::timer::Timer<TockSyscalls>);
 #[cfg(not(feature = "std"))]
 impl<const CLOCK_FREQUENCY: u32> LibtockClock<CLOCK_FREQUENCY> {
     pub fn new() -> Self {
-        let boxed_cb = alloc::boxed::Box::new(libtock_drivers::timer::with_callback(|_, _| {}));
+        let boxed_cb = alloc::boxed::Box::new(libtock_drivers::timer::with_callback(|_| {}));
         let timer = alloc::boxed::Box::leak(boxed_cb).init().flex_unwrap();
         Self(timer)
     }
@@ -56,7 +58,7 @@ impl<const CLOCK_FREQUENCY: u32> embedded_time::Clock for LibtockClock<CLOCK_FRE
 
     fn try_now(&self) -> Result<embedded_time::Instant<Self>, embedded_time::clock::Error> {
         let timer = &self.0;
-        let now = timer.get_current_clock().flex_unwrap();
+        let now = timer.get_current_counter_ticks().flex_unwrap();
         Ok(embedded_time::Instant::new(now.num_ticks() as Self::T))
     }
 }

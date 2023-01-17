@@ -22,34 +22,38 @@ use crate::api::{attestation_store, key_store};
 use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
 use core::cell::Cell;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::marker::PhantomData;
 use embedded_time::duration::Milliseconds;
 use embedded_time::fixed_point::FixedPoint;
-use libtock_core::result::{CommandError, EALREADY};
-use libtock_drivers::buttons::{self, ButtonState};
-use libtock_drivers::console::Console;
+use libtock_buttons::{ButtonListener, ButtonState, Buttons};
+use libtock_console::{Console, ConsoleWriter};
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::usb_ctap_hid::{self, UsbEndpoint};
-use libtock_drivers::{crp, led, timer};
+use libtock_drivers::usb_ctap_hid::{self, UsbCtapHid, UsbEndpoint};
+use libtock_drivers::{crp, timer};
+use libtock_leds::Leds;
+use libtock_platform as platform;
+use libtock_platform::{ErrorCode, Syscalls};
 use persistent_store::{StorageResult, Store};
+use platform::{share, DefaultConfig, Subscribe};
 use rng256::TockRng256;
 
 mod storage;
 
-pub struct TockHidConnection {
+pub struct TockHidConnection<S: Syscalls> {
     endpoint: UsbEndpoint,
+    s: PhantomData<S>,
 }
 
-impl HidConnection for TockHidConnection {
+impl<S: Syscalls> HidConnection for TockHidConnection<S> {
     fn send_and_maybe_recv(
         &mut self,
         buf: &mut [u8; 64],
         timeout: Milliseconds<ClockInt>,
     ) -> SendOrRecvResult {
-        match usb_ctap_hid::send_or_recv_with_timeout(
+        match UsbCtapHid::<S>::send_or_recv_with_timeout(
             buf,
-            timer::Duration::from_ms(timeout.integer() as isize),
+            Duration::from_ms(timeout.integer() as isize),
             self.endpoint,
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
@@ -62,17 +66,20 @@ impl HidConnection for TockHidConnection {
     }
 }
 
-pub struct TockEnv {
-    rng: TockRng256,
-    store: Store<TockStorage>,
-    upgrade_storage: Option<TockUpgradeStorage>,
-    main_connection: TockHidConnection,
+pub struct TockEnv<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config = DefaultConfig,
+> {
+    rng: TockRng256<S>,
+    store: Store<TockStorage<S, C>>,
+    upgrade_storage: Option<TockUpgradeStorage<S, C>>,
+    main_connection: TockHidConnection<S>,
     #[cfg(feature = "vendor_hid")]
-    vendor_connection: TockHidConnection,
+    vendor_connection: TockHidConnection<S>,
     blink_pattern: usize,
 }
 
-impl TockEnv {
+impl<S: Syscalls> TockEnv<S> {
     /// Returns the unique instance of the Tock environment.
     ///
     /// # Panics
@@ -81,21 +88,32 @@ impl TockEnv {
     pub fn new() -> Self {
         // We rely on `take_storage` to ensure that this function is called only once.
         let storage = take_storage().unwrap();
-        let store = Store::new(storage).ok().unwrap();
+        let store = match Store::new(storage) {
+            Ok(s) => s,
+            Err((e, _)) => panic!("StoreError: {:?}", e),
+        };
         let upgrade_storage = TockUpgradeStorage::new().ok();
         TockEnv {
-            rng: TockRng256 {},
+            rng: TockRng256::new(),
             store,
             upgrade_storage,
             main_connection: TockHidConnection {
                 endpoint: UsbEndpoint::MainHid,
+                s: PhantomData,
             },
             #[cfg(feature = "vendor_hid")]
             vendor_connection: TockHidConnection {
                 endpoint: UsbEndpoint::VendorHid,
+                s: PhantomData,
             },
             blink_pattern: 0,
         }
+    }
+}
+
+impl<S: Syscalls> Default for TockEnv<S> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -104,14 +122,44 @@ impl TockEnv {
 /// # Panics
 ///
 /// - If called a second time.
-pub fn take_storage() -> StorageResult<TockStorage> {
+pub fn take_storage<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config>(
+) -> StorageResult<TockStorage<S, C>> {
     // Make sure the storage was not already taken.
-    static TAKEN: AtomicBool = AtomicBool::new(false);
-    assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
+    #[cfg(target_has_atomic = "8")]
+    {
+        use core::sync::atomic::{AtomicBool, Ordering};
+        static TAKEN: AtomicBool = AtomicBool::new(false);
+        assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
+    }
+    #[cfg(not(target_has_atomic = "8"))]
+    {
+        static mut TAKEN: bool = false;
+        // Safety
+        //
+        // We can not use an AtomicBool on platforms that do not support atomics,
+        // such as the whole `riscv32i[mc]` family like OpenTitan.
+        // Thus, we need to use a mutable static variable which are unsafe
+        // cause they could cause a data race when two threads access it
+        // at the same time.
+        //
+        // However, as we are running an application on TockOS and because
+        // of its [architecture](https://www.tockos.org/documentation/design)
+        // we are running in a single-threaded event loop which means the
+        // aforementioned data race is impossible. Thus, in this case, the
+        // usage of a static mut is safe.
+        unsafe {
+            assert!(!TAKEN);
+            TAKEN = true;
+        }
+    }
     TockStorage::new()
 }
 
-impl UserPresence for TockEnv {
+impl<S, C> UserPresence for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
     fn check_init(&mut self) {
         self.blink_pattern = 0;
     }
@@ -119,52 +167,74 @@ impl UserPresence for TockEnv {
         if timeout.integer() == 0 {
             return Err(UserPresenceError::Timeout);
         }
-        blink_leds(self.blink_pattern);
+        blink_leds::<S>(self.blink_pattern);
         self.blink_pattern += 1;
 
+        // enable interrupts for all buttons
+        let num_buttons = Buttons::<S>::count()?;
+        (0..num_buttons)
+            .into_iter()
+            .try_for_each(|n| Buttons::<S>::enable_interrupts(n))?;
+
         let button_touched = Cell::new(false);
-        let mut buttons_callback = buttons::with_callback(|_button_num, state| {
+        let button_listener = ButtonListener(|_button_num, state| {
             match state {
                 ButtonState::Pressed => button_touched.set(true),
                 ButtonState::Released => (),
             };
         });
-        let mut buttons = buttons_callback.init().flex_unwrap();
-        for mut button in &mut buttons {
-            button.enable().flex_unwrap();
-        }
 
-        // Setup a keep-alive callback.
+        // Setup a keep-alive callback but don't enable it yet
         let keepalive_expired = Cell::new(false);
-        let mut keepalive_callback = timer::with_callback(|_, _| {
-            keepalive_expired.set(true);
-        });
-        let mut keepalive = keepalive_callback.init().flex_unwrap();
-        let keepalive_alarm = keepalive
-            .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
-            .flex_unwrap();
+        let mut keepalive_callback =
+            timer::with_callback::<S, C, _>(|_| keepalive_expired.set(true));
+        share::scope::<
+            (
+                Subscribe<_, { libtock_buttons::DRIVER_NUM }, 0>,
+                Subscribe<
+                    S,
+                    { libtock_drivers::timer::DRIVER_NUM },
+                    { libtock_drivers::timer::subscribe::CALLBACK },
+                >,
+            ),
+            _,
+            _,
+        >(|handle| {
+            let (sub_button, sub_timer) = handle.split();
+            Buttons::<S>::register_listener(&button_listener, sub_button)?;
 
-        // Wait for a button touch or an alarm.
-        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+            let mut keepalive = keepalive_callback.init().flex_unwrap();
+            keepalive_callback.enable(sub_timer)?;
+            keepalive
+                .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
+                .flex_unwrap();
 
-        // Cleanup alarm callback.
-        match keepalive.stop_alarm(keepalive_alarm) {
-            Ok(()) => (),
-            Err(TockError::Command(CommandError {
-                return_code: EALREADY,
-                ..
-            })) => assert!(keepalive_expired.get()),
-            Err(_e) => {
-                #[cfg(feature = "debug_ctap")]
-                panic!("Unexpected error when stopping alarm: {:?}", _e);
-                #[cfg(not(feature = "debug_ctap"))]
-                panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+            // Wait for a button touch or an alarm.
+            libtock_drivers::util::Util::<S>::yieldk_for(|| {
+                button_touched.get() || keepalive_expired.get()
+            });
+
+            Buttons::<S>::unregister_listener();
+
+            // disable event interrupts for all buttons
+            (0..num_buttons)
+                .into_iter()
+                .try_for_each(|n| Buttons::<S>::disable_interrupts(n))?;
+
+            // Cleanup alarm callback.
+            match keepalive.stop_alarm() {
+                Ok(()) => (),
+                Err(TockError::Command(ErrorCode::Already)) => assert!(keepalive_expired.get()),
+                Err(_e) => {
+                    #[cfg(feature = "debug_ctap")]
+                    panic!("Unexpected error when stopping alarm: {:?}", _e);
+                    #[cfg(not(feature = "debug_ctap"))]
+                    panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+                }
             }
-        }
 
-        for mut button in &mut buttons {
-            button.disable().flex_unwrap();
-        }
+            Ok::<(), UserPresenceError>(())
+        })?;
 
         if button_touched.get() {
             Ok(())
@@ -176,26 +246,35 @@ impl UserPresence for TockEnv {
     }
 
     fn check_complete(&mut self) {
-        switch_off_leds();
+        switch_off_leds::<S>();
     }
 }
 
-impl FirmwareProtection for TockEnv {
+impl<S, C> FirmwareProtection for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
     fn lock(&mut self) -> bool {
         matches!(
-            crp::set_protection(crp::ProtectionLevel::FullyLocked),
-            Ok(())
-                | Err(TockError::Command(CommandError {
-                    return_code: EALREADY,
-                    ..
-                }))
+            crp::Crp::<S>::set_protection(crp::ProtectionLevel::FullyLocked),
+            Ok(()) | Err(TockError::Command(ErrorCode::Already))
         )
     }
 }
 
-impl key_store::Helper for TockEnv {}
+impl<S, C> key_store::Helper for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::allow_ro::Config + platform::subscribe::Config,
+{
+}
 
-impl AttestationStore for TockEnv {
+impl<S, C> AttestationStore for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
     fn get(
         &mut self,
         id: &attestation_store::Id,
@@ -218,17 +297,19 @@ impl AttestationStore for TockEnv {
     }
 }
 
-impl Env for TockEnv {
-    type Rng = TockRng256;
+impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> Env
+    for TockEnv<S, C>
+{
+    type Rng = TockRng256<S>;
     type UserPresence = Self;
-    type Storage = TockStorage;
+    type Storage = TockStorage<S, C>;
     type KeyStore = Self;
     type AttestationStore = Self;
-    type UpgradeStorage = TockUpgradeStorage;
+    type UpgradeStorage = TockUpgradeStorage<S, C>;
     type FirmwareProtection = Self;
-    type Write = Console;
+    type Write = ConsoleWriter<S>;
     type Customization = CustomizationImpl;
-    type HidConnection = TockHidConnection;
+    type HidConnection = TockHidConnection<S>;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -259,7 +340,7 @@ impl Env for TockEnv {
     }
 
     fn write(&mut self) -> Self::Write {
-        Console::new()
+        Console::<S>::writer()
     }
 
     fn customization(&self) -> &Self::Customization {
@@ -276,17 +357,17 @@ impl Env for TockEnv {
     }
 }
 
-pub fn blink_leds(pattern_seed: usize) {
-    for l in 0..led::count().flex_unwrap() {
-        if (pattern_seed ^ l).count_ones() & 1 != 0 {
-            led::get(l).flex_unwrap().on().flex_unwrap();
+pub fn blink_leds<S: Syscalls>(pattern_seed: usize) {
+    for l in 0..Leds::<S>::count().unwrap() {
+        if (pattern_seed ^ l as usize).count_ones() & 1 != 0 {
+            Leds::<S>::on(l).unwrap();
         } else {
-            led::get(l).flex_unwrap().off().flex_unwrap();
+            Leds::<S>::off(l).unwrap();
         }
     }
 }
 
-pub fn wink_leds(pattern_seed: usize) {
+pub fn wink_leds<S: Syscalls>(pattern_seed: usize) {
     // This generates a "snake" pattern circling through the LEDs.
     // Fox example with 4 LEDs the sequence of lit LEDs will be the following.
     // 0 1 2 3
@@ -299,7 +380,7 @@ pub fn wink_leds(pattern_seed: usize) {
     // *     *
     // * *   *
     // * *
-    let count = led::count().flex_unwrap();
+    let count = Leds::<S>::count().unwrap() as usize;
     let a = (pattern_seed / 2) % count;
     let b = ((pattern_seed + 1) / 2) % count;
     let c = ((pattern_seed + 3) / 2) % count;
@@ -312,16 +393,17 @@ pub fn wink_leds(pattern_seed: usize) {
             _ => l,
         };
         if k == a || k == b || k == c {
-            led::get(l).flex_unwrap().on().flex_unwrap();
+            Leds::<S>::on(l as u32).unwrap();
         } else {
-            led::get(l).flex_unwrap().off().flex_unwrap();
+            Leds::<S>::off(l as u32).unwrap();
         }
     }
 }
 
-pub fn switch_off_leds() {
-    for l in 0..led::count().flex_unwrap() {
-        led::get(l).flex_unwrap().off().flex_unwrap();
+pub fn switch_off_leds<S: Syscalls>() {
+    let count = Leds::<S>::count().unwrap();
+    for l in 0..count {
+        Leds::<S>::off(l).unwrap();
     }
 }
 

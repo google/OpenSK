@@ -6,6 +6,7 @@ license = "Apache-2.0"
 edition = "2018"
 
 [dependencies]
+libtock_platform = { path = "../../third_party/libtock-rs/platform" }
 
 [dev-dependencies]
 tempfile = "3"

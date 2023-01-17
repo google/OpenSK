@@ -127,27 +127,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
 
 [[package]]
-name = "libtock_codegen"
+name = "libtock_console"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "libtock_core"
-version = "0.1.0"
-dependencies = [
- "libtock_codegen",
+ "libtock_platform",
 ]
 
 [[package]]
 name = "libtock_drivers"
 version = "0.1.0"
 dependencies = [
- "libtock_core",
+ "libtock_console",
+ "libtock_platform",
 ]
+
+[[package]]
+name = "libtock_platform"
+version = "0.1.0"
 
 [[package]]
 name = "log"
@@ -341,6 +337,7 @@ version = "0.1.0"
 dependencies = [
  "arrayref",
  "libtock_drivers",
+ "libtock_platform",
  "rand",
 ]
 

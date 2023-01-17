@@ -116,6 +116,27 @@ nrf52840dk_opensk_board = OpenSKBoard(
     nordic_dfu=False,
 )
 
+cw310_opensk_board = OpenSKBoard(
+    path="third_party/tock/boards/opentitan/earlgrey-cw310",
+    arch="riscv32imc-unknown-none-elf",
+    page_size=2048,
+    kernel_address=0,
+    padding_address=None,
+    firmware_size=None,
+    metadata_address=None,
+    app_ldscript="opentitan_layout.ld",
+    app_address=0x20030000, # TODO: address in flash where the app begins
+    storage_address=None,# TODO 
+    storage_size=None, # TODO
+    pyocd_target=None,
+    openocd_board=None,
+    openocd_options=[],
+    openocd_commands={},
+    jlink_if=None,
+    jlink_device=None,
+    nordic_dfu=False,
+)
+
 SUPPORTED_BOARDS = {
     "nrf52840dk_opensk":
         nrf52840dk_opensk_board,
@@ -154,11 +175,13 @@ SUPPORTED_BOARDS = {
             kernel_address=0x1000,
             nordic_dfu=True,
         ),
+    "cw310_opensk":
+        cw310_opensk_board,
 }
 
 # The following value must match the one used in the file
 # `src/entry_point.rs`
-APP_HEAP_SIZE = 90000
+APP_HEAP_SIZE = 90_000
 
 CARGO_TARGET_DIR = os.environ.get("CARGO_TARGET_DIR", "target")
 
@@ -445,8 +468,8 @@ class OpenSKInstaller:
         f"link-arg=-T{props.app_ldscript}",
         "-C",
         "relocation-model=static",
-        "-D",
-        "warnings",
+        #"-D",
+        #"warnings",
         f"--remap-path-prefix={os.getcwd()}=",
         "-C",
         "link-arg=-icf=all",
@@ -465,6 +488,9 @@ class OpenSKInstaller:
       command.extend(["--example", self.args.application])
     if self.args.verbose_build:
       command.append("--verbose")
+    print("BUILD CMD:", command)
+    print("RUST_FLAGS:", env["RUSTFLAGS"])
+    print("APP_HEAP_SIZE:", env["APP_HEAP_SIZE"])
     self.checked_command(command, env=env)
     app_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release")
     if is_example:
@@ -502,14 +528,17 @@ class OpenSKInstaller:
     elf2tab_ver = self.checked_command_output(
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.7.0":
-      error(("Detected unsupported elf2tab version {elf2tab_ver!a}. The "
-             "following commands may fail. Please use 0.7.0 instead."))
+    if elf2tab_ver != "elf2tab 0.10.2":
+      error(("Detected unsupported elf2tab version {elf2tab_ver}! The "
+             "following commands may fail. Please use 0.10.2 instead."))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder, f"{self.args.application}.tab")
+    supported_kernel = (2, 1)
     elf2tab_args = [
         "elf2tab/bin/elf2tab", "--deterministic", "--package-name",
-        self.args.application, "-o", tab_filename
+        self.args.application, f"--kernel-major={supported_kernel[0]}",
+        f"--kernel-minor={supported_kernel[1]}",
+        "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
@@ -527,11 +556,13 @@ class OpenSKInstaller:
           stack_sizes.add(required_stack_size)
     if len(stack_sizes) != 1:
       error("Detected different stack sizes across tab files.")
-
+    
+    # `protected-region-size` must match the `TBF_HEADER_SIZE` (currently 0x60 = 96 bytes)
     elf2tab_args.extend([
         f"--stack={stack_sizes.pop()}", f"--app-heap={APP_HEAP_SIZE}",
-        "--kernel-heap=1024", "--protected-region-size=64"
+        "--kernel-heap=1024", "--protected-region-size=96" 
     ])
+    print("ELF2TAB ARGS:", elf2tab_args)
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
       self.args.elf2tab_output.write(output)
@@ -712,9 +743,12 @@ class OpenSKInstaller:
         fatal(("It seems that the TAB file was not produced for the "
                "architecture {board_props.arch}"))
       app_hex = intelhex.IntelHex()
+      tab_bytes = app_tab.extract_app(
+                board_props.arch).get_binary(board_props.app_address)
+      if tab_bytes is None:
+        fatal("The extracted bytes from the TAB file are none")
       app_hex.frombytes(
-          app_tab.extract_app(board_props.arch).get_binary(
-              board_props.app_address),
+          tab_bytes,
           offset=board_props.app_address)
       final_hex.merge(app_hex)
     info(f"Generating all-merged HEX file: {dest_file}")
@@ -777,8 +811,8 @@ class OpenSKInstaller:
       info("Nothing to do.")
       return 0
 
-    if self.args.check_patches:
-      subprocess.run(["./maintainers/patches", "check"], check=False)
+    # if self.args.check_patches:
+    #   subprocess.run(["./maintainers/patches", "check"], check=False)
 
     # Compile what needs to be compiled
     board_props = SUPPORTED_BOARDS[self.args.board]

@@ -14,8 +14,11 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use core::marker::PhantomData;
+
 use arrayref::array_ref;
-use libtock_drivers::rng;
+use libtock_drivers::rng::{self, Config};
+use libtock_platform::{DefaultConfig, Syscalls};
 #[cfg(feature = "std")]
 use rand::Rng;
 
@@ -41,18 +44,30 @@ fn bytes_to_u32(bytes: [u8; 32]) -> [u32; 8] {
     result
 }
 
-// RNG backed by the TockOS rng driver.
-pub struct TockRng256 {}
+/// RNG backed by the TockOS rng driver.
+pub struct TockRng256<S: Syscalls, C: Config = DefaultConfig> {
+    _marker_s: PhantomData<S>,
+    _marker_c: PhantomData<C>,
+}
 
-impl Rng256 for TockRng256 {
+impl<S: Syscalls, C: Config> TockRng256<S, C> {
+    pub fn new() -> Self {
+        Self {
+            _marker_s: PhantomData,
+            _marker_c: PhantomData,
+        }
+    }
+}
+
+impl<S: Syscalls, C: Config> Rng256 for TockRng256<S, C> {
     fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
         let mut buf: [u8; 32] = [Default::default(); 32];
-        rng::fill_buffer(&mut buf);
+        rng::Rng::<S, C>::fill_buffer(&mut buf);
         buf
     }
 }
 
-// For tests on the desktop, we use the cryptographically secure thread rng as entropy source.
+/// For tests on the desktop, we use the cryptographically secure thread rng as entropy source.
 #[cfg(feature = "std")]
 pub struct ThreadRng256 {}
 

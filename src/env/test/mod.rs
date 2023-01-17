@@ -95,6 +95,12 @@ impl HidConnection for TestEnv {
     }
 }
 
+impl Default for TestEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestEnv {
     pub fn new() -> Self {
         let rng = TestRng256 {

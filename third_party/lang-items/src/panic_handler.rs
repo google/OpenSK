@@ -1,26 +1,25 @@
+//! Custom panic handler for OpenSK
+
 use crate::util;
 #[cfg(feature = "panic_console")]
 use core::fmt::Write;
-use core::panic::PanicInfo;
 #[cfg(feature = "panic_console")]
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+#[allow(unused_imports)]
+use libtock_platform::{ErrorCode, Syscalls};
+use libtock_runtime::TockSyscalls;
 
 #[panic_handler]
-fn panic_handler(_info: &PanicInfo) -> ! {
-    util::signal_panic();
+fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
+    util::Util::<TockSyscalls>::signal_panic();
 
     #[cfg(feature = "panic_console")]
     {
-        let mut console = Console::new();
-        writeln!(console, "{}", _info).ok();
-        console.flush();
-        // Force the kernel to report the panic cause, by reading an invalid address.
-        // The memory protection unit should be setup by the Tock kernel to prevent apps from accessing
-        // address zero.
-        unsafe {
-            core::ptr::read_volatile(0 as *const usize);
-        }
+        let mut writer = Console::<TockSyscalls>::writer();
+        writeln!(writer, "{}", _info).ok();
+        // Exit with a non-zero exit code to indicate failure.
+        TockSyscalls::exit_terminate(ErrorCode::Fail as u32);
     }
-
-    util::flash_all_leds();
+    #[cfg(not(feature = "panic_console"))]
+    util::Util::<TockSyscalls>::flash_all_leds();
 }

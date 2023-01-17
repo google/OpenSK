@@ -14,3 +14,6 @@ target/
 /reproducible/elf2tab.txt
 /reproducible/reproduced.tar
 __pycache__
+
+# ctags
+**/tags*

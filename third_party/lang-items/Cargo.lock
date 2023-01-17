@@ -6,32 +6,53 @@ version = 3
 name = "lang_items"
 version = "0.1.0"
 dependencies = [
- "libtock_core",
+ "libtock_console",
  "libtock_drivers",
+ "libtock_leds",
+ "libtock_low_level_debug",
+ "libtock_platform",
+ "libtock_runtime",
  "linked_list_allocator",
 ]
 
 [[package]]
-name = "libtock_codegen"
+name = "libtock_console"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "libtock_core"
-version = "0.1.0"
-dependencies = [
- "libtock_codegen",
+ "libtock_platform",
 ]
 
 [[package]]
 name = "libtock_drivers"
 version = "0.1.0"
 dependencies = [
- "libtock_core",
+ "libtock_console",
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_leds"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_low_level_debug"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_platform"
+version = "0.1.0"
+
+[[package]]
+name = "libtock_runtime"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
 ]
 
 [[package]]
@@ -39,38 +60,3 @@ name = "linked_list_allocator"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e322f259d225fbae43a1b053b2dc6a5968a6bdf8b205f5de684dab485b95030e"
-
-[[package]]
-name = "proc-macro2"
-version = "1.0.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2ca2c61bc9f3d74d2886294ab7b9853abd9c1ad903a3ac7815c58989bb7bab"
-dependencies = [
- "unicode-ident",
-]
-
-[[package]]
-name = "quote"
-version = "1.0.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbe448f377a7d6961e30f5955f9b8d106c3f5e449d493ee1b125c1d43c2b5179"
-dependencies = [
- "proc-macro2",
-]
-
-[[package]]
-name = "syn"
-version = "1.0.100"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52205623b1b0f064a4e71182c3b18ae902267282930c6d5462c91b859668426e"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
-]
-
-[[package]]
-name = "unicode-ident"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcc811dc4066ac62f84f11307873c4850cb653bfa9b1719cee2bd2204a4bc5dd"

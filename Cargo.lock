@@ -108,8 +108,13 @@ dependencies = [
  "embedded-time",
  "enum-iterator",
  "lang_items",
- "libtock_core",
+ "libtock_buttons",
+ "libtock_console",
  "libtock_drivers",
+ "libtock_leds",
+ "libtock_platform",
+ "libtock_runtime",
+ "libtock_unittest",
  "openssl",
  "persistent_store",
  "rand 0.8.5",
@@ -222,8 +227,12 @@ dependencies = [
 name = "lang_items"
 version = "0.1.0"
 dependencies = [
- "libtock_core",
+ "libtock_console",
  "libtock_drivers",
+ "libtock_leds",
+ "libtock_low_level_debug",
+ "libtock_platform",
+ "libtock_runtime",
  "linked_list_allocator",
 ]
 
@@ -234,26 +243,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
 
 [[package]]
-name = "libtock_codegen"
+name = "libtock_buttons"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "libtock_platform",
 ]
 
 [[package]]
-name = "libtock_core"
+name = "libtock_console"
 version = "0.1.0"
 dependencies = [
- "libtock_codegen",
+ "libtock_platform",
 ]
 
 [[package]]
 name = "libtock_drivers"
 version = "0.1.0"
 dependencies = [
- "libtock_core",
+ "libtock_console",
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_leds"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_low_level_debug"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_platform"
+version = "0.1.0"
+
+[[package]]
+name = "libtock_runtime"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
+
+[[package]]
+name = "libtock_unittest"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+ "thiserror",
 ]
 
 [[package]]
@@ -388,6 +429,9 @@ dependencies = [
 [[package]]
 name = "persistent_store"
 version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
 
 [[package]]
 name = "pkg-config"
@@ -602,6 +646,7 @@ version = "0.1.0"
 dependencies = [
  "arrayref",
  "libtock_drivers",
+ "libtock_platform",
  "rand 0.6.5",
 ]
 
@@ -667,6 +712,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10deb33631e3c9018b9baf9dcbbc4f737320d2b576bac10f6aefa048fa407e3e"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "982d17546b47146b28f7c22e3d08465f6b8903d0ea13c1660d9d84a6e7adcdbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

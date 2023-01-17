@@ -543,7 +543,9 @@ impl From<persistent_store::StoreError> for Ctap2StatusCode {
             // storage.
             StoreError::InvalidStorage => Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
             // This error is not expected. The kernel is failing our syscalls.
-            StoreError::StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
+            StoreError::StorageError | StoreError::StorageImplError(_) => {
+                Ctap2StatusCode::CTAP1_ERR_OTHER
+            }
         }
     }
 }

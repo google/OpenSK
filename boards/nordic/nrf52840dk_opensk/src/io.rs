@@ -10,6 +10,7 @@ use nrf52840::gpio::Pin;
 
 use crate::CHIP;
 use crate::PROCESSES;
+use crate::PROCESS_PRINTER;
 
 enum Writer {
     WriterUart(/* initialized */ bool),
@@ -48,7 +49,7 @@ impl IoWrite for Writer {
                 let uart = nrf52840::uart::Uarte::new();
                 if !*initialized {
                     *initialized = true;
-                    uart.configure(uart::Parameters {
+                    let _ = uart.configure(uart::Parameters {
                         baud_rate: 115200,
                         stop_bits: uart::StopBits::One,
                         parity: uart::Parity::None,
@@ -102,5 +103,6 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
+        &PROCESS_PRINTER,
     )
 }

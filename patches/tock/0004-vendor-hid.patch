@@ -1,0 +1,155 @@
+diff --git a/capsules/Cargo.toml b/capsules/Cargo.toml
+index c04b2e0f3..09d2df2a3 100644
+--- a/capsules/Cargo.toml
++++ b/capsules/Cargo.toml
+@@ -8,3 +8,6 @@ edition.workspace = true
+ kernel = { path = "../kernel" }
+ enum_primitive = { path = "../libraries/enum_primitive" }
+ tickv = { path = "../libraries/tickv" }
++
++[features]
++vendor_hid = []
+diff --git a/capsules/src/usb/descriptors.rs b/capsules/src/usb/descriptors.rs
+index 67f708239..c2556d3a2 100644
+--- a/capsules/src/usb/descriptors.rs
++++ b/capsules/src/usb/descriptors.rs
+@@ -415,13 +415,14 @@ impl DescriptorBuffer {
+ /// example, if the interface descriptor list contains `[ID1, ID2, ID3]`,
+ /// and the endpoint descriptors list is `[[ED1, ED2], [ED3, ED4, ED5],
+ /// [ED6]]`, then the third interface descriptor (`ID3`) has one
+-/// corresponding endpoint descriptor (`ED6`).
++/// corresponding endpoint descriptor (`ED6`). If supplied, each HID descriptor
++/// corresponds to the matching index in the interface descriptor list.
+ pub fn create_descriptor_buffers(
+     device_descriptor: DeviceDescriptor,
+     mut configuration_descriptor: ConfigurationDescriptor,
+     interface_descriptor: &mut [InterfaceDescriptor],
+     endpoint_descriptors: &[&[EndpointDescriptor]],
+-    hid_descriptor: Option<&HIDDescriptor>,
++    hid_descriptor: Option<&[&HIDDescriptor<'static>]>,
+     cdc_descriptor: Option<&[CdcInterfaceDescriptor]>,
+ ) -> (DeviceBuffer, DescriptorBuffer) {
+     // Create device descriptor buffer and fill.
+@@ -505,7 +506,7 @@ pub fn create_descriptor_buffers(
+                 .iter()
+                 .map(|descs| descs.iter().map(|d| d.size()).sum::<usize>())
+                 .sum::<usize>()
+-            + hid_descriptor.map_or(0, |d| d.size())
++            + hid_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>())
+             + cdc_descriptor.map_or(0, |ds| ds.iter().map(|d| d.size()).sum::<usize>());
+ 
+     // Set the number of endpoints for each interface descriptor.
+@@ -522,12 +523,10 @@ pub fn create_descriptor_buffers(
+         // Add the interface descriptor.
+         len += d.write_to(&other_buf.buf[len..]);
+ 
+-        // If there is a HID descriptor, we include
+-        // it with the first interface descriptor.
+-        if i == 0 {
+-            // HID descriptor, if any.
+-            if let Some(dh) = hid_descriptor {
+-                len += dh.write_to(&other_buf.buf[len..]);
++        // HID descriptor, if present, for this interface.
++        if let Some(dh) = hid_descriptor {
++            if let Some(d) = dh.get(i) {
++                len += d.write_to(&other_buf.buf[len..]);
+             }
+         }
+ 
+diff --git a/capsules/src/usb/usbc_client_ctrl.rs b/capsules/src/usb/usbc_client_ctrl.rs
+index c8e55a8a8..54c7c3bbb 100644
+--- a/capsules/src/usb/usbc_client_ctrl.rs
++++ b/capsules/src/usb/usbc_client_ctrl.rs
+@@ -40,6 +40,12 @@ const DESCRIPTOR_BUFLEN: usize = 128;
+ 
+ const N_ENDPOINTS: usize = 3;
+ 
++#[cfg(feature = "vendor_hid")]
++const N_HID_INTERFACES: usize = 2;
++
++#[cfg(not(feature = "vendor_hid"))]
++const N_HID_INTERFACES: usize = 1;
++
+ /// Handler for USB control endpoint requests.
+ pub struct ClientCtrl<'a, 'b, U: 'a> {
+     /// The USB hardware controller.
+@@ -66,12 +72,12 @@ pub struct ClientCtrl<'a, 'b, U: 'a> {
+ 
+     /// An optional HID descriptor for the configuration. This can be requested
+     /// separately. It must also be included in `other_descriptor_buffer` if it exists.
+-    hid_descriptor: Option<&'b HIDDescriptor<'b>>,
++    hid_descriptor: Option<[&'b HIDDescriptor<'b>; N_HID_INTERFACES]>,
+ 
+     /// An optional report descriptor for the configuration. This can be
+     /// requested separately. It must also be included in
+     /// `other_descriptor_buffer` if it exists.
+-    report_descriptor: Option<&'b ReportDescriptor<'b>>,
++    report_descriptor: Option<[&'b ReportDescriptor<'b>; N_HID_INTERFACES]>,
+ 
+     /// Supported language (only one for now).
+     language: &'b [u16; 1],
+@@ -106,8 +112,8 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
+         controller: &'a U,
+         device_descriptor_buffer: DeviceBuffer,
+         other_descriptor_buffer: DescriptorBuffer,
+-        hid_descriptor: Option<&'b HIDDescriptor<'b>>,
+-        report_descriptor: Option<&'b ReportDescriptor<'b>>,
++        hid_descriptor: Option<[&'b HIDDescriptor<'b>; N_HID_INTERFACES]>,
++        report_descriptor: Option<[&'b ReportDescriptor<'b>; N_HID_INTERFACES]>,
+         language: &'b [u16; 1],
+         strings: &'b [&'b str],
+     ) -> Self {
+@@ -333,28 +339,39 @@ impl<'a, 'b, U: hil::usb::UsbController<'a>> ClientCtrl<'a, 'b, U> {
+                 descriptor_type,
+                 // TODO: use the descriptor index
+                 descriptor_index: _,
+-                // TODO: use the language ID?
+-                lang_id: _,
++                lang_id,
+                 requested_length,
+             } => match descriptor_type {
+                 DescriptorType::HID => {
+-                    if let Some(desc) = self.hid_descriptor {
+-                        let buf = self.descriptor_buf();
+-                        let len = desc.write_to(buf);
+-                        let end = min(len, requested_length as usize);
+-                        self.state[endpoint].set(State::CtrlIn(0, end));
+-                        hil::usb::CtrlSetupResult::Ok
++                    if let Some(dh) = self.hid_descriptor {
++                        let interface = lang_id as usize;
++                        if interface < dh.len() {
++                            let d = dh[interface];
++                            let buf = self.descriptor_buf();
++                            let len = d.write_to(buf);
++                            let end = min(len, requested_length as usize);
++                            self.state[endpoint].set(State::CtrlIn(0, end));
++                            hil::usb::CtrlSetupResult::Ok
++                        } else {
++                            hil::usb::CtrlSetupResult::ErrGeneric
++                        }
+                     } else {
+                         hil::usb::CtrlSetupResult::ErrGeneric
+                     }
+                 }
+                 DescriptorType::Report => {
+-                    if let Some(desc) = self.report_descriptor {
+-                        let buf = self.descriptor_buf();
+-                        let len = desc.write_to(buf);
+-                        let end = min(len, requested_length as usize);
+-                        self.state[endpoint].set(State::CtrlIn(0, end));
+-                        hil::usb::CtrlSetupResult::Ok
++                    if let Some(desc_array) = self.report_descriptor {
++                        let interface = lang_id as usize;
++                        if interface < desc_array.len() {
++                            let desc = desc_array[interface];
++                            let buf = self.descriptor_buf();
++                            let len = desc.write_to(buf);
++                            let end = min(len, requested_length as usize);
++                            self.state[endpoint].set(State::CtrlIn(0, end));
++                            hil::usb::CtrlSetupResult::Ok
++                        } else {
++                            hil::usb::CtrlSetupResult::ErrGeneric
++                        }
+                     } else {
+                         hil::usb::CtrlSetupResult::ErrGeneric
+                     }

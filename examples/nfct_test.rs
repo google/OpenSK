@@ -5,15 +5,28 @@ extern crate lang_items;
 extern crate libtock_drivers;
 
 use core::fmt::Write;
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
 
-libtock_core::stack_size! {0x4000}
+#[cfg(not(feature = "std"))]
+stack_size! {0x4000}
+#[cfg(not(feature = "std"))]
+set_main! {main}
+
+#[cfg(feature = "std")]
+type Syscalls = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type Syscalls = TockSyscalls;
 
 #[cfg(not(feature = "with_nfc"))]
 mod example {
-    use super::{Console, Write};
+    use super::Write;
+    use libtock_console::ConsoleWriter;
 
-    pub fn nfc(console: &mut Console) {
+    pub fn nfc<S: libtock_platform::Syscalls>(console: &mut ConsoleWriter<S>) {
         writeln!(console, "NFC feature flag is missing!").unwrap();
     }
 }
@@ -21,11 +34,13 @@ mod example {
 #[cfg(feature = "with_nfc")]
 mod example {
     use super::{Console, Write};
-    use libtock_core::result::CommandError;
+    use libtock_console::ConsoleWriter;
+    //use libtock_core::result::CommandError;
     use libtock_drivers::nfc::{NfcTag, RecvOp};
     use libtock_drivers::result::{FlexUnwrap, TockError};
     use libtock_drivers::timer;
     use libtock_drivers::timer::{Timer, Timestamp};
+    use libtock_platform::ErrorCode;
 
     #[derive(Copy, Clone, Debug, PartialEq)]
     #[allow(clippy::upper_case_acronyms)]
@@ -64,36 +79,34 @@ mod example {
     }
 
     /// Helper function to write on console the received packet.
-    fn print_rx_buffer(buf: &mut [u8]) {
+    fn print_rx_buffer<S: libtock_platform::Syscalls>(buf: &mut [u8]) {
         if let Some((last, bytes)) = buf.split_last() {
-            let mut console = Console::new();
+            let mut console = Console::<S>::writer();
             write!(console, "RX:").unwrap();
             for byte in bytes {
                 write!(console, " {:02x?}", byte).unwrap();
             }
             writeln!(console, " {:02x?}", last).unwrap();
-            console.flush();
         }
     }
 
     /// Function to identify the time elapsed for a transmission request.
-    fn bench_transmit(
-        console: &mut Console,
-        timer: &Timer,
+    fn bench_transmit<S: libtock_platform::Syscalls>(
+        console: &mut ConsoleWriter<S>,
+        timer: &Timer<S>,
         title: &str,
         mut buf: &mut [u8],
     ) -> ReturnCode {
         let amount = buf.len();
-        let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let start =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         match NfcTag::transmit(&mut buf, amount) {
             Ok(_) => (),
-            Err(TockError::Command(CommandError {
-                return_code: -8, /* ECANCEL: No Field*/
-                ..
-            })) => return ReturnCode::ECANCEL,
-            Err(_) => writeln!(Console::new(), " -- tx error!").unwrap(),
+            Err(TockError::Command(ErrorCode::Cancel)) => return ReturnCode::ECANCEL,
+            Err(_) => writeln!(console, " -- tx error!").unwrap(),
         }
-        let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let end =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         let elapsed = (end - start).ms();
         writeln!(
             console,
@@ -104,11 +117,14 @@ mod example {
             (amount as f64) / elapsed * 8.
         )
         .unwrap();
-        console.flush();
+
         ReturnCode::SUCCESS
     }
 
-    fn receive_packet(console: &mut Console, mut buf: &mut [u8; 256]) -> ReturnCode {
+    fn receive_packet<S: libtock_platform::Syscalls>(
+        console: &mut ConsoleWriter<S>,
+        mut buf: &mut [u8; 256],
+    ) -> ReturnCode {
         match NfcTag::receive(&mut buf) {
             Ok(RecvOp {
                 recv_amount: amount,
@@ -118,7 +134,7 @@ mod example {
                     print_rx_buffer(&mut buf[..amount]);
                 }
             }
-            Err(TockError::Command(CommandError { return_code, .. })) => return return_code.into(),
+            Err(TockError::Command(code)) => return code.into(),
             Err(_) => {
                 writeln!(console, " -- RX Err").unwrap();
                 return ReturnCode::ECANCEL;
@@ -127,7 +143,11 @@ mod example {
         ReturnCode::SUCCESS
     }
 
-    fn transmit_reply(mut console: &mut Console, timer: &Timer, buf: &[u8]) -> ReturnCode {
+    fn transmit_reply<S: libtock_platform::Syscalls>(
+        mut console: &mut ConsoleWriter<S>,
+        timer: &Timer<S>,
+        buf: &[u8],
+    ) -> ReturnCode {
         let mut return_code = ReturnCode::SUCCESS;
         match buf[0] {
             0xe0 /* RATS */=> {
@@ -185,23 +205,19 @@ mod example {
         return_code
     }
 
-    pub fn nfc(mut console: &mut Console) {
+    pub fn nfc<S: libtock_platform::Syscalls>(mut console: &mut ConsoleWriter<S>) {
         // Setup the timer with a dummy callback (we only care about reading the current time, but the
         // API forces us to set an alarm callback too).
-        let mut with_callback = timer::with_callback(|_, _| {});
+        let mut with_callback = timer::with_callback(|_| {});
+
         let timer = with_callback.init().flex_unwrap();
 
-        writeln!(
-            console,
-            "Clock frequency: {} Hz",
-            timer.clock_frequency().hz()
-        )
-        .unwrap();
+        writeln!(console, "Clock frequency: {:?} Hz", timer.clock_frequency()).unwrap();
 
         let mut state_change_counter = 0;
         loop {
             let mut rx_buf = [0; 256];
-            match receive_packet(&mut console, &mut rx_buf) {
+            match receive_packet(console, &mut rx_buf) {
                 ReturnCode::EOFF => {
                     // Not configured
                     while !NfcTag::enable_emulation() {}
@@ -220,7 +236,7 @@ mod example {
                 ReturnCode::ENOSUPPORT => (),
                 ReturnCode::SUCCESS => {
                     // If the reader restarts the communication then disable the tag.
-                    match transmit_reply(&mut console, &timer, &rx_buf) {
+                    match transmit_reply(console, &timer, &rx_buf) {
                         ReturnCode::ECANCEL | ReturnCode::EOFF => {
                             if NfcTag::disable_emulation() {
                                 writeln!(console, " -- TAG DISABLED").unwrap();
@@ -239,7 +255,7 @@ mod example {
 }
 
 fn main() {
-    let mut console = Console::new();
+    let mut console = Console::<Syscalls>::writer();
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "nfct_test application is installed").unwrap();
     example::nfc(&mut console);

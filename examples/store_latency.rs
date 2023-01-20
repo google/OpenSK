@@ -22,24 +22,47 @@ use alloc::vec::Vec;
 use alloc::{format, vec};
 use core::fmt::Write;
 use ctap2::env::tock::{take_storage, TockStorage};
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
+use libtock_platform::DefaultConfig;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
 use persistent_store::Store;
 
-libtock_core::stack_size! {0x2000}
+#[cfg(not(feature = "std"))]
+stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+set_main! {main}
 
-fn timestamp(timer: &Timer) -> Timestamp<f64> {
-    Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
+#[cfg(feature = "std")]
+type Syscalls = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type Syscalls = TockSyscalls;
+
+fn timestamp<S: libtock_platform::Syscalls>(timer: &Timer<S>) -> Timestamp<f64> {
+    Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().ok().unwrap())
 }
 
-fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>) {
+fn measure<T, S: libtock_platform::Syscalls>(
+    timer: &Timer<S>,
+    operation: impl FnOnce() -> T,
+) -> (T, Duration<f64>) {
     let before = timestamp(timer);
     let result = operation();
     let after = timestamp(timer);
     (result, after - before)
 }
 
-fn boot_store(mut storage: TockStorage, erase: bool) -> Store<TockStorage> {
+fn boot_store<
+    S: libtock_platform::Syscalls,
+    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
+>(
+    mut storage: TockStorage<S, C>,
+    erase: bool,
+) -> Store<TockStorage<S, C>> {
     use persistent_store::Storage;
     let num_pages = storage.num_pages();
     if erase {
@@ -55,7 +78,12 @@ struct StorageConfig {
     num_pages: usize,
 }
 
-fn storage_config(storage: &TockStorage) -> StorageConfig {
+fn storage_config<
+    S: libtock_platform::Syscalls,
+    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
+>(
+    storage: &TockStorage<S, C>,
+) -> StorageConfig {
     use persistent_store::Storage;
     StorageConfig {
         num_pages: storage.num_pages(),
@@ -72,20 +100,23 @@ struct Stat {
     remove_ms: f64,
 }
 
-fn compute_latency(
-    storage: TockStorage,
-    timer: &Timer,
+fn compute_latency<
+    S: libtock_platform::Syscalls,
+    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
+>(
+    storage: TockStorage<S, C>,
+    timer: &Timer<S>,
     num_pages: usize,
     key_increment: usize,
     word_length: usize,
-) -> (TockStorage, Stat) {
+) -> (TockStorage<S, C>, Stat) {
     let mut stat = Stat {
         key_increment,
         entry_length: word_length,
         ..Default::default()
     };
 
-    let mut console = Console::new();
+    let mut console = Console::<S>::writer();
     writeln!(
         console,
         "\nLatency for key_increment={} word_length={}.",
@@ -155,20 +186,22 @@ fn compute_latency(
 }
 
 fn main() {
-    let mut with_callback = timer::with_callback(|_, _| {});
-    let timer = with_callback.init().ok().unwrap();
-    let storage = take_storage().unwrap();
+    let mut with_callback = timer::with_callback::<Syscalls, DefaultConfig, _>(|_| {});
+
+    let timer = with_callback.init().flex_unwrap();
+    let storage = take_storage::<Syscalls, DefaultConfig>().unwrap();
     let config = storage_config(&storage);
     let mut stats = Vec::new();
+    let mut console = Console::<Syscalls>::writer();
 
-    writeln!(Console::new(), "\nRunning 2 tests...").unwrap();
+    writeln!(console, "\nRunning 2 tests...").unwrap();
     // Simulate a store full of credentials (of 50 words).
     let (storage, stat) = compute_latency(storage, &timer, config.num_pages, 1, 50);
     stats.push(stat);
     // Simulate a store full of increments of a single counter.
     let (_storage, stat) = compute_latency(storage, &timer, config.num_pages, 0, 1);
     stats.push(stat);
-    writeln!(Console::new(), "\nDone.\n").unwrap();
+    writeln!(console, "\nDone.\n").unwrap();
 
     const HEADERS: &[&str] = &[
         "Overwrite",
@@ -189,8 +222,8 @@ fn main() {
             format!("{:.1} ms", stat.remove_ms),
         ]);
     }
-    writeln!(Console::new(), "Copy to examples/store_latency.rs:\n").unwrap();
-    writeln!(Console::new(), "{:?}", config).unwrap();
+    writeln!(console, "Copy to examples/store_latency.rs:\n").unwrap();
+    writeln!(console, "{:?}", config).unwrap();
     write_matrix(matrix);
 
     // Results for nrf52840dk_opensk:
@@ -201,10 +234,11 @@ fn main() {
 }
 
 fn align(x: &str, n: usize) {
+    let mut console = Console::<Syscalls>::writer();
     for _ in 0..n.saturating_sub(x.len()) {
-        write!(Console::new(), " ").unwrap();
+        write!(console, " ").unwrap();
     }
-    write!(Console::new(), "{}", x).unwrap();
+    write!(console, "{}", x).unwrap();
 }
 
 fn write_matrix(mut m: Vec<Vec<String>>) {
@@ -223,6 +257,6 @@ fn write_matrix(mut m: Vec<Vec<String>>) {
         for col in 0..num_cols {
             align(&row[col], col_len[col] + 2 * (col > 0) as usize);
         }
-        writeln!(Console::new()).unwrap();
+        writeln!(Console::<Syscalls>::writer()).unwrap();
     }
 }

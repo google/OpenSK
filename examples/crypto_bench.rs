@@ -21,30 +21,39 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
-use libtock_drivers::console::Console;
+use libtock_console::{Console, ConsoleWriter};
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
+use libtock_platform as platform;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
+use platform::DefaultConfig;
 use rng256::TockRng256;
 
-libtock_core::stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+set_main! {main}
+
+#[cfg(feature = "std")]
+type Syscalls = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type Syscalls = TockSyscalls;
 
 fn main() {
-    let mut console = Console::new();
+    let mut console = Console::<Syscalls>::writer();
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
-    let mut with_callback = timer::with_callback(|_, _| {});
+    let mut with_callback = timer::with_callback(|_| {});
     let timer = with_callback.init().flex_unwrap();
 
-    let mut rng = TockRng256 {};
+    let mut rng = TockRng256::<Syscalls, DefaultConfig>::new();
 
     writeln!(console, "****************************************").unwrap();
-    writeln!(
-        console,
-        "Clock frequency: {} Hz",
-        timer.clock_frequency().hz()
-    )
-    .unwrap();
+    writeln!(console, "Clock frequency: {:?} Hz", timer.clock_frequency()).unwrap();
 
     // AES
     bench(&mut console, &timer, "aes256::EncryptionKey::new", || {
@@ -149,20 +158,23 @@ fn main() {
     writeln!(console, "****************************************").unwrap();
 }
 
-fn bench<F>(console: &mut Console, timer: &Timer, title: &str, mut f: F)
+fn bench<F, S>(console: &mut ConsoleWriter<S>, timer: &Timer<S>, title: &str, mut f: F)
 where
     F: FnMut(),
+    S: platform::Syscalls,
 {
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "Benchmarking: {}", title).unwrap();
     writeln!(console, "----------------------------------------").unwrap();
     let mut count = 1;
     for _ in 0..30 {
-        let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let start =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         for _ in 0..count {
             f();
         }
-        let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let end =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         let elapsed = (end - start).ms();
         writeln!(
             console,
@@ -172,7 +184,6 @@ where
             elapsed / (count as f64)
         )
         .unwrap();
-        console.flush();
         if elapsed > 1000.0 {
             break;
         }

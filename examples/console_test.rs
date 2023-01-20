@@ -19,11 +19,18 @@ extern crate lang_items;
 use libtock_console::Console;
 #[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
 
 #[cfg(not(feature = "std"))]
 stack_size! {0x800}
 #[cfg(not(feature = "std"))]
 set_main! {main}
+
+#[cfg(feature = "std")]
+type Syscalls = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type Syscalls = TockSyscalls;
 
 fn main() {
     // Write messages of length up to the console driver's buffer size.
@@ -34,7 +41,7 @@ fn main() {
                 *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
-            Console::<TockSyscalls>::write(&mut buf[..(i + 1)])
+            Console::<Syscalls>::write(&mut buf[..(i + 1)])
                 .ok()
                 .unwrap();
         }

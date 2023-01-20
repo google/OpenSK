@@ -15,8 +15,13 @@
 #![no_std]
 
 extern crate lang_items;
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size};
 
-libtock_core::stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+set_main! {main}
 
 fn main() {
     panic!("Bye world!")

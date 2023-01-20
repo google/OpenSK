@@ -17,19 +17,33 @@
 extern crate alloc;
 extern crate lang_items;
 
-libtock_core::stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
 
 use alloc::vec::Vec;
 use core::fmt::Write;
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+#[cfg(feature = "std")]
+use libtock_unittest::fake;
+
+#[cfg(not(feature = "std"))]
+stack_size! {0x800}
+#[cfg(not(feature = "std"))]
+set_main! {main}
+
+#[cfg(feature = "std")]
+type Syscalls = fake::Syscalls;
+#[cfg(not(feature = "std"))]
+type Syscalls = TockSyscalls;
 
 fn main() {
-    writeln!(Console::new(), "****************************************").unwrap();
+    let mut console = Console::<Syscalls>::writer();
+    writeln!(console, "****************************************").unwrap();
     for i in 0.. {
-        writeln!(Console::new(), "Allocating {} bytes...", 1 << i).unwrap();
+        writeln!(console, "Allocating {} bytes...", 1 << i).unwrap();
         let x: Vec<u8> = Vec::with_capacity(1 << i);
-        writeln!(Console::new(), "Allocated!").unwrap();
+        writeln!(console, "Allocated!").unwrap();
         drop(x);
-        writeln!(Console::new(), "Dropped!").unwrap();
+        writeln!(console, "Dropped!").unwrap();
     }
 }

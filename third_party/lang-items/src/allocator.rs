@@ -10,6 +10,7 @@ use core::sync::atomic;
 use core::sync::atomic::AtomicUsize;
 #[cfg(any(feature = "debug_allocations", feature = "panic_console"))]
 use libtock_console::Console;
+#[cfg(feature = "panic_console")]
 use libtock_platform::{ErrorCode, Syscalls};
 use libtock_runtime::TockSyscalls;
 use linked_list_allocator::Heap;

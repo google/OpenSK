@@ -157,31 +157,8 @@ fn main() {
     #[cfg(feature = "debug_ctap")]
     writeln!(writer, "Entering main ctap loop").unwrap();
     loop {
-        // Create the button callback, used for CTAP1.
-        // #[cfg(feature = "with_ctap1")]
-        // let button_touched = Cell::new(false);
-        // #[cfg(feature = "with_ctap1")]
-        // let buttons_listener = ButtonListener(|_button_num, state| {
-        //     match state {
-        //         ButtonState::Pressed => button_touched.set(true),
-        //         ButtonState::Released => (),
-        //     };
-        // });
-        // #[cfg(feature = "with_ctap1")]
-        // share::scope(|subscribe| {
-        //     Buttons::<SyscallImplementation>::register_listener(&buttons_listener, subscribe)
-        // })
-        // .ok()
-        // .unwrap();
         #[cfg(feature = "with_ctap1")]
         let num_buttons = Buttons::<SyscallImplementation>::count().ok().unwrap();
-        // // At the moment, all buttons are accepted. You can customize your setup here.
-        // #[cfg(feature = "with_ctap1")]
-        // for n in 0..num_buttons {
-        //     Buttons::<SyscallImplementation>::enable_interrupts(n)
-        //         .ok()
-        //         .unwrap();
-        // }
 
         // Variable for use in both the send_and_maybe_recv and recv cases.
         let mut usb_endpoint: Option<UsbEndpoint> = None;
@@ -260,15 +237,6 @@ fn main() {
             if button_touched {
                 ctap.state().u2f_grant_user_presence(now);
             }
-            // Cleanup button callbacks. We miss button presses while processing though.
-            // Heavy computation mostly follows a registered touch luckily. Unregistering
-            // callbacks is important to not clash with those from check_user_presence.
-            // for n in 0..num_buttons {
-            //     Buttons::<SyscallImplementation>::disable_interrupts(n)
-            //         .ok()
-            //         .unwrap();
-            // }
-            // Buttons::<SyscallImplementation>::unregister_listener();
         }
 
         // These calls are making sure that even for long inactivity, wrapping clock values

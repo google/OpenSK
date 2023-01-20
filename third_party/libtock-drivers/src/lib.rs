@@ -3,9 +3,7 @@
 // we don't need the LEDs, buttons, console driver interface modules anymore
 // since they are provided by `libtock-rs` itself
 
-//pub mod buttons;
 pub mod crp;
-//pub mod led;
 // we don't need the nfc stuff for now
 //#[cfg(feature = "with_nfc")]
 //pub mod nfc;

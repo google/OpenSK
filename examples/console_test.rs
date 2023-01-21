@@ -42,9 +42,7 @@ fn main() {
                 *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
-            Console::<Syscalls>::write(&mut buf[..(i + 1)])
-                .ok()
-                .unwrap();
+            Console::<Syscalls>::write(&buf[..(i + 1)]).ok().unwrap();
         }
     }
 }

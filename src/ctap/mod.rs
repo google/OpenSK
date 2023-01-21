@@ -885,7 +885,7 @@ impl CtapState {
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
-        auth_data.extend(&storage::aaguid(env)?);
+        auth_data.extend(storage::aaguid(env)?);
         // The length is fixed to 0x20 or 0x80 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -1440,7 +1440,7 @@ impl CtapState {
             &mut signature_counter,
             storage::global_signature_counter(env)?,
         );
-        auth_data.extend(&signature_counter);
+        auth_data.extend(signature_counter);
         Ok(auth_data)
     }
 
@@ -1509,7 +1509,7 @@ mod test {
                 ];
                 expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
                 expected_auth_data.extend(expected_aaguid);
-                expected_auth_data.extend(&[0x00, expected_credential_id_size]);
+                expected_auth_data.extend([0x00, expected_credential_id_size]);
                 assert_eq!(
                     auth_data[0..expected_auth_data.len()],
                     expected_auth_data[..]

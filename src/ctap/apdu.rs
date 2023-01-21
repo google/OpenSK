@@ -118,7 +118,7 @@ impl TryFrom<&[u8]> for Apdu {
     type Error = ApduStatusCode;
 
     fn try_from(frame: &[u8]) -> Result<Self, ApduStatusCode> {
-        if frame.len() < APDU_HEADER_LEN as usize {
+        if frame.len() < APDU_HEADER_LEN {
             return Err(ApduStatusCode::SW_WRONG_DATA);
         }
         //        +-----+-----+----+----+

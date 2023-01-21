@@ -187,7 +187,7 @@ pub fn encrypt_to_credential_id(
         &env.key_store().key_handle_authentication()?,
         &credential_id[..],
     );
-    credential_id.extend(&id_hmac);
+    credential_id.extend(id_hmac);
     Ok(credential_id)
 }
 
@@ -314,7 +314,7 @@ mod test {
         encrypted_id.truncate(&encrypted_id.len() - 32);
         let hmac_key = env.key_store().key_handle_authentication().unwrap();
         let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
-        encrypted_id.extend(&id_hmac);
+        encrypted_id.extend(id_hmac);
 
         assert_eq!(
             decrypt_credential_id(&mut env, encrypted_id, &rp_id_hash),
@@ -394,7 +394,7 @@ mod test {
             &env.key_store().key_handle_authentication()?,
             &encrypted_id[..],
         );
-        encrypted_id.extend(&id_hmac);
+        encrypted_id.extend(id_hmac);
         Ok(encrypted_id)
     }
 

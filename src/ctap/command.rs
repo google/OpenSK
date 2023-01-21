@@ -982,7 +982,7 @@ mod test {
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR));
 
-        cbor_bytes.extend(&[0xA1, 0x01, 0xF5]);
+        cbor_bytes.extend([0xA1, 0x01, 0xF5]);
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(
             command,

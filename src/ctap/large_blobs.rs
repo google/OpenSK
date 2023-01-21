@@ -93,11 +93,11 @@ impl LargeBlobs {
                 let pin_uv_auth_protocol =
                     pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
                 let mut large_blob_data = vec![0xFF; 32];
-                large_blob_data.extend(&[0x0C, 0x00]);
+                large_blob_data.extend([0x0C, 0x00]);
                 let mut offset_bytes = [0u8; 4];
                 LittleEndian::write_u32(&mut offset_bytes, offset as u32);
-                large_blob_data.extend(&offset_bytes);
-                large_blob_data.extend(&Sha256::hash(set.as_slice()));
+                large_blob_data.extend(offset_bytes);
+                large_blob_data.extend(Sha256::hash(set.as_slice()));
                 client_pin.verify_pin_uv_auth_token(
                     &large_blob_data,
                     &pin_uv_auth_param,
@@ -395,8 +395,8 @@ mod test {
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let mut large_blob_data = vec![0xFF; 32];
         // Command constant and offset bytes.
-        large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        large_blob_data.extend(&Sha256::hash(&large_blob));
+        large_blob_data.extend([0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        large_blob_data.extend(Sha256::hash(&large_blob));
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
             &large_blob_data,

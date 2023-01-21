@@ -94,7 +94,7 @@ pub fn process_config(
             pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
         // Constants are taken from the specification, section 6.11, step 4.2.
         let mut config_data = vec![0xFF; 32];
-        config_data.extend(&[0x0D, sub_command as u8]);
+        config_data.extend([0x0D, sub_command as u8]);
         if let Some(sub_command_params) = sub_command_params.clone() {
             super::cbor_write(sub_command_params.into(), &mut config_data)?;
         }
@@ -200,7 +200,7 @@ mod test {
         storage::set_pin(&mut env, &[0x88; 16], 4).unwrap();
 
         let mut config_data = vec![0xFF; 32];
-        config_data.extend(&[0x0D, ConfigSubCommand::ToggleAlwaysUv as u8]);
+        config_data.extend([0x0D, ConfigSubCommand::ToggleAlwaysUv as u8]);
         let pin_uv_auth_param =
             authenticate_pin_uv_auth_token(&pin_uv_auth_token, &config_data, pin_uv_auth_protocol);
         let config_params = AuthenticatorConfigParameters {

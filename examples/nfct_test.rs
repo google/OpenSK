@@ -7,6 +7,7 @@ extern crate libtock_drivers;
 
 use core::fmt::Write;
 use libtock_console::Console;
+use libtock_platform::DefaultConfig;
 #[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 #[cfg(feature = "std")]
@@ -64,16 +65,17 @@ mod example {
         ENOSUPPORT,
     }
 
-    impl From<isize> for ReturnCode {
-        fn from(original: isize) -> ReturnCode {
+    impl From<ErrorCode> for ReturnCode {
+        fn from(original: ErrorCode) -> ReturnCode {
             match original {
-                0 => ReturnCode::SUCCESS,
-                -1 => ReturnCode::FAIL,
-                -2 => ReturnCode::EBUSY,
-                -4 => ReturnCode::EOFF,
-                -6 => ReturnCode::EINVAL,
-                -8 => ReturnCode::ECANCEL,
-                -9 => ReturnCode::ENOMEM,
+                // not represented in ErrorCode
+                //0 => ReturnCode::SUCCESS,
+                ErrorCode::Fail => ReturnCode::FAIL,
+                ErrorCode::Busy => ReturnCode::EBUSY,
+                ErrorCode::Off => ReturnCode::EOFF,
+                ErrorCode::Invalid => ReturnCode::EINVAL,
+                ErrorCode::Cancel => ReturnCode::ECANCEL,
+                ErrorCode::NoMem => ReturnCode::ENOMEM,
                 _ => ReturnCode::ENOSUPPORT,
             }
         }
@@ -92,7 +94,7 @@ mod example {
     }
 
     /// Function to identify the time elapsed for a transmission request.
-    fn bench_transmit<S: libtock_platform::Syscalls>(
+    fn bench_transmit<S: libtock_platform::Syscalls, C: libtock_drivers::nfc::Config>(
         console: &mut ConsoleWriter<S>,
         timer: &Timer<S>,
         title: &str,
@@ -101,7 +103,7 @@ mod example {
         let amount = buf.len();
         let start =
             Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
-        match NfcTag::transmit(&mut buf, amount) {
+        match NfcTag::<S, C>::transmit(&mut buf, amount as u32) {
             Ok(_) => (),
             Err(TockError::Command(ErrorCode::Cancel)) => return ReturnCode::ECANCEL,
             Err(_) => writeln!(console, " -- tx error!").unwrap(),
@@ -122,17 +124,17 @@ mod example {
         ReturnCode::SUCCESS
     }
 
-    fn receive_packet<S: libtock_platform::Syscalls>(
+    fn receive_packet<S: libtock_platform::Syscalls, C: libtock_drivers::nfc::Config>(
         console: &mut ConsoleWriter<S>,
         mut buf: &mut [u8; 256],
     ) -> ReturnCode {
-        match NfcTag::receive(&mut buf) {
+        match NfcTag::<S, C>::receive(&mut buf) {
             Ok(RecvOp {
                 recv_amount: amount,
                 ..
             }) => {
-                if amount <= buf.len() {
-                    print_rx_buffer(&mut buf[..amount]);
+                if amount <= buf.len() as u32 {
+                    print_rx_buffer::<S>(&mut buf[..amount as usize]);
                 }
             }
             Err(TockError::Command(code)) => return code.into(),
@@ -144,7 +146,7 @@ mod example {
         ReturnCode::SUCCESS
     }
 
-    fn transmit_reply<S: libtock_platform::Syscalls>(
+    fn transmit_reply<S: libtock_platform::Syscalls, C: libtock_drivers::nfc::Config>(
         mut console: &mut ConsoleWriter<S>,
         timer: &Timer<S>,
         buf: &[u8],
@@ -153,49 +155,49 @@ mod example {
         match buf[0] {
             0xe0 /* RATS */=> {
                 let mut answer_to_select = [0x05, 0x78, 0x80, 0xB1, 0x00];
-                return_code = bench_transmit(&mut console, &timer, "TX: ATS", &mut answer_to_select);
+                return_code = bench_transmit::<S,C>(&mut console, &timer, "TX: ATS", &mut answer_to_select);
             }
             0xc2 /* DESELECT */ => {
                 // Ignore the request
                 let mut command_error = [0x6A, 0x81];
-                return_code = bench_transmit(&mut console, &timer, "TX: DESELECT", &mut command_error);
+                return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: DESELECT", &mut command_error);
             }
             0x02 | 0x03 /* APDU Prefix */ => match buf[2] {
                 // If the received packet is applet selection command (FIDO 2)
                 0xa4 /* SELECT */ => if buf[3] == 0x04 && buf[5] == 0x08 && buf[6] == 0xa0 {
                     // Vesion: "FIDO_2_0"
                     let mut reply = [buf[0], 0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30, 0x90, 0x00,];
-                    return_code = bench_transmit(&mut console, &timer, "TX: Version Str", &mut reply);
+                    return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: Version Str", &mut reply);
                 } else if (buf[6] == 0xd2 && buf[7] == 0x76) || (buf[6] == 0xe1 && (buf[7] == 0x03 || buf[7] == 0x04)){
                     let mut reply = [buf[0], 0x90, 0x00];
-                    return_code = bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
+                    return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: 0x9000", &mut reply);
                 } else /* Unknown file */ {
                     let mut reply = [buf[0], 0x6a, 0x82];
-                    return_code = bench_transmit(&mut console, &timer, "TX: 0x6A82", &mut reply);
+                    return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: 0x6A82", &mut reply);
                 }
                 0xb0 /* READ */ =>  match buf[5] {
                     0x02 => {
                         let mut reply = [buf[0], 0x12, 0x90, 0x00,];
-                        return_code = bench_transmit(&mut console, &timer, "TX: File Size", &mut reply);
+                        return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: File Size", &mut reply);
                     }
                     0x12 => {
                         let mut reply = [buf[0], 0xd1, 0x01, 0x0e, 0x55, 0x77, 0x77, 0x77, 0x2e, 0x6f, 0x70, 0x65,
                         0x6e, 0x73, 0x6b, 0x2e, 0x64, 0x65, 0x76, 0x90, 0x00,];
-                        return_code = bench_transmit(&mut console, &timer, "TX: NDEF", &mut reply);
+                        return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: NDEF", &mut reply);
                     }
                     0x0f => {
                         let mut reply = [buf[0], 0x00, 0x0f, 0x20, 0x00, 0x7f, 0x00, 0x7f, 0x04, 0x06, 0xe1, 0x04,
                         0x00, 0x7f, 0x00, 0x00, 0x90, 0x00,];
-                        return_code = bench_transmit(&mut console, &timer, "TX: CC", &mut reply);
+                        return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: CC", &mut reply);
                     }
                     _ => {
                         let mut reply = [buf[0], 0x90, 0x00];
-                        return_code = bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
+                        return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: 0x9000", &mut reply);
                     }
                 }
                 _ => {
                     let mut reply = [buf[0], 0x90, 0x00];
-                    return_code = bench_transmit(&mut console, &timer, "TX: 0x9000", &mut reply);
+                    return_code = bench_transmit::<S, C>(&mut console, &timer, "TX: 0x9000", &mut reply);
                 }
             }
             0x26 | 0x52 | 0x50 /* REQA | WUPA | Halt */ => {
@@ -206,7 +208,9 @@ mod example {
         return_code
     }
 
-    pub fn nfc<S: libtock_platform::Syscalls>(mut console: &mut ConsoleWriter<S>) {
+    pub fn nfc<S: libtock_platform::Syscalls, C: libtock_drivers::nfc::Config>(
+        console: &mut ConsoleWriter<S>,
+    ) {
         // Setup the timer with a dummy callback (we only care about reading the current time, but the
         // API forces us to set an alarm callback too).
         let mut with_callback = timer::with_callback(|_| {});
@@ -218,15 +222,15 @@ mod example {
         let mut state_change_counter = 0;
         loop {
             let mut rx_buf = [0; 256];
-            match receive_packet(console, &mut rx_buf) {
+            match receive_packet::<S, C>(console, &mut rx_buf) {
                 ReturnCode::EOFF => {
                     // Not configured
-                    while !NfcTag::enable_emulation() {}
+                    while !NfcTag::<S,C>::enable_emulation() {}
                     // Configure Type 4 tag
-                    while !NfcTag::configure(4) {}
+                    while !NfcTag::<S,C>::configure(4) {}
                 }
                 ReturnCode::ECANCEL /* field lost */ => {
-                    NfcTag::disable_emulation();
+                    NfcTag::<S,C>::disable_emulation();
                 }
                 ReturnCode::EBUSY /* awaiting select*/ => (),
                 ReturnCode::ENOMEM => {
@@ -237,9 +241,9 @@ mod example {
                 ReturnCode::ENOSUPPORT => (),
                 ReturnCode::SUCCESS => {
                     // If the reader restarts the communication then disable the tag.
-                    match transmit_reply(console, &timer, &rx_buf) {
+                    match transmit_reply::<S, C>(console, &timer, &rx_buf) {
                         ReturnCode::ECANCEL | ReturnCode::EOFF => {
-                            if NfcTag::disable_emulation() {
+                            if NfcTag::<S,C>::disable_emulation() {
                                 writeln!(console, " -- TAG DISABLED").unwrap();
                             }
                             state_change_counter += 1;
@@ -259,6 +263,6 @@ fn main() {
     let mut console = Console::<Syscalls>::writer();
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "nfct_test application is installed").unwrap();
-    example::nfc(&mut console);
+    example::nfc::<Syscalls, DefaultConfig>(&mut console);
     writeln!(console, "****************************************").unwrap();
 }

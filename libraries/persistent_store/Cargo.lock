@@ -39,9 +39,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
 
 [[package]]
+name = "libtock_platform"
+version = "0.1.0"
+
+[[package]]
 name = "persistent_store"
 version = "0.1.0"
 dependencies = [
+ "libtock_platform",
  "tempfile",
 ]
 

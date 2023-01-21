@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'libraries/peristent_store/**'
+      - 'third_party/libtock-rs/**'
   pull_request:
     types: [opened, synchronize, reopened]
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![no_std]
+#![no_main]
 
 extern crate lang_items;
 #[cfg(not(feature = "std"))]

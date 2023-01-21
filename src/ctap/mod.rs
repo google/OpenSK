@@ -1533,6 +1533,9 @@ mod test {
         let info_reponse =
             ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL, CtapInstant::new(0));
 
+        #[allow(clippy::unnecessary_to_owned)]
+        // otherwise `SUPPORTED_CRED_PARAMS` triggers unnecessary to owned
+        // without it would fail, however, since it can not move out of a shared reference
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
                     #[cfg(feature = "with_ctap1")]

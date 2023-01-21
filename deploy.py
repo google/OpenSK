@@ -126,7 +126,7 @@ cw310_opensk_board = OpenSKBoard(
     metadata_address=None,
     app_ldscript="opentitan_layout.ld",
     app_address=0x20030000, # TODO: address in flash where the app begins
-    storage_address=None,# TODO 
+    storage_address=None,# TODO
     storage_size=None, # TODO
     pyocd_target=None,
     openocd_board=None,
@@ -553,11 +553,13 @@ class OpenSKInstaller:
           stack_sizes.add(required_stack_size)
     if len(stack_sizes) != 1:
       error("Detected different stack sizes across tab files.")
-    
-    # `protected-region-size` must match the `TBF_HEADER_SIZE` (currently 0x60 = 96 bytes)
+    # `protected-region-size` must match the `TBF_HEADER_SIZE`
+    # (currently 0x60 = 96 bytes)
     elf2tab_args.extend([
-        f"--stack={stack_sizes.pop()}", f"--app-heap={APP_HEAP_SIZE}",
-        "--kernel-heap=1024", "--protected-region-size=96" 
+        f"--stack={stack_sizes.pop()}",
+        f"--app-heap={APP_HEAP_SIZE}",
+        "--kernel-heap=1024",
+        "--protected-region-size=96"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)

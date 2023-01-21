@@ -39,6 +39,12 @@ pub struct MessageAssembler {
     payload: Vec<u8>,
 }
 
+impl Default for MessageAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageAssembler {
     pub fn new() -> MessageAssembler {
         MessageAssembler {

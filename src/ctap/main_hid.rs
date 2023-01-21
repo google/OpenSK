@@ -30,6 +30,12 @@ pub struct MainHid {
     wink_permission: TimedPermission,
 }
 
+impl Default for MainHid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MainHid {
     const WINK_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(5000 as ClockInt);
 

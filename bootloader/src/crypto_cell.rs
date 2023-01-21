@@ -23,10 +23,10 @@
 use super::bitfields;
 use super::registers::{CryptoCellRegisters, NordicCC310Registers};
 use super::static_ref::StaticRef;
-use tock_registers::interfaces::{Readable, Writeable};
 use core::cell::Cell;
 #[cfg(debug_assertions)]
 use rtt_target::rprintln;
+use tock_registers::interfaces::{Readable, Writeable};
 
 const SHA256_INIT_VALUE: [u32; 8] = [
     0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,

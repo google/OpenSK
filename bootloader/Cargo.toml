@@ -1,9 +1,7 @@
 [package]
 name = "bootloader"
 version = "0.1.0"
-authors = [
-  "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
-]
+authors = ["Fabian Kaczmarczyck <kaczmarczyck@google.com>"]
 build = "build.rs"
 license = "Apache-2.0"
 edition = "2018"
@@ -15,7 +13,7 @@ cortex-m-rt = "*"
 cortex-m-rt-macros = "*"
 panic-abort = "0.3.2"
 rtt-target = { version = "*", features = ["cortex-m"] }
-tock-registers = { version = "0.6.0", features = ["no_std_unit_tests"] }
+tock-registers = "0.7.0"
 
 [profile.dev]
 panic = "abort"

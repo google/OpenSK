@@ -23,6 +23,7 @@
 use super::bitfields;
 use super::registers::{CryptoCellRegisters, NordicCC310Registers};
 use super::static_ref::StaticRef;
+use tock_registers::interfaces::{Readable, Writeable};
 use core::cell::Cell;
 #[cfg(debug_assertions)]
 use rtt_target::rprintln;

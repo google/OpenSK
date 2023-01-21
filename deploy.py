@@ -125,9 +125,9 @@ cw310_opensk_board = OpenSKBoard(
     firmware_size=None,
     metadata_address=None,
     app_ldscript="opentitan_layout.ld",
-    app_address=0x20030000, # TODO: address in flash where the app begins
-    storage_address=None,# TODO
-    storage_size=None, # TODO
+    app_address=0x20030000,  # TODO: address in flash where the app begins
+    storage_address=None,  # TODO
+    storage_size=None,  # TODO
     pyocd_target=None,
     openocd_board=None,
     openocd_options=[],
@@ -534,8 +534,7 @@ class OpenSKInstaller:
     elf2tab_args = [
         "elf2tab/bin/elf2tab", "--deterministic", "--package-name",
         self.args.application, f"--kernel-major={supported_kernel[0]}",
-        f"--kernel-minor={supported_kernel[1]}",
-        "-o", tab_filename
+        f"--kernel-minor={supported_kernel[1]}", "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
@@ -556,10 +555,8 @@ class OpenSKInstaller:
     # `protected-region-size` must match the `TBF_HEADER_SIZE`
     # (currently 0x60 = 96 bytes)
     elf2tab_args.extend([
-        f"--stack={stack_sizes.pop()}",
-        f"--app-heap={APP_HEAP_SIZE}",
-        "--kernel-heap=1024",
-        "--protected-region-size=96"
+        f"--stack={stack_sizes.pop()}", f"--app-heap={APP_HEAP_SIZE}",
+        "--kernel-heap=1024", "--protected-region-size=96"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
@@ -741,13 +738,11 @@ class OpenSKInstaller:
         fatal(("It seems that the TAB file was not produced for the "
                "architecture {board_props.arch}"))
       app_hex = intelhex.IntelHex()
-      tab_bytes = app_tab.extract_app(
-                board_props.arch).get_binary(board_props.app_address)
+      tab_bytes = app_tab.extract_app(board_props.arch).get_binary(
+          board_props.app_address)
       if tab_bytes is None:
         fatal("The extracted bytes from the TAB file are none")
-      app_hex.frombytes(
-          tab_bytes,
-          offset=board_props.app_address)
+      app_hex.frombytes(tab_bytes, offset=board_props.app_address)
       final_hex.merge(app_hex)
     info(f"Generating all-merged HEX file: {dest_file}")
     final_hex.tofile(dest_file, format="hex")

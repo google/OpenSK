@@ -275,8 +275,8 @@ impl Ctap1Command {
         // The first byte is reserved.
         let mut signature_data = Vec::with_capacity(66 + key_handle.len());
         signature_data.push(0x00);
-        signature_data.extend(&application);
-        signature_data.extend(&challenge);
+        signature_data.extend(application);
+        signature_data.extend(challenge);
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
@@ -329,7 +329,7 @@ impl Ctap1Command {
                     Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
                 )
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
-            signature_data.extend(&challenge);
+            signature_data.extend(challenge);
             let signature = ecdsa_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
 
             let mut response = signature_data[application.len()..application.len() + 5].to_vec();
@@ -363,7 +363,7 @@ mod test {
             0x40,
         ];
         let challenge = [0x0C; 32];
-        message.extend(&challenge);
+        message.extend(challenge);
         message.extend(application);
         message
     }
@@ -380,9 +380,9 @@ mod test {
             0x00,
             0x00,
         ];
-        message.extend(&(65 + CBOR_CREDENTIAL_ID_SIZE as u16).to_be_bytes());
+        message.extend((65 + CBOR_CREDENTIAL_ID_SIZE as u16).to_be_bytes());
         let challenge = [0x0C; 32];
-        message.extend(&challenge);
+        message.extend(challenge);
         message.extend(application);
         message.push(CBOR_CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);

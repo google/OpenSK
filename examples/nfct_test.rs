@@ -28,7 +28,11 @@ mod example {
     use super::Write;
     use libtock_console::ConsoleWriter;
 
-    pub fn nfc<S: libtock_platform::Syscalls>(console: &mut ConsoleWriter<S>) {
+    pub fn nfc<S, C>(console: &mut ConsoleWriter<S>)
+    where
+        S: libtock_platform::Syscalls,
+        C: libtock_platform::subscribe::Config,
+    {
         writeln!(console, "NFC feature flag is missing!").unwrap();
     }
 }

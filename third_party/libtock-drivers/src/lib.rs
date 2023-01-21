@@ -4,9 +4,8 @@
 // since they are provided by `libtock-rs` itself
 
 pub mod crp;
-// we don't need the nfc stuff for now
-//#[cfg(feature = "with_nfc")]
-//pub mod nfc;
+#[cfg(feature = "with_nfc")]
+pub mod nfc;
 pub mod result;
 pub mod rng;
 pub mod timer;

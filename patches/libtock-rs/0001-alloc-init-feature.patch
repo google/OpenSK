@@ -1,11 +1,3 @@
-diff --git a/.gitignore b/.gitignore
-index 1b72444..2a66ba7 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -1,2 +1,3 @@
- /Cargo.lock
- /target
-+
 diff --git a/apis/buttons/src/lib.rs b/apis/buttons/src/lib.rs
 index 565970f..f5d08b5 100644
 --- a/apis/buttons/src/lib.rs

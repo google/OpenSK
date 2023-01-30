@@ -926,7 +926,7 @@ impl TryFrom<cbor::Value> for PinUvAuthProtocol {
         match extract_unsigned(cbor_value)? {
             1 => Ok(PinUvAuthProtocol::V1),
             2 => Ok(PinUvAuthProtocol::V2),
-            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
         }
     }
 }

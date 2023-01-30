@@ -786,7 +786,7 @@ impl CtapState {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 // Corresponds to makeCredUvNotRqd set to true.
-                if options.rk && storage::pin_hash(env)?.is_some() {
+                if storage::pin_hash(env)?.is_some() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                 }
                 0x00

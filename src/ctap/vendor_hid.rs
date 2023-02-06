@@ -26,6 +26,12 @@ pub struct VendorHid {
     hid: CtapHid,
 }
 
+impl Default for VendorHid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VendorHid {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     pub fn new() -> Self {

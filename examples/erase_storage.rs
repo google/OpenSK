@@ -20,6 +20,7 @@ extern crate lang_items;
 use core::fmt::Write;
 use ctap2::env::tock::take_storage;
 use libtock_console::Console;
+use libtock_drivers::result::FlexUnwrap;
 use libtock_leds::Leds;
 use libtock_platform as platform;
 #[cfg(not(feature = "std"))]
@@ -50,7 +51,7 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
 }
 
 fn main() {
-    Leds::<Syscalls>::on(1).unwrap(); // red on dongle
+    Leds::<Syscalls>::on(1).map_err(|e| e.into()).flex_unwrap(); // red on dongle
     let mut storage = take_storage::<Syscalls, DefaultConfig>().unwrap();
     let num_pages = storage.num_pages();
     let mut console = Console::<Syscalls>::writer();
@@ -65,6 +66,6 @@ fn main() {
         }
     }
     writeln!(console, "Done.").unwrap();
-    Leds::<Syscalls>::on(1).unwrap();
-    Leds::<Syscalls>::off(0).unwrap(); // green on dongle
+    Leds::<Syscalls>::on(1).map_err(|e| e.into()).flex_unwrap();
+    Leds::<Syscalls>::off(0).map_err(|e| e.into()).flex_unwrap(); // green on dongle
 }

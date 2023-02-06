@@ -18,6 +18,7 @@
 extern crate lang_items;
 
 use libtock_console::Console;
+use libtock_drivers::result::FlexUnwrap;
 #[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 #[cfg(feature = "std")]
@@ -42,7 +43,9 @@ fn main() {
                 *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
-            Console::<Syscalls>::write(&buf[..(i + 1)]).ok().unwrap();
+            Console::<Syscalls>::write(&buf[..(i + 1)])
+                .map_err(|e| e.into())
+                .flex_unwrap();
         }
     }
 }

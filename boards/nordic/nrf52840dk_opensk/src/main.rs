@@ -242,7 +242,7 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
     for Platform
 {
     type SyscallDriverLookup = Self;
-    type SyscallFilter = ();
+    type SyscallFilter = Self;
     type ProcessFault = ();
     type CredentialsCheckingPolicy = ();
     type Scheduler = RoundRobinSched<'static>;
@@ -254,7 +254,7 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
         &self
     }
     fn syscall_filter(&self) -> &Self::SyscallFilter {
-        &()
+        &self
     }
     fn process_fault(&self) -> &Self::ProcessFault {
         &()

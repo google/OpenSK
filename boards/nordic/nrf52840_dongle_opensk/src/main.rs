@@ -179,7 +179,7 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
     for Platform
 {
     type SyscallDriverLookup = Self;
-    type SyscallFilter = ();
+    type SyscallFilter = Self;
     type ProcessFault = ();
     type CredentialsCheckingPolicy = ();
     type Scheduler = RoundRobinSched<'static>;
@@ -191,7 +191,7 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
         &self
     }
     fn syscall_filter(&self) -> &Self::SyscallFilter {
-        &()
+        &self
     }
     fn process_fault(&self) -> &Self::ProcessFault {
         &()
@@ -238,7 +238,6 @@ pub unsafe fn main() {
     nrf52840_peripherals.init();
     let base_peripherals = &nrf52840_peripherals.nrf52;
 
-    // let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
     let board_kernel = static_init!(
         kernel::Kernel,
         kernel::Kernel::new_with_storage(&PROCESSES, &STORAGE_LOCATIONS)

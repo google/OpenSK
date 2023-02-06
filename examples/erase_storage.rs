@@ -65,6 +65,6 @@ fn main() {
         }
     }
     writeln!(console, "Done.").unwrap();
-    Leds::<Syscalls>::off(1).unwrap();
+    Leds::<Syscalls>::on(1).unwrap();
     Leds::<Syscalls>::off(0).unwrap(); // green on dongle
 }

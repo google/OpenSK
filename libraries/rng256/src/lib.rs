@@ -46,15 +46,15 @@ fn bytes_to_u32(bytes: [u8; 32]) -> [u32; 8] {
 
 /// RNG backed by the TockOS rng driver.
 pub struct TockRng256<S: Syscalls, C: Config = DefaultConfig> {
-    _marker_s: PhantomData<S>,
-    _marker_c: PhantomData<C>,
+    _syscalls: PhantomData<S>,
+    _config: PhantomData<C>,
 }
 
 impl<S: Syscalls, C: Config> TockRng256<S, C> {
     pub fn new() -> Self {
         Self {
-            _marker_s: PhantomData,
-            _marker_c: PhantomData,
+            _syscalls: PhantomData,
+            _config: PhantomData,
         }
     }
 }

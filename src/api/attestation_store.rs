@@ -93,7 +93,6 @@ impl From<StoreError> for Error {
             StoreError::InvalidArgument
             | StoreError::NoCapacity
             | StoreError::NoLifetime
-            | StoreError::StorageImplError(_)
             | StoreError::InvalidStorage => Error::Internal,
             StoreError::StorageError => Error::Storage,
         }

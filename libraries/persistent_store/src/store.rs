@@ -66,16 +66,12 @@ pub enum StoreError {
     /// The storage should be erased and the store [recovered](Store::recover). The store would be
     /// empty and have lost track of lifetime.
     InvalidStorage,
-
-    /// An error occurred in the underlying storage trait implementation
-    StorageImplError(libtock_platform::ErrorCode),
 }
 
 impl From<StorageError> for StoreError {
     fn from(error: StorageError) -> StoreError {
         match error {
             StorageError::CustomError => StoreError::StorageError,
-            StorageError::LibtockRsError(e) => StoreError::StorageImplError(e),
             // The store always calls the storage correctly.
             StorageError::NotAligned | StorageError::OutOfBounds => unreachable!(),
         }

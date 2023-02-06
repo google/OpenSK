@@ -34,15 +34,6 @@ pub enum StorageError {
 
     /// Implementation-specific error.
     CustomError,
-
-    /// libtock-rs Error
-    LibtockRsError(libtock_platform::ErrorCode),
-}
-
-impl From<libtock_platform::ErrorCode> for StorageError {
-    fn from(e: libtock_platform::ErrorCode) -> Self {
-        Self::LibtockRsError(e)
-    }
 }
 
 #[cfg(feature = "std")]

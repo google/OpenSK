@@ -66,8 +66,9 @@ mod storage_type {
 }
 
 fn get_info<S: Syscalls>(nr: u32, arg: u32) -> StorageResult<u32> {
-    let info =
-        S::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg).to_result::<u32, ErrorCode>()?;
+    let info = S::command(DRIVER_NUMBER, command_nr::GET_INFO, nr, arg)
+        .to_result::<u32, ErrorCode>()
+        .map_err(|_| StorageError::CustomError)?;
     Ok(info)
 }
 
@@ -81,7 +82,7 @@ fn memop<S: RawSyscalls>(nr: u32, arg: u32) -> StorageResult<u32> {
     // see: https://github.com/tock/tock/blob/master/doc/reference/trd104-syscalls.md#32-return-values
     match (r0, r1) {
         (129, r1) => Ok(r1),
-        (_, _) => Err(StorageError::LibtockRsError(ErrorCode::BadRVal)),
+        (_, _) => Err(StorageError::CustomError),
     }
 }
 
@@ -94,13 +95,16 @@ fn block_command<S: Syscalls, C: platform::subscribe::Config + platform::allow_r
     let called: Cell<Option<(u32,)>> = Cell::new(None);
 
     share::scope(|subscribe| {
-        S::subscribe::<_, _, C, DRIVER_NUMBER, { subscribe_nr::DONE }>(subscribe, &called)?;
-        S::command(driver, cmd, arg1, arg2).to_result::<(), ErrorCode>()?;
+        S::subscribe::<_, _, C, DRIVER_NUMBER, { subscribe_nr::DONE }>(subscribe, &called)
+            .map_err(|_| StorageError::CustomError)?;
+        S::command(driver, cmd, arg1, arg2)
+            .to_result::<(), ErrorCode>()
+            .map_err(|_| StorageError::CustomError)?;
         libtock_drivers::util::Util::<S>::yieldk_for(|| called.get().is_some());
         if called.get().unwrap().0 == 0 {
             Ok(())
         } else {
-            Err(StorageError::LibtockRsError(ErrorCode::Invalid))
+            Err(StorageError::CustomError)
         }
     })
 }
@@ -114,7 +118,8 @@ fn write_slice<S: Syscalls, C: platform::allow_ro::Config + platform::subscribe:
     value: &[u8],
 ) -> StorageResult<()> {
     share::scope(|allow_ro| {
-        S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::WRITE_SLICE }>(allow_ro, value)?;
+        S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::WRITE_SLICE }>(allow_ro, value)
+            .map_err(|_| StorageError::CustomError)?;
         block_command::<S, C>(
             DRIVER_NUMBER,
             command_nr::WRITE_SLICE,

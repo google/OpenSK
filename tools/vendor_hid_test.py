@@ -124,7 +124,7 @@ class HidInterfaces(unittest.TestCase):
   def get_device(cls, usage_page) -> HidDevice:
     devices = list(get_devices(usage_page))
     if len(devices) != 1:
-      raise Exception(f'Found {len(devices)} devices')
+      raise RuntimeError(f'Found {len(devices)} devices')
     return HidDevice(devices[0])
 
   def setUp(self) -> None:
@@ -277,7 +277,7 @@ def get_fido_device() -> CtapHidDevice:
   for d in CtapHidDevice.list_devices():
     if d.descriptor.vid == _OPENSK_VID and d.descriptor.pid == _OPENSK_PID:
       return d
-  raise Exception('Unable to find Fido device')
+  raise RuntimeError('Unable to find Fido device')
 
 
 def get_fido_device_vendor() -> CtapHidDevice:

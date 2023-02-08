@@ -111,8 +111,7 @@ const STATEFUL_COMMAND_TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(3
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
-// TODO(#106) change to final string when ready
-pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1_PRE";
+pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1";
 
 // We currently only support one algorithm for signatures: ES256.
 // This algorithm is requested in MakeCredential and advertized in GetInfo.

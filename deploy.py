@@ -1160,7 +1160,7 @@ if __name__ == "__main__":
 
   # We only need the apps_group if we have a board set
   apps_group = main_parser.add_mutually_exclusive_group(
-      required=(partial_args.board is not None))
+      required=partial_args.board is not None)
   apps_group.add_argument(
       "--no-app",
       dest="application",

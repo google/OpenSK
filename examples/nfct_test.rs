@@ -24,7 +24,7 @@ type Syscalls = TockSyscalls;
 
 #[cfg(not(feature = "with_nfc"))]
 mod example {
-    use super::Write;
+    use super::{Syscalls, Write};
     use libtock_console::ConsoleWriter;
 
     pub fn nfc(console: &mut ConsoleWriter<Syscalls>) {
@@ -38,7 +38,6 @@ mod example {
 
     use super::{Console, Write};
     use libtock_console::ConsoleWriter;
-    //use libtock_core::result::CommandError;
     use libtock_drivers::nfc::{NfcTag, RecvOp};
     use libtock_drivers::result::{FlexUnwrap, TockError};
     use libtock_drivers::timer;

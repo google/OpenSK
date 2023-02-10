@@ -43,27 +43,21 @@ type Syscalls = fake::Syscalls;
 #[cfg(not(feature = "std"))]
 type Syscalls = TockSyscalls;
 
-fn timestamp<S: libtock_platform::Syscalls>(timer: &Timer<S>) -> Timestamp<f64> {
+fn timestamp(timer: &Timer<Syscalls>) -> Timestamp<f64> {
     Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().ok().unwrap())
 }
 
-fn measure<T, S: libtock_platform::Syscalls>(
-    timer: &Timer<S>,
-    operation: impl FnOnce() -> T,
-) -> (T, Duration<f64>) {
+fn measure<T>(timer: &Timer<Syscalls>, operation: impl FnOnce() -> T) -> (T, Duration<f64>) {
     let before = timestamp(timer);
     let result = operation();
     let after = timestamp(timer);
     (result, after - before)
 }
 
-fn boot_store<
-    S: libtock_platform::Syscalls,
-    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
->(
-    mut storage: TockStorage<S, C>,
+fn boot_store(
+    mut storage: TockStorage<Syscalls, DefaultConfig>,
     erase: bool,
-) -> Store<TockStorage<S, C>> {
+) -> Store<TockStorage<Syscalls, DefaultConfig>> {
     use persistent_store::Storage;
     let num_pages = storage.num_pages();
     if erase {
@@ -79,12 +73,7 @@ struct StorageConfig {
     num_pages: usize,
 }
 
-fn storage_config<
-    S: libtock_platform::Syscalls,
-    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
->(
-    storage: &TockStorage<S, C>,
-) -> StorageConfig {
+fn storage_config(storage: &TockStorage<Syscalls, DefaultConfig>) -> StorageConfig {
     use persistent_store::Storage;
     StorageConfig {
         num_pages: storage.num_pages(),
@@ -101,23 +90,20 @@ struct Stat {
     remove_ms: f64,
 }
 
-fn compute_latency<
-    S: libtock_platform::Syscalls,
-    C: libtock_platform::subscribe::Config + libtock_platform::allow_ro::Config,
->(
-    storage: TockStorage<S, C>,
-    timer: &Timer<S>,
+fn compute_latency(
+    storage: TockStorage<Syscalls, DefaultConfig>,
+    timer: &Timer<Syscalls>,
     num_pages: usize,
     key_increment: usize,
     word_length: usize,
-) -> (TockStorage<S, C>, Stat) {
+) -> (TockStorage<Syscalls, DefaultConfig>, Stat) {
     let mut stat = Stat {
         key_increment,
         entry_length: word_length,
         ..Default::default()
     };
 
-    let mut console = Console::<S>::writer();
+    let mut console = Console::<Syscalls>::writer();
     writeln!(
         console,
         "\nLatency for key_increment={} word_length={}.",
@@ -229,7 +215,7 @@ fn main() {
 
     // Results for nrf52840dk_opensk:
     // StorageConfig { num_pages: 20 }
-    // Overwrite    Length      Boot  Compaction   Insert  Remove
+    // Overwrite    Length      Boot  Compaction   Insert  Removon
     //        no  50 words   18.6 ms    145.8 ms  21.0 ms  9.8 ms
     //       yes   1 words  335.8 ms    100.6 ms  11.7 ms  5.7 ms
 }

@@ -159,10 +159,9 @@ fn main() {
     writeln!(console, "****************************************").unwrap();
 }
 
-fn bench<F, S>(console: &mut ConsoleWriter<S>, timer: &Timer<S>, title: &str, mut f: F)
+fn bench<F>(console: &mut ConsoleWriter<Syscalls>, timer: &Timer<Syscalls>, title: &str, mut f: F)
 where
     F: FnMut(),
-    S: platform::Syscalls,
 {
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "Benchmarking: {}", title).unwrap();

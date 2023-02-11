@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(not(feature = "std"), no_main)]
+#![no_main]
+#![no_std]
 
 extern crate lang_items;
 
@@ -23,21 +23,13 @@ use libtock_console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_leds::Leds;
 use libtock_platform as platform;
-#[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-#[cfg(feature = "std")]
-use libtock_unittest::fake;
 use persistent_store::{Storage, StorageIndex};
 use platform::DefaultConfig;
 
-#[cfg(not(feature = "std"))]
 stack_size! {0x800}
-#[cfg(not(feature = "std"))]
 set_main! {main}
 
-#[cfg(feature = "std")]
-type Syscalls = fake::Syscalls;
-#[cfg(not(feature = "std"))]
 type Syscalls = TockSyscalls;
 
 fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {

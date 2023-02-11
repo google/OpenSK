@@ -12,29 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(not(feature = "std"), no_main)]
+#![no_main]
+#![no_std]
 
 extern crate alloc;
 extern crate lang_items;
 
-#[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 
 use alloc::vec::Vec;
 use core::fmt::Write;
 use libtock_console::Console;
-#[cfg(feature = "std")]
-use libtock_unittest::fake;
 
-#[cfg(not(feature = "std"))]
 stack_size! {0x800}
-#[cfg(not(feature = "std"))]
 set_main! {main}
 
-#[cfg(feature = "std")]
-type Syscalls = fake::Syscalls;
-#[cfg(not(feature = "std"))]
 type Syscalls = TockSyscalls;
 
 fn main() {

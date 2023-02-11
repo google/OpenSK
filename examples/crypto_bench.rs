@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(not(feature = "std"), no_main)]
+#![no_main]
+#![no_std]
 
 extern crate alloc;
 extern crate lang_items;
@@ -27,21 +27,13 @@ use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
 use libtock_platform as platform;
-#[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-#[cfg(feature = "std")]
-use libtock_unittest::fake;
 use platform::DefaultConfig;
 use rng256::TockRng256;
 
-#[cfg(not(feature = "std"))]
 stack_size! {0x800}
-#[cfg(not(feature = "std"))]
 set_main! {main}
 
-#[cfg(feature = "std")]
-type Syscalls = fake::Syscalls;
-#[cfg(not(feature = "std"))]
 type Syscalls = TockSyscalls;
 
 fn main() {

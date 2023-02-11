@@ -1,5 +1,5 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(not(feature = "std"), no_main)]
+#![no_main]
+#![no_std]
 
 extern crate alloc;
 extern crate lang_items;
@@ -7,19 +7,11 @@ extern crate libtock_drivers;
 
 use core::fmt::Write;
 use libtock_console::Console;
-#[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-#[cfg(feature = "std")]
-use libtock_unittest::fake;
 
-#[cfg(not(feature = "std"))]
 stack_size! {0x4000}
-#[cfg(not(feature = "std"))]
 set_main! {main}
 
-#[cfg(feature = "std")]
-type Syscalls = fake::Syscalls;
-#[cfg(not(feature = "std"))]
 type Syscalls = TockSyscalls;
 
 #[cfg(not(feature = "with_nfc"))]

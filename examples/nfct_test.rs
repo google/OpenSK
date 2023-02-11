@@ -1,4 +1,3 @@
-#![cfg_attr(any(target_arch = "arm", target_arch = "riscv32"), tock_syscalls)]
 #![no_main]
 #![no_std]
 
@@ -8,20 +7,12 @@ extern crate libtock_drivers;
 
 use core::fmt::Write;
 use libtock_console::Console;
-#[cfg(feature = "tock_syscalls")]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-#[cfg(not(feature = "tock_syscalls"))]
-use libtock_unittest::fake;
 
-#[cfg(feature = "tock_syscalls")]
 stack_size! {0x4000}
-#[cfg(feature = "tock_syscalls")]
 set_main! {main}
 
-#[cfg(feature = "tock_syscalls")]
 type Syscalls = TockSyscalls;
-#[cfg(not(feature = "tock_syscalls"))]
-type Syscalls = fake::Syscalls;
 
 #[cfg(not(feature = "with_nfc"))]
 mod example {

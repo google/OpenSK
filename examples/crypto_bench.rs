@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(any(target_arch = "arm", target_arch = "riscv32"), tock_syscalls)]
 #![no_main]
 #![no_std]
 
@@ -27,14 +28,22 @@ use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
 use libtock_platform as platform;
+#[cfg(feature = "tock_syscalls")]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(not(feature = "tock_syscalls"))]
+use libtock_unittest::fake;
 use platform::DefaultConfig;
 use rng256::TockRng256;
 
+#[cfg(feature = "tock_syscalls")]
 stack_size! {0x800}
+#[cfg(feature = "tock_syscalls")]
 set_main! {main}
 
+#[cfg(feature = "tock_syscalls")]
 type Syscalls = TockSyscalls;
+#[cfg(not(feature = "tock_syscalls"))]
+type Syscalls = fake::Syscalls;
 
 fn main() {
     let mut console = Console::<Syscalls>::writer();

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(any(target_arch = "arm", target_arch = "riscv32"), tock_syscalls)]
 #![no_main]
 #![no_std]
 
@@ -23,14 +24,22 @@ use libtock_console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_leds::Leds;
 use libtock_platform as platform;
+#[cfg(feature = "tock_syscalls")]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
+#[cfg(not(feature = "tock_syscalls"))]
+use libtock_unittest::fake;
 use persistent_store::{Storage, StorageIndex};
 use platform::DefaultConfig;
 
+#[cfg(feature = "tock_syscalls")]
 stack_size! {0x800}
+#[cfg(feature = "tock_syscalls")]
 set_main! {main}
 
+#[cfg(feature = "tock_syscalls")]
 type Syscalls = TockSyscalls;
+#[cfg(not(feature = "tock_syscalls"))]
+type Syscalls = fake::SyscallDriver;
 
 fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
     let index = StorageIndex { page, byte: 0 };

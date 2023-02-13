@@ -8,6 +8,3 @@ colorama
 tqdm
 cryptography
 fido2 >= 1.0.0
-
-# DFU install
-nrfutil

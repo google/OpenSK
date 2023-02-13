@@ -25,6 +25,8 @@ following:
 *   python3 and pip (can be installed with the `python3-pip` package on Debian)
 *   the OpenSSL command line tool (can be installed and configured with the
     `libssl-dev` and `pkg-config` packages on Debian)
+*   `nrfutil` (can be installed using `pip3 install nrfutil`) if you want to flash
+    a device with DFU
 *   `uuid-runtime` if you are missing the `uuidgen` command.
 *   `llvm` if you want to use the upgradability feature.
 

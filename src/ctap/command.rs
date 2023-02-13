@@ -457,8 +457,8 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
 pub struct AuthenticatorConfigParameters {
     pub sub_command: ConfigSubCommand,
     pub sub_command_params: Option<ConfigSubCommandParams>,
-    pub pin_uv_auth_param: Option<Vec<u8>>,
     pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
@@ -469,8 +469,8 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
             let {
                 0x01 => sub_command,
                 0x02 => sub_command_params,
-                0x03 => pin_uv_auth_param,
-                0x04 => pin_uv_auth_protocol,
+                0x03 => pin_uv_auth_protocol,
+                0x04 => pin_uv_auth_param,
             } = extract_map(cbor_value)?;
         }
 
@@ -481,16 +481,16 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
             )),
             _ => None,
         };
-        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
             .transpose()?;
+        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
 
         Ok(AuthenticatorConfigParameters {
             sub_command,
             sub_command_params,
-            pin_uv_auth_param,
             pin_uv_auth_protocol,
+            pin_uv_auth_param,
         })
     }
 }
@@ -792,6 +792,36 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_GET_NEXT_ASSERTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorGetNextAssertion));
+    }
+
+    #[test]
+    fn test_from_cbor_config_parameters() {
+        let cbor_value = cbor_map! {
+            0x01 => ConfigSubCommand::SetMinPinLength as u64,
+            0x02 => cbor_map!{
+                0x01 => 6,
+                0x02 => cbor_array![String::from("example.com")],
+                0x03 => true,
+            },
+            0x03 => 1,
+            0x04 => vec! [0x9A; 16],
+        };
+        let returned_config_parameters =
+            AuthenticatorConfigParameters::try_from(cbor_value).unwrap();
+
+        let sub_command_params = ConfigSubCommandParams::SetMinPinLength(SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec![String::from("example.com")]),
+            force_change_pin: Some(true),
+        });
+        let expected_config_parameters = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::SetMinPinLength,
+            sub_command_params: Some(sub_command_params),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param: Some(vec![0x9A; 16]),
+        };
+
+        assert_eq!(returned_config_parameters, expected_config_parameters);
     }
 
     #[test]

@@ -81,8 +81,8 @@ pub fn process_config(
     let AuthenticatorConfigParameters {
         sub_command,
         sub_command_params,
-        pin_uv_auth_param,
         pin_uv_auth_protocol,
+        pin_uv_auth_param,
     } = params;
 
     let enforce_uv =

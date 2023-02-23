@@ -14,6 +14,7 @@
 
 use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::attestation_store::AttestationStore;
+use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
@@ -37,6 +38,7 @@ pub struct TestEnv {
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
     customization: TestCustomization,
+    clock: TestClock,
 }
 
 pub struct TestRng256 {
@@ -54,6 +56,52 @@ impl Rng256 for TestRng256 {
         let mut result = [Default::default(); 32];
         self.rng.fill(&mut result);
         result
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TestTimer {
+    end: usize,
+}
+
+#[derive(Debug)]
+pub struct TestClock {
+    cur_time: usize,
+}
+
+impl TestClock {
+    pub fn new() -> Self {
+        TestClock { cur_time: 0 }
+    }
+
+    pub fn advance(&mut self, milliseconds: usize) {
+        self.cur_time += milliseconds;
+    }
+}
+
+impl Clock for TestClock {
+    type Timer = TestTimer;
+
+    fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
+        TestTimer {
+            end: self.cur_time + milliseconds,
+        }
+    }
+
+    fn check_timer(&mut self, timer: Self::Timer) -> Option<Self::Timer> {
+        if self.cur_time < timer.end {
+            Some(timer)
+        } else {
+            None
+        }
+    }
+
+    fn tickle(&mut self) {}
+
+    #[cfg(feature = "debug_ctap")]
+    fn timestamp_us(&mut self) -> usize {
+        // Unused, but let's implement something because it's easy.
+        self.cur_time * 1000
     }
 }
 
@@ -107,12 +155,14 @@ impl TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
         let customization = DEFAULT_CUSTOMIZATION.into();
+        let clock = TestClock::new();
         TestEnv {
             rng,
             user_presence,
             store,
             upgrade_storage,
             customization,
+            clock,
         }
     }
 
@@ -174,6 +224,7 @@ impl Env for TestEnv {
     type Storage = BufferStorage;
     type KeyStore = Self;
     type AttestationStore = Self;
+    type Clock = TestClock;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
@@ -200,6 +251,10 @@ impl Env for TestEnv {
         self
     }
 
+    fn clock(&mut self) -> &mut Self::Clock {
+        &mut self.clock
+    }
+
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
         self.upgrade_storage.as_mut()
     }
@@ -223,5 +278,22 @@ impl Env for TestEnv {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
         self
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::module_inception)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_clock() {
+        let mut clock = TestClock::new();
+        let timer = clock.make_timer(3);
+        let timer = clock.check_timer(timer).unwrap();
+        clock.advance(2);
+        let timer = clock.check_timer(timer).unwrap();
+        clock.advance(1);
+        assert_eq!(clock.check_timer(timer), None);
     }
 }

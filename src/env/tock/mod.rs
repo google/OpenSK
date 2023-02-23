@@ -21,6 +21,7 @@ use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceRes
 use crate::api::{attestation_store, key_store};
 use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
+use clock::TockClock;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_time::duration::Milliseconds;
@@ -35,6 +36,7 @@ use libtock_drivers::{crp, led, timer};
 use persistent_store::{StorageResult, Store};
 use rng256::TockRng256;
 
+mod clock;
 mod storage;
 
 pub struct TockHidConnection {
@@ -70,6 +72,7 @@ pub struct TockEnv {
     #[cfg(feature = "vendor_hid")]
     vendor_connection: TockHidConnection,
     blink_pattern: usize,
+    clock: TockClock,
 }
 
 impl TockEnv {
@@ -95,6 +98,7 @@ impl TockEnv {
                 endpoint: UsbEndpoint::VendorHid,
             },
             blink_pattern: 0,
+            clock: TockClock::new(),
         }
     }
 }
@@ -115,6 +119,7 @@ impl UserPresence for TockEnv {
     fn check_init(&mut self) {
         self.blink_pattern = 0;
     }
+
     fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
         if timeout.integer() == 0 {
             return Err(UserPresenceError::Timeout);
@@ -224,6 +229,7 @@ impl Env for TockEnv {
     type Storage = TockStorage;
     type KeyStore = Self;
     type AttestationStore = Self;
+    type Clock = TockClock;
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
@@ -248,6 +254,10 @@ impl Env for TockEnv {
 
     fn attestation_store(&mut self) -> &mut Self {
         self
+    }
+
+    fn clock(&mut self) -> &mut Self::Clock {
+        &mut self.clock
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {

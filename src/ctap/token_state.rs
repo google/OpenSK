@@ -12,24 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::clock::Clock;
 use crate::ctap::client_pin::PinPermission;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::timed_permission::TimedPermission;
 use crate::env::Env;
 use alloc::string::String;
-use core::marker::PhantomData;
 use crypto::sha256::Sha256;
 use crypto::Hash256;
-use embedded_time::duration::Milliseconds;
-
-use crate::clock::{ClockInt, CtapInstant};
 
 /// Timeout for auth tokens.
 ///
 /// This usage time limit is correct for USB, BLE, and internal.
 /// NFC only allows 19.8 seconds.
 /// TODO(#15) multiplex over transports, add NFC
-const INITIAL_USAGE_TIME_LIMIT: Milliseconds<ClockInt> = Milliseconds(30000 as ClockInt);
+const INITIAL_USAGE_TIME_LIMIT: usize = 30000;
 
 /// Implements pinUvAuthToken state from section 6.5.2.1.
 ///
@@ -38,11 +34,10 @@ const INITIAL_USAGE_TIME_LIMIT: Milliseconds<ClockInt> = Milliseconds(30000 as C
 ///
 /// This implementation does not use a rolling timer.
 pub struct PinUvAuthTokenState<E: Env> {
-    _phantom: PhantomData<E>,
     // Relies on the fact that all permissions are represented by powers of two.
     permissions_set: u8,
     permissions_rp_id: Option<String>,
-    usage_timer: TimedPermission,
+    usage_timer: Option<<<E as Env>::Clock as Clock>::Timer>,
     user_verified: bool,
     in_use: bool,
 }
@@ -51,10 +46,9 @@ impl<E: Env> PinUvAuthTokenState<E> {
     /// Creates a pinUvAuthToken state without permissions.
     pub fn new() -> Self {
         PinUvAuthTokenState {
-            _phantom: PhantomData,
             permissions_set: 0,
             permissions_rp_id: None,
-            usage_timer: TimedPermission::waiting(),
+            usage_timer: None,
             user_verified: false,
             in_use: false,
         }
@@ -117,19 +111,19 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self, now: CtapInstant) {
+    pub fn begin_using_pin_uv_auth_token(&mut self, env: &mut E) {
         self.user_verified = true;
-        self.usage_timer = TimedPermission::granted(now, INITIAL_USAGE_TIME_LIMIT);
+        self.usage_timer = Some(env.clock().make_timer(INITIAL_USAGE_TIME_LIMIT));
         self.in_use = true;
     }
 
     /// Updates the usage timer, and disables the pinUvAuthToken on timeout.
-    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, now: CtapInstant) {
+    pub fn pin_uv_auth_token_usage_timer_observer(&mut self, env: &mut E) {
         if !self.in_use {
             return;
         }
-        self.usage_timer = self.usage_timer.check_expiration(now);
-        if !self.usage_timer.is_granted(now) {
+        env.clock().update_timer(&mut self.usage_timer);
+        if self.usage_timer.is_none() {
             self.stop_using_pin_uv_auth_token();
         }
     }
@@ -153,7 +147,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     pub fn stop_using_pin_uv_auth_token(&mut self) {
         self.permissions_rp_id = None;
         self.permissions_set = 0;
-        self.usage_timer = TimedPermission::waiting();
+        self.usage_timer = None;
         self.user_verified = false;
         self.in_use = false;
     }
@@ -167,23 +161,23 @@ mod test {
 
     #[test]
     fn test_observer() {
+        let mut env = TestEnv::new();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        let mut now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.is_in_use());
-        now = now + Milliseconds(100_u32);
-        token_state.pin_uv_auth_token_usage_timer_observer(now);
+        env.clock().advance(100);
+        token_state.pin_uv_auth_token_usage_timer_observer(&mut env);
         assert!(token_state.is_in_use());
-        now = now + INITIAL_USAGE_TIME_LIMIT;
-        token_state.pin_uv_auth_token_usage_timer_observer(now);
+        env.clock().advance(INITIAL_USAGE_TIME_LIMIT);
+        token_state.pin_uv_auth_token_usage_timer_observer(&mut env);
         assert!(!token_state.is_in_use());
     }
 
     #[test]
     fn test_stop() {
+        let mut env = TestEnv::new();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.is_in_use());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.is_in_use());
@@ -267,14 +261,14 @@ mod test {
 
     #[test]
     fn test_user_verified_flag() {
+        let mut env = TestEnv::new();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         assert!(!token_state.get_user_verified_flag_value());
-        let now: CtapInstant = CtapInstant::new(0);
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.get_user_verified_flag_value());
         token_state.clear_user_verified_flag();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(now);
+        token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.get_user_verified_flag_value());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.get_user_verified_flag_value());

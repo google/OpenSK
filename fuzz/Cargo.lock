@@ -104,7 +104,6 @@ dependencies = [
  "arrayref",
  "byteorder",
  "crypto",
- "embedded-time",
  "lang_items",
  "libtock_core",
  "libtock_drivers",

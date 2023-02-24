@@ -18,6 +18,7 @@ extern crate alloc;
 #[macro_use]
 extern crate arrayref;
 
+use crate::api::clock::Clock;
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
 #[cfg(feature = "vendor_hid")]
@@ -25,7 +26,6 @@ use crate::ctap::vendor_hid::VendorHid;
 use crate::ctap::CtapState;
 pub use crate::ctap::Transport;
 use crate::env::Env;
-use clock::CtapInstant;
 
 // Those macros should eventually be split into trace, debug, info, warn, and error macros when
 // adding either the defmt or log feature and crate dependency.
@@ -45,7 +45,6 @@ macro_rules! debug_ctap {
 }
 
 pub mod api;
-pub mod clock;
 // TODO(kaczmarczyck): Refactor this so that ctap module isn't public.
 pub mod ctap;
 pub mod env;
@@ -65,8 +64,8 @@ impl<E: Env> Ctap<E> {
     /// Instantiates a CTAP implementation given its environment.
     // This should only take the environment, but it temporarily takes the boot time until the
     // clock is part of the environment.
-    pub fn new(mut env: E, now: CtapInstant) -> Self {
-        let state = CtapState::<E>::new(&mut env, now);
+    pub fn new(mut env: E) -> Self {
+        let state = CtapState::<E>::new(&mut env);
         let hid = MainHid::new();
         #[cfg(feature = "vendor_hid")]
         let vendor_hid = VendorHid::new();
@@ -95,23 +94,36 @@ impl<E: Env> Ctap<E> {
         &mut self,
         packet: &HidPacket,
         transport: Transport,
-        now: CtapInstant,
     ) -> HidPacketIterator {
         match transport {
             Transport::MainHid => {
                 self.hid
-                    .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+                    .process_hid_packet(&mut self.env, packet, &mut self.state)
             }
             #[cfg(feature = "vendor_hid")]
             Transport::VendorHid => {
                 self.vendor_hid
-                    .process_hid_packet(&mut self.env, packet, now, &mut self.state)
+                    .process_hid_packet(&mut self.env, packet, &mut self.state)
             }
         }
     }
 
-    pub fn update_timeouts(&mut self, now: CtapInstant) {
-        self.state.update_timeouts(now);
-        self.hid.update_wink_timeout(now);
+    pub fn update_timeouts(&mut self) {
+        self.env.clock().tickle();
+        self.state.update_timeouts(&mut self.env);
+    }
+
+    pub fn should_wink(&mut self) -> bool {
+        self.hid.should_wink(&mut self.env)
+    }
+
+    #[cfg(feature = "with_ctap1")]
+    pub fn u2f_grant_user_presence(&mut self) {
+        self.state.u2f_grant_user_presence(&mut self.env)
+    }
+
+    #[cfg(feature = "with_ctap1")]
+    pub fn u2f_needs_user_presence(&mut self) -> bool {
+        self.state.u2f_needs_user_presence(&mut self.env)
     }
 }

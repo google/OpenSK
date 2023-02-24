@@ -20,10 +20,8 @@ use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
-use crate::clock::ClockInt;
 use crate::env::Env;
 use customization::TestCustomization;
-use embedded_time::duration::Milliseconds;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -133,11 +131,7 @@ fn new_storage() -> BufferStorage {
 }
 
 impl HidConnection for TestEnv {
-    fn send_and_maybe_recv(
-        &mut self,
-        _buf: &mut [u8; 64],
-        _timeout: Milliseconds<ClockInt>,
-    ) -> SendOrRecvResult {
+    fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout: usize) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
         Ok(SendOrRecvStatus::Sent)
     }
@@ -187,7 +181,7 @@ impl TestUserPresence {
 
 impl UserPresence for TestUserPresence {
     fn check_init(&mut self) {}
-    fn wait_with_timeout(&mut self, _timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
+    fn wait_with_timeout(&mut self, _timeout: usize) -> UserPresenceResult {
         (self.check)()
     }
     fn check_complete(&mut self) {}

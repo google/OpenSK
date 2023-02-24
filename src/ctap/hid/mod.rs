@@ -21,7 +21,6 @@ pub use self::receive::MessageAssembler;
 #[cfg(not(feature = "std"))]
 use self::receive::MessageAssembler;
 pub use self::send::HidPacketIterator;
-use super::super::clock::{ClockInt, CtapInstant};
 use super::status_code::Ctap2StatusCode;
 #[cfg(test)]
 use crate::env::test::TestEnv;
@@ -29,7 +28,6 @@ use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
-use embedded_time::duration::Milliseconds;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 
@@ -197,9 +195,6 @@ impl<E: Env> CtapHid<E> {
     #[cfg(any(not(feature = "with_ctap1"), feature = "vendor_hid"))]
     pub const CAPABILITY_NMSG: u8 = 0x08;
 
-    // TODO: Is this timeout duration specified?
-    const TIMEOUT_DURATION: Milliseconds<ClockInt> = Milliseconds(100 as ClockInt);
-
     /// Creates a new CTAP HID packet parser.
     ///
     /// The capabilities passed in are reported to the client in Init.
@@ -230,13 +225,8 @@ impl<E: Env> CtapHid<E> {
     /// Ignoring the others is incorrect behavior. You have to at least replace them with an error
     /// message:
     /// `Self::error_message(message.cid, CtapHidError::InvalidCmd)`
-    pub fn parse_packet(
-        &mut self,
-        env: &mut E,
-        packet: &HidPacket,
-        clock_value: CtapInstant,
-    ) -> Option<Message> {
-        match self.assembler.parse_packet(env, packet, clock_value) {
+    pub fn parse_packet(&mut self, env: &mut E, packet: &HidPacket) -> Option<Message> {
+        match self.assembler.parse_packet(env, packet) {
             Ok(Some(message)) => {
                 debug_ctap!(env, "Received message: {:02x?}", message);
                 self.preprocess_message(message)
@@ -432,7 +422,7 @@ mod test {
             let mut messages = Vec::new();
             let mut assembler = MessageAssembler::<TestEnv>::new();
             for packet in HidPacketIterator::new(message.clone()).unwrap() {
-                match assembler.parse_packet(&mut env, &packet, CtapInstant::new(0)) {
+                match assembler.parse_packet(&mut env, &packet) {
                     Ok(Some(msg)) => messages.push(msg),
                     Ok(None) => (),
                     Err(_) => panic!("Couldn't assemble packet: {:02x?}", &packet as &[u8]),
@@ -450,10 +440,7 @@ mod test {
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
         // Continuation packets are silently ignored.
-        assert_eq!(
-            ctap_hid.parse_packet(&mut env, &packet, CtapInstant::new(0)),
-            None
-        );
+        assert_eq!(ctap_hid.parse_packet(&mut env, &packet), None);
     }
 
     #[test]
@@ -496,12 +483,9 @@ mod test {
         packet2[4..15].copy_from_slice(&[
             0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
         ]);
+        assert_eq!(ctap_hid.parse_packet(&mut env, &packet1), None);
         assert_eq!(
-            ctap_hid.parse_packet(&mut env, &packet1, CtapInstant::new(0)),
-            None
-        );
-        assert_eq!(
-            ctap_hid.parse_packet(&mut env, &packet2, CtapInstant::new(0)),
+            ctap_hid.parse_packet(&mut env, &packet2),
             Some(Message {
                 cid,
                 cmd: CtapHidCommand::Init,
@@ -525,7 +509,7 @@ mod test {
         ping_packet[..4].copy_from_slice(&cid);
         ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
         assert_eq!(
-            ctap_hid.parse_packet(&mut env, &ping_packet, CtapInstant::new(0)),
+            ctap_hid.parse_packet(&mut env, &ping_packet),
             Some(Message {
                 cid,
                 cmd: CtapHidCommand::Ping,
@@ -543,7 +527,7 @@ mod test {
         cancel_packet[..4].copy_from_slice(&cid);
         cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
 
-        let response = ctap_hid.parse_packet(&mut env, &cancel_packet, CtapInstant::new(0));
+        let response = ctap_hid.parse_packet(&mut env, &cancel_packet);
         assert_eq!(response, None);
     }
 

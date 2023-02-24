@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::clock::CtapInstant;
 use super::apdu::{Apdu, ApduStatusCode};
 use super::credential_id::{decrypt_credential_id, encrypt_to_credential_id};
 use super::crypto_wrapper::PrivateKey;
@@ -178,7 +177,6 @@ impl Ctap1Command {
         env: &mut E,
         message: &[u8],
         ctap_state: &mut CtapState<E>,
-        clock_value: CtapInstant,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         if !ctap_state
             .allows_ctap1(env)
@@ -192,7 +190,7 @@ impl Ctap1Command {
                 challenge,
                 application,
             } => {
-                if !ctap_state.u2f_up_state.consume_up(clock_value) {
+                if !ctap_state.u2f_up_state.consume_up(env) {
                     return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
                 Ctap1Command::process_register(env, challenge, application)
@@ -205,8 +203,7 @@ impl Ctap1Command {
                 flags,
             } => {
                 // The order is important due to side effects of checking user presence.
-                if flags == Ctap1Flags::EnforceUpAndSign
-                    && !ctap_state.u2f_up_state.consume_up(clock_value)
+                if flags == Ctap1Flags::EnforceUpAndSign && !ctap_state.u2f_up_state.consume_up(env)
                 {
                     return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
                 }
@@ -345,9 +342,9 @@ impl Ctap1Command {
 mod test {
     use super::super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::super::data_formats::SignatureAlgorithm;
+    use super::super::TOUCH_TIMEOUT;
     use super::*;
     use crate::api::customization::Customization;
-    use crate::clock::TEST_CLOCK_FREQUENCY_HZ;
     use crate::ctap::storage;
     use crate::env::test::TestEnv;
     use crypto::Hash256;
@@ -394,15 +391,14 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         storage::toggle_always_uv(&mut env).unwrap();
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COMMAND_NOT_ALLOWED));
     }
 
@@ -411,14 +407,13 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
@@ -429,11 +424,9 @@ mod test {
         env.attestation_store()
             .set(&attestation_store::Id::Batch, Some(&attestation))
             .unwrap();
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
-                .unwrap();
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
         assert_eq!(response[66], CBOR_CREDENTIAL_ID_SIZE as u8);
         assert!(decrypt_credential_id(
@@ -455,16 +448,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);
-        let response = Ctap1Command::process_command(
-            &mut env,
-            &message[..message.len() - 1],
-            &mut ctap_state,
-            CtapInstant::new(0),
-        );
+        let response =
+            Ctap1Command::process_command(&mut env, &message[..message.len() - 1], &mut ctap_state);
 
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
     }
@@ -477,14 +466,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let timeout_clock_value: CtapInstant =
-            CtapInstant::new((30001 * TEST_CLOCK_FREQUENCY_HZ as u64) / 1000);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, timeout_clock_value);
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        env.clock().advance(TOUCH_TIMEOUT);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
@@ -494,15 +481,14 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 
@@ -512,7 +498,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -520,8 +506,7 @@ mod test {
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
@@ -531,7 +516,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -543,23 +528,19 @@ mod test {
         );
 
         message.push(0x00);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert!(response.is_ok());
 
         message.push(0x00);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert!(response.is_ok());
 
         message.push(0x00);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert!(response.is_ok());
 
         message.push(0x00);
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
     }
 
@@ -569,7 +550,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -578,8 +559,7 @@ mod test {
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
 
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_CLA_INVALID));
     }
 
@@ -589,7 +569,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -598,8 +578,7 @@ mod test {
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
 
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_INS_INVALID));
     }
 
@@ -609,7 +588,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -618,8 +597,7 @@ mod test {
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
 
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
@@ -637,7 +615,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -645,11 +623,9 @@ mod test {
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0))
-                .unwrap();
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], 0x01);
         let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_signature_counter(
@@ -665,7 +641,7 @@ mod test {
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
         let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
@@ -676,13 +652,8 @@ mod test {
             &key_handle,
         );
 
-        let response = Ctap1Command::process_command(
-            &mut env,
-            &message,
-            &mut ctap_state,
-            CtapInstant::new((30001 * TEST_CLOCK_FREQUENCY_HZ as u64) / 1000),
-        )
-        .unwrap();
+        env.clock().advance(TOUCH_TIMEOUT);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], 0x01);
         let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
         check_signature_counter(
@@ -702,12 +673,11 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response =
-            Ctap1Command::process_command(&mut env, &message, &mut ctap_state, CtapInstant::new(0));
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 
@@ -721,16 +691,12 @@ mod test {
         let mut env = TestEnv::new();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
-        ctap_state.u2f_up_state.consume_up(CtapInstant::new(0));
-        ctap_state.u2f_up_state.grant_up(CtapInstant::new(0));
-        let response = Ctap1Command::process_command(
-            &mut env,
-            &message,
-            &mut ctap_state,
-            CtapInstant::new((30001 * TEST_CLOCK_FREQUENCY_HZ as u64) / 1000),
-        );
+        ctap_state.u2f_up_state.consume_up(&mut env);
+        ctap_state.u2f_up_state.grant_up(&mut env);
+        env.clock().advance(TOUCH_TIMEOUT);
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
 }

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::ClockInt;
-use embedded_time::duration::Milliseconds;
-
 #[derive(Debug)]
 pub enum UserPresenceError {
     /// User explicitly declined user presence check.
@@ -36,7 +33,7 @@ pub trait UserPresence {
     /// Waits until user presence is confirmed, rejected, or the given timeout expires.
     ///
     /// Must be called between calls to [`Self::check_init`] and [`Self::check_complete`].
-    fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult;
+    fn wait_with_timeout(&mut self, timeout: usize) -> UserPresenceResult;
 
     /// Finalizes a user presence check.
     ///

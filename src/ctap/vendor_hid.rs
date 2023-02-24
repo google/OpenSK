@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::CtapInstant;
 use crate::ctap::hid::{
     CtapHid, CtapHidCommand, CtapHidError, HidPacket, HidPacketIterator, Message,
 };
@@ -38,11 +37,10 @@ impl<E: Env> VendorHid<E> {
         &mut self,
         env: &mut E,
         packet: &HidPacket,
-        now: CtapInstant,
         ctap_state: &mut CtapState<E>,
     ) -> HidPacketIterator {
-        if let Some(message) = self.hid.parse_packet(env, packet, now) {
-            let processed_message = self.process_message(env, message, now, ctap_state);
+        if let Some(message) = self.hid.parse_packet(env, packet) {
+            let processed_message = self.process_message(env, message, ctap_state);
             debug_ctap!(
                 env,
                 "Sending message through the second usage page: {:02x?}",
@@ -59,7 +57,6 @@ impl<E: Env> VendorHid<E> {
         &mut self,
         env: &mut E,
         message: Message,
-        now: CtapInstant,
         ctap_state: &mut CtapState<E>,
     ) -> Message {
         let cid = message.cid;
@@ -69,7 +66,7 @@ impl<E: Env> VendorHid<E> {
             // The CTAP2 processing function multiplexes internally.
             CtapHidCommand::Cbor => {
                 let response =
-                    ctap_state.process_command(env, &message.payload, Channel::VendorHid(cid), now);
+                    ctap_state.process_command(env, &message.payload, Channel::VendorHid(cid));
                 Message {
                     cid,
                     cmd: CtapHidCommand::Cbor,
@@ -98,19 +95,14 @@ mod test {
     #[test]
     fn test_process_hid_packet() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 
         let mut ping_packet = [0x00; 64];
         ping_packet[..4].copy_from_slice(&cid);
         ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
 
-        let mut response = vendor_hid.process_hid_packet(
-            &mut env,
-            &ping_packet,
-            CtapInstant::new(0),
-            &mut ctap_state,
-        );
+        let mut response = vendor_hid.process_hid_packet(&mut env, &ping_packet, &mut ctap_state);
         assert_eq!(response.next(), Some(ping_packet));
         assert_eq!(response.next(), None);
     }
@@ -118,26 +110,21 @@ mod test {
     #[test]
     fn test_process_hid_packet_empty() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 
         let mut cancel_packet = [0x00; 64];
         cancel_packet[..4].copy_from_slice(&cid);
         cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
 
-        let mut response = vendor_hid.process_hid_packet(
-            &mut env,
-            &cancel_packet,
-            CtapInstant::new(0),
-            &mut ctap_state,
-        );
+        let mut response = vendor_hid.process_hid_packet(&mut env, &cancel_packet, &mut ctap_state);
         assert_eq!(response.next(), None);
     }
 
     #[test]
     fn test_blocked_commands() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 
         // Usually longer, but we don't parse them anyway.
@@ -153,21 +140,11 @@ mod test {
         error_packet[..4].copy_from_slice(&cid);
         error_packet[4..8].copy_from_slice(&[0xBF, 0x00, 0x01, 0x01]);
 
-        let mut response = vendor_hid.process_hid_packet(
-            &mut env,
-            &msg_packet,
-            CtapInstant::new(0),
-            &mut ctap_state,
-        );
+        let mut response = vendor_hid.process_hid_packet(&mut env, &msg_packet, &mut ctap_state);
         assert_eq!(response.next(), Some(error_packet));
         assert_eq!(response.next(), None);
 
-        let mut response = vendor_hid.process_hid_packet(
-            &mut env,
-            &wink_packet,
-            CtapInstant::new(0),
-            &mut ctap_state,
-        );
+        let mut response = vendor_hid.process_hid_packet(&mut env, &wink_packet, &mut ctap_state);
         assert_eq!(response.next(), Some(error_packet));
         assert_eq!(response.next(), None);
     }

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::ClockInt;
-use embedded_time::duration::Milliseconds;
 use libtock_drivers::usb_ctap_hid::UsbEndpoint;
 
 pub enum SendOrRecvStatus {
@@ -27,9 +25,5 @@ pub struct SendOrRecvError;
 pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
 
 pub trait HidConnection {
-    fn send_and_maybe_recv(
-        &mut self,
-        buf: &mut [u8; 64],
-        timeout: Milliseconds<ClockInt>,
-    ) -> SendOrRecvResult;
+    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout: usize) -> SendOrRecvResult;
 }

@@ -115,7 +115,7 @@ index e911a96..d00feab 100644
  # See https://rust-lang.github.io/rustup-components-history/ for a list of
  # recently nightlies and what components are available for them.
 -channel = "nightly-2022-06-10"
-+channel = "nightly-2022-10-22"
++channel = "nightly-2023-02-01"
  components = ["clippy", "miri", "rustfmt"]
  targets = ["thumbv7em-none-eabi",
             "riscv32imac-unknown-none-elf",

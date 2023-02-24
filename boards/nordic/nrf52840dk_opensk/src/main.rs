@@ -244,7 +244,6 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
     type SyscallDriverLookup = Self;
     type SyscallFilter = Self;
     type ProcessFault = ();
-    type CredentialsCheckingPolicy = ();
     type Scheduler = RoundRobinSched<'static>;
     type SchedulerTimer = cortexm4::systick::SysTick;
     type WatchDog = ();
@@ -257,9 +256,6 @@ impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'
         &self
     }
     fn process_fault(&self) -> &Self::ProcessFault {
-        &()
-    }
-    fn credentials_checking_policy(&self) -> &'static Self::CredentialsCheckingPolicy {
         &()
     }
     fn scheduler(&self) -> &Self::Scheduler {
@@ -290,8 +286,8 @@ pub unsafe fn main() {
 
     let uart_channel = if USB_DEBUGGING {
         // Initialize early so any panic beyond this point can use the RTT memory object.
-        let mut rtt_memory_refs = components::segger_rtt::SeggerRttMemoryComponent::new()
-            .finalize(components::segger_rtt_memory_component_static!());
+        let mut rtt_memory_refs =
+            components::segger_rtt::SeggerRttMemoryComponent::new().finalize(());
 
         // XXX: This is inherently unsafe as it aliases the mutable reference to rtt_memory. This
         // aliases reference is only used inside a panic handler, which should be OK, but maybe we
@@ -331,7 +327,7 @@ pub unsafe fn main() {
             15 => &nrf52840_peripherals.gpio_port[Pin::P0_27]
         ),
     )
-    .finalize(components::gpio_component_static!(nrf52840::gpio::GPIOPin));
+    .finalize(components::gpio_component_buf!(nrf52840::gpio::GPIOPin));
 
     let button = components::button::ButtonComponent::new(
         board_kernel,
@@ -360,11 +356,9 @@ pub unsafe fn main() {
             ) //16
         ),
     )
-    .finalize(components::button_component_static!(
-        nrf52840::gpio::GPIOPin
-    ));
+    .finalize(components::button_component_buf!(nrf52840::gpio::GPIOPin));
 
-    let led = components::led::LedsComponent::new().finalize(components::led_component_static!(
+    let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedLow<'static, nrf52840::gpio::GPIOPin>,
         LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED2_PIN]),
@@ -403,22 +397,20 @@ pub unsafe fn main() {
     let rtc = &base_peripherals.rtc;
     let _ = rtc.start();
     let mux_alarm = components::alarm::AlarmMuxComponent::new(rtc)
-        .finalize(components::alarm_mux_component_static!(nrf52840::rtc::Rtc));
+        .finalize(components::alarm_mux_component_helper!(nrf52840::rtc::Rtc));
     let alarm = components::alarm::AlarmDriverComponent::new(
         board_kernel,
         capsules::alarm::DRIVER_NUM,
         mux_alarm,
     )
-    .finalize(components::alarm_component_static!(nrf52840::rtc::Rtc));
+    .finalize(components::alarm_component_helper!(nrf52840::rtc::Rtc));
 
     let channel = nrf52_components::UartChannelComponent::new(
         uart_channel,
         mux_alarm,
         &base_peripherals.uarte0,
     )
-    .finalize(nrf52_components::uart_channel_component_static!(
-        nrf52840::rtc::Rtc
-    ));
+    .finalize(());
 
     let dynamic_deferred_call_clients =
         static_init!([DynamicDeferredCallClientState; 3], Default::default());
@@ -427,14 +419,14 @@ pub unsafe fn main() {
         DynamicDeferredCall::new(dynamic_deferred_call_clients)
     );
     DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
-    let process_printer = components::process_printer::ProcessPrinterTextComponent::new()
-        .finalize(components::process_printer_text_component_static!());
+    let process_printer =
+        components::process_printer::ProcessPrinterTextComponent::new().finalize(());
     PROCESS_PRINTER = Some(process_printer);
 
     // Create a shared UART channel for the console and for kernel debug.
     let uart_mux =
         components::console::UartMuxComponent::new(channel, 115200, dynamic_deferred_caller)
-            .finalize(components::uart_mux_component_static!());
+            .finalize(());
 
     let pconsole = components::process_console::ProcessConsoleComponent::new(
         board_kernel,
@@ -442,7 +434,7 @@ pub unsafe fn main() {
         mux_alarm,
         process_printer,
     )
-    .finalize(components::process_console_component_static!(
+    .finalize(components::process_console_component_helper!(
         nrf52840::rtc::Rtc<'static>
     ));
 
@@ -452,17 +444,16 @@ pub unsafe fn main() {
         capsules::console::DRIVER_NUM,
         uart_mux,
     )
-    .finalize(components::console_component_static!());
+    .finalize(components::console_component_helper!());
     // Create the debugger object that handles calls to `debug!()`.
-    components::debug_writer::DebugWriterComponent::new(uart_mux)
-        .finalize(components::debug_writer_component_static!());
+    components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
     let rng = components::rng::RngComponent::new(
         board_kernel,
         capsules::rng::DRIVER_NUM,
         &base_peripherals.trng,
     )
-    .finalize(components::rng_component_static!());
+    .finalize(());
 
     base_peripherals.spim0.configure(
         nrf52840::pinmux::Pinmux::new(SPI_MOSI as u32),
@@ -472,16 +463,16 @@ pub unsafe fn main() {
 
     // Initialize AC using AIN5 (P0.29) as VIN+ and VIN- as AIN0 (P0.02)
     // These are hardcoded pin assignments specified in the driver
-    let analog_comparator = components::analog_comparator::AnalogComparatorComponent::new(
+    let analog_comparator = components::analog_comparator::AcComponent::new(
         &base_peripherals.acomp,
-        components::analog_comparator_component_helper!(
+        components::acomp_component_helper!(
             nrf52840::acomp::Channel,
             &nrf52840::acomp::CHANNEL_AC0
         ),
         board_kernel,
         capsules::analog_comparator::DRIVER_NUM,
     )
-    .finalize(components::analog_comparator_component_static!(
+    .finalize(components::acomp_component_buf!(
         nrf52840::acomp::Comparator
     ));
 
@@ -510,7 +501,7 @@ pub unsafe fn main() {
         PRODUCT_ID,
         STRINGS,
     )
-    .finalize(components::usb_ctap_component_static!(nrf52840::usbd::Usbd));
+    .finalize(components::usb_ctap_component_helper!(nrf52840::usbd::Usbd));
 
     // disable for now
     // let crp = components::firmware_protection::FirmwareProtectionComponent::new(
@@ -521,7 +512,7 @@ pub unsafe fn main() {
     //     nrf52840::uicr::Uicr
 
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
-        .finalize(components::round_robin_component_static!(NUM_PROCS)); // ));
+        .finalize(components::rr_component_helper!(NUM_PROCS));
 
     nrf52_components::NrfClockComponent::new(&base_peripherals.clock).finalize(());
 

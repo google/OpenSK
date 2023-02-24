@@ -38,41 +38,27 @@ fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
     lhs.wrapping_sub(rhs) & 0xffffff
 }
 
+#[derive(Default)]
 pub struct TockClock {
     epoch: usize,
     tick: usize,
-}
-
-impl TockClock {
-    pub fn new() -> Self {
-        TockClock { epoch: 0, tick: 0 }
-    }
 }
 
 impl Clock for TockClock {
     type Timer = TockTimer;
 
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
+        self.tickle();
         let clock_frequency =
             syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)
                 .ok()
                 .unwrap();
-        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
-            .ok()
-            .unwrap();
-        // Update self first
-        if wrapping_sub_u24(self.tick, cur_tick) < 0x80_0000 {
-            self.epoch += 1;
-        }
-        self.tick = cur_tick;
-
-        // Now create the Timer
         let delta_tick = match milliseconds.checked_mul(clock_frequency) {
             Some(x) => x / 1000,
             // All CTAP timeouts are multiples of 100 so far. Worst case we timeout too early.
             None => (milliseconds / 100).saturating_mul(clock_frequency / 10),
         };
-        let (end_tick, passed_epochs) = add_to_u24_with_wraps(cur_tick, delta_tick);
+        let (end_tick, passed_epochs) = add_to_u24_with_wraps(self.tick, delta_tick);
         // Epoch wraps after thousands of years, so we don't mind.
         let end_epoch = self.epoch + passed_epochs;
         Self::Timer {
@@ -93,7 +79,6 @@ impl Clock for TockClock {
     /// Elapses timers before the clock wraps.
     ///
     /// Call this regularly to timeout reliably despite wrapping clock ticks.
-    // TODO we implicitly update in the other commands, is this desirable?
     fn tickle(&mut self) {
         let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
             .ok()

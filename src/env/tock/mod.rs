@@ -91,7 +91,7 @@ impl TockEnv {
                 endpoint: UsbEndpoint::VendorHid,
             },
             blink_pattern: 0,
-            clock: TockClock::new(),
+            clock: TockClock::default(),
         }
     }
 }

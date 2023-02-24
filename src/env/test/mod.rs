@@ -62,16 +62,12 @@ pub struct TestTimer {
     end: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TestClock {
     cur_time: usize,
 }
 
 impl TestClock {
-    pub fn new() -> Self {
-        TestClock { cur_time: 0 }
-    }
-
     pub fn advance(&mut self, milliseconds: usize) {
         self.cur_time += milliseconds;
     }
@@ -149,7 +145,7 @@ impl TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
         let customization = DEFAULT_CUSTOMIZATION.into();
-        let clock = TestClock::new();
+        let clock = TestClock::default();
         TestEnv {
             rng,
             user_presence,
@@ -282,7 +278,7 @@ mod test {
 
     #[test]
     fn test_clock() {
-        let mut clock = TestClock::new();
+        let mut clock = TestClock::default();
         let timer = clock.make_timer(3);
         let timer = clock.check_timer(timer).unwrap();
         clock.advance(2);

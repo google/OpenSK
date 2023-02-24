@@ -107,7 +107,7 @@ index 769bfe9..052479f 100644
      // signature matches the signature in the `extern` block in this function.
      unsafe {
 diff --git a/rust-toolchain b/rust-toolchain
-index e911a96..d00feab 100644
+index e911a96..d139e12 100644
 --- a/rust-toolchain
 +++ b/rust-toolchain
 @@ -1,7 +1,7 @@

@@ -1,8 +1,8 @@
 diff --git a/boards/nordic/nrf52_components/src/startup.rs b/boards/nordic/nrf52_components/src/startup.rs
-index 09dc5292c..c1bd961cc 100644
+index e6cf3ff56..7b3ea5a59 100644
 --- a/boards/nordic/nrf52_components/src/startup.rs
 +++ b/boards/nordic/nrf52_components/src/startup.rs
-@@ -55,6 +55,9 @@ impl<'a> Component for NrfStartupComponent<'a> {
+@@ -53,6 +53,9 @@ impl<'a> Component for NrfStartupComponent<'a> {
              erase_uicr |= !uicr.is_nfc_pins_protection_enabled();
          }
  
@@ -12,7 +12,7 @@ index 09dc5292c..c1bd961cc 100644
          if erase_uicr {
              self.nvmc.erase_uicr();
          }
-@@ -64,6 +67,11 @@ impl<'a> Component for NrfStartupComponent<'a> {
+@@ -62,6 +65,11 @@ impl<'a> Component for NrfStartupComponent<'a> {
  
          let mut needs_soft_reset: bool = false;
  

@@ -1,8 +1,8 @@
 diff --git a/capsules/Cargo.toml b/capsules/Cargo.toml
-index c04b2e0f3..09d2df2a3 100644
+index 65301bcf1..dc70e98b1 100644
 --- a/capsules/Cargo.toml
 +++ b/capsules/Cargo.toml
-@@ -8,3 +8,6 @@ edition.workspace = true
+@@ -8,3 +8,6 @@ edition = "2021"
  kernel = { path = "../kernel" }
  enum_primitive = { path = "../libraries/enum_primitive" }
  tickv = { path = "../libraries/tickv" }

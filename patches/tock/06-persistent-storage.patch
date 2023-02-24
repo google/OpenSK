@@ -1,12 +1,3 @@
-diff --git a/boards/nordic/nrf52840_chip_layout.ld b/boards/nordic/nrf52840_chip_layout.ld
-index 37c0c74d7..e8906f050 100644
---- a/boards/nordic/nrf52840_chip_layout.ld
-+++ b/boards/nordic/nrf52840_chip_layout.ld
-@@ -7,3 +7,4 @@ MEMORY
- }
- 
- PAGE_SIZE = 4K;
-+MPU_MIN_ALIGN = 8K;
 diff --git a/chips/nrf52/src/nvmc.rs b/chips/nrf52/src/nvmc.rs
 index 61e94260e..b7c3be3f6 100644
 --- a/chips/nrf52/src/nvmc.rs
@@ -314,10 +305,10 @@ index 61e94260e..b7c3be3f6 100644
 +    }
 +}
 diff --git a/kernel/src/kernel.rs b/kernel/src/kernel.rs
-index 0e3a2940a..f4fd0a083 100644
+index a1d081ad7..583fbe8d6 100644
 --- a/kernel/src/kernel.rs
 +++ b/kernel/src/kernel.rs
-@@ -43,11 +43,28 @@ use tock_tbf::types::TbfParseError;
+@@ -38,6 +38,20 @@ use crate::utilities::cells::NumericCellExt;
  /// is less than this threshold.
  pub(crate) const MIN_QUANTA_THRESHOLD_US: u32 = 500;
  
@@ -337,6 +328,8 @@ index 0e3a2940a..f4fd0a083 100644
 +
  /// Main object for the kernel. Each board will need to create one.
  pub struct Kernel {
+     /// How many "to-do" items exist at any given time. These include
+@@ -47,6 +61,9 @@ pub struct Kernel {
      /// This holds a pointer to the static array of Process pointers.
      processes: &'static [Option<&'static dyn process::Process>],
  
@@ -346,31 +339,23 @@ index 0e3a2940a..f4fd0a083 100644
      /// A counter which keeps track of how many process identifiers have been
      /// created. This is used to create new unique identifiers for processes.
      process_identifier_max: Cell<usize>,
-@@ -121,8 +138,16 @@ unsafe impl capabilities::ProcessApprovalCapability for KernelProcessApprovalCap
+@@ -110,15 +127,26 @@ fn try_allocate_grant(driver: &dyn SyscallDriver, process: &dyn process::Process
  
  impl Kernel {
      pub fn new(processes: &'static [Option<&'static dyn process::Process>]) -> Kernel {
 +        Kernel::new_with_storage(processes, &[])
 +    }
-+
 +    pub fn new_with_storage(
 +        processes: &'static [Option<&'static dyn process::Process>],
 +        storage_locations: &'static [StorageLocation],
 +    ) -> Kernel {
          Kernel {
+             work: Cell::new(0),
              processes,
 +            storage_locations,
              process_identifier_max: Cell::new(0),
              grant_counter: Cell::new(0),
              grants_finalized: Cell::new(false),
-@@ -131,12 +156,16 @@ impl Kernel {
-                 process: Cell::new(0),
-                 footer: Cell::new(0),
-                 policy: OptionalCell::empty(),
--                processes: processes,
-+                processes,
-                 approve_cap: KernelProcessApprovalCapability {},
-             },
          }
      }
  
@@ -378,13 +363,14 @@ index 0e3a2940a..f4fd0a083 100644
 +        self.storage_locations
 +    }
 +
-     /// Helper function that moves all non-generic portions of process_map_or
-     /// into a non-generic function to reduce code bloat from monomorphization.
-     pub(crate) fn get_process(&self, processid: ProcessId) -> Option<&dyn process::Process> {
-@@ -1396,6 +1425,17 @@ enum FooterCheckResult {
-     Error,              // An internal error occurred, no check started
+     /// Something was scheduled for a process, so there is more work to do.
+     ///
+     /// This is only exposed in the core kernel crate.
+@@ -1374,3 +1402,14 @@ impl Kernel {
+         }
+     }
  }
- 
++
 +impl TryFrom<StorageType> for u32 {
 +    type Error = ();
 +
@@ -395,15 +381,11 @@ index 0e3a2940a..f4fd0a083 100644
 +        }
 +    }
 +}
-+
- impl ProcessCheckerMachine {
-     /// Check the next footer of the next process. Returns:
-     ///   - Ok(true) if a valid footer was found and is being checked
 diff --git a/kernel/src/lib.rs b/kernel/src/lib.rs
-index 25ae781d1..02507d340 100644
+index 028f30220..8880bc000 100644
 --- a/kernel/src/lib.rs
 +++ b/kernel/src/lib.rs
-@@ -126,5 +126,6 @@ mod syscall_driver;
+@@ -125,5 +125,6 @@ mod syscall_driver;
  // Core resources exposed as `kernel::Type`.
  pub use crate::errorcode::ErrorCode;
  pub use crate::kernel::Kernel;
@@ -453,10 +435,10 @@ index 51d89f37c..45ab3856b 100644
      }
  }
 diff --git a/kernel/src/process.rs b/kernel/src/process.rs
-index 01642a622..a3f924074 100644
+index c1794d9bf..4fbad3f0b 100644
 --- a/kernel/src/process.rs
 +++ b/kernel/src/process.rs
-@@ -8,7 +8,7 @@ use core::str;
+@@ -9,7 +9,7 @@ use core::str;
  use crate::capabilities;
  use crate::errorcode::ErrorCode;
  use crate::ipc;
@@ -465,7 +447,7 @@ index 01642a622..a3f924074 100644
  use crate::platform::mpu::{self};
  use crate::processbuffer::{ReadOnlyProcessBuffer, ReadWriteProcessBuffer};
  use crate::storage_permissions;
-@@ -419,6 +419,15 @@ pub trait Process {
+@@ -335,6 +335,15 @@ pub trait Process {
      /// writeable flash region.
      fn get_writeable_flash_region(&self, region_index: usize) -> (u32, u32);
  
@@ -482,10 +464,10 @@ index 01642a622..a3f924074 100644
      /// process. Processes are not required to call this through the memop
      /// system call, but it aids in debugging the process.
 diff --git a/kernel/src/process_standard.rs b/kernel/src/process_standard.rs
-index 16fefe8e1..f14a57952 100644
+index fa76e2c68..dd03e8f29 100644
 --- a/kernel/src/process_standard.rs
 +++ b/kernel/src/process_standard.rs
-@@ -15,7 +15,7 @@ use crate::collections::ring_buffer::RingBuffer;
+@@ -14,7 +14,7 @@ use crate::collections::ring_buffer::RingBuffer;
  use crate::config;
  use crate::debug;
  use crate::errorcode::ErrorCode;
@@ -494,8 +476,8 @@ index 16fefe8e1..f14a57952 100644
  use crate::platform::chip::Chip;
  use crate::platform::mpu::{self, MPU};
  use crate::process::{Error, FunctionCall, FunctionCallSource, Process, State, Task};
-@@ -519,6 +519,35 @@ impl<C: Chip> Process for ProcessStandard<'_, C> {
-         self.header.get_writeable_flash_region(region_index)
+@@ -258,6 +258,35 @@ impl<C: Chip> Process for ProcessStandard<'_, C> {
+         ret
      }
  
 +    fn number_storage_locations(&self) -> usize {
@@ -527,11 +509,11 @@ index 16fefe8e1..f14a57952 100644
 +            })
 +    }
 +
-     fn update_stack_start_pointer(&self, stack_pointer: *const u8) {
-         if stack_pointer >= self.mem_start() && stack_pointer < self.mem_end() {
-             self.debug.map(|debug| {
-@@ -1468,6 +1497,33 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
-             return Err((ProcessLoadError::MpuInvalidFlashLength, remaining_memory));
+     fn ready(&self) -> bool {
+         self.tasks.map_or(false, |ring_buf| ring_buf.has_elements())
+             || self.state.get() == State::Running
+@@ -1366,6 +1395,33 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
+             return Err(ProcessLoadError::MpuInvalidFlashLength);
          }
  
 +        // Allocate MPU region for the storage locations. The storage locations are currently

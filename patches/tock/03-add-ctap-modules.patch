@@ -1,18 +1,18 @@
 diff --git a/boards/components/src/lib.rs b/boards/components/src/lib.rs
-index b573b911f..bb5778216 100644
+index 92d45f7e3..51041545b 100644
 --- a/boards/components/src/lib.rs
 +++ b/boards/components/src/lib.rs
-@@ -73,3 +73,4 @@ pub mod touch;
+@@ -64,3 +64,4 @@ pub mod tickv;
+ pub mod touch;
  pub mod udp_driver;
  pub mod udp_mux;
- pub mod usb;
 +pub mod usb_ctap;
 diff --git a/boards/components/src/usb_ctap.rs b/boards/components/src/usb_ctap.rs
 new file mode 100644
-index 000000000..b8e1f3244
+index 000000000..eed34a268
 --- /dev/null
 +++ b/boards/components/src/usb_ctap.rs
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,87 @@
 +//! Component for CTAP over USB.
 +
 +use capsules::usb::usb_ctap::CtapUsbSyscallDriver;
@@ -25,15 +25,17 @@ index 000000000..b8e1f3244
 +
 +// Setup static space for the objects.
 +#[macro_export]
-+macro_rules! usb_ctap_component_static {
++macro_rules! usb_ctap_component_helper {
 +    ($C:ty $(,)?) => {{
 +        use capsules::usb::usb_ctap::CtapUsbSyscallDriver;
 +        use capsules::usb::usbc_ctap_hid::ClientCtapHID;
++        use core::mem::MaybeUninit;
 +
-+        let hid = kernel::static_buf!(ClientCtapHID<'static, 'static, $C>);
-+        let driver = kernel::static_buf!(CtapUsbSyscallDriver<'static, 'static, $C>);
++        static mut hid: MaybeUninit<ClientCtapHID<'static, 'static, $C>> = MaybeUninit::uninit();
++        static mut driver: MaybeUninit<CtapUsbSyscallDriver<'static, 'static, $C>> =
++            MaybeUninit::uninit();
 +
-+        (hid, driver)
++        (&mut hid, &mut driver)
 +    };};
 +}
 +
@@ -76,7 +78,7 @@ index 000000000..b8e1f3244
 +    );
 +    type Output = &'static CtapUsbSyscallDriver<'static, 'static, C>;
 +
-+    fn finalize(self, s: Self::StaticInput) -> Self::Output {
++    unsafe fn finalize(self, s: Self::StaticInput) -> Self::Output {
 +        let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 +
 +        let usb_ctap = s.0.write(ClientCtapHID::new(

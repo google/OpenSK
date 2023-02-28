@@ -33,7 +33,7 @@ pub trait UserPresence {
     /// Waits until user presence is confirmed, rejected, or the given timeout expires.
     ///
     /// Must be called between calls to [`Self::check_init`] and [`Self::check_complete`].
-    fn wait_with_timeout(&mut self, timeout: usize) -> UserPresenceResult;
+    fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult;
 
     /// Finalizes a user presence check.
     ///

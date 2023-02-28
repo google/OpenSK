@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::TOUCH_TIMEOUT;
+use super::TOUCH_TIMEOUT_MS;
 use crate::api::clock::Clock;
 use crate::env::Env;
 
-const U2F_UP_PROMPT_TIMEOUT: usize = 10000;
+const U2F_UP_PROMPT_TIMEOUT_MS: usize = 10000;
 
 pub struct U2fUserPresenceState<E: Env> {
     /// If user presence was recently requested, its timeout is saved here.
@@ -40,7 +40,7 @@ impl<E: Env> U2fUserPresenceState<E> {
     pub fn grant_up(&mut self, env: &mut E) {
         if !env.clock().is_elapsed(&self.needs_up) {
             self.needs_up = <E::Clock as Clock>::Timer::default();
-            self.has_up = env.clock().make_timer(TOUCH_TIMEOUT);
+            self.has_up = env.clock().make_timer(TOUCH_TIMEOUT_MS);
         }
     }
 
@@ -50,7 +50,7 @@ impl<E: Env> U2fUserPresenceState<E> {
             self.has_up = <E::Clock as Clock>::Timer::default();
             true
         } else {
-            self.needs_up = env.clock().make_timer(U2F_UP_PROMPT_TIMEOUT);
+            self.needs_up = env.clock().make_timer(U2F_UP_PROMPT_TIMEOUT_MS);
             false
         }
     }
@@ -87,7 +87,7 @@ mod test {
         let mut u2f_state = U2fUserPresenceState::new();
         assert!(!u2f_state.consume_up(env));
         assert!(u2f_state.is_up_needed(env));
-        env.clock().advance(U2F_UP_PROMPT_TIMEOUT);
+        env.clock().advance(U2F_UP_PROMPT_TIMEOUT_MS);
         // The timeout excludes equality, so it should be over at this instant.
         assert!(!u2f_state.is_up_needed(env));
     }
@@ -97,7 +97,7 @@ mod test {
         assert!(!u2f_state.consume_up(env));
         assert!(u2f_state.is_up_needed(env));
         u2f_state.grant_up(env);
-        env.clock().advance(TOUCH_TIMEOUT);
+        env.clock().advance(TOUCH_TIMEOUT_MS);
         // The timeout excludes equality, so it should be over at this instant.
         assert!(!u2f_state.consume_up(env));
     }

@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 use core::mem::swap;
 
 // TODO: Is this timeout duration specified?
-const TIMEOUT_DURATION: usize = 100;
+const TIMEOUT_DURATION_MS: usize = 100;
 
 /// A structure to assemble CTAPHID commands from a series of incoming USB HID packets.
 pub struct MessageAssembler<E: Env> {
@@ -132,7 +132,7 @@ impl<E: Env> MessageAssembler<E> {
                         Err((cid, CtapHidError::InvalidSeq))
                     } else {
                         // Update the last timestamp.
-                        self.timer = env.clock().make_timer(TIMEOUT_DURATION);
+                        self.timer = env.clock().make_timer(TIMEOUT_DURATION_MS);
                         // Increment the sequence number for the next packet.
                         self.seq += 1;
                         Ok(self.append_payload(data))
@@ -156,7 +156,7 @@ impl<E: Env> MessageAssembler<E> {
             return Err((cid, CtapHidError::InvalidLen));
         }
         self.cid = cid;
-        self.timer = env.clock().make_timer(TIMEOUT_DURATION);
+        self.timer = env.clock().make_timer(TIMEOUT_DURATION_MS);
         self.cmd = cmd;
         self.seq = 0;
         self.remaining_payload_len = len;
@@ -210,7 +210,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut assembler = MessageAssembler::new();
         assert_eq!(
-            assembler.parse_packet(&mut env, &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90]),),
+            assembler.parse_packet(&mut env, &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90])),
             Ok(Some(Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
                 cmd: CtapHidCommand::Cbor,
@@ -520,7 +520,7 @@ mod test {
             ),
             Ok(None)
         );
-        env.clock().advance(TIMEOUT_DURATION);
+        env.clock().advance(TIMEOUT_DURATION_MS);
         assert_eq!(
             assembler.parse_packet(&mut env, &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),),
             Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::MsgTimeout))
@@ -531,7 +531,7 @@ mod test {
     fn test_just_in_time_packets() {
         let mut env = TestEnv::new();
         // Delay between each packet is just below the threshold.
-        let delay = TIMEOUT_DURATION - 1;
+        let delay = TIMEOUT_DURATION_MS - 1;
 
         let mut assembler = MessageAssembler::new();
         assert_eq!(

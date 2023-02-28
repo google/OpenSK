@@ -59,17 +59,18 @@ impl Rng256 for TestRng256 {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TestTimer {
-    end: usize,
+    end_ms: usize,
 }
 
 #[derive(Debug, Default)]
 pub struct TestClock {
-    cur_time: usize,
+    /// The current time, as advanced, in milliseconds.
+    now_ms: usize,
 }
 
 impl TestClock {
     pub fn advance(&mut self, milliseconds: usize) {
-        self.cur_time += milliseconds;
+        self.now_ms += milliseconds;
     }
 }
 
@@ -78,18 +79,18 @@ impl Clock for TestClock {
 
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
         TestTimer {
-            end: self.cur_time + milliseconds,
+            end_ms: self.now_ms + milliseconds,
         }
     }
 
     fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
-        self.cur_time >= timer.end
+        self.now_ms >= timer.end_ms
     }
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
         // Unused, but let's implement something because it's easy.
-        self.cur_time * 1000
+        self.now_ms * 1000
     }
 }
 
@@ -121,7 +122,7 @@ fn new_storage() -> BufferStorage {
 }
 
 impl HidConnection for TestEnv {
-    fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout: usize) -> SendOrRecvResult {
+    fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout_ms: usize) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
         Ok(SendOrRecvStatus::Sent)
     }
@@ -171,7 +172,7 @@ impl TestUserPresence {
 
 impl UserPresence for TestUserPresence {
     fn check_init(&mut self) {}
-    fn wait_with_timeout(&mut self, _timeout: usize) -> UserPresenceResult {
+    fn wait_with_timeout(&mut self, _timeout_ms: usize) -> UserPresenceResult {
         (self.check)()
     }
     fn check_complete(&mut self) {}

@@ -98,11 +98,11 @@ const ED_FLAG: u8 = 0x80;
 // CTAP2 specification section 6 requires that the depth of nested CBOR structures be limited to at most four levels.
 const MAX_CBOR_NESTING_DEPTH: i8 = 4;
 
-pub const KEEPALIVE_DELAY: usize = 100;
-pub const TOUCH_TIMEOUT: usize = 30000;
+pub const KEEPALIVE_DELAY_MS: usize = 100;
+pub const TOUCH_TIMEOUT_MS: usize = 30000;
 // TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
-const RESET_TIMEOUT_DURATION: usize = 10000;
-const STATEFUL_COMMAND_TIMEOUT_DURATION: usize = 30000;
+const RESET_TIMEOUT_DURATION_MS: usize = 10000;
+const STATEFUL_COMMAND_TIMEOUT_DURATION_MS: usize = 30000;
 
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
@@ -208,7 +208,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 fn send_keepalive_up_needed<E: Env>(
     env: &mut E,
     channel: Channel,
-    timeout: usize,
+    timeout_ms: usize,
 ) -> Result<(), UserPresenceError> {
     let (cid, transport) = match channel {
         Channel::MainHid(cid) => (cid, Transport::MainHid),
@@ -218,7 +218,7 @@ fn send_keepalive_up_needed<E: Env>(
     let keepalive_msg = CtapHid::<E>::keepalive(cid, KeepaliveStatus::UpNeeded);
     for mut pkt in keepalive_msg {
         let ctap_hid_connection = transport.hid_connection(env);
-        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout) {
+        match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout_ms) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
                 // TODO: abort user presence test?
@@ -288,7 +288,7 @@ fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap
     env.user_presence().check_init();
 
     // The timeout is N times the keepalive delay.
-    const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT / KEEPALIVE_DELAY;
+    const TIMEOUT_ITERATIONS: usize = TOUCH_TIMEOUT_MS / KEEPALIVE_DELAY_MS;
 
     // All fallible functions are called without '?' operator to always reach
     // check_complete(...) cleanup function.
@@ -299,7 +299,7 @@ fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap
         // user presence check result immediately to client, without sending any keepalive packets.
         result = env
             .user_presence()
-            .wait_with_timeout(if i == 0 { 0 } else { KEEPALIVE_DELAY });
+            .wait_with_timeout(if i == 0 { 0 } else { KEEPALIVE_DELAY_MS });
         if !matches!(result, Err(UserPresenceError::Timeout)) {
             break;
         }
@@ -307,7 +307,7 @@ fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap
         // accordingly, so that all wait_with_timeout invocations are separated by
         // equal time intervals. That way token indicators, such as LEDs, will blink
         // with a consistent pattern.
-        let keepalive_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY);
+        let keepalive_result = send_keepalive_up_needed(env, channel, KEEPALIVE_DELAY_MS);
         if keepalive_result.is_err() {
             debug_ctap!(
                 env,
@@ -372,7 +372,7 @@ impl<E: Env> StatefulPermission<E> {
     /// means allowing Reset, and Reset cannot be granted later.
     pub fn new_reset(env: &mut E) -> StatefulPermission<E> {
         StatefulPermission {
-            permission: env.clock().make_timer(RESET_TIMEOUT_DURATION),
+            permission: env.clock().make_timer(RESET_TIMEOUT_DURATION_MS),
             command_type: Some(StatefulCommand::Reset),
             channel: None,
         }
@@ -429,7 +429,7 @@ impl<E: Env> StatefulPermission<E> {
             // Reset is only allowed after a power cycle.
             StatefulCommand::Reset => unreachable!(),
             _ => {
-                self.permission = env.clock().make_timer(STATEFUL_COMMAND_TIMEOUT_DURATION);
+                self.permission = env.clock().make_timer(STATEFUL_COMMAND_TIMEOUT_DURATION_MS);
                 self.command_type = Some(new_command_type);
                 self.channel = Some(channel);
             }
@@ -492,12 +492,12 @@ pub struct CtapState<E: Env> {
 impl<E: Env> CtapState<E> {
     pub fn new(env: &mut E) -> Self {
         storage::init(env).ok().unwrap();
-        let client_pin = ClientPin::<E>::new(env);
+        let client_pin = ClientPin::new(env);
         CtapState {
             client_pin,
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
-            stateful_command_permission: StatefulPermission::<E>::new_reset(env),
+            stateful_command_permission: StatefulPermission::new_reset(env),
             large_blobs: LargeBlobs::new(),
         }
     }
@@ -3465,7 +3465,8 @@ mod test {
             Command::AuthenticatorGetAssertion(get_assertion_params),
             DUMMY_CHANNEL,
         );
-        env.clock().advance(STATEFUL_COMMAND_TIMEOUT_DURATION - 1);
+        env.clock()
+            .advance(STATEFUL_COMMAND_TIMEOUT_DURATION_MS - 1);
         assert!(get_assertion_response.is_ok());
         let get_next_assertion_response = ctap_state.process_parsed_command(
             &mut env,
@@ -3490,7 +3491,7 @@ mod test {
         let mut env = TestEnv::new();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
-        env.clock().advance(RESET_TIMEOUT_DURATION);
+        env.clock().advance(RESET_TIMEOUT_DURATION_MS);
         let response =
             ctap_state.process_parsed_command(&mut env, Command::AuthenticatorReset, DUMMY_CHANNEL);
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
@@ -3561,7 +3562,8 @@ mod test {
             pin_uv_auth_protocol: None,
             pin_uv_auth_param: None,
         };
-        env.clock().advance(STATEFUL_COMMAND_TIMEOUT_DURATION - 1);
+        env.clock()
+            .advance(STATEFUL_COMMAND_TIMEOUT_DURATION_MS - 1);
         let response = ctap_state.process_parsed_command(
             &mut env,
             Command::AuthenticatorCredentialManagement(cred_management_params),

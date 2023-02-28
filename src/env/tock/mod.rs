@@ -41,10 +41,10 @@ pub struct TockHidConnection {
 }
 
 impl HidConnection for TockHidConnection {
-    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout: usize) -> SendOrRecvResult {
+    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult {
         match usb_ctap_hid::send_or_recv_with_timeout(
             buf,
-            Duration::from_ms(timeout as isize),
+            Duration::from_ms(timeout_ms as isize),
             self.endpoint,
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
@@ -113,8 +113,8 @@ impl UserPresence for TockEnv {
         self.blink_pattern = 0;
     }
 
-    fn wait_with_timeout(&mut self, timeout: usize) -> UserPresenceResult {
-        if timeout == 0 {
+    fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult {
+        if timeout_ms == 0 {
             return Err(UserPresenceError::Timeout);
         }
         blink_leds(self.blink_pattern);
@@ -139,7 +139,7 @@ impl UserPresence for TockEnv {
         });
         let mut keepalive = keepalive_callback.init().flex_unwrap();
         let keepalive_alarm = keepalive
-            .set_alarm(Duration::from_ms(timeout as isize))
+            .set_alarm(Duration::from_ms(timeout_ms as isize))
             .flex_unwrap();
 
         // Wait for a button touch or an alarm.

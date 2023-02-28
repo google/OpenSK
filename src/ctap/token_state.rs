@@ -25,7 +25,7 @@ use crypto::Hash256;
 /// This usage time limit is correct for USB, BLE, and internal.
 /// NFC only allows 19.8 seconds.
 /// TODO(#15) multiplex over transports, add NFC
-const INITIAL_USAGE_TIME_LIMIT: usize = 30000;
+const INITIAL_USAGE_TIME_LIMIT_MS: usize = 30000;
 
 /// Implements pinUvAuthToken state from section 6.5.2.1.
 ///
@@ -113,7 +113,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     /// Starts the timer for pinUvAuthToken usage.
     pub fn begin_using_pin_uv_auth_token(&mut self, env: &mut E) {
         self.user_verified = true;
-        self.usage_timer = env.clock().make_timer(INITIAL_USAGE_TIME_LIMIT);
+        self.usage_timer = env.clock().make_timer(INITIAL_USAGE_TIME_LIMIT_MS);
         self.in_use = true;
     }
 
@@ -167,7 +167,7 @@ mod test {
         env.clock().advance(100);
         token_state.pin_uv_auth_token_usage_timer_observer(&mut env);
         assert!(token_state.is_in_use());
-        env.clock().advance(INITIAL_USAGE_TIME_LIMIT);
+        env.clock().advance(INITIAL_USAGE_TIME_LIMIT_MS);
         token_state.pin_uv_auth_token_usage_timer_observer(&mut env);
         assert!(!token_state.is_in_use());
     }

@@ -228,7 +228,7 @@ fn process_delete_credential<E: Env>(
         .credential_id
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
         .key_id;
-    check_rp_id_permissions::<E>(env, client_pin, &credential_id)?;
+    check_rp_id_permissions(env, client_pin, &credential_id)?;
     storage::delete_credential(env, &credential_id)
 }
 
@@ -245,7 +245,7 @@ fn process_update_user_information<E: Env>(
     let user = sub_command_params
         .user
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-    check_rp_id_permissions::<E>(env, client_pin, &credential_id)?;
+    check_rp_id_permissions(env, client_pin, &credential_id)?;
     storage::update_credential(env, &credential_id, user)
 }
 
@@ -311,17 +311,17 @@ pub fn process_credential_management<E: Env>(
         }
         CredentialManagementSubCommand::EnumerateRpsBegin => {
             client_pin.has_no_rp_id_permission()?;
-            Some(process_enumerate_rps_begin::<E>(
+            Some(process_enumerate_rps_begin(
                 env,
                 stateful_command_permission,
                 channel,
             )?)
         }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp => Some(
-            process_enumerate_rps_get_next_rp::<E>(env, stateful_command_permission)?,
+            process_enumerate_rps_get_next_rp(env, stateful_command_permission)?,
         ),
         CredentialManagementSubCommand::EnumerateCredentialsBegin => {
-            Some(process_enumerate_credentials_begin::<E>(
+            Some(process_enumerate_credentials_begin(
                 env,
                 stateful_command_permission,
                 client_pin,
@@ -329,14 +329,11 @@ pub fn process_credential_management<E: Env>(
                 channel,
             )?)
         }
-        CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {
-            Some(process_enumerate_credentials_get_next_credential::<E>(
-                env,
-                stateful_command_permission,
-            )?)
-        }
+        CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => Some(
+            process_enumerate_credentials_get_next_credential(env, stateful_command_permission)?,
+        ),
         CredentialManagementSubCommand::DeleteCredential => {
-            process_delete_credential::<E>(
+            process_delete_credential(
                 env,
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
@@ -344,7 +341,7 @@ pub fn process_credential_management<E: Env>(
             None
         }
         CredentialManagementSubCommand::UpdateUserInformation => {
-            process_update_user_information::<E>(
+            process_update_user_information(
                 env,
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,

@@ -1,4 +1,5 @@
 // Copyright 2020-2021 Google LLC
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -116,7 +117,7 @@ impl<E: Env> ClientPin<E> {
             pin_protocol_v1: PinProtocol::new(env.rng()),
             pin_protocol_v2: PinProtocol::new(env.rng()),
             consecutive_pin_mismatches: 0,
-            pin_uv_auth_token_state: PinUvAuthTokenState::<E>::new(),
+            pin_uv_auth_token_state: PinUvAuthTokenState::new(),
         }
     }
 
@@ -565,7 +566,7 @@ impl<E: Env> ClientPin<E> {
             PinUvAuthProtocol::V1 => (key_agreement_key, crypto::ecdh::SecKey::gensk(env.rng())),
             PinUvAuthProtocol::V2 => (crypto::ecdh::SecKey::gensk(env.rng()), key_agreement_key),
         };
-        let mut pin_uv_auth_token_state = PinUvAuthTokenState::<E>::new();
+        let mut pin_uv_auth_token_state = PinUvAuthTokenState::new();
         pin_uv_auth_token_state.set_permissions(0xFF);
         pin_uv_auth_token_state.begin_using_pin_uv_auth_token(env);
         Self {

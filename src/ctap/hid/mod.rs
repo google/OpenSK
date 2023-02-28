@@ -200,7 +200,7 @@ impl<E: Env> CtapHid<E> {
     /// The capabilities passed in are reported to the client in Init.
     pub fn new(capabilities: u8) -> CtapHid<E> {
         Self {
-            assembler: MessageAssembler::<E>::new(),
+            assembler: MessageAssembler::new(),
             allocated_cids: 0,
             capabilities,
         }
@@ -396,7 +396,7 @@ impl<E: Env> CtapHid<E> {
     pub fn new_initialized() -> (Self, ChannelID) {
         (
             Self {
-                assembler: MessageAssembler::<E>::new(),
+                assembler: MessageAssembler::new(),
                 allocated_cids: 1,
                 capabilities: 0x0D,
             },

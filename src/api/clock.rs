@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub trait Clock: Sized {
+pub trait Clock {
     /// Stores data for the clock to recognize if this timer is elapsed or not.
     ///
     /// The Clock does not keep track of the timers it creates. Therefore, they should not wrap

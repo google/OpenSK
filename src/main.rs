@@ -28,7 +28,7 @@ use core::fmt::Write;
 use ctap2::api::clock::Clock;
 use ctap2::api::connection::{HidConnection, SendOrRecvStatus};
 use ctap2::ctap::hid::HidPacketIterator;
-use ctap2::ctap::KEEPALIVE_DELAY;
+use ctap2::ctap::KEEPALIVE_DELAY_MS;
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
@@ -45,8 +45,8 @@ use usb_ctap_hid::UsbEndpoint;
 
 libtock_core::stack_size! {0x4000}
 
-const SEND_TIMEOUT: usize = 1000;
-const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY as isize);
+const SEND_TIMEOUT_MS: usize = 1000;
+const KEEPALIVE_DELAY_MS_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 #[cfg(not(feature = "vendor_hid"))]
 const NUM_ENDPOINTS: usize = 1;
@@ -151,7 +151,7 @@ fn main() {
         if let Some(mut packet) = replies.next_packet() {
             // send and receive.
             let hid_connection = packet.transport.hid_connection(ctap.env());
-            match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT) {
+            match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT_MS) {
                 Ok(SendOrRecvStatus::Timeout) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice(
@@ -183,7 +183,7 @@ fn main() {
         } else {
             // receive
             usb_endpoint =
-                match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK)
+                match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_MS_TOCK)
                     .flex_unwrap()
                 {
                     usb_ctap_hid::SendOrRecvStatus::Received(endpoint) => {
@@ -249,7 +249,7 @@ fn main() {
             // Loops quickly when waiting for U2F user presence, so the next LED blink
             // state is only set if enough time has elapsed.
             led_counter += 1;
-            led_blink_timer = ctap.env().clock().make_timer(KEEPALIVE_DELAY)
+            led_blink_timer = ctap.env().clock().make_timer(KEEPALIVE_DELAY_MS)
         }
 
         if ctap.should_wink() {

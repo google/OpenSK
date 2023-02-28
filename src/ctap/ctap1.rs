@@ -342,7 +342,7 @@ impl Ctap1Command {
 mod test {
     use super::super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::super::data_formats::SignatureAlgorithm;
-    use super::super::TOUCH_TIMEOUT;
+    use super::super::TOUCH_TIMEOUT_MS;
     use super::*;
     use crate::api::customization::Customization;
     use crate::ctap::storage;
@@ -470,7 +470,7 @@ mod test {
 
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);
-        env.clock().advance(TOUCH_TIMEOUT);
+        env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }
@@ -652,7 +652,7 @@ mod test {
             &key_handle,
         );
 
-        env.clock().advance(TOUCH_TIMEOUT);
+        env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], 0x01);
         let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
@@ -695,7 +695,7 @@ mod test {
 
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);
-        env.clock().advance(TOUCH_TIMEOUT);
+        env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
     }

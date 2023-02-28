@@ -23,7 +23,7 @@ use crate::ctap::hid::{
 use crate::ctap::{Channel, CtapState};
 use crate::env::Env;
 
-const WINK_TIMEOUT_DURATION: usize = 5000;
+const WINK_TIMEOUT_DURATION_MS: usize = 5000;
 
 /// Implements the standard CTAP command processing for HID.
 pub struct MainHid<E: Env> {
@@ -41,7 +41,7 @@ impl<E: Env> MainHid<E> {
             | CtapHid::<E>::CAPABILITY_CBOR
             | CtapHid::<E>::CAPABILITY_NMSG;
 
-        let hid = CtapHid::<E>::new(capabilities);
+        let hid = CtapHid::new(capabilities);
         let wink_permission = <E::Clock as Clock>::Timer::default();
         MainHid {
             hid,
@@ -105,7 +105,7 @@ impl<E: Env> MainHid<E> {
             // CTAP 2.1 from 2021-06-15, section 11.2.9.2.1.
             CtapHidCommand::Wink => {
                 if message.payload.is_empty() {
-                    self.wink_permission = env.clock().make_timer(WINK_TIMEOUT_DURATION);
+                    self.wink_permission = env.clock().make_timer(WINK_TIMEOUT_DURATION_MS);
                     // The response is empty like the request.
                     message
                 } else {
@@ -207,7 +207,7 @@ mod test {
         assert_eq!(response.next(), Some(wink_packet));
         assert_eq!(response.next(), None);
         assert!(main_hid.should_wink(&mut env));
-        env.clock().advance(WINK_TIMEOUT_DURATION);
+        env.clock().advance(WINK_TIMEOUT_DURATION_MS);
         assert!(!main_hid.should_wink(&mut env));
     }
 }

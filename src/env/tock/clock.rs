@@ -13,26 +13,28 @@
 // limitations under the License.
 
 use crate::api::clock::Clock;
-use libtock_core::syscalls;
+use libtock_drivers::timer::{get_clock_frequency, get_ticks};
 
-mod command_nr {
-    pub const GET_CLOCK_FREQUENCY: usize = 1;
-    pub const GET_CLOCK_VALUE: usize = 2;
+/// 56-bits timestamp (valid for 70k+ years)
+#[derive(Clone, Copy, Debug, Default, PartialOrd, Ord, PartialEq, Eq)]
+struct Timestamp {
+    epoch: usize, // 32-bits
+    tick: usize,  // 24-bits (32kHz)
 }
 
-const DRIVER_NUMBER: usize = 0x00000;
+impl Timestamp {
+    /// Adds (potentially more than 24 bit of) ticks to this timestamp.
+    pub fn add_ticks(&mut self, ticks: usize) {
+        // Saturating should never happen, but it fails gracefully.
+        let sum = self.tick.saturating_add(ticks);
+        self.epoch += sum >> 24;
+        self.tick = sum & 0xff_ffff;
+    }
+}
 
 #[derive(Default)]
 pub struct TockTimer {
-    end_epoch: usize,
-    end_tick: usize,
-}
-
-/// Returns a tupel of u24 sum and how many times the sum wraps.
-fn add_to_u24_with_wraps(lhs: usize, rhs: usize) -> (usize, usize) {
-    // Saturating should never happen, but it fails gracefully.
-    let sum = lhs.saturating_add(rhs);
-    (sum & 0xffffff, sum >> 24)
+    deadline: Timestamp,
 }
 
 /// Clock that produces timers through Tock syscalls.
@@ -42,8 +44,7 @@ fn add_to_u24_with_wraps(lhs: usize, rhs: usize) -> (usize, usize) {
 /// can't guarantee to regularly create or check timers, call tickle at least every 8 minutes.
 #[derive(Default)]
 pub struct TockClock {
-    epoch: usize,
-    tick: usize,
+    now: Timestamp,
 }
 
 impl TockClock {
@@ -51,13 +52,11 @@ impl TockClock {
     ///
     /// Call this regularly to timeout reliably despite wrapping clock ticks.
     pub fn tickle(&mut self) {
-        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
-            .ok()
-            .unwrap();
-        if cur_tick < self.tick {
-            self.epoch += 1;
+        let cur_tick = get_ticks().ok().unwrap();
+        if cur_tick < self.now.tick {
+            self.now.epoch += 1;
         }
-        self.tick = cur_tick;
+        self.now.tick = cur_tick;
     }
 }
 
@@ -66,37 +65,27 @@ impl Clock for TockClock {
 
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
         self.tickle();
-        let clock_frequency =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)
-                .ok()
-                .unwrap();
+        let clock_frequency = get_clock_frequency().ok().unwrap();
         let delta_tick = match milliseconds.checked_mul(clock_frequency) {
             Some(x) => x / 1000,
             // All CTAP timeouts are multiples of 100 so far. Worst case we timeout too early.
             None => (milliseconds / 100).saturating_mul(clock_frequency / 10),
         };
-        let (end_tick, passed_epochs) = add_to_u24_with_wraps(self.tick, delta_tick);
-        // Epoch wraps after thousands of years, so we don't mind.
-        let end_epoch = self.epoch + passed_epochs;
-        Self::Timer {
-            end_epoch,
-            end_tick,
-        }
+        let mut deadline = self.now;
+        deadline.add_ticks(delta_tick);
+        Self::Timer { deadline }
     }
 
     fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
         self.tickle();
-        (self.epoch, self.tick) >= (timer.end_epoch, timer.end_tick)
+        self.now >= timer.deadline
     }
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
-        let clock_frequency =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)
-                .ok()
-                .unwrap();
-        let total_ticks = 0x100_0000 * self.epoch + self.tick;
-        total_ticks * 1_000_000 / clock_frequency
+        let clock_frequency = get_clock_frequency().ok().unwrap();
+        let total_ticks = 0x100_0000u64 * self.now.epoch as u64 + self.now.tick as u64;
+        (total_ticks.wrapping_mul(1_000_000u64) / clock_frequency as u64) as usize
     }
 }
 
@@ -105,16 +94,25 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_add_to_u24_with_wraps() {
-        // non-wrapping cases
-        assert_eq!(add_to_u24_with_wraps(0, 0), (0, 0));
-        assert_eq!(add_to_u24_with_wraps(0xffffff, 0), (0xffffff, 0));
-        assert_eq!(add_to_u24_with_wraps(0, 0xffffff), (0xffffff, 0));
-        // wrapping cases
-        assert_eq!(add_to_u24_with_wraps(1, 0xffffff), (0, 1));
-        assert_eq!(add_to_u24_with_wraps(0xffffff, 0xffffff), (0xfffffe, 1));
-        assert_eq!(add_to_u24_with_wraps(0, 0x1000000), (0, 1));
-        assert_eq!(add_to_u24_with_wraps(0, 0x2000000), (0, 2));
-        assert_eq!(add_to_u24_with_wraps(0xffffff, 0x2ffffff), (0xfffffe, 3));
+    fn test_timestamp_add_ticks() {
+        let mut timestamp = Timestamp::default();
+        timestamp.add_ticks(1);
+        let expected = Timestamp { epoch: 0, tick: 1 };
+        assert_eq!(timestamp, expected);
+        timestamp.add_ticks(0xff_ffff);
+        let expected = Timestamp { epoch: 1, tick: 0 };
+        assert_eq!(timestamp, expected);
+        timestamp.add_ticks(0x100_0000);
+        let expected = Timestamp { epoch: 2, tick: 0 };
+        assert_eq!(timestamp, expected);
+        timestamp.add_ticks(0x1ff_ffff);
+        let expected = Timestamp {
+            epoch: 3,
+            tick: 0xff_ffff,
+        };
+        assert_eq!(timestamp, expected);
+        timestamp.add_ticks(1);
+        let expected = Timestamp { epoch: 4, tick: 0 };
+        assert_eq!(timestamp, expected);
     }
 }

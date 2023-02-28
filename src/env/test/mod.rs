@@ -14,15 +14,14 @@
 
 use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::attestation_store::AttestationStore;
+use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
-use crate::clock::ClockInt;
 use crate::env::Env;
 use customization::TestCustomization;
-use embedded_time::duration::Milliseconds;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -37,6 +36,7 @@ pub struct TestEnv {
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
     customization: TestCustomization,
+    clock: TestClock,
 }
 
 pub struct TestRng256 {
@@ -54,6 +54,43 @@ impl Rng256 for TestRng256 {
         let mut result = [Default::default(); 32];
         self.rng.fill(&mut result);
         result
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct TestTimer {
+    end_ms: usize,
+}
+
+#[derive(Debug, Default)]
+pub struct TestClock {
+    /// The current time, as advanced, in milliseconds.
+    now_ms: usize,
+}
+
+impl TestClock {
+    pub fn advance(&mut self, milliseconds: usize) {
+        self.now_ms += milliseconds;
+    }
+}
+
+impl Clock for TestClock {
+    type Timer = TestTimer;
+
+    fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
+        TestTimer {
+            end_ms: self.now_ms + milliseconds,
+        }
+    }
+
+    fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
+        self.now_ms >= timer.end_ms
+    }
+
+    #[cfg(feature = "debug_ctap")]
+    fn timestamp_us(&mut self) -> usize {
+        // Unused, but let's implement something because it's easy.
+        self.now_ms * 1000
     }
 }
 
@@ -85,11 +122,7 @@ fn new_storage() -> BufferStorage {
 }
 
 impl HidConnection for TestEnv {
-    fn send_and_maybe_recv(
-        &mut self,
-        _buf: &mut [u8; 64],
-        _timeout: Milliseconds<ClockInt>,
-    ) -> SendOrRecvResult {
+    fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout_ms: usize) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
         Ok(SendOrRecvStatus::Sent)
     }
@@ -107,12 +140,14 @@ impl TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
         let customization = DEFAULT_CUSTOMIZATION.into();
+        let clock = TestClock::default();
         TestEnv {
             rng,
             user_presence,
             store,
             upgrade_storage,
             customization,
+            clock,
         }
     }
 
@@ -137,7 +172,7 @@ impl TestUserPresence {
 
 impl UserPresence for TestUserPresence {
     fn check_init(&mut self) {}
-    fn wait_with_timeout(&mut self, _timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
+    fn wait_with_timeout(&mut self, _timeout_ms: usize) -> UserPresenceResult {
         (self.check)()
     }
     fn check_complete(&mut self) {}
@@ -174,6 +209,7 @@ impl Env for TestEnv {
     type Storage = BufferStorage;
     type KeyStore = Self;
     type AttestationStore = Self;
+    type Clock = TestClock;
     type UpgradeStorage = BufferUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = TestWrite;
@@ -200,6 +236,10 @@ impl Env for TestEnv {
         self
     }
 
+    fn clock(&mut self) -> &mut Self::Clock {
+        &mut self.clock
+    }
+
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
         self.upgrade_storage.as_mut()
     }
@@ -223,5 +263,22 @@ impl Env for TestEnv {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
         self
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::module_inception)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_clock() {
+        let mut clock = TestClock::default();
+        let timer = clock.make_timer(3);
+        assert!(!clock.is_elapsed(&timer));
+        clock.advance(2);
+        assert!(!clock.is_elapsed(&timer));
+        clock.advance(1);
+        assert!(clock.is_elapsed(&timer));
     }
 }

@@ -19,12 +19,10 @@ use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
-use crate::clock::{ClockInt, KEEPALIVE_DELAY_MS};
 use crate::env::Env;
+use clock::TockClock;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
-use embedded_time::duration::Milliseconds;
-use embedded_time::fixed_point::FixedPoint;
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
@@ -35,6 +33,7 @@ use libtock_drivers::{crp, led, timer};
 use persistent_store::{StorageResult, Store};
 use rng256::TockRng256;
 
+mod clock;
 mod storage;
 
 pub struct TockHidConnection {
@@ -42,14 +41,10 @@ pub struct TockHidConnection {
 }
 
 impl HidConnection for TockHidConnection {
-    fn send_and_maybe_recv(
-        &mut self,
-        buf: &mut [u8; 64],
-        timeout: Milliseconds<ClockInt>,
-    ) -> SendOrRecvResult {
+    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult {
         match usb_ctap_hid::send_or_recv_with_timeout(
             buf,
-            timer::Duration::from_ms(timeout.integer() as isize),
+            Duration::from_ms(timeout_ms as isize),
             self.endpoint,
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
@@ -70,6 +65,7 @@ pub struct TockEnv {
     #[cfg(feature = "vendor_hid")]
     vendor_connection: TockHidConnection,
     blink_pattern: usize,
+    clock: TockClock,
 }
 
 impl TockEnv {
@@ -95,6 +91,7 @@ impl TockEnv {
                 endpoint: UsbEndpoint::VendorHid,
             },
             blink_pattern: 0,
+            clock: TockClock::default(),
         }
     }
 }
@@ -115,8 +112,9 @@ impl UserPresence for TockEnv {
     fn check_init(&mut self) {
         self.blink_pattern = 0;
     }
-    fn wait_with_timeout(&mut self, timeout: Milliseconds<ClockInt>) -> UserPresenceResult {
-        if timeout.integer() == 0 {
+
+    fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult {
+        if timeout_ms == 0 {
             return Err(UserPresenceError::Timeout);
         }
         blink_leds(self.blink_pattern);
@@ -141,7 +139,7 @@ impl UserPresence for TockEnv {
         });
         let mut keepalive = keepalive_callback.init().flex_unwrap();
         let keepalive_alarm = keepalive
-            .set_alarm(timer::Duration::from_ms(timeout.integer() as isize))
+            .set_alarm(Duration::from_ms(timeout_ms as isize))
             .flex_unwrap();
 
         // Wait for a button touch or an alarm.
@@ -224,6 +222,7 @@ impl Env for TockEnv {
     type Storage = TockStorage;
     type KeyStore = Self;
     type AttestationStore = Self;
+    type Clock = TockClock;
     type UpgradeStorage = TockUpgradeStorage;
     type FirmwareProtection = Self;
     type Write = Console;
@@ -248,6 +247,10 @@ impl Env for TockEnv {
 
     fn attestation_store(&mut self) -> &mut Self {
         self
+    }
+
+    fn clock(&mut self) -> &mut Self::Clock {
+        &mut self.clock
     }
 
     fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
@@ -324,5 +327,3 @@ pub fn switch_off_leds() {
         led::get(l).flex_unwrap().off().flex_unwrap();
     }
 }
-
-pub const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);

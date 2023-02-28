@@ -41,6 +41,24 @@ pub fn sleep(duration: Duration<isize>) -> TockResult<()> {
     }
 }
 
+pub fn get_ticks() -> TockResult<usize> {
+    Ok(syscalls::command(
+        DRIVER_NUMBER,
+        command_nr::GET_CLOCK_VALUE,
+        0,
+        0,
+    )?)
+}
+
+pub fn get_clock_frequency() -> TockResult<usize> {
+    Ok(syscalls::command(
+        DRIVER_NUMBER,
+        command_nr::GET_CLOCK_FREQUENCY,
+        0,
+        0,
+    )?)
+}
+
 pub fn with_callback<CB>(callback: CB) -> WithCallback<'static, CB> {
     WithCallback {
         callback,

@@ -18,6 +18,7 @@
 //! by a trait. This module gathers the API of those components.
 
 pub mod attestation_store;
+pub mod clock;
 pub mod connection;
 pub mod customization;
 pub mod firmware_protection;

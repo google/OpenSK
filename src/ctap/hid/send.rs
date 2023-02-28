@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{CtapHid, HidPacket, Message};
+use super::{HidPacket, Message};
+
+const TYPE_INIT_BIT: u8 = 0x80;
 
 /// Iterator for HID packets.
 ///
@@ -121,7 +123,7 @@ impl Iterator for MessageSplitter {
         match self.seq {
             None => {
                 // First, send an initialization packet.
-                self.packet[4] = self.message.cmd as u8 | CtapHid::TYPE_INIT_BIT;
+                self.packet[4] = self.message.cmd as u8 | TYPE_INIT_BIT;
                 self.packet[5] = (payload_len >> 8) as u8;
                 self.packet[6] = payload_len as u8;
 

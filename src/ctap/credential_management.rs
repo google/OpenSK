@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::clock::CtapInstant;
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorCredentialManagementParameters;
 use super::data_formats::{
@@ -108,9 +107,9 @@ fn enumerate_credentials_response(
 /// Check if the token permissions have the correct associated RP ID.
 ///
 /// Either no RP ID is associated, or the RP ID matches the stored credential.
-fn check_rp_id_permissions(
-    env: &mut impl Env,
-    client_pin: &mut ClientPin,
+fn check_rp_id_permissions<E: Env>(
+    env: &mut E,
+    client_pin: &mut ClientPin<E>,
     credential_id: &[u8],
 ) -> Result<(), Ctap2StatusCode> {
     // Pre-check a sufficient condition before calling the store.
@@ -135,17 +134,16 @@ fn process_get_creds_metadata(
 }
 
 /// Processes the subcommand enumerateRPsBegin for CredentialManagement.
-fn process_enumerate_rps_begin(
-    env: &mut impl Env,
-    stateful_command_permission: &mut StatefulPermission,
+fn process_enumerate_rps_begin<E: Env>(
+    env: &mut E,
+    stateful_command_permission: &mut StatefulPermission<E>,
     channel: Channel,
-    now: CtapInstant,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_set = get_stored_rp_ids(env)?;
     let total_rps = rp_set.len();
 
     if total_rps > 1 {
-        stateful_command_permission.set_command(now, StatefulCommand::EnumerateRps(1), channel);
+        stateful_command_permission.set_command(env, StatefulCommand::EnumerateRps(1), channel);
     }
     // TODO https://github.com/rust-lang/rust/issues/62924 replace with pop_first()
     let rp_id = rp_set
@@ -156,9 +154,9 @@ fn process_enumerate_rps_begin(
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
-fn process_enumerate_rps_get_next_rp(
-    env: &mut impl Env,
-    stateful_command_permission: &mut StatefulPermission,
+fn process_enumerate_rps_get_next_rp<E: Env>(
+    env: &mut E,
+    stateful_command_permission: &mut StatefulPermission<E>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_index = stateful_command_permission.next_enumerate_rp()?;
     let rp_set = get_stored_rp_ids(env)?;
@@ -171,13 +169,12 @@ fn process_enumerate_rps_get_next_rp(
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
-fn process_enumerate_credentials_begin(
-    env: &mut impl Env,
-    stateful_command_permission: &mut StatefulPermission,
-    client_pin: &mut ClientPin,
+fn process_enumerate_credentials_begin<E: Env>(
+    env: &mut E,
+    stateful_command_permission: &mut StatefulPermission<E>,
+    client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
     channel: Channel,
-    now: CtapInstant,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let rp_id_hash = sub_command_params
         .rp_id_hash
@@ -203,7 +200,7 @@ fn process_enumerate_credentials_begin(
     let credential = storage::get_credential(env, current_key)?;
     if total_credentials > 1 {
         stateful_command_permission.set_command(
-            now,
+            env,
             StatefulCommand::EnumerateCredentials(rp_credentials),
             channel,
         );
@@ -212,9 +209,9 @@ fn process_enumerate_credentials_begin(
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
-fn process_enumerate_credentials_get_next_credential(
-    env: &mut impl Env,
-    stateful_command_permission: &mut StatefulPermission,
+fn process_enumerate_credentials_get_next_credential<E: Env>(
+    env: &mut E,
+    stateful_command_permission: &mut StatefulPermission<E>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential()?;
     let credential = storage::get_credential(env, credential_key)?;
@@ -222,9 +219,9 @@ fn process_enumerate_credentials_get_next_credential(
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.
-fn process_delete_credential(
-    env: &mut impl Env,
-    client_pin: &mut ClientPin,
+fn process_delete_credential<E: Env>(
+    env: &mut E,
+    client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
     let credential_id = sub_command_params
@@ -236,9 +233,9 @@ fn process_delete_credential(
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
-fn process_update_user_information(
-    env: &mut impl Env,
-    client_pin: &mut ClientPin,
+fn process_update_user_information<E: Env>(
+    env: &mut E,
+    client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
 ) -> Result<(), Ctap2StatusCode> {
     let credential_id = sub_command_params
@@ -253,13 +250,12 @@ fn process_update_user_information(
 }
 
 /// Processes the CredentialManagement command and all its subcommands.
-pub fn process_credential_management(
-    env: &mut impl Env,
-    stateful_command_permission: &mut StatefulPermission,
-    client_pin: &mut ClientPin,
+pub fn process_credential_management<E: Env>(
+    env: &mut E,
+    stateful_command_permission: &mut StatefulPermission<E>,
+    client_pin: &mut ClientPin<E>,
     cred_management_params: AuthenticatorCredentialManagementParameters,
     channel: Channel,
-    now: CtapInstant,
 ) -> Result<ResponseData, Ctap2StatusCode> {
     let AuthenticatorCredentialManagementParameters {
         sub_command,
@@ -319,7 +315,6 @@ pub fn process_credential_management(
                 env,
                 stateful_command_permission,
                 channel,
-                now,
             )?)
         }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp => Some(
@@ -332,7 +327,6 @@ pub fn process_credential_management(
                 client_pin,
                 sub_command_params.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
                 channel,
-                now,
             )?)
         }
         CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => Some(
@@ -392,11 +386,15 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, pin_uv_auth_protocol);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
         let credential_source = create_credential_source(&mut env);
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
@@ -419,7 +417,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         let initial_capacity = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -445,7 +442,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -474,13 +470,17 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let credential_source1 = create_credential_source(&mut env);
         let mut credential_source2 = create_credential_source(&mut env);
         credential_source2.rp_id = "another.example.com".to_string();
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source1).unwrap();
@@ -504,7 +504,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         let first_rp_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -529,7 +528,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         let second_rp_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -555,7 +553,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -568,11 +565,15 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let credential_source = create_credential_source(&mut env);
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         const NUM_CREDENTIALS: usize = 20;
@@ -605,7 +606,6 @@ mod test {
                 &mut ctap_state.client_pin,
                 cred_management_params,
                 DUMMY_CHANNEL,
-                CtapInstant::new(0),
             );
             match cred_management_response.unwrap() {
                 ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -636,7 +636,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -649,8 +648,12 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let credential_source1 = create_credential_source(&mut env);
         let mut credential_source2 = create_credential_source(&mut env);
         credential_source2.user_handle = vec![0x02];
@@ -658,7 +661,7 @@ mod test {
         credential_source2.user_display_name = Some("User Two".to_string());
         credential_source2.user_icon = Some("icon2".to_string());
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source1).unwrap();
@@ -689,7 +692,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         let first_credential_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -713,7 +715,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         let second_credential_id = match cred_management_response.unwrap() {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
@@ -738,7 +739,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -751,12 +751,16 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut credential_source = create_credential_source(&mut env);
         credential_source.credential_id = vec![0x1D; 32];
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source).unwrap();
@@ -789,7 +793,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -808,7 +811,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -821,12 +823,16 @@ mod test {
         let mut env = TestEnv::new();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
-        let client_pin =
-            ClientPin::new_test(key_agreement_key, pin_uv_auth_token, PinUvAuthProtocol::V1);
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
         let mut credential_source = create_credential_source(&mut env);
         credential_source.credential_id = vec![0x1D; 32];
 
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
         storage::store_credential(&mut env, credential_source).unwrap();
@@ -865,7 +871,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,
@@ -887,7 +892,7 @@ mod test {
     #[test]
     fn test_process_credential_management_invalid_pin_uv_auth_param() {
         let mut env = TestEnv::new();
-        let mut ctap_state = CtapState::new(&mut env, CtapInstant::new(0));
+        let mut ctap_state = CtapState::new(&mut env);
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
 
@@ -903,7 +908,6 @@ mod test {
             &mut ctap_state.client_pin,
             cred_management_params,
             DUMMY_CHANNEL,
-            CtapInstant::new(0),
         );
         assert_eq!(
             cred_management_response,

@@ -20,7 +20,6 @@ use arbitrary::{Arbitrary, Unstructured};
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use ctap2::api::customization::is_valid;
-use ctap2::clock::CtapInstant;
 use ctap2::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, Command,
@@ -89,12 +88,8 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
     let mut assembler_reply = MessageAssembler::new();
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
-        for pkt_reply in
-            ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
-        {
-            if let Ok(Some(result)) =
-                assembler_reply.parse_packet(ctap.env(), &pkt_reply, CtapInstant::new(0))
-            {
+        for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
+            if let Ok(Some(result)) = assembler_reply.parse_packet(ctap.env(), &pkt_reply) {
                 result_cid.copy_from_slice(&result.payload[8..12]);
             }
         }
@@ -131,11 +126,9 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
         let mut assembler_reply = MessageAssembler::new();
         for pkt_request in hid_packet_iterator {
-            for pkt_reply in
-                ctap.process_hid_packet(&pkt_request, Transport::MainHid, CtapInstant::new(0))
-            {
+            for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
                 // Only checks for assembling crashes, not for semantics.
-                let _ = assembler_reply.parse_packet(ctap.env(), &pkt_reply, CtapInstant::new(0));
+                let _ = assembler_reply.parse_packet(ctap.env(), &pkt_reply);
             }
         }
     }
@@ -152,7 +145,7 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
 
     let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(env, CtapInstant::new(0));
+    let mut ctap = Ctap::new(env);
     let cid = initialize(&mut ctap);
     // Wrap input as message with the allocated cid.
     let mut command = cid.to_vec();
@@ -179,7 +172,7 @@ fn setup_customization(
 
 fn setup_state(
     unstructured: &mut Unstructured,
-    state: &mut CtapState,
+    state: &mut CtapState<TestEnv>,
     env: &mut TestEnv,
 ) -> FuzzResult<()> {
     if bool::arbitrary(unstructured)? {
@@ -202,7 +195,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
         return Ok(());
     }
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(env, CtapInstant::new(0));
+    let mut ctap = Ctap::new(env);
     let cid = initialize(&mut ctap);
     // Wrap input as message with allocated cid and command type.
     let mut command = cid.to_vec();
@@ -232,7 +225,7 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult
     env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
     setup_customization(unstructured, env.customization_mut())?;
 
-    let mut state = CtapState::new(&mut env, CtapInstant::new(0));
+    let mut state = CtapState::new(&mut env);
     setup_state(unstructured, &mut state, &mut env)?;
 
     let command = match input_type {
@@ -255,7 +248,6 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult
             &mut env,
             command,
             Channel::MainHid(ChannelID::arbitrary(unstructured)?),
-            CtapInstant::new(0),
         )
         .ok();
 
@@ -276,13 +268,10 @@ pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
         let packets: Vec<HidPacket> = hid_packet_iterator.collect();
         if let Some((last_packet, first_packets)) = packets.split_last() {
             for packet in first_packets {
-                assert_eq!(
-                    assembler.parse_packet(&mut env, packet, CtapInstant::new(0)),
-                    Ok(None)
-                );
+                assert_eq!(assembler.parse_packet(&mut env, packet), Ok(None));
             }
             assert_eq!(
-                assembler.parse_packet(&mut env, last_packet, CtapInstant::new(0)),
+                assembler.parse_packet(&mut env, last_packet),
                 Ok(Some(message))
             );
         }

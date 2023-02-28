@@ -24,22 +24,16 @@ extern crate lang_items;
 #[cfg(feature = "with_ctap1")]
 use core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
-use core::convert::TryFrom;
-use core::convert::TryInto;
-#[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
+use ctap2::api::clock::Clock;
 use ctap2::api::connection::{HidConnection, SendOrRecvStatus};
-#[cfg(feature = "debug_ctap")]
-use ctap2::clock::CtapClock;
-use ctap2::clock::{new_clock, Clock, ClockInt, KEEPALIVE_DELAY, KEEPALIVE_DELAY_MS};
 use ctap2::ctap::hid::HidPacketIterator;
+use ctap2::ctap::KEEPALIVE_DELAY_MS;
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
+use ctap2::env::Env;
 use ctap2::Transport;
-#[cfg(feature = "debug_ctap")]
-use embedded_time::duration::Microseconds;
-use embedded_time::duration::Milliseconds;
 #[cfg(feature = "with_ctap1")]
 use libtock_drivers::buttons::{self, ButtonState};
 #[cfg(feature = "debug_ctap")]
@@ -51,8 +45,8 @@ use usb_ctap_hid::UsbEndpoint;
 
 libtock_core::stack_size! {0x4000}
 
-const SEND_TIMEOUT: Milliseconds<ClockInt> = Milliseconds(1000);
-const KEEPALIVE_DELAY_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
+const SEND_TIMEOUT_MS: usize = 1000;
+const KEEPALIVE_DELAY_MS_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 #[cfg(not(feature = "vendor_hid"))]
 const NUM_ENDPOINTS: usize = 1;
@@ -113,20 +107,18 @@ impl EndpointReplies {
         None
     }
 }
-fn main() {
-    let clock = new_clock();
 
+fn main() {
     // Setup USB driver.
     if !usb_ctap_hid::setup() {
         panic!("Cannot setup USB driver");
     }
 
-    let boot_time = clock.try_now().unwrap();
     let env = TockEnv::new();
-    let mut ctap = ctap2::Ctap::new(env, boot_time);
+    let mut ctap = ctap2::Ctap::new(env);
 
     let mut led_counter = 0;
-    let mut last_led_increment = boot_time;
+    let mut led_blink_timer = <<TockEnv as Env>::Clock as Clock>::Timer::default();
 
     let mut replies = EndpointReplies::new();
 
@@ -159,21 +151,27 @@ fn main() {
         if let Some(mut packet) = replies.next_packet() {
             // send and receive.
             let hid_connection = packet.transport.hid_connection(ctap.env());
-            match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT) {
+            match hid_connection.send_and_maybe_recv(&mut packet.packet, SEND_TIMEOUT_MS) {
                 Ok(SendOrRecvStatus::Timeout) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Sending packet timed out", &clock);
+                    print_packet_notice(
+                        "Sending packet timed out",
+                        ctap.env().clock().timestamp_us(),
+                    );
                     // TODO: reset the ctap_hid state.
                     // Since sending the packet timed out, we cancel this reply.
                     break;
                 }
                 Ok(SendOrRecvStatus::Sent) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Sent packet", &clock);
+                    print_packet_notice("Sent packet", ctap.env().clock().timestamp_us());
                 }
                 Ok(SendOrRecvStatus::Received(ep)) => {
                     #[cfg(feature = "debug_ctap")]
-                    print_packet_notice("Received another packet", &clock);
+                    print_packet_notice(
+                        "Received another packet",
+                        ctap.env().clock().timestamp_us(),
+                    );
                     usb_endpoint = Some(ep);
 
                     // Copy to incoming packet to local buffer to be consistent
@@ -185,12 +183,12 @@ fn main() {
         } else {
             // receive
             usb_endpoint =
-                match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_TOCK)
+                match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY_MS_TOCK)
                     .flex_unwrap()
                 {
                     usb_ctap_hid::SendOrRecvStatus::Received(endpoint) => {
                         #[cfg(feature = "debug_ctap")]
-                        print_packet_notice("Received packet", &clock);
+                        print_packet_notice("Received packet", ctap.env().clock().timestamp_us());
                         Some(endpoint)
                     }
                     usb_ctap_hid::SendOrRecvStatus::Sent => {
@@ -200,11 +198,10 @@ fn main() {
                 };
         }
 
-        let now = clock.try_now().unwrap();
         #[cfg(feature = "with_ctap1")]
         {
             if button_touched.get() {
-                ctap.state().u2f_grant_user_presence(now);
+                ctap.u2f_grant_user_presence();
             }
             // Cleanup button callbacks. We miss button presses while processing though.
             // Heavy computation mostly follows a registered touch luckily. Unregistering
@@ -218,7 +215,8 @@ fn main() {
 
         // These calls are making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
-        ctap.update_timeouts(now);
+        ctap.update_timeouts();
+        ctap.env().clock().tickle();
 
         if let Some(endpoint) = usb_endpoint {
             let transport = match endpoint {
@@ -226,7 +224,7 @@ fn main() {
                 #[cfg(feature = "vendor_hid")]
                 UsbEndpoint::VendorHid => Transport::VendorHid,
             };
-            let reply = ctap.process_hid_packet(&pkt_request, transport, now);
+            let reply = ctap.process_hid_packet(&pkt_request, transport);
             if reply.has_data() {
                 // Update endpoint with the reply.
                 for ep in replies.replies.iter_mut() {
@@ -247,28 +245,20 @@ fn main() {
             }
         }
 
-        let now = clock.try_now().unwrap();
-        if let Some(wait_duration) = now.checked_duration_since(&last_led_increment) {
-            let wait_duration: Milliseconds<ClockInt> = wait_duration.try_into().unwrap();
-            if wait_duration > KEEPALIVE_DELAY {
-                // Loops quickly when waiting for U2F user presence, so the next LED blink
-                // state is only set if enough time has elapsed.
-                led_counter += 1;
-                last_led_increment = now;
-            }
-        } else {
-            // This branch means the clock frequency changed. This should never happen.
+        if ctap.env().clock().is_elapsed(&led_blink_timer) {
+            // Loops quickly when waiting for U2F user presence, so the next LED blink
+            // state is only set if enough time has elapsed.
             led_counter += 1;
-            last_led_increment = now;
+            led_blink_timer = ctap.env().clock().make_timer(KEEPALIVE_DELAY_MS)
         }
 
-        if ctap.hid().should_wink(now) {
+        if ctap.should_wink() {
             wink_leds(led_counter);
         } else {
             #[cfg(not(feature = "with_ctap1"))]
             switch_off_leds();
             #[cfg(feature = "with_ctap1")]
-            if ctap.state().u2f_needs_user_presence(now) {
+            if ctap.u2f_needs_user_presence() {
                 // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
                 // delay caused by processing and sending of packets.
                 blink_leds(led_counter);
@@ -280,11 +270,7 @@ fn main() {
 }
 
 #[cfg(feature = "debug_ctap")]
-fn print_packet_notice(notice_text: &str, clock: &CtapClock) {
-    let now = clock.try_now().unwrap();
-    let now_us = Microseconds::<u64>::try_from(now.duration_since_epoch())
-        .unwrap()
-        .0;
+fn print_packet_notice(notice_text: &str, now_us: usize) {
     writeln!(
         Console::new(),
         "{} at {}.{:06} s",

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::clock::CtapInstant;
 use crate::ctap::command::{
     AuthenticatorAttestationMaterial, AuthenticatorConfigParameters,
     AuthenticatorVendorConfigureParameters, Command,
@@ -28,9 +27,9 @@ const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 #[cfg(feature = "vendor_hid")]
 const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
-pub fn enable_enterprise_attestation(
-    state: &mut CtapState,
-    env: &mut impl Env,
+pub fn enable_enterprise_attestation<E: Env>(
+    state: &mut CtapState<E>,
+    env: &mut E,
 ) -> Result<AuthenticatorAttestationMaterial, Ctap2StatusCode> {
     let dummy_key = [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
     let dummy_cert = vec![0xdd; 20];
@@ -47,7 +46,7 @@ pub fn enable_enterprise_attestation(
     #[cfg(not(feature = "vendor_hid"))]
     let vendor_channel = DUMMY_CHANNEL;
     let vendor_command = Command::AuthenticatorVendorConfigure(configure_params);
-    state.process_parsed_command(env, vendor_command, vendor_channel, CtapInstant::new(0))?;
+    state.process_parsed_command(env, vendor_command, vendor_channel)?;
 
     let config_params = AuthenticatorConfigParameters {
         sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
@@ -56,7 +55,7 @@ pub fn enable_enterprise_attestation(
         pin_uv_auth_protocol: None,
     };
     let config_command = Command::AuthenticatorConfig(config_params);
-    state.process_parsed_command(env, config_command, DUMMY_CHANNEL, CtapInstant::new(0))?;
+    state.process_parsed_command(env, config_command, DUMMY_CHANNEL)?;
 
     Ok(attestation_material)
 }

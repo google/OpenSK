@@ -360,7 +360,7 @@ pub enum StatefulCommand {
 /// Additionally, state that is held over multiple commands is assigned to a channel. We discard
 /// all state when we receive data on a different channel.
 pub struct StatefulPermission<E: Env> {
-    permission: Option<<<E as Env>::Clock as Clock>::Timer>,
+    permission: <<E as Env>::Clock as Clock>::Timer,
     command_type: Option<StatefulCommand>,
     channel: Option<Channel>,
 }
@@ -372,7 +372,7 @@ impl<E: Env> StatefulPermission<E> {
     /// means allowing Reset, and Reset cannot be granted later.
     pub fn new_reset(env: &mut E) -> StatefulPermission<E> {
         StatefulPermission {
-            permission: Some(env.clock().make_timer(RESET_TIMEOUT_DURATION)),
+            permission: env.clock().make_timer(RESET_TIMEOUT_DURATION),
             command_type: Some(StatefulCommand::Reset),
             channel: None,
         }
@@ -380,7 +380,7 @@ impl<E: Env> StatefulPermission<E> {
 
     /// Clears all permissions and state.
     pub fn clear(&mut self) {
-        self.permission = None;
+        self.permission = <<E as Env>::Clock as Clock>::Timer::default();
         self.command_type = None;
         self.channel = None;
     }
@@ -406,8 +406,7 @@ impl<E: Env> StatefulPermission<E> {
 
     /// Clears all state if the permission timed out.
     pub fn clear_timer(&mut self, env: &mut E) {
-        env.clock().update_timer(&mut self.permission);
-        if self.permission.is_none() {
+        if env.clock().is_elapsed(&self.permission) {
             self.clear();
         }
     }
@@ -430,7 +429,7 @@ impl<E: Env> StatefulPermission<E> {
             // Reset is only allowed after a power cycle.
             StatefulCommand::Reset => unreachable!(),
             _ => {
-                self.permission = Some(env.clock().make_timer(STATEFUL_COMMAND_TIMEOUT_DURATION));
+                self.permission = env.clock().make_timer(STATEFUL_COMMAND_TIMEOUT_DURATION);
                 self.command_type = Some(new_command_type);
                 self.channel = Some(channel);
             }

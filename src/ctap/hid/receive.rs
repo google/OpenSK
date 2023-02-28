@@ -31,7 +31,7 @@ pub struct MessageAssembler<E: Env> {
     // Current channel ID.
     cid: ChannelID,
     // Timestamp of the last packet received on the current channel.
-    timer: Option<<<E as Env>::Clock as Clock>::Timer>,
+    timer: <<E as Env>::Clock as Clock>::Timer,
     // Current command.
     cmd: u8,
     // Sequence number expected for the next packet.
@@ -47,7 +47,7 @@ impl<E: Env> MessageAssembler<E> {
         MessageAssembler {
             idle: true,
             cid: [0, 0, 0, 0],
-            timer: None,
+            timer: <<E as Env>::Clock as Clock>::Timer::default(),
             cmd: 0,
             seq: 0,
             remaining_payload_len: 0,
@@ -60,7 +60,7 @@ impl<E: Env> MessageAssembler<E> {
     fn reset(&mut self) {
         self.idle = true;
         self.cid = [0, 0, 0, 0];
-        self.timer = None;
+        self.timer = <<E as Env>::Clock as Clock>::Timer::default();
         self.cmd = 0;
         self.seq = 0;
         self.remaining_payload_len = 0;
@@ -81,8 +81,7 @@ impl<E: Env> MessageAssembler<E> {
         // section 8.8.1
         let (cid, processed_packet) = CtapHid::<E>::process_single_packet(packet);
 
-        env.clock().update_timer(&mut self.timer);
-        if !self.idle && self.timer.is_none() {
+        if !self.idle && env.clock().is_elapsed(&self.timer) {
             // The current channel timed out.
             // Save the channel ID and reset the state.
             let current_cid = self.cid;
@@ -133,7 +132,7 @@ impl<E: Env> MessageAssembler<E> {
                         Err((cid, CtapHidError::InvalidSeq))
                     } else {
                         // Update the last timestamp.
-                        self.timer = Some(env.clock().make_timer(TIMEOUT_DURATION));
+                        self.timer = env.clock().make_timer(TIMEOUT_DURATION);
                         // Increment the sequence number for the next packet.
                         self.seq += 1;
                         Ok(self.append_payload(data))
@@ -157,7 +156,7 @@ impl<E: Env> MessageAssembler<E> {
             return Err((cid, CtapHidError::InvalidLen));
         }
         self.cid = cid;
-        self.timer = Some(env.clock().make_timer(TIMEOUT_DURATION));
+        self.timer = env.clock().make_timer(TIMEOUT_DURATION);
         self.cmd = cmd;
         self.seq = 0;
         self.remaining_payload_len = len;

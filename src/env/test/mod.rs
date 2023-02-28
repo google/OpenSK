@@ -57,7 +57,7 @@ impl Rng256 for TestRng256 {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct TestTimer {
     end: usize,
 }
@@ -82,15 +82,9 @@ impl Clock for TestClock {
         }
     }
 
-    fn check_timer(&mut self, timer: Self::Timer) -> Option<Self::Timer> {
-        if self.cur_time < timer.end {
-            Some(timer)
-        } else {
-            None
-        }
+    fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
+        self.cur_time >= timer.end
     }
-
-    fn tickle(&mut self) {}
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
@@ -280,10 +274,10 @@ mod test {
     fn test_clock() {
         let mut clock = TestClock::default();
         let timer = clock.make_timer(3);
-        let timer = clock.check_timer(timer).unwrap();
+        assert!(!clock.is_elapsed(&timer));
         clock.advance(2);
-        let timer = clock.check_timer(timer).unwrap();
+        assert!(!clock.is_elapsed(&timer));
         clock.advance(1);
-        assert_eq!(clock.check_timer(timer), None);
+        assert!(clock.is_elapsed(&timer));
     }
 }

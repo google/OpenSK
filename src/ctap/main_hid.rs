@@ -28,7 +28,7 @@ const WINK_TIMEOUT_DURATION: usize = 5000;
 /// Implements the standard CTAP command processing for HID.
 pub struct MainHid<E: Env> {
     hid: CtapHid<E>,
-    wink_permission: Option<<<E as Env>::Clock as Clock>::Timer>,
+    wink_permission: <<E as Env>::Clock as Clock>::Timer,
 }
 
 impl<E: Env> MainHid<E> {
@@ -42,7 +42,7 @@ impl<E: Env> MainHid<E> {
             | CtapHid::<E>::CAPABILITY_NMSG;
 
         let hid = CtapHid::<E>::new(capabilities);
-        let wink_permission = None;
+        let wink_permission = <<E as Env>::Clock as Clock>::Timer::default();
         MainHid {
             hid,
             wink_permission,
@@ -73,7 +73,7 @@ impl<E: Env> MainHid<E> {
         ctap_state: &mut CtapState<E>,
     ) -> Message {
         // If another command arrives, stop winking to prevent accidential button touches.
-        self.wink_permission = None;
+        self.wink_permission = <<E as Env>::Clock as Clock>::Timer::default();
 
         let cid = message.cid;
         match message.cmd {
@@ -105,7 +105,7 @@ impl<E: Env> MainHid<E> {
             // CTAP 2.1 from 2021-06-15, section 11.2.9.2.1.
             CtapHidCommand::Wink => {
                 if message.payload.is_empty() {
-                    self.wink_permission = Some(env.clock().make_timer(WINK_TIMEOUT_DURATION));
+                    self.wink_permission = env.clock().make_timer(WINK_TIMEOUT_DURATION);
                     // The response is empty like the request.
                     message
                 } else {
@@ -118,9 +118,8 @@ impl<E: Env> MainHid<E> {
     }
 
     /// Returns whether a wink permission is currently granted.
-    pub fn should_wink(&mut self, env: &mut E) -> bool {
-        env.clock().update_timer(&mut self.wink_permission);
-        self.wink_permission.is_some()
+    pub fn should_wink(&self, env: &mut E) -> bool {
+        !env.clock().is_elapsed(&self.wink_permission)
     }
 
     #[cfg(feature = "with_ctap1")]
@@ -154,10 +153,11 @@ mod test {
 
     fn new_initialized() -> (MainHid<TestEnv>, ChannelID) {
         let (hid, cid) = CtapHid::new_initialized();
+        let wink_permission = <<TestEnv as Env>::Clock as Clock>::Timer::default();
         (
             MainHid::<TestEnv> {
                 hid,
-                wink_permission: None,
+                wink_permission,
             },
             cid,
         )

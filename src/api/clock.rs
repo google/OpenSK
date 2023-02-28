@@ -13,21 +13,19 @@
 // limitations under the License.
 
 pub trait Clock: Sized {
-    type Timer;
+    /// Stores data for the clock to recognize if this timer is elapsed or not.
+    ///
+    /// The Clock does not keep track of the timers it creates. Therefore, they should not wrap
+    /// unexpectedly. A timer that is elapsed may never return to a non-elapsed state.
+    ///
+    /// A default Timer should return `true` when checked with `is_elapsed`.
+    type Timer: Default;
 
     /// Creates a new timer that expires after the given time in ms.
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer;
 
-    /// Consumes a timer, and returns it if not expired.
-    fn check_timer(&mut self, timer: Self::Timer) -> Option<Self::Timer>;
-
-    /// Checks the timer and takes it, if expired.
-    fn update_timer(&mut self, timer: &mut Option<Self::Timer>) {
-        *timer = timer.take().and_then(|t| Self::check_timer(self, t));
-    }
-
-    /// Tickles the clock and makes it check its timers. Often a NOOP.
-    fn tickle(&mut self);
+    /// Checks whether a given timer is expired.
+    fn is_elapsed(&mut self, timer: &Self::Timer) -> bool;
 
     /// Timestamp in microseconds.
     ///

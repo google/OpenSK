@@ -118,7 +118,7 @@ fn main() {
     let mut ctap = ctap2::Ctap::new(env);
 
     let mut led_counter = 0;
-    let mut led_blink_timer = None;
+    let mut led_blink_timer = <<TockEnv as Env>::Clock as Clock>::Timer::default();
 
     let mut replies = EndpointReplies::new();
 
@@ -216,6 +216,7 @@ fn main() {
         // These calls are making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
         ctap.update_timeouts();
+        ctap.env().clock().tickle();
 
         if let Some(endpoint) = usb_endpoint {
             let transport = match endpoint {
@@ -244,12 +245,11 @@ fn main() {
             }
         }
 
-        ctap.env().clock().update_timer(&mut led_blink_timer);
-        if led_blink_timer.is_none() {
+        if ctap.env().clock().is_elapsed(&led_blink_timer) {
             // Loops quickly when waiting for U2F user presence, so the next LED blink
             // state is only set if enough time has elapsed.
             led_counter += 1;
-            led_blink_timer = Some(ctap.env().clock().make_timer(KEEPALIVE_DELAY))
+            led_blink_timer = ctap.env().clock().make_timer(KEEPALIVE_DELAY)
         }
 
         if ctap.should_wink() {

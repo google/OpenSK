@@ -18,7 +18,6 @@ extern crate alloc;
 #[macro_use]
 extern crate arrayref;
 
-use crate::api::clock::Clock;
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
 #[cfg(feature = "vendor_hid")]
@@ -109,7 +108,6 @@ impl<E: Env> Ctap<E> {
     }
 
     pub fn update_timeouts(&mut self) {
-        self.env.clock().tickle();
         self.state.update_timeouts(&mut self.env);
     }
 

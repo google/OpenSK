@@ -22,6 +22,7 @@ mod command_nr {
 
 const DRIVER_NUMBER: usize = 0x00000;
 
+#[derive(Default)]
 pub struct TockTimer {
     end_epoch: usize,
     end_tick: usize,
@@ -38,10 +39,30 @@ fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
     lhs.wrapping_sub(rhs) & 0xffffff
 }
 
+/// Clock that produces timers through Tock syscalls.
+///
+/// To guarantee correctness, you have to call any of its functions at least once per full tick
+/// counter wrap. In our case, 24 bit ticks with a 32 kHz frequency wrap after 512 seconds. If you
+/// can't guarantee to regularly create or check timers, call tickle at least every 8 minutes.
 #[derive(Default)]
 pub struct TockClock {
     epoch: usize,
     tick: usize,
+}
+
+impl TockClock {
+    /// Elapses timers before the clock wraps.
+    ///
+    /// Call this regularly to timeout reliably despite wrapping clock ticks.
+    pub fn tickle(&mut self) {
+        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
+            .ok()
+            .unwrap();
+        if wrapping_sub_u24(self.tick, cur_tick) < 0x80_0000 {
+            self.epoch += 1;
+        }
+        self.tick = cur_tick;
+    }
 }
 
 impl Clock for TockClock {
@@ -67,26 +88,9 @@ impl Clock for TockClock {
         }
     }
 
-    fn check_timer(&mut self, timer: Self::Timer) -> Option<Self::Timer> {
+    fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
         self.tickle();
-        if (self.epoch, self.tick) < (timer.end_epoch, timer.end_tick) {
-            Some(timer)
-        } else {
-            None
-        }
-    }
-
-    /// Elapses timers before the clock wraps.
-    ///
-    /// Call this regularly to timeout reliably despite wrapping clock ticks.
-    fn tickle(&mut self) {
-        let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
-            .ok()
-            .unwrap();
-        if wrapping_sub_u24(self.tick, cur_tick) < 0x80_0000 {
-            self.epoch += 1;
-        }
-        self.tick = cur_tick;
+        (self.epoch, self.tick) >= (timer.end_epoch, timer.end_tick)
     }
 
     #[cfg(feature = "debug_ctap")]

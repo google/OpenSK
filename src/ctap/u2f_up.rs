@@ -20,51 +20,47 @@ const U2F_UP_PROMPT_TIMEOUT: usize = 10000;
 
 pub struct U2fUserPresenceState<E: Env> {
     /// If user presence was recently requested, its timeout is saved here.
-    needs_up: Option<<<E as Env>::Clock as Clock>::Timer>,
+    needs_up: <<E as Env>::Clock as Clock>::Timer,
 
     /// Button touch timeouts, while user presence is requested, are saved here.
-    has_up: Option<<<E as Env>::Clock as Clock>::Timer>,
+    has_up: <<E as Env>::Clock as Clock>::Timer,
 }
 
 impl<E: Env> U2fUserPresenceState<E> {
     pub fn new() -> U2fUserPresenceState<E> {
         U2fUserPresenceState {
-            needs_up: None,
-            has_up: None,
+            needs_up: <<E as Env>::Clock as Clock>::Timer::default(),
+            has_up: <<E as Env>::Clock as Clock>::Timer::default(),
         }
     }
 
-    // Granting user presence is ignored if it needs activation, but waits. Also cleans up.
+    /// Allows consuming user presence until timeout, if it was needed.
+    ///
+    /// If user presence was not requested, granting user presence does nothing.
     pub fn grant_up(&mut self, env: &mut E) {
-        self.check_expiration(env);
-        if self.needs_up.is_some() {
-            self.needs_up = None;
-            self.has_up = Some(env.clock().make_timer(TOUCH_TIMEOUT));
+        if !env.clock().is_elapsed(&self.needs_up) {
+            self.needs_up = <<E as Env>::Clock as Clock>::Timer::default();
+            self.has_up = env.clock().make_timer(TOUCH_TIMEOUT);
         }
     }
 
-    // This marks user presence as needed or uses it up if already granted. Also cleans up.
+    /// Returns whether user presence was granted within the timeout and not yet consumed.
     pub fn consume_up(&mut self, env: &mut E) -> bool {
-        self.check_expiration(env);
-        if self.has_up.is_some() {
-            self.has_up = None;
+        if !env.clock().is_elapsed(&self.has_up) {
+            self.has_up = <<E as Env>::Clock as Clock>::Timer::default();
             true
         } else {
-            self.needs_up = Some(env.clock().make_timer(U2F_UP_PROMPT_TIMEOUT));
+            self.needs_up = env.clock().make_timer(U2F_UP_PROMPT_TIMEOUT);
             false
         }
     }
 
-    // Returns if user presence was requested. Also cleans up.
+    /// Returns whether user presence was requested.
+    ///
+    /// This function doesn't represent interaction with the environment, and does not change the
+    /// state, i.e. neither grants nor consumes user presence.
     pub fn is_up_needed(&mut self, env: &mut E) -> bool {
-        self.check_expiration(env);
-        self.needs_up.is_some()
-    }
-
-    /// Checks and updates all timers.
-    pub fn check_expiration(&mut self, env: &mut E) {
-        env.clock().update_timer(&mut self.needs_up);
-        env.clock().update_timer(&mut self.has_up);
+        !env.clock().is_elapsed(&self.needs_up)
     }
 }
 

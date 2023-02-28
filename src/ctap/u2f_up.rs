@@ -20,17 +20,17 @@ const U2F_UP_PROMPT_TIMEOUT: usize = 10000;
 
 pub struct U2fUserPresenceState<E: Env> {
     /// If user presence was recently requested, its timeout is saved here.
-    needs_up: <<E as Env>::Clock as Clock>::Timer,
+    needs_up: <E::Clock as Clock>::Timer,
 
     /// Button touch timeouts, while user presence is requested, are saved here.
-    has_up: <<E as Env>::Clock as Clock>::Timer,
+    has_up: <E::Clock as Clock>::Timer,
 }
 
 impl<E: Env> U2fUserPresenceState<E> {
     pub fn new() -> U2fUserPresenceState<E> {
         U2fUserPresenceState {
-            needs_up: <<E as Env>::Clock as Clock>::Timer::default(),
-            has_up: <<E as Env>::Clock as Clock>::Timer::default(),
+            needs_up: <E::Clock as Clock>::Timer::default(),
+            has_up: <E::Clock as Clock>::Timer::default(),
         }
     }
 
@@ -39,7 +39,7 @@ impl<E: Env> U2fUserPresenceState<E> {
     /// If user presence was not requested, granting user presence does nothing.
     pub fn grant_up(&mut self, env: &mut E) {
         if !env.clock().is_elapsed(&self.needs_up) {
-            self.needs_up = <<E as Env>::Clock as Clock>::Timer::default();
+            self.needs_up = <E::Clock as Clock>::Timer::default();
             self.has_up = env.clock().make_timer(TOUCH_TIMEOUT);
         }
     }
@@ -47,7 +47,7 @@ impl<E: Env> U2fUserPresenceState<E> {
     /// Returns whether user presence was granted within the timeout and not yet consumed.
     pub fn consume_up(&mut self, env: &mut E) -> bool {
         if !env.clock().is_elapsed(&self.has_up) {
-            self.has_up = <<E as Env>::Clock as Clock>::Timer::default();
+            self.has_up = <E::Clock as Clock>::Timer::default();
             true
         } else {
             self.needs_up = env.clock().make_timer(U2F_UP_PROMPT_TIMEOUT);

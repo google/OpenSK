@@ -37,7 +37,7 @@ pub struct PinUvAuthTokenState<E: Env> {
     // Relies on the fact that all permissions are represented by powers of two.
     permissions_set: u8,
     permissions_rp_id: Option<String>,
-    usage_timer: <<E as Env>::Clock as Clock>::Timer,
+    usage_timer: <E::Clock as Clock>::Timer,
     user_verified: bool,
     in_use: bool,
 }
@@ -48,7 +48,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
         PinUvAuthTokenState {
             permissions_set: 0,
             permissions_rp_id: None,
-            usage_timer: <<E as Env>::Clock as Clock>::Timer::default(),
+            usage_timer: <E::Clock as Clock>::Timer::default(),
             user_verified: false,
             in_use: false,
         }
@@ -146,7 +146,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     pub fn stop_using_pin_uv_auth_token(&mut self) {
         self.permissions_rp_id = None;
         self.permissions_set = 0;
-        self.usage_timer = <<E as Env>::Clock as Clock>::Timer::default();
+        self.usage_timer = <E::Clock as Clock>::Timer::default();
         self.user_verified = false;
         self.in_use = false;
     }

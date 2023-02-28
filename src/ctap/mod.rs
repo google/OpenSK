@@ -360,7 +360,7 @@ pub enum StatefulCommand {
 /// Additionally, state that is held over multiple commands is assigned to a channel. We discard
 /// all state when we receive data on a different channel.
 pub struct StatefulPermission<E: Env> {
-    permission: <<E as Env>::Clock as Clock>::Timer,
+    permission: <E::Clock as Clock>::Timer,
     command_type: Option<StatefulCommand>,
     channel: Option<Channel>,
 }
@@ -380,7 +380,7 @@ impl<E: Env> StatefulPermission<E> {
 
     /// Clears all permissions and state.
     pub fn clear(&mut self) {
-        self.permission = <<E as Env>::Clock as Clock>::Timer::default();
+        self.permission = <E::Clock as Clock>::Timer::default();
         self.command_type = None;
         self.channel = None;
     }

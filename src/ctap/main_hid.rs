@@ -28,7 +28,7 @@ const WINK_TIMEOUT_DURATION: usize = 5000;
 /// Implements the standard CTAP command processing for HID.
 pub struct MainHid<E: Env> {
     hid: CtapHid<E>,
-    wink_permission: <<E as Env>::Clock as Clock>::Timer,
+    wink_permission: <E::Clock as Clock>::Timer,
 }
 
 impl<E: Env> MainHid<E> {
@@ -42,7 +42,7 @@ impl<E: Env> MainHid<E> {
             | CtapHid::<E>::CAPABILITY_NMSG;
 
         let hid = CtapHid::<E>::new(capabilities);
-        let wink_permission = <<E as Env>::Clock as Clock>::Timer::default();
+        let wink_permission = <E::Clock as Clock>::Timer::default();
         MainHid {
             hid,
             wink_permission,
@@ -73,7 +73,7 @@ impl<E: Env> MainHid<E> {
         ctap_state: &mut CtapState<E>,
     ) -> Message {
         // If another command arrives, stop winking to prevent accidential button touches.
-        self.wink_permission = <<E as Env>::Clock as Clock>::Timer::default();
+        self.wink_permission = <E::Clock as Clock>::Timer::default();
 
         let cid = message.cid;
         match message.cmd {

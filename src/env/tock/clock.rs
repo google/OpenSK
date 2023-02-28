@@ -35,10 +35,6 @@ fn add_to_u24_with_wraps(lhs: usize, rhs: usize) -> (usize, usize) {
     (sum & 0xffffff, sum >> 24)
 }
 
-fn wrapping_sub_u24(lhs: usize, rhs: usize) -> usize {
-    lhs.wrapping_sub(rhs) & 0xffffff
-}
-
 /// Clock that produces timers through Tock syscalls.
 ///
 /// To guarantee correctness, you have to call any of its functions at least once per full tick
@@ -58,7 +54,7 @@ impl TockClock {
         let cur_tick = syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)
             .ok()
             .unwrap();
-        if wrapping_sub_u24(self.tick, cur_tick) < 0x80_0000 {
+        if cur_tick < self.tick {
             self.epoch += 1;
         }
         self.tick = cur_tick;
@@ -120,16 +116,5 @@ mod test {
         assert_eq!(add_to_u24_with_wraps(0, 0x1000000), (0, 1));
         assert_eq!(add_to_u24_with_wraps(0, 0x2000000), (0, 2));
         assert_eq!(add_to_u24_with_wraps(0xffffff, 0x2ffffff), (0xfffffe, 3));
-    }
-
-    #[test]
-    fn test_wrapping_sub_u24() {
-        // non-wrapping cases
-        assert_eq!(wrapping_sub_u24(0, 0), 0);
-        assert_eq!(wrapping_sub_u24(0xffffff, 0), 0xffffff);
-        assert_eq!(wrapping_sub_u24(0xffffff, 0xffffff), 0);
-        // wrapping cases
-        assert_eq!(wrapping_sub_u24(0, 0xffffff), 1);
-        assert_eq!(wrapping_sub_u24(0, 1), 0xffffff);
     }
 }

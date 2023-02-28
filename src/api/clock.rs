@@ -25,6 +25,10 @@ pub trait Clock: Sized {
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer;
 
     /// Checks whether a given timer is expired.
+    ///
+    /// Until a timer expires, this function consistently returns false. Once it expires, this
+    /// function consistently returns true. In particular, it is valid to continue calling this
+    /// function after the first time it returns true.
     fn is_elapsed(&mut self, timer: &Self::Timer) -> bool;
 
     /// Timestamp in microseconds.

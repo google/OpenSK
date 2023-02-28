@@ -31,7 +31,7 @@ pub struct MessageAssembler<E: Env> {
     // Current channel ID.
     cid: ChannelID,
     // Timestamp of the last packet received on the current channel.
-    timer: <<E as Env>::Clock as Clock>::Timer,
+    timer: <E::Clock as Clock>::Timer,
     // Current command.
     cmd: u8,
     // Sequence number expected for the next packet.
@@ -47,7 +47,7 @@ impl<E: Env> MessageAssembler<E> {
         MessageAssembler {
             idle: true,
             cid: [0, 0, 0, 0],
-            timer: <<E as Env>::Clock as Clock>::Timer::default(),
+            timer: <E::Clock as Clock>::Timer::default(),
             cmd: 0,
             seq: 0,
             remaining_payload_len: 0,
@@ -60,7 +60,7 @@ impl<E: Env> MessageAssembler<E> {
     fn reset(&mut self) {
         self.idle = true;
         self.cid = [0, 0, 0, 0];
-        self.timer = <<E as Env>::Clock as Clock>::Timer::default();
+        self.timer = <E::Clock as Clock>::Timer::default();
         self.cmd = 0;
         self.seq = 0;
         self.remaining_payload_len = 0;

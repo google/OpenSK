@@ -213,9 +213,8 @@ fn main() {
             drop(buttons_callback);
         }
 
-        // These calls are making sure that even for long inactivity, wrapping clock values
+        // This call is making sure that even for long inactivity, wrapping clock values
         // don't cause problems with timers.
-        ctap.update_timeouts();
         ctap.env().clock().tickle();
 
         if let Some(endpoint) = usb_endpoint {

@@ -32,7 +32,7 @@ std = ["crypto/std", "lang_items/std", "persistent_store/std", "rng256/std", "ra
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
-vendor_hid = ["libtock_drivers/vendor_hid"]
+vendor_hid = []
 fuzz = ["arbitrary", "std"]
 ed25519 = ["ed25519-compact"]
 

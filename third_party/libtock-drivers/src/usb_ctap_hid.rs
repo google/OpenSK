@@ -18,7 +18,6 @@ use crate::result::{OutOfRangeError, TockError, TockResult};
 use crate::timer::Duration;
 use crate::{timer, util};
 use core::cell::Cell;
-use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use libtock_core::result::{CommandError, EALREADY, EBUSY, SUCCESS};
@@ -66,30 +65,10 @@ pub fn setup() -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum UsbEndpoint {
-    MainHid = 1,
-    #[cfg(feature = "vendor_hid")]
-    VendorHid = 2,
-}
-
-impl TryFrom<usize> for UsbEndpoint {
-    type Error = TockError;
-
-    fn try_from(endpoint_num: usize) -> Result<Self, TockError> {
-        match endpoint_num {
-            1 => Ok(UsbEndpoint::MainHid),
-            #[cfg(feature = "vendor_hid")]
-            2 => Ok(UsbEndpoint::VendorHid),
-            _ => Err(OutOfRangeError.into()),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SendOrRecvStatus {
     Timeout,
     Sent,
-    Received(UsbEndpoint),
+    Received(usize),
 }
 
 /// Waits to receive a packet.
@@ -116,7 +95,7 @@ pub fn recv_with_timeout(
             Console::new(),
             "Received packet = {:02x?} on endpoint {}",
             buf as &[u8],
-            endpoint as u8,
+            endpoint,
         )
         .unwrap();
     }
@@ -140,7 +119,7 @@ pub fn recv_with_timeout(
 pub fn send_or_recv_with_timeout(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-    endpoint: UsbEndpoint,
+    endpoint: usize,
 ) -> TockResult<SendOrRecvStatus> {
     #[cfg(feature = "verbose_usb")]
     writeln!(
@@ -159,7 +138,7 @@ pub fn send_or_recv_with_timeout(
             Console::new(),
             "Received packet = {:02x?} on endpoint {}",
             buf as &[u8],
-            received_endpoint as u8,
+            received_endpoint,
         )
         .unwrap();
     }
@@ -176,9 +155,7 @@ fn recv_with_timeout_detail(
     let status = Cell::new(None);
     let mut alarm = |direction, endpoint| {
         status.set(Some(match direction {
-            subscribe_nr::callback_status::RECEIVED => {
-                UsbEndpoint::try_from(endpoint).map(|i| SendOrRecvStatus::Received(i))
-            }
+            subscribe_nr::callback_status::RECEIVED => Ok(SendOrRecvStatus::Received(endpoint)),
             // Unknown direction or "transmitted" sent by the kernel.
             _ => Err(OutOfRangeError.into()),
         }));
@@ -260,7 +237,7 @@ fn recv_with_timeout_detail(
 fn send_or_recv_with_timeout_detail(
     buf: &mut [u8; 64],
     timeout_delay: Duration<isize>,
-    endpoint: UsbEndpoint,
+    endpoint: usize,
 ) -> TockResult<SendOrRecvStatus> {
     let result = syscalls::allow(DRIVER_NUMBER, allow_nr::TRANSMIT_OR_RECEIVE, buf)?;
 
@@ -268,9 +245,7 @@ fn send_or_recv_with_timeout_detail(
     let mut alarm = |direction, endpoint| {
         status.set(Some(match direction {
             subscribe_nr::callback_status::TRANSMITTED => Ok(SendOrRecvStatus::Sent),
-            subscribe_nr::callback_status::RECEIVED => {
-                UsbEndpoint::try_from(endpoint).map(|i| SendOrRecvStatus::Received(i))
-            }
+            subscribe_nr::callback_status::RECEIVED => Ok(SendOrRecvStatus::Received(endpoint)),
             // Unknown direction sent by the kernel.
             _ => Err(OutOfRangeError.into()),
         }));

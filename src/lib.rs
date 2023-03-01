@@ -107,10 +107,6 @@ impl<E: Env> Ctap<E> {
         }
     }
 
-    pub fn update_timeouts(&mut self) {
-        self.state.update_timeouts(&mut self.env);
-    }
-
     pub fn should_wink(&mut self) -> bool {
         self.hid.should_wink(&mut self.env)
     }

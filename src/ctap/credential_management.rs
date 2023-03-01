@@ -158,7 +158,7 @@ fn process_enumerate_rps_get_next_rp<E: Env>(
     env: &mut E,
     stateful_command_permission: &mut StatefulPermission<E>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp_id_index = stateful_command_permission.next_enumerate_rp()?;
+    let rp_id_index = stateful_command_permission.next_enumerate_rp(env)?;
     let rp_set = get_stored_rp_ids(env)?;
     // A BTreeSet is already sorted.
     let rp_id = rp_set
@@ -213,7 +213,7 @@ fn process_enumerate_credentials_get_next_credential<E: Env>(
     env: &mut E,
     stateful_command_permission: &mut StatefulPermission<E>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let credential_key = stateful_command_permission.next_enumerate_credential()?;
+    let credential_key = stateful_command_permission.next_enumerate_credential(env)?;
     let credential = storage::get_credential(env, credential_key)?;
     enumerate_credentials_response(env, credential, None)
 }
@@ -264,7 +264,7 @@ pub fn process_credential_management<E: Env>(
         pin_uv_auth_param,
     } = cred_management_params;
 
-    match (sub_command, stateful_command_permission.get_command()) {
+    match (sub_command, stateful_command_permission.get_command(env)) {
         (
             CredentialManagementSubCommand::EnumerateRpsGetNextRp,
             Ok(StatefulCommand::EnumerateRps(_)),

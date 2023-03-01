@@ -395,7 +395,7 @@ impl<E: Env> StatefulPermission<E> {
         // If we wanted to switch to (B) or (C), we'd have to be very careful that the state does
         // not go stale. For example, we keep credential keys that we expect to still exist.
         // However, interleaving (stateless) commands could delete credentials or change the PIN,
-        // which chould make invalidate our access. Some read-only commands should be okay to run,
+        // which could invalidate our access. Some read-only commands should be okay to run,
         // but (A) is the safest and easiest solution.
         if let Some(c) = &self.channel {
             if c != channel {
@@ -405,14 +405,15 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Clears all state if the permission timed out.
-    pub fn clear_timer(&mut self, env: &mut E) {
+    fn clear_timer(&mut self, env: &mut E) {
         if env.clock().is_elapsed(&self.permission) {
             self.clear();
         }
     }
 
     /// Gets a reference to the current command state, if any exists.
-    pub fn get_command(&self) -> Result<&StatefulCommand, Ctap2StatusCode> {
+    pub fn get_command(&mut self, env: &mut E) -> Result<&StatefulCommand, Ctap2StatusCode> {
+        self.clear_timer(env);
         self.command_type
             .as_ref()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -442,7 +443,9 @@ impl<E: Env> StatefulPermission<E> {
     /// to the next credential that needs to be processed.
     pub fn next_assertion_credential(
         &mut self,
+        env: &mut E,
     ) -> Result<(AssertionInput, usize), Ctap2StatusCode> {
+        self.clear_timer(env);
         if let Some(StatefulCommand::GetAssertion(assertion_state)) = &mut self.command_type {
             let credential_key = assertion_state
                 .next_credential_keys
@@ -455,7 +458,8 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Returns the index to the next RP ID for enumeration and advances it.
-    pub fn next_enumerate_rp(&mut self) -> Result<usize, Ctap2StatusCode> {
+    pub fn next_enumerate_rp(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
+        self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = &mut self.command_type {
             let current_index = *rp_id_index;
             *rp_id_index += 1;
@@ -466,7 +470,8 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Returns the next storage credential key for enumeration and advances it.
-    pub fn next_enumerate_credential(&mut self) -> Result<usize, Ctap2StatusCode> {
+    pub fn next_enumerate_credential(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
+        self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut self.command_type
         {
             rp_credentials
@@ -500,11 +505,6 @@ impl<E: Env> CtapState<E> {
             stateful_command_permission: StatefulPermission::new_reset(env),
             large_blobs: LargeBlobs::new(),
         }
-    }
-
-    pub fn update_timeouts(&mut self, env: &mut E) {
-        self.stateful_command_permission.clear_timer(env);
-        self.client_pin.update_timeouts(env);
     }
 
     pub fn increment_global_signature_counter(
@@ -560,6 +560,9 @@ impl<E: Env> CtapState<E> {
         command: Command,
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
+        // The auth token timeouts are checked once here, to make error codes consistent. If your
+        // auth token hasn't timed out now, you can fully use it for this command.
+        self.client_pin.update_timeouts(env);
         // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
         #[cfg(feature = "with_ctap1")]
         {
@@ -569,8 +572,7 @@ impl<E: Env> CtapState<E> {
         }
         self.stateful_command_permission
             .clear_old_channels(&channel);
-        self.stateful_command_permission.clear_timer(env);
-        match (&command, self.stateful_command_permission.get_command()) {
+        match (&command, self.stateful_command_permission.get_command(env)) {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
             | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
             // AuthenticatorGetInfo still allows Reset.
@@ -1213,7 +1215,7 @@ impl<E: Env> CtapState<E> {
     fn process_get_next_assertion(&mut self, env: &mut E) -> Result<ResponseData, Ctap2StatusCode> {
         let (assertion_input, credential_key) = self
             .stateful_command_permission
-            .next_assertion_credential()?;
+            .next_assertion_credential(env)?;
         let credential = storage::get_credential(env, credential_key)?;
         self.assertion_response(env, credential, assertion_input, None, true)
     }
@@ -1295,9 +1297,11 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
-        match self.stateful_command_permission.get_command()? {
-            StatefulCommand::Reset => (),
-            _ => return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED),
+        if !matches!(
+            self.stateful_command_permission.get_command(env)?,
+            StatefulCommand::Reset
+        ) {
+            return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
         }
         check_user_presence(env, channel)?;
 

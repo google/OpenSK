@@ -404,11 +404,16 @@ impl<E: Env> StatefulPermission<E> {
         }
     }
 
-    /// Gets a reference to the current command state, if any exists.
-    pub fn get_command(&mut self, env: &mut E) -> Result<&StatefulCommand, Ctap2StatusCode> {
+    /// Clears all state if the permission timed out.
+    fn clear_timer(&mut self, env: &mut E) {
         if env.clock().is_elapsed(&self.permission) {
             self.clear();
         }
+    }
+
+    /// Gets a reference to the current command state, if any exists.
+    pub fn get_command(&mut self, env: &mut E) -> Result<&StatefulCommand, Ctap2StatusCode> {
+        self.clear_timer(env);
         self.command_type
             .as_ref()
             .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
@@ -440,9 +445,7 @@ impl<E: Env> StatefulPermission<E> {
         &mut self,
         env: &mut E,
     ) -> Result<(AssertionInput, usize), Ctap2StatusCode> {
-        if env.clock().is_elapsed(&self.permission) {
-            self.clear();
-        }
+        self.clear_timer(env);
         if let Some(StatefulCommand::GetAssertion(assertion_state)) = &mut self.command_type {
             let credential_key = assertion_state
                 .next_credential_keys
@@ -456,9 +459,7 @@ impl<E: Env> StatefulPermission<E> {
 
     /// Returns the index to the next RP ID for enumeration and advances it.
     pub fn next_enumerate_rp(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
-        if env.clock().is_elapsed(&self.permission) {
-            self.clear();
-        }
+        self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = &mut self.command_type {
             let current_index = *rp_id_index;
             *rp_id_index += 1;
@@ -470,9 +471,7 @@ impl<E: Env> StatefulPermission<E> {
 
     /// Returns the next storage credential key for enumeration and advances it.
     pub fn next_enumerate_credential(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
-        if env.clock().is_elapsed(&self.permission) {
-            self.clear();
-        }
+        self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut self.command_type
         {
             rp_credentials

@@ -12,7 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libtock_drivers::usb_ctap_hid::UsbEndpoint;
+use core::convert::TryFrom;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum UsbEndpoint {
+    MainHid = 1,
+    #[cfg(feature = "vendor_hid")]
+    VendorHid = 2,
+}
+
+impl TryFrom<usize> for UsbEndpoint {
+    type Error = SendOrRecvError;
+
+    fn try_from(endpoint_num: usize) -> Result<Self, SendOrRecvError> {
+        match endpoint_num {
+            1 => Ok(UsbEndpoint::MainHid),
+            #[cfg(feature = "vendor_hid")]
+            2 => Ok(UsbEndpoint::VendorHid),
+            _ => Err(SendOrRecvError),
+        }
+    }
+}
 
 pub enum SendOrRecvStatus {
     Timeout,

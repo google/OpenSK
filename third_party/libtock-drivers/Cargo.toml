@@ -13,6 +13,5 @@ libtock_core = { path = "../../third_party/libtock-rs/core" }
 
 [features]
 debug_ctap = []
-vendor_hid = []
 verbose_usb = ["debug_ctap"]
 with_nfc=[]

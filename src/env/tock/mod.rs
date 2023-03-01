@@ -14,7 +14,9 @@
 
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use crate::api::attestation_store::AttestationStore;
-use crate::api::connection::{HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus};
+use crate::api::connection::{
+    HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
+};
 use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
@@ -22,14 +24,14 @@ use crate::api::{attestation_store, key_store};
 use crate::env::Env;
 use clock::TockClock;
 use core::cell::Cell;
+use core::convert::TryFrom;
 use core::sync::atomic::{AtomicBool, Ordering};
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::usb_ctap_hid::{self, UsbEndpoint};
-use libtock_drivers::{crp, led, timer};
+use libtock_drivers::{crp, led, timer, usb_ctap_hid};
 use persistent_store::{StorageResult, Store};
 use rng256::TockRng256;
 
@@ -45,12 +47,12 @@ impl HidConnection for TockHidConnection {
         match usb_ctap_hid::send_or_recv_with_timeout(
             buf,
             Duration::from_ms(timeout_ms as isize),
-            self.endpoint,
+            self.endpoint as usize,
         ) {
             Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
             Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
             Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
-                Ok(SendOrRecvStatus::Received(recv_endpoint))
+                UsbEndpoint::try_from(recv_endpoint).map(SendOrRecvStatus::Received)
             }
             _ => Err(SendOrRecvError),
         }

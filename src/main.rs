@@ -23,10 +23,11 @@ extern crate lang_items;
 
 #[cfg(feature = "with_ctap1")]
 use core::cell::Cell;
+use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use ctap2::api::clock::Clock;
-use ctap2::api::connection::{HidConnection, SendOrRecvStatus};
+use ctap2::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use ctap2::ctap::hid::HidPacketIterator;
 use ctap2::ctap::KEEPALIVE_DELAY_MS;
 #[cfg(feature = "with_ctap1")]
@@ -41,7 +42,6 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
-use usb_ctap_hid::UsbEndpoint;
 
 libtock_core::stack_size! {0x4000}
 
@@ -189,7 +189,7 @@ fn main() {
                     usb_ctap_hid::SendOrRecvStatus::Received(endpoint) => {
                         #[cfg(feature = "debug_ctap")]
                         print_packet_notice("Received packet", ctap.env().clock().timestamp_us());
-                        Some(endpoint)
+                        UsbEndpoint::try_from(endpoint).ok()
                     }
                     usb_ctap_hid::SendOrRecvStatus::Sent => {
                         panic!("Returned transmit status on receive")

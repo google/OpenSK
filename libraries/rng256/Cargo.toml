@@ -10,7 +10,6 @@ license = "Apache-2.0"
 edition = "2018"
 
 [dependencies]
-libtock_drivers = { path = "../../third_party/libtock-drivers" }
 arrayref = "0.3.6"
 rand = { version = "0.6.5", optional = true }
 

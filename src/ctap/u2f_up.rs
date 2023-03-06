@@ -104,7 +104,7 @@ mod test {
 
     #[test]
     fn test_grant_up_timeout() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         grant_up_timeout(&mut env);
         env.clock().advance(big_positive());
         grant_up_timeout(&mut env);
@@ -112,7 +112,7 @@ mod test {
 
     #[test]
     fn test_need_up_timeout() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         need_up_timeout(&mut env);
         env.clock().advance(big_positive());
         need_up_timeout(&mut env);
@@ -120,7 +120,7 @@ mod test {
 
     #[test]
     fn test_grant_up_when_needed() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         grant_up_when_needed(&mut env);
         env.clock().advance(big_positive());
         grant_up_when_needed(&mut env);
@@ -128,7 +128,7 @@ mod test {
 
     #[test]
     fn test_grant_up_without_need() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut u2f_state = U2fUserPresenceState::new();
         u2f_state.grant_up(&mut env);
         assert!(!u2f_state.is_up_needed(&mut env));

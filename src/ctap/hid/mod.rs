@@ -1,4 +1,4 @@
-// Copyright 2019-2022 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,7 +200,7 @@ impl<E: Env> CtapHid<E> {
     /// The capabilities passed in are reported to the client in Init.
     pub fn new(capabilities: u8) -> CtapHid<E> {
         Self {
-            assembler: MessageAssembler::new(),
+            assembler: MessageAssembler::default(),
             allocated_cids: 0,
             capabilities,
         }
@@ -396,7 +396,7 @@ impl<E: Env> CtapHid<E> {
     pub fn new_initialized() -> (Self, ChannelID) {
         (
             Self {
-                assembler: MessageAssembler::new(),
+                assembler: MessageAssembler::default(),
                 allocated_cids: 1,
                 capabilities: 0x0D,
             },
@@ -411,7 +411,7 @@ mod test {
 
     #[test]
     fn test_split_assemble() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         for payload_len in 0..7609 {
             let message = Message {
                 cid: [0x12, 0x34, 0x56, 0x78],
@@ -420,7 +420,7 @@ mod test {
             };
 
             let mut messages = Vec::new();
-            let mut assembler = MessageAssembler::<TestEnv>::new();
+            let mut assembler = MessageAssembler::<TestEnv>::default();
             for packet in HidPacketIterator::new(message.clone()).unwrap() {
                 match assembler.parse_packet(&mut env, &packet) {
                     Ok(Some(msg)) => messages.push(msg),
@@ -435,7 +435,7 @@ mod test {
 
     #[test]
     fn test_spurious_continuation_packet() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_hid = CtapHid::<TestEnv>::new(0x0D);
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
@@ -470,7 +470,7 @@ mod test {
 
     #[test]
     fn test_command_init_for_sync() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
 
         // Ping packet with a length longer than one packet.
@@ -502,7 +502,7 @@ mod test {
 
     #[test]
     fn test_command_ping() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
 
         let mut ping_packet = [0x00; 64];
@@ -520,7 +520,7 @@ mod test {
 
     #[test]
     fn test_command_cancel() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
 
         let mut cancel_packet = [0x00; 64];

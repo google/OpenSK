@@ -1,4 +1,4 @@
-// Copyright 2019-2022 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,8 +42,8 @@ pub struct MessageAssembler<E: Env> {
     payload: Vec<u8>,
 }
 
-impl<E: Env> MessageAssembler<E> {
-    pub fn new() -> MessageAssembler<E> {
+impl<E: Env> Default for MessageAssembler<E> {
+    fn default() -> MessageAssembler<E> {
         MessageAssembler {
             idle: true,
             cid: [0, 0, 0, 0],
@@ -54,7 +54,9 @@ impl<E: Env> MessageAssembler<E> {
             payload: Vec::new(),
         }
     }
+}
 
+impl<E: Env> MessageAssembler<E> {
     // Resets the message assembler to the idle state.
     // The caller can reset the assembler for example due to a timeout.
     fn reset(&mut self) {
@@ -207,8 +209,8 @@ mod test {
 
     #[test]
     fn test_empty_payload() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(&mut env, &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x90])),
             Ok(Some(Message {
@@ -221,8 +223,8 @@ mod test {
 
     #[test]
     fn test_one_packet() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -238,11 +240,11 @@ mod test {
 
     #[test]
     fn test_nonzero_padding() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // CTAP specification (version 20190130) section 8.1.4
         // It is written that "Unused bytes SHOULD be set to zero", so we test that non-zero
         // padding is accepted as well.
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -258,8 +260,8 @@ mod test {
 
     #[test]
     fn test_two_packets() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -279,8 +281,8 @@ mod test {
 
     #[test]
     fn test_three_packets() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -304,8 +306,8 @@ mod test {
 
     #[test]
     fn test_max_packets() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -331,9 +333,9 @@ mod test {
 
     #[test]
     fn test_multiple_messages() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // Check that after yielding a message, the assembler is ready to process new messages.
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         for i in 0..10 {
             // Introduce some variability in the messages.
             let cmd = CtapHidCommand::from(i + 1);
@@ -372,9 +374,9 @@ mod test {
 
     #[test]
     fn test_channel_switch() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // Check that the assembler can process messages from multiple channels, sequentially.
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         for i in 0..10 {
             // Introduce some variability in the messages.
             let cid = 0x78 + i;
@@ -407,8 +409,8 @@ mod test {
 
     #[test]
     fn test_unexpected_channel() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -443,11 +445,11 @@ mod test {
 
     #[test]
     fn test_spurious_continuation_packets() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // CTAP specification (version 20190130) section 8.1.5.4
         // Spurious continuation packets appearing without a prior initialization packet will be
         // ignored.
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         for i in 0..0x80 {
             // Some legit packet.
             let byte = 2 * i;
@@ -477,8 +479,8 @@ mod test {
 
     #[test]
     fn test_unexpected_init() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -494,8 +496,8 @@ mod test {
 
     #[test]
     fn test_unexpected_seq() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -511,8 +513,8 @@ mod test {
 
     #[test]
     fn test_timed_out_packet() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -529,11 +531,11 @@ mod test {
 
     #[test]
     fn test_just_in_time_packets() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // Delay between each packet is just below the threshold.
         let delay = TIMEOUT_DURATION_MS - 1;
 
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         assert_eq!(
             assembler.parse_packet(
                 &mut env,
@@ -561,8 +563,8 @@ mod test {
 
     #[test]
     fn test_init_sync() {
-        let mut env = TestEnv::new();
-        let mut assembler = MessageAssembler::new();
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
         // Ping packet with a length longer than one packet.
         assert_eq!(
             assembler.parse_packet(

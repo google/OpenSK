@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -388,7 +388,7 @@ mod test {
 
     #[test]
     fn test_process_allowed() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
@@ -404,7 +404,7 @@ mod test {
 
     #[test]
     fn test_process_register() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
@@ -445,7 +445,7 @@ mod test {
 
     #[test]
     fn test_process_register_bad_message() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
@@ -463,7 +463,7 @@ mod test {
         let application = [0x0A; 32];
         let message = create_register_message(&application);
 
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
@@ -477,7 +477,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -494,7 +494,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only_wrong_rp() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -512,7 +512,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only_wrong_length() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -546,7 +546,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only_wrong_cla() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -565,7 +565,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only_wrong_ins() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -584,7 +584,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_check_only_wrong_flags() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -611,7 +611,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_enforce() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -637,7 +637,7 @@ mod test {
 
     #[test]
     fn test_process_authenticate_dont_enforce() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
@@ -670,7 +670,7 @@ mod test {
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
@@ -688,7 +688,7 @@ mod test {
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);

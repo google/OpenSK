@@ -160,7 +160,7 @@ mod test {
 
     #[test]
     fn test_observer() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.is_in_use());
@@ -174,7 +174,7 @@ mod test {
 
     #[test]
     fn test_stop() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         token_state.begin_using_pin_uv_auth_token(&mut env);
         assert!(token_state.is_in_use());
@@ -260,7 +260,7 @@ mod test {
 
     #[test]
     fn test_user_verified_flag() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         assert!(!token_state.get_user_verified_flag_value());
         token_state.begin_using_pin_uv_auth_token(&mut env);

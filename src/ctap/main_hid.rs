@@ -31,9 +31,9 @@ pub struct MainHid<E: Env> {
     wink_permission: <E::Clock as Clock>::Timer,
 }
 
-impl<E: Env> MainHid<E> {
+impl<E: Env> Default for MainHid<E> {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
-    pub fn new() -> Self {
+    fn default() -> Self {
         #[cfg(feature = "with_ctap1")]
         let capabilities = CtapHid::<E>::CAPABILITY_WINK | CtapHid::<E>::CAPABILITY_CBOR;
         #[cfg(not(feature = "with_ctap1"))]
@@ -48,7 +48,9 @@ impl<E: Env> MainHid<E> {
             wink_permission,
         }
     }
+}
 
+impl<E: Env> MainHid<E> {
     /// Processes an incoming USB HID packet, and returns an iterator for all outgoing packets.
     pub fn process_hid_packet(
         &mut self,
@@ -165,7 +167,7 @@ mod test {
 
     #[test]
     fn test_process_hid_packet() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
 
@@ -180,7 +182,7 @@ mod test {
 
     #[test]
     fn test_process_hid_packet_empty() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
 
@@ -194,7 +196,7 @@ mod test {
 
     #[test]
     fn test_wink() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut main_hid, cid) = new_initialized();
         assert!(!main_hid.should_wink(&mut env));

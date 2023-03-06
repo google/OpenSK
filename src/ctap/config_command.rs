@@ -1,4 +1,4 @@
-// Copyright 2020-2021 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +130,7 @@ mod test {
 
     #[test]
     fn test_process_enable_enterprise_attestation() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -161,7 +161,7 @@ mod test {
 
     #[test]
     fn test_process_toggle_always_uv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -200,7 +200,7 @@ mod test {
     }
 
     fn test_helper_process_toggle_always_uv_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -274,7 +274,7 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -322,7 +322,7 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_rp_ids() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -402,7 +402,7 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_force_pin_change_implicit() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -429,7 +429,7 @@ mod test {
 
     #[test]
     fn test_process_set_min_pin_length_force_pin_change_explicit() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -464,7 +464,7 @@ mod test {
 
     #[test]
     fn test_process_config_vendor_prototype() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(

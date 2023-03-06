@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,13 +89,13 @@ pub struct TockEnv {
     clock: TockClock,
 }
 
-impl TockEnv {
+impl Default for TockEnv {
     /// Returns the unique instance of the Tock environment.
     ///
     /// # Panics
     ///
     /// - If called a second time.
-    pub fn new() -> Self {
+    fn default() -> Self {
         // We rely on `take_storage` to ensure that this function is called only once.
         let storage = take_storage().unwrap();
         let store = Store::new(storage).ok().unwrap();

@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2021-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -226,7 +226,7 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_with_iv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
@@ -236,7 +236,7 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_without_iv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, false).unwrap();
@@ -246,7 +246,7 @@ mod test {
 
     #[test]
     fn test_correct_iv_usage() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let mut ciphertext_no_iv =
@@ -259,7 +259,7 @@ mod test {
 
     #[test]
     fn test_iv_manipulation_property() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let mut ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
@@ -274,7 +274,7 @@ mod test {
 
     #[test]
     fn test_chaining() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext1 = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
@@ -291,7 +291,7 @@ mod test {
 
     #[test]
     fn test_new_ecdsa_from_bytes() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
@@ -303,7 +303,7 @@ mod test {
     #[test]
     #[cfg(feature = "ed25519")]
     fn test_new_ed25519_from_bytes() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Eddsa);
         let key_bytes = private_key.to_bytes();
         assert_eq!(
@@ -331,7 +331,7 @@ mod test {
 
     #[test]
     fn test_private_key_get_pub_key() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
         let public_key = ecdsa_key.genpk();
@@ -343,7 +343,7 @@ mod test {
 
     #[test]
     fn test_private_key_sign_and_encode() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let message = [0x5A; 32];
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
@@ -355,7 +355,7 @@ mod test {
     }
 
     fn test_private_key_signature_algorithm(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
         assert_eq!(private_key.signature_algorithm(), signature_algorithm);
     }
@@ -372,7 +372,7 @@ mod test {
     }
 
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
         let cbor = cbor::Value::from(&private_key);
         assert_eq!(PrivateKey::try_from(cbor), Ok(private_key),);

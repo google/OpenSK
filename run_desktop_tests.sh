@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2019 Google LLC
+# Copyright 2019-2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ cargo fmt --all -- --check
 cd ..
 
 echo "Running Clippy lints..."
-cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
-cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
-cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
+cargo clippy --all-targets --features std -- -D warnings
+cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -D warnings
+cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml

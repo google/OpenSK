@@ -144,7 +144,7 @@ mod test {
 
     #[test]
     fn test_process_command_get_empty() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -179,7 +179,7 @@ mod test {
 
     #[test]
     fn test_process_command_commit_and_get() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -245,7 +245,7 @@ mod test {
 
     #[test]
     fn test_process_command_commit_unexpected_offset() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -295,7 +295,7 @@ mod test {
 
     #[test]
     fn test_process_command_commit_unexpected_length() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -345,7 +345,7 @@ mod test {
 
     #[test]
     fn test_process_command_commit_end_offset_overflow() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -372,7 +372,7 @@ mod test {
 
     #[test]
     fn test_process_command_commit_unexpected_hash() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(
@@ -404,7 +404,7 @@ mod test {
     }
 
     fn test_helper_process_command_commit_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let mut client_pin = ClientPin::<TestEnv>::new_test(

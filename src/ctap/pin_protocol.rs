@@ -234,7 +234,7 @@ mod test {
 
     #[test]
     fn test_pin_protocol_public_key() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut pin_protocol = PinProtocol::new(env.rng());
         let public_key = pin_protocol.get_public_key();
         pin_protocol.regenerate(env.rng());
@@ -244,7 +244,7 @@ mod test {
 
     #[test]
     fn test_pin_protocol_pin_uv_auth_token() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut pin_protocol = PinProtocol::new(env.rng());
         let token = *pin_protocol.get_pin_uv_auth_token();
         pin_protocol.reset_pin_uv_auth_token(env.rng());
@@ -254,7 +254,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v1_encrypt_decrypt() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let shared_secret = SharedSecretV1::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
@@ -290,7 +290,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_encrypt_decrypt() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let shared_secret = SharedSecretV2::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
@@ -327,7 +327,7 @@ mod test {
 
     #[test]
     fn test_decapsulate_symmetric() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let pin_protocol1 = PinProtocol::new(env.rng());
         let pin_protocol2 = PinProtocol::new(env.rng());
         for &protocol in &[PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {

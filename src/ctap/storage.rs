@@ -652,7 +652,7 @@ mod test {
 
     #[test]
     fn test_store() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
         let credential_source = create_credential_source(&mut env, "example.com", vec![]);
         assert!(store_credential(&mut env, credential_source).is_ok());
@@ -661,7 +661,7 @@ mod test {
 
     #[test]
     fn test_delete_credential() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
 
         let mut credential_ids = vec![];
@@ -682,7 +682,7 @@ mod test {
 
     #[test]
     fn test_update_credential() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let user = PublicKeyCredentialUserEntity {
             // User ID is ignored.
             user_id: vec![0x00],
@@ -715,7 +715,7 @@ mod test {
 
     #[test]
     fn test_credential_order() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let credential_source = create_credential_source(&mut env, "example.com", vec![]);
         let current_latest_creation = credential_source.creation_order;
         assert!(store_credential(&mut env, credential_source).is_ok());
@@ -729,7 +729,7 @@ mod test {
 
     #[test]
     fn test_fill_store() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
 
         let max_supported_resident_keys = env.customization().max_supported_resident_keys();
@@ -756,7 +756,7 @@ mod test {
 
     #[test]
     fn test_overwrite() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         init(&mut env).unwrap();
 
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
@@ -801,7 +801,7 @@ mod test {
 
     #[test]
     fn test_get_credential() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let credential_source0 = create_credential_source(&mut env, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut env, "example.com", vec![0x01]);
         let credential_source2 =
@@ -818,7 +818,7 @@ mod test {
 
     #[test]
     fn test_find() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         assert_eq!(count_credentials(&mut env).unwrap(), 0);
         let credential_source0 = create_credential_source(&mut env, "example.com", vec![0x00]);
         let credential_source1 = create_credential_source(&mut env, "example.com", vec![0x01]);
@@ -849,7 +849,7 @@ mod test {
 
     #[test]
     fn test_cred_random_secret() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         init(&mut env).unwrap();
 
         // CredRandom secrets stay the same within the same CTAP reset cycle.
@@ -871,7 +871,7 @@ mod test {
 
     #[test]
     fn test_pin_hash_and_length() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         // Pin hash is initially not set.
         assert!(pin_hash(&mut env).unwrap().is_none());
@@ -899,7 +899,7 @@ mod test {
 
     #[test]
     fn test_pin_retries() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         // The pin retries is initially at the maximum.
         assert_eq!(
@@ -927,7 +927,7 @@ mod test {
 
     #[test]
     fn test_persistent_keys() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         init(&mut env).unwrap();
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
@@ -955,7 +955,7 @@ mod test {
 
     #[test]
     fn test_min_pin_length() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         // The minimum PIN length is initially at the default.
         assert_eq!(
@@ -971,7 +971,7 @@ mod test {
 
     #[test]
     fn test_min_pin_length_rp_ids() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         // The minimum PIN length RP IDs are initially at the default.
         assert_eq!(
@@ -992,7 +992,7 @@ mod test {
 
     #[test]
     fn test_max_large_blob_array_size() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         assert!(
             env.customization().max_large_blob_array_size()
@@ -1003,7 +1003,7 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         let large_blob_array = vec![0x01, 0x02, 0x03];
         assert!(commit_large_blob_array(&mut env, &large_blob_array).is_ok());
@@ -1023,7 +1023,7 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array_overwrite() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         let large_blob_array = vec![0x11; 5];
         assert!(commit_large_blob_array(&mut env, &large_blob_array).is_ok());
@@ -1042,7 +1042,7 @@ mod test {
 
     #[test]
     fn test_commit_get_large_blob_array_no_commit() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         let empty_blob_array = vec![
             0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
@@ -1058,7 +1058,7 @@ mod test {
 
     #[test]
     fn test_global_signature_counter() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         let mut counter_value = 1;
         assert_eq!(global_signature_counter(&mut env).unwrap(), counter_value);
@@ -1071,7 +1071,7 @@ mod test {
 
     #[test]
     fn test_force_pin_change() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         assert!(!has_force_pin_change(&mut env).unwrap());
         assert_eq!(force_pin_change(&mut env), Ok(()));
@@ -1082,7 +1082,7 @@ mod test {
 
     #[test]
     fn test_enterprise_attestation() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         let dummy_attestation = Attestation {
             private_key: [0x41; ATTESTATION_PRIVATE_KEY_LENGTH],
@@ -1101,7 +1101,7 @@ mod test {
 
     #[test]
     fn test_always_uv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
 
         if env.customization().enforce_always_uv() {
             assert!(has_always_uv(&mut env).unwrap());
@@ -1120,7 +1120,7 @@ mod test {
 
     #[test]
     fn test_serialize_deserialize_credential() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,

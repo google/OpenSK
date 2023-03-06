@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -475,7 +475,7 @@ mod test {
 
     #[test]
     fn test_check_metadata() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let upgrade_locations = env.upgrade_storage().unwrap();
 
@@ -536,7 +536,7 @@ mod test {
 
     #[test]
     fn test_verify_signature() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = crypto::ecdsa::SecKey::gensk(env.rng());
         let message = [0x44; 64];
         let signed_hash = Sha256::hash(&message);

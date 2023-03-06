@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -277,7 +277,7 @@ mod test {
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
     fn test_encrypt_decrypt_credential(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -303,7 +303,7 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_bad_version() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
@@ -323,7 +323,7 @@ mod test {
     }
 
     fn test_encrypt_decrypt_bad_hmac(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -351,7 +351,7 @@ mod test {
     }
 
     fn test_decrypt_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, signature_algorithm);
 
         let rp_id_hash = [0x55; 32];
@@ -400,7 +400,7 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_credential_legacy() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
 
@@ -418,7 +418,7 @@ mod test {
 
     #[test]
     fn test_encrypt_credential_size() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
@@ -431,7 +431,7 @@ mod test {
     fn test_encrypt_credential_max_cbor_size() {
         // The cbor encoding length is variadic and depends on size of fields. Try to put maximum length
         // for each encoded field and ensure that it doesn't go over the padding size.
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         // Currently all private key types have same length when transformed to bytes.
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let rp_id_hash = [0x55; 32];
@@ -451,7 +451,7 @@ mod test {
 
     #[test]
     fn test_cred_protect_persisted() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];
@@ -476,7 +476,7 @@ mod test {
 
     #[test]
     fn test_cred_blob_persisted() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
 
         let rp_id_hash = [0x55; 32];

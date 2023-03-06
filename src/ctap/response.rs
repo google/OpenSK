@@ -506,7 +506,7 @@ mod test {
 
     #[test]
     fn test_used_client_pin_into_cbor() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
@@ -550,7 +550,7 @@ mod test {
 
     #[test]
     fn test_used_credential_management_optionals_into_cbor() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let rp = PublicKeyCredentialRpEntity {
             rp_id: String::from("example.com"),

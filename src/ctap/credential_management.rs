@@ -1,4 +1,4 @@
-// Copyright 2020-2021 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -383,7 +383,7 @@ mod test {
     }
 
     fn test_helper_process_get_creds_metadata(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -467,7 +467,7 @@ mod test {
 
     #[test]
     fn test_process_enumerate_rps_with_uv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -562,7 +562,7 @@ mod test {
 
     #[test]
     fn test_process_enumerate_rps_completeness() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -645,7 +645,7 @@ mod test {
 
     #[test]
     fn test_process_enumerate_credentials_with_uv() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -748,7 +748,7 @@ mod test {
 
     #[test]
     fn test_process_delete_credential() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -820,7 +820,7 @@ mod test {
 
     #[test]
     fn test_process_update_user_information() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
@@ -891,7 +891,7 @@ mod test {
 
     #[test]
     fn test_process_credential_management_invalid_pin_uv_auth_param() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::new(&mut env);
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();

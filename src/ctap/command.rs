@@ -740,7 +740,7 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);

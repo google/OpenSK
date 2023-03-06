@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,7 +123,7 @@ mod test {
 
     #[test]
     fn test_key_store() {
-        let mut env = crate::env::test::TestEnv::new();
+        let mut env = crate::env::test::TestEnv::default();
         let key_store = env.key_store();
 
         // Master keys are well-defined and stable.

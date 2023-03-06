@@ -1,4 +1,4 @@
-// Copyright 2020-2021 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -597,7 +597,7 @@ mod test {
     /// Fails on PINs bigger than 64 bytes.
     fn encrypt_pin(shared_secret: &dyn SharedSecret, pin: Vec<u8>) -> Vec<u8> {
         assert!(pin.len() <= 64);
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut padded_pin = [0u8; 64];
         padded_pin[..pin.len()].copy_from_slice(&pin[..]);
         shared_secret.encrypt(env.rng(), &padded_pin).unwrap()
@@ -612,7 +612,7 @@ mod test {
     fn create_client_pin_and_shared_secret(
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> (ClientPin<TestEnv>, Box<dyn SharedSecret>) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = key_agreement_key.genpk();
         let key_agreement = CoseKey::from(pk);
@@ -637,7 +637,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
         sub_command: ClientPinSubCommand,
     ) -> (ClientPin<TestEnv>, AuthenticatorClientPinParameters) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 
         let pin = b"1234";
@@ -679,7 +679,7 @@ mod test {
 
     #[test]
     fn test_mix_pin_protocols() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let client_pin = ClientPin::<TestEnv>::new(&mut env);
         let pin_protocol_v1 = client_pin.get_pin_protocol(PinUvAuthProtocol::V1);
         let pin_protocol_v2 = client_pin.get_pin_protocol(PinUvAuthProtocol::V2);
@@ -720,7 +720,7 @@ mod test {
     }
 
     fn test_helper_verify_pin_hash_enc(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         let pin_protocol = client_pin.get_pin_protocol(pin_uv_auth_protocol);
         let shared_secret = pin_protocol
@@ -812,7 +812,7 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetPinRetries,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let expected_response = Some(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_uv_auth_token: None,
@@ -852,7 +852,7 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetKeyAgreement,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let expected_response = Some(AuthenticatorClientPinResponse {
             key_agreement: params.key_agreement.clone(),
             pin_uv_auth_token: None,
@@ -881,7 +881,7 @@ mod test {
             PinUvAuthProtocol::V1,
             ClientPinSubCommand::GetKeyAgreement,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         env.customization_mut().set_allows_pin_protocol_v1(false);
         assert_eq!(
             client_pin.process_command(&mut env, params),
@@ -892,7 +892,7 @@ mod test {
     fn test_helper_process_set_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let (mut client_pin, params) =
             create_client_pin_and_parameters(pin_uv_auth_protocol, ClientPinSubCommand::SetPin);
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         assert_eq!(
             client_pin.process_command(&mut env, params),
             Ok(ResponseData::AuthenticatorClientPin(None))
@@ -919,7 +919,7 @@ mod test {
                 params.pin_uv_auth_protocol,
             )
             .unwrap();
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
         let mut auth_param_data = params.new_pin_enc.clone().unwrap();
@@ -969,7 +969,7 @@ mod test {
                 params.pin_uv_auth_protocol,
             )
             .unwrap();
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
         let response = client_pin
@@ -1029,7 +1029,7 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetPinToken,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
         assert_eq!(storage::force_pin_change(&mut env), Ok(()));
@@ -1063,7 +1063,7 @@ mod test {
                 params.pin_uv_auth_protocol,
             )
             .unwrap();
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
         let response = client_pin
@@ -1139,7 +1139,7 @@ mod test {
             pin_uv_auth_protocol,
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
         assert_eq!(storage::force_pin_change(&mut env), Ok(()));
@@ -1164,7 +1164,7 @@ mod test {
     }
 
     fn test_helper_decrypt_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let pin_protocol = PinProtocol::new(env.rng());
         let shared_secret = pin_protocol
             .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
@@ -1208,7 +1208,7 @@ mod test {
     }
 
     fn test_helper_check_and_store_new_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let pin_protocol = PinProtocol::new(env.rng());
         let shared_secret = pin_protocol
             .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
@@ -1265,7 +1265,7 @@ mod test {
         cred_random: &[u8; 32],
         salt: Vec<u8>,
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 
         let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
@@ -1283,7 +1283,7 @@ mod test {
     }
 
     fn test_helper_process_hmac_secret_bad_salt_auth(pin_uv_auth_protocol: PinUvAuthProtocol) {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
         let cred_random = [0xC9; 32];
 
@@ -1399,7 +1399,7 @@ mod test {
 
     #[test]
     fn test_has_permission() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         client_pin.pin_uv_auth_token_state.set_permissions(0x7F);
         for permission in PinPermission::into_enum_iter() {
@@ -1423,7 +1423,7 @@ mod test {
 
     #[test]
     fn test_has_no_rp_id_permission() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         assert_eq!(client_pin.has_no_rp_id_permission(), Ok(()));
         client_pin
@@ -1437,7 +1437,7 @@ mod test {
 
     #[test]
     fn test_has_no_or_rp_id_permission() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         assert_eq!(client_pin.has_no_or_rp_id_permission("example.com"), Ok(()));
         client_pin
@@ -1452,7 +1452,7 @@ mod test {
 
     #[test]
     fn test_has_no_or_rp_id_hash_permission() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         let rp_id_hash = Sha256::hash(b"example.com");
         assert_eq!(
@@ -1474,7 +1474,7 @@ mod test {
 
     #[test]
     fn test_ensure_rp_id_permission() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         assert_eq!(client_pin.ensure_rp_id_permission("example.com"), Ok(()));
         assert_eq!(
@@ -1492,7 +1492,7 @@ mod test {
 
     #[test]
     fn test_verify_pin_uv_auth_token() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         let message = [0xAA];
         client_pin
@@ -1566,7 +1566,7 @@ mod test {
 
     #[test]
     fn test_verify_pin_uv_auth_token_not_in_use() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let client_pin = ClientPin::<TestEnv>::new(&mut env);
         let message = [0xAA];
 
@@ -1588,7 +1588,7 @@ mod test {
 
     #[test]
     fn test_reset() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         let public_key_v1 = client_pin.pin_protocol_v1.get_public_key();
         let public_key_v2 = client_pin.pin_protocol_v2.get_public_key();
@@ -1624,7 +1624,7 @@ mod test {
             PinUvAuthProtocol::V2,
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
         params.permissions = Some(0xFF);
 
@@ -1668,7 +1668,7 @@ mod test {
             PinUvAuthProtocol::V2,
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions,
         );
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         set_standard_pin(&mut env);
         params.permissions = Some(0xFF);
 

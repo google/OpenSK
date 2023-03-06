@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,8 +128,8 @@ impl HidConnection for TestEnv {
     }
 }
 
-impl TestEnv {
-    pub fn new() -> Self {
+impl Default for TestEnv {
+    fn default() -> Self {
         let rng = TestRng256 {
             rng: StdRng::seed_from_u64(0),
         };
@@ -150,7 +150,9 @@ impl TestEnv {
             clock,
         }
     }
+}
 
+impl TestEnv {
     pub fn disable_upgrade_storage(&mut self) {
         self.upgrade_storage = None;
     }

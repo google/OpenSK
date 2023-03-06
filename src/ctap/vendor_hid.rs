@@ -25,13 +25,15 @@ pub struct VendorHid<E: Env> {
     hid: CtapHid<E>,
 }
 
-impl<E: Env> VendorHid<E> {
+impl<E: Env> Default for VendorHid<E> {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
-    pub fn new() -> Self {
+    fn default() -> Self {
         let hid = CtapHid::<E>::new(CtapHid::<E>::CAPABILITY_CBOR | CtapHid::<E>::CAPABILITY_NMSG);
         VendorHid { hid }
     }
+}
 
+impl<E: Env> VendorHid<E> {
     /// Processes an incoming USB HID packet, and returns an iterator for all outgoing packets.
     pub fn process_hid_packet(
         &mut self,
@@ -94,7 +96,7 @@ mod test {
 
     #[test]
     fn test_process_hid_packet() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 
@@ -109,7 +111,7 @@ mod test {
 
     #[test]
     fn test_process_hid_packet_empty() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 
@@ -123,7 +125,7 @@ mod test {
 
     #[test]
     fn test_blocked_commands() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let (mut vendor_hid, cid) = new_initialized();
 

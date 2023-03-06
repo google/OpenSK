@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,7 +114,7 @@ fn main() {
         panic!("Cannot setup USB driver");
     }
 
-    let env = TockEnv::new();
+    let env = TockEnv::default();
     let mut ctap = ctap2::Ctap::new(env);
 
     let mut led_counter = 0;

@@ -85,7 +85,7 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
         cmd: CtapHidCommand::Init,
         payload: nonce,
     };
-    let mut assembler_reply = MessageAssembler::new();
+    let mut assembler_reply = MessageAssembler::default();
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
         for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
@@ -124,7 +124,7 @@ fn is_type(data: &[u8], input_type: InputType) -> bool {
 fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
     let message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message) {
-        let mut assembler_reply = MessageAssembler::new();
+        let mut assembler_reply = MessageAssembler::default();
         for pkt_request in hid_packet_iterator {
             for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
                 // Only checks for assembling crashes, not for semantics.
@@ -140,7 +140,7 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
 pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::default();
     env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
@@ -187,7 +187,7 @@ fn setup_state(
 pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::default();
     env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
@@ -221,7 +221,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
 pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult<()> {
     let unstructured = &mut Unstructured::new(data);
 
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::default();
     env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
     setup_customization(unstructured, env.customization_mut())?;
 
@@ -258,13 +258,13 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult
 pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::default();
     env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     let message = raw_to_message(data);
     if let Some(hid_packet_iterator) = HidPacketIterator::new(message.clone()) {
-        let mut assembler = MessageAssembler::new();
+        let mut assembler = MessageAssembler::default();
         let packets: Vec<HidPacket> = hid_packet_iterator.collect();
         if let Some((last_packet, first_packets)) = packets.split_last() {
             for packet in first_packets {

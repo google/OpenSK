@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1733,7 +1733,7 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_default_protocol() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
@@ -1763,7 +1763,7 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_with_protocol() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
@@ -1938,7 +1938,7 @@ mod test {
 
     #[test]
     fn test_from_into_cose_key_ecdh() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdh::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk.clone());
@@ -1948,7 +1948,7 @@ mod test {
 
     #[test]
     fn test_into_cose_key_ecdsa() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let sk = crypto::ecdsa::SecKey::gensk(env.rng());
         let pk = sk.genpk();
         let cose_key = CoseKey::from(pk);
@@ -2108,7 +2108,7 @@ mod test {
 
     #[test]
     fn test_credential_source_cbor_round_trip() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2193,7 +2193,7 @@ mod test {
 
     #[test]
     fn test_credential_source_cbor_read_legacy() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let key_bytes = private_key.to_bytes();
         let credential = PublicKeyCredentialSource {
@@ -2225,7 +2225,7 @@ mod test {
 
     #[test]
     fn test_credential_source_cbor_legacy_error() {
-        let mut env = TestEnv::new();
+        let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let key_bytes = private_key.to_bytes();
         let credential = PublicKeyCredentialSource {

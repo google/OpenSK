@@ -1,4 +1,4 @@
-// Copyright 2019-2022 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,9 +65,9 @@ impl<E: Env> Ctap<E> {
     // clock is part of the environment.
     pub fn new(mut env: E) -> Self {
         let state = CtapState::<E>::new(&mut env);
-        let hid = MainHid::new();
+        let hid = MainHid::default();
         #[cfg(feature = "vendor_hid")]
-        let vendor_hid = VendorHid::new();
+        let vendor_hid = VendorHid::default();
         Ctap {
             env,
             state,

@@ -140,7 +140,7 @@ mod test {
 
     #[test]
     fn enough_credentials() {
-        let env = TestEnv::new();
+        let env = TestEnv::default();
         assert!(
             env.customization().max_supported_resident_keys()
                 <= CREDENTIALS.end - CREDENTIALS.start

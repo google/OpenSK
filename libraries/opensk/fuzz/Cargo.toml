@@ -1,5 +1,5 @@
 [package]
-name = "ctap2-fuzz"
+name = "opensk-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false

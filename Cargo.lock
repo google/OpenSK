@@ -109,6 +109,7 @@ dependencies = [
  "lang_items",
  "libtock_core",
  "libtock_drivers",
+ "opensk",
  "openssl",
  "persistent_store",
  "rand 0.8.5",
@@ -272,6 +273,23 @@ name = "once_cell"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f7254b99e31cad77da24b08ebf628882739a608578bb1bcdfc1f9c21260d7c0"
+
+[[package]]
+name = "opensk"
+version = "1.0.0"
+dependencies = [
+ "arrayref",
+ "byteorder",
+ "crypto",
+ "ed25519-compact",
+ "openssl",
+ "persistent_store",
+ "rand 0.8.5",
+ "rng256",
+ "sk-cbor",
+ "subtle",
+ "uuid",
+]
 
 [[package]]
 name = "openssl"

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::clock::Clock;
 use libtock_drivers::timer::{get_clock_frequency, get_ticks};
+use opensk::api::clock::Clock;
 
 /// 56-bits timestamp (valid for 70k+ years)
 #[derive(Clone, Copy, Debug, Default, PartialOrd, Ord, PartialEq, Eq)]

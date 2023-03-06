@@ -97,34 +97,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctap2"
-version = "1.0.0"
-dependencies = [
- "arbitrary",
- "arrayref",
- "byteorder",
- "crypto",
- "lang_items",
- "libtock_core",
- "libtock_drivers",
- "openssl",
- "persistent_store",
- "rand 0.8.5",
- "rng256",
- "sk-cbor",
- "subtle",
- "uuid",
-]
-
-[[package]]
-name = "ctap2-fuzz"
-version = "0.0.0"
-dependencies = [
- "fuzz_helper",
- "libfuzzer-sys",
-]
-
-[[package]]
 name = "derive_arbitrary"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -133,15 +105,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "embedded-time"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a4b4d10ac48d08bfe3db7688c402baadb244721f30a77ce360bd24c3dffe58"
-dependencies = [
- "num",
 ]
 
 [[package]]
@@ -172,10 +135,7 @@ dependencies = [
  "arbitrary",
  "arrayref",
  "crypto",
- "ctap2",
- "embedded-time",
- "lang_items",
- "libtock_drivers",
+ "opensk",
  "rng256",
  "sk-cbor",
 ]
@@ -213,15 +173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lang_items"
-version = "0.1.0"
-dependencies = [
- "libtock_core",
- "libtock_drivers",
- "linked_list_allocator",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -236,35 +187,6 @@ dependencies = [
  "arbitrary",
  "cc",
 ]
-
-[[package]]
-name = "libtock_codegen"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "libtock_core"
-version = "0.1.0"
-dependencies = [
- "libtock_codegen",
-]
-
-[[package]]
-name = "libtock_drivers"
-version = "0.1.0"
-dependencies = [
- "libtock_core",
-]
-
-[[package]]
-name = "linked_list_allocator"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e322f259d225fbae43a1b053b2dc6a5968a6bdf8b205f5de684dab485b95030e"
 
 [[package]]
 name = "log"
@@ -282,73 +204,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
-name = "num"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b7a8e9be5e039e2ff869df49155f1c06bd01ade2117ec783e56ab0932b67a8f"
-dependencies = [
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
-name = "num-complex"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-integer"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
-dependencies = [
- "autocfg 1.1.0",
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d03e6c028c5dc5cac6e2dec0efda81fc887605bb3d884578bb6d6bf7514e252"
-dependencies = [
- "autocfg 1.1.0",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-rational"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12ac428b1cb17fce6f731001d307d351ec70a6d202fc2e60f7d4c5e42d8f4f07"
-dependencies = [
- "autocfg 1.1.0",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
-dependencies = [
- "autocfg 1.1.0",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f7254b99e31cad77da24b08ebf628882739a608578bb1bcdfc1f9c21260d7c0"
+
+[[package]]
+name = "opensk"
+version = "1.0.0"
+dependencies = [
+ "arbitrary",
+ "arrayref",
+ "byteorder",
+ "crypto",
+ "openssl",
+ "persistent_store",
+ "rand 0.8.5",
+ "rng256",
+ "sk-cbor",
+ "subtle",
+ "uuid",
+]
+
+[[package]]
+name = "opensk-fuzz"
+version = "0.0.0"
+dependencies = [
+ "fuzz_helper",
+ "libfuzzer-sys",
+]
 
 [[package]]
 name = "openssl"

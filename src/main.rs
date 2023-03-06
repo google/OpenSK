@@ -26,15 +26,9 @@ use core::cell::Cell;
 use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
-use ctap2::api::clock::Clock;
-use ctap2::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
-use ctap2::ctap::hid::HidPacketIterator;
-use ctap2::ctap::KEEPALIVE_DELAY_MS;
 #[cfg(feature = "with_ctap1")]
 use ctap2::env::tock::blink_leds;
 use ctap2::env::tock::{switch_off_leds, wink_leds, TockEnv};
-use ctap2::env::Env;
-use ctap2::Transport;
 #[cfg(feature = "with_ctap1")]
 use libtock_drivers::buttons::{self, ButtonState};
 #[cfg(feature = "debug_ctap")]
@@ -42,6 +36,12 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
+use opensk::api::clock::Clock;
+use opensk::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
+use opensk::ctap::hid::HidPacketIterator;
+use opensk::ctap::KEEPALIVE_DELAY_MS;
+use opensk::env::Env;
+use opensk::Transport;
 
 libtock_core::stack_size! {0x4000}
 
@@ -115,7 +115,7 @@ fn main() {
     }
 
     let env = TockEnv::default();
-    let mut ctap = ctap2::Ctap::new(env);
+    let mut ctap = opensk::Ctap::new(env);
 
     let mut led_counter = 0;
     let mut led_blink_timer = <<TockEnv as Env>::Clock as Clock>::Timer::default();

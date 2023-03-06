@@ -31,11 +31,13 @@ jobs:
       - name: Unit testing of crypto library (release mode)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
           args: --manifest-path libraries/crypto/Cargo.toml --release --features std
 
       - name: Unit testing of crypto library (debug mode)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
           args: --manifest-path libraries/crypto/Cargo.toml --features std

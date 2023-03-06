@@ -15,7 +15,7 @@
 use alloc::vec::Vec;
 use persistent_store::StorageResult;
 
-pub(crate) mod helper;
+pub mod helper;
 
 /// Accessors to storage locations used for upgrading from a CTAP command.
 pub trait UpgradeStorage {

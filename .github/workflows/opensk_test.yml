@@ -29,24 +29,28 @@ jobs:
       - name: Unit testing of CTAP2 (release mode)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
-          args: --release --features std
+          args: --manifest-path libraries/opensk/Cargo.toml --release --features std
 
       - name: Unit testing of CTAP2 (debug mode)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
-          args: --features std
+          args: --manifest-path libraries/opensk/Cargo.toml --features std
 
-      - name: Unit testing of CTAP2 (release mode + CTAP1)
+      - name: Unit testing of CTAP2 (release mode + all features)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
-          args: --release --features std,with_ctap1
+          args: --manifest-path libraries/opensk/Cargo.toml --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
 
-      - name: Unit testing of CTAP2 (debug mode + CTAP1)
+      - name: Unit testing of CTAP2 (debug mode + all features)
         uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
-          args: --features std,with_ctap1
+          args: --manifest-path libraries/opensk/Cargo.toml --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
 

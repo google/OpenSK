@@ -13,15 +13,6 @@
 // limitations under the License.
 
 pub use self::storage::{TockStorage, TockUpgradeStorage};
-use crate::api::attestation_store::AttestationStore;
-use crate::api::connection::{
-    HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
-};
-use crate::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
-use crate::api::firmware_protection::FirmwareProtection;
-use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
-use crate::api::{attestation_store, key_store};
-use crate::env::Env;
 use clock::TockClock;
 use core::cell::Cell;
 use core::convert::TryFrom;
@@ -32,6 +23,15 @@ use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::{crp, led, rng, timer, usb_ctap_hid};
+use opensk::api::attestation_store::AttestationStore;
+use opensk::api::connection::{
+    HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
+};
+use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
+use opensk::api::firmware_protection::FirmwareProtection;
+use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
+use opensk::api::{attestation_store, key_store};
+use opensk::env::Env;
 use persistent_store::{StorageResult, Store};
 use rng256::Rng256;
 

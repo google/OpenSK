@@ -23,7 +23,6 @@ mod crypto_wrapper;
 mod ctap1;
 pub mod data_formats;
 pub mod hid;
-pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
@@ -1442,7 +1441,7 @@ mod test {
     use super::client_pin::PIN_TOKEN_LENGTH;
     use super::command::{
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
-        AuthenticatorCredentialManagementParameters,
+        AuthenticatorCredentialManagementParameters, ATTESTATION_PRIVATE_KEY_LENGTH,
     };
     use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
@@ -3240,7 +3239,7 @@ mod test {
         );
 
         // Inject dummy values
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_key = [0x41u8; ATTESTATION_PRIVATE_KEY_LENGTH];
         let dummy_cert = [0xddu8; 20];
         let response = ctap_state.process_vendor_configure(
             &mut env,
@@ -3271,7 +3270,7 @@ mod test {
         );
 
         // Try to inject other dummy values and check that initial values are retained.
-        let other_dummy_key = [0x44u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let other_dummy_key = [0x44u8; ATTESTATION_PRIVATE_KEY_LENGTH];
         let response = ctap_state.process_vendor_configure(
             &mut env,
             AuthenticatorVendorConfigureParameters {

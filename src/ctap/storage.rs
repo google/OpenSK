@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 mod key;
 
 use crate::api::attestation_store::{self, AttestationStore};
-use crate::api::customization::Customization;
+use crate::api::customization::{Customization, AAGUID_LENGTH};
 use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::{key_material, INITIAL_SIGNATURE_COUNTER};
+use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;
@@ -56,7 +56,7 @@ pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     }
 
     if env.store().find_handle(key::AAGUID)?.is_none() {
-        set_aaguid(env, key_material::AAGUID)?;
+        set_aaguid(env)?;
     }
     Ok(())
 }
@@ -435,24 +435,22 @@ pub fn commit_large_blob_array(
 }
 
 /// Returns the AAGUID.
-pub fn aaguid(env: &mut impl Env) -> Result<[u8; key_material::AAGUID_LENGTH], Ctap2StatusCode> {
+pub fn aaguid(env: &mut impl Env) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
     let aaguid = env
         .store()
         .find(key::AAGUID)?
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    if aaguid.len() != key_material::AAGUID_LENGTH {
+    if aaguid.len() != AAGUID_LENGTH {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
-    Ok(*array_ref![aaguid, 0, key_material::AAGUID_LENGTH])
+    Ok(*array_ref![aaguid, 0, AAGUID_LENGTH])
 }
 
 /// Sets the AAGUID.
 ///
 /// If it is already defined, it is overwritten.
-pub fn set_aaguid(
-    env: &mut impl Env,
-    aaguid: &[u8; key_material::AAGUID_LENGTH],
-) -> Result<(), Ctap2StatusCode> {
+pub fn set_aaguid(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    let aaguid = env.customization().aaguid();
     Ok(env.store().insert(key::AAGUID, aaguid)?)
 }
 
@@ -646,6 +644,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 mod test {
     use super::*;
     use crate::api::attestation_store::{self, Attestation, AttestationStore};
+    use crate::ctap::command::ATTESTATION_PRIVATE_KEY_LENGTH;
     use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
@@ -963,13 +962,13 @@ mod test {
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_attestation = Attestation {
-            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            private_key: [0x41; ATTESTATION_PRIVATE_KEY_LENGTH],
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()
             .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
             .unwrap();
-        assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
+        assert_eq!(&aaguid(&mut env).unwrap(), env.customization().aaguid());
 
         // The persistent keys stay initialized and preserve their value after a reset.
         reset(&mut env).unwrap();
@@ -977,7 +976,7 @@ mod test {
             env.attestation_store().get(&attestation_store::Id::Batch),
             Ok(Some(dummy_attestation))
         );
-        assert_eq!(&aaguid(&mut env).unwrap(), key_material::AAGUID);
+        assert_eq!(&aaguid(&mut env).unwrap(), env.customization().aaguid());
     }
 
     #[test]
@@ -1112,7 +1111,7 @@ mod test {
         let mut env = TestEnv::new();
 
         let dummy_attestation = Attestation {
-            private_key: [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+            private_key: [0x41; ATTESTATION_PRIVATE_KEY_LENGTH],
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()

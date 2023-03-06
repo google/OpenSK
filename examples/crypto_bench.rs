@@ -21,11 +21,11 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
+use ctap2::env::tock::TockRng256;
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
-use rng256::TockRng256;
 
 libtock_core::stack_size! {0x800}
 

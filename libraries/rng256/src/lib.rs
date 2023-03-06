@@ -1,4 +1,4 @@
-// Copyright 2019-2022 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use arrayref::array_ref;
-use libtock_drivers::rng;
 #[cfg(feature = "std")]
 use rand::Rng;
 
@@ -39,17 +38,6 @@ fn bytes_to_u32(bytes: [u8; 32]) -> [u32; 8] {
         *r = u32::from_ne_bytes(*array_ref![bytes, 4 * i, 4]);
     }
     result
-}
-
-// RNG backed by the TockOS rng driver.
-pub struct TockRng256 {}
-
-impl Rng256 for TockRng256 {
-    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
-        let mut buf: [u8; 32] = [Default::default(); 32];
-        rng::fill_buffer(&mut buf);
-        buf
-    }
 }
 
 // For tests on the desktop, we use the cryptographically secure thread rng as entropy source.

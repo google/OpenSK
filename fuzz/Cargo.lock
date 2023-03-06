@@ -605,7 +605,6 @@ name = "rng256"
 version = "0.1.0"
 dependencies = [
  "arrayref",
- "libtock_drivers",
  "rand 0.6.5",
 ]
 

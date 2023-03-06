@@ -31,12 +31,23 @@ use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::{crp, led, timer, usb_ctap_hid};
+use libtock_drivers::{crp, led, rng, timer, usb_ctap_hid};
 use persistent_store::{StorageResult, Store};
-use rng256::TockRng256;
+use rng256::Rng256;
 
 mod clock;
 mod storage;
+
+/// RNG backed by the TockOS rng driver.
+pub struct TockRng256 {}
+
+impl Rng256 for TockRng256 {
+    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
+        let mut buf: [u8; 32] = [Default::default(); 32];
+        rng::fill_buffer(&mut buf);
+        buf
+    }
+}
 
 pub struct TockHidConnection {
     endpoint: UsbEndpoint,

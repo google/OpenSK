@@ -23,7 +23,6 @@ mod crypto_wrapper;
 mod ctap1;
 pub mod data_formats;
 pub mod hid;
-pub mod key_material;
 mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
@@ -873,7 +872,7 @@ impl<E: Env> CtapState<E> {
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
-        auth_data.extend(&storage::aaguid(env)?);
+        auth_data.extend(env.customization().aaguid());
         // The length is fixed to 0x20 or 0x80 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -1261,7 +1260,7 @@ impl<E: Env> CtapState<E> {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ]),
-                aaguid: storage::aaguid(env)?,
+                aaguid: *env.customization().aaguid(),
                 options: Some(options),
                 max_msg_size: Some(env.customization().max_msg_size() as u64),
                 // The order implies preference. We favor the new V2.
@@ -1442,7 +1441,7 @@ mod test {
     use super::client_pin::PIN_TOKEN_LENGTH;
     use super::command::{
         AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
-        AuthenticatorCredentialManagementParameters,
+        AuthenticatorCredentialManagementParameters, ATTESTATION_PRIVATE_KEY_LENGTH,
     };
     use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
@@ -1528,7 +1527,7 @@ mod test {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ],
-            0x03 => storage::aaguid(&mut env).unwrap(),
+            0x03 => env.customization().aaguid(),
             0x04 => cbor_map_options! {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
@@ -1644,7 +1643,7 @@ mod test {
         match make_credential_response {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let auth_data = make_credential_response.auth_data;
-                let offset = 37 + storage::aaguid(env).unwrap().len();
+                let offset = 37 + env.customization().aaguid().len();
                 assert_eq!(auth_data[offset], 0x00);
                 assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
                 auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()
@@ -1665,7 +1664,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0x41,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &[],
         );
@@ -1684,7 +1683,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0x41,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
@@ -1854,7 +1853,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
@@ -1880,7 +1879,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1903,7 +1902,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0x41,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &[],
         );
@@ -1929,7 +1928,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1954,7 +1953,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1986,7 +1985,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -2064,7 +2063,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0x45,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             0x20,
             &[],
         );
@@ -2101,7 +2100,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0x41,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
@@ -2800,7 +2799,7 @@ mod test {
         check_make_response(
             &make_credential_response,
             0xC1,
-            &storage::aaguid(&mut env).unwrap(),
+            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
@@ -3240,7 +3239,7 @@ mod test {
         );
 
         // Inject dummy values
-        let dummy_key = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_key = [0x41u8; ATTESTATION_PRIVATE_KEY_LENGTH];
         let dummy_cert = [0xddu8; 20];
         let response = ctap_state.process_vendor_configure(
             &mut env,
@@ -3271,7 +3270,7 @@ mod test {
         );
 
         // Try to inject other dummy values and check that initial values are retained.
-        let other_dummy_key = [0x44u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let other_dummy_key = [0x44u8; ATTESTATION_PRIVATE_KEY_LENGTH];
         let response = ctap_state.process_vendor_configure(
             &mut env,
             AuthenticatorVendorConfigureParameters {

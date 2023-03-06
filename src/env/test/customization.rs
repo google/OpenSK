@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::customization::{Customization, CustomizationImpl};
+use crate::api::customization::{Customization, CustomizationImpl, AAGUID_LENGTH};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
 
 pub struct TestCustomization {
+    aaguid: &'static [u8; AAGUID_LENGTH],
     allows_pin_protocol_v1: bool,
     default_cred_protect: Option<CredentialProtectionPolicy>,
     default_min_pin_length: u8,
@@ -54,6 +55,10 @@ impl TestCustomization {
 }
 
 impl Customization for TestCustomization {
+    fn aaguid(&self) -> &'static [u8; AAGUID_LENGTH] {
+        self.aaguid
+    }
+
     fn allows_pin_protocol_v1(&self) -> bool {
         self.allows_pin_protocol_v1
     }
@@ -126,6 +131,7 @@ impl Customization for TestCustomization {
 impl From<CustomizationImpl> for TestCustomization {
     fn from(c: CustomizationImpl) -> Self {
         let CustomizationImpl {
+            aaguid,
             allows_pin_protocol_v1,
             default_cred_protect,
             default_min_pin_length,
@@ -155,6 +161,7 @@ impl From<CustomizationImpl> for TestCustomization {
             .collect::<Vec<_>>();
 
         Self {
+            aaguid,
             allows_pin_protocol_v1,
             default_cred_protect,
             default_min_pin_length,

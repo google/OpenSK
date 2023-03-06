@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::cbor_read;
 use super::data_formats::{
     extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
     extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
@@ -21,7 +22,6 @@ use super::data_formats::{
     PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
 };
 use super::status_code::Ctap2StatusCode;
-use super::{cbor_read, key_material};
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -33,6 +33,9 @@ use sk_cbor::destructure_cbor_map;
 
 // This constant is a consequence of the structure of messages.
 const MIN_LARGE_BLOB_LEN: usize = 17;
+
+/// Expected length of the passed in attestation key bytes during configuration.
+pub const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq, Eq)]
@@ -498,7 +501,7 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthenticatorAttestationMaterial {
     pub certificate: Vec<u8>,
-    pub private_key: [u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH],
+    pub private_key: [u8; ATTESTATION_PRIVATE_KEY_LENGTH],
 }
 
 impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
@@ -513,10 +516,10 @@ impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
         }
         let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
         let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
-        if private_key.len() != key_material::ATTESTATION_PRIVATE_KEY_LENGTH {
+        if private_key.len() != ATTESTATION_PRIVATE_KEY_LENGTH {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let private_key = array_ref!(private_key, 0, key_material::ATTESTATION_PRIVATE_KEY_LENGTH);
+        let private_key = array_ref!(private_key, 0, ATTESTATION_PRIVATE_KEY_LENGTH);
         Ok(AuthenticatorAttestationMaterial {
             certificate,
             private_key: *private_key,
@@ -1025,14 +1028,14 @@ mod test {
         );
 
         let dummy_cert = [0xddu8; 20];
-        let dummy_pkey = [0x41u8; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+        let dummy_pkey = [0x41u8; ATTESTATION_PRIVATE_KEY_LENGTH];
 
         // Attestation key is too short.
         let cbor_value = cbor_map! {
             0x01 => false,
             0x02 => cbor_map! {
                 0x01 => dummy_cert,
-                0x02 => dummy_pkey[..key_material::ATTESTATION_PRIVATE_KEY_LENGTH - 1]
+                0x02 => dummy_pkey[..ATTESTATION_PRIVATE_KEY_LENGTH - 1]
             }
         };
         assert_eq!(

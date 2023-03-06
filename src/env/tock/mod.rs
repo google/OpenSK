@@ -17,7 +17,7 @@ use crate::api::attestation_store::AttestationStore;
 use crate::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
-use crate::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
+use crate::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
@@ -37,6 +37,14 @@ use rng256::Rng256;
 
 mod clock;
 mod storage;
+
+pub const AAGUID: &[u8; AAGUID_LENGTH] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
+
+const TOCK_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
+    aaguid: AAGUID,
+    ..DEFAULT_CUSTOMIZATION
+};
 
 /// RNG backed by the TockOS rng driver.
 pub struct TockRng256 {}
@@ -279,7 +287,7 @@ impl Env for TockEnv {
     }
 
     fn customization(&self) -> &Self::Customization {
-        &DEFAULT_CUSTOMIZATION
+        &TOCK_CUSTOMIZATION
     }
 
     fn main_hid_connection(&mut self) -> &mut Self::HidConnection {

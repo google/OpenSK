@@ -14,11 +14,11 @@
 
 use crate::ctap::command::{
     AuthenticatorAttestationMaterial, AuthenticatorConfigParameters,
-    AuthenticatorVendorConfigureParameters, Command,
+    AuthenticatorVendorConfigureParameters, Command, ATTESTATION_PRIVATE_KEY_LENGTH,
 };
 use crate::ctap::data_formats::ConfigSubCommand;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::{key_material, Channel, CtapState};
+use crate::ctap::{Channel, CtapState};
 use crate::env::Env;
 
 // In tests where we define a dummy user-presence check that immediately returns, the channel
@@ -31,7 +31,7 @@ pub fn enable_enterprise_attestation<E: Env>(
     state: &mut CtapState<E>,
     env: &mut E,
 ) -> Result<AuthenticatorAttestationMaterial, Ctap2StatusCode> {
-    let dummy_key = [0x41; key_material::ATTESTATION_PRIVATE_KEY_LENGTH];
+    let dummy_key = [0x41; ATTESTATION_PRIVATE_KEY_LENGTH];
     let dummy_cert = vec![0xdd; 20];
     let attestation_material = AuthenticatorAttestationMaterial {
         certificate: dummy_cert,

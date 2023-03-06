@@ -15,7 +15,7 @@
 mod key;
 
 use crate::api::attestation_store::{self, AttestationStore};
-use crate::api::customization::{Customization, AAGUID_LENGTH};
+use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
@@ -53,10 +53,6 @@ pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
         cred_random.extend_from_slice(&cred_random_without_uv);
         cred_random.extend_from_slice(&cred_random_with_uv);
         env.store().insert(key::CRED_RANDOM_SECRET, &cred_random)?;
-    }
-
-    if env.store().find_handle(key::AAGUID)?.is_none() {
-        set_aaguid(env)?;
     }
     Ok(())
 }
@@ -432,26 +428,6 @@ pub fn commit_large_blob_array(
         &key::LARGE_BLOB_SHARDS,
         large_blob_array,
     )?)
-}
-
-/// Returns the AAGUID.
-pub fn aaguid(env: &mut impl Env) -> Result<[u8; AAGUID_LENGTH], Ctap2StatusCode> {
-    let aaguid = env
-        .store()
-        .find(key::AAGUID)?
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    if aaguid.len() != AAGUID_LENGTH {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    Ok(*array_ref![aaguid, 0, AAGUID_LENGTH])
-}
-
-/// Sets the AAGUID.
-///
-/// If it is already defined, it is overwritten.
-pub fn set_aaguid(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    let aaguid = env.customization().aaguid();
-    Ok(env.store().insert(key::AAGUID, aaguid)?)
 }
 
 /// Resets the store as for a CTAP reset.
@@ -968,7 +944,6 @@ mod test {
         env.attestation_store()
             .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
             .unwrap();
-        assert_eq!(&aaguid(&mut env).unwrap(), env.customization().aaguid());
 
         // The persistent keys stay initialized and preserve their value after a reset.
         reset(&mut env).unwrap();
@@ -976,7 +951,6 @@ mod test {
             env.attestation_store().get(&attestation_store::Id::Batch),
             Ok(Some(dummy_attestation))
         );
-        assert_eq!(&aaguid(&mut env).unwrap(), env.customization().aaguid());
     }
 
     #[test]

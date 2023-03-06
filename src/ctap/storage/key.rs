@@ -64,8 +64,8 @@ make_partition! {
     /// Reserved for the attestation store implementation of the environment.
     _RESERVED_ATTESTATION_STORE = 1..3;
 
-    /// The aaguid.
-    AAGUID = 3;
+    /// Used for the AAGUID before, but deprecated.
+    _AAGUID = 3;
 
     // This is the persistent key limit:
     // - When adding a (persistent) key above this message, make sure its value is smaller than

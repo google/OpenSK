@@ -45,52 +45,52 @@ jobs:
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/opensk/Cargo.toml --all -- --check
+          args: --manifest-path libraries/opensk/Cargo.toml -- --check
 
       - name: Cargo format libraries/opensk/fuzz
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/opensk/fuzz/Cargo.toml --all -- --check
+          args: --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
 
       - name: Cargo format libraries/cbor
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/cbor/Cargo.toml --all -- --check
+          args: --manifest-path libraries/cbor/Cargo.toml -- --check
 
       - name: Cargo format libraries/cbor/fuzz
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/cbor/fuzz/Cargo.toml --all -- --check
+          args: --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
 
       - name: Cargo format libraries/crypto
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/crypto/Cargo.toml --all -- --check
+          args: --manifest-path libraries/crypto/Cargo.toml -- --check
 
       - name: Cargo format libraries/persistent_store
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path libraries/persistent_store/Cargo.toml --all -- --check
+          args: --manifest-path libraries/persistent_store/Cargo.toml -- --check
 
       - name: Cargo format tools/heapviz
         uses: actions-rs/cargo@v1
         with:
           toolchain: nightly
           command: fmt
-          args: --manifest-path tools/heapviz/Cargo.toml --all -- --check
+          args: --manifest-path tools/heapviz/Cargo.toml -- --check
 
       - name: Cargo format bootloader
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --manifest-path bootloader/Cargo.toml --all -- --check
+          args: --manifest-path bootloader/Cargo.toml -- --check

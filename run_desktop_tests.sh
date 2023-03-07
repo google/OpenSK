@@ -18,25 +18,25 @@ set -ex
 echo "Checking formatting..."
 cargo fmt -- --check
 cd libraries/opensk
-cargo +nightly fmt --all -- --check
+cargo +nightly fmt -- --check
 cd ../..
 cd libraries/cbor
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/crypto
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/rng256
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/persistent_store
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd tools/heapviz
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd bootloader
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ..
 
 echo "Running Clippy lints..."

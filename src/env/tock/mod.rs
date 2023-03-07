@@ -348,3 +348,14 @@ pub fn switch_off_leds() {
         led::get(l).flex_unwrap().off().flex_unwrap();
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use opensk::api::customization::is_valid;
+
+    #[test]
+    fn test_invariants() {
+        assert!(is_valid(&TOCK_CUSTOMIZATION));
+    }
+}

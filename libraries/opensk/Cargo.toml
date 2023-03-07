@@ -9,6 +9,7 @@ authors = [
 ]
 license = "Apache-2.0"
 edition = "2018"
+rust-version = "1.47"
 
 [dependencies]
 sk-cbor = { path = "../cbor" }

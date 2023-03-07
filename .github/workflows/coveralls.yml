@@ -38,8 +38,6 @@ jobs:
         env:
           RUSTFLAGS: "-Cinstrument-coverage"
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"
-      - name: =========== TEST PRINT ==========
-        run: cat lcov.info
       - name: Run grcov
         run: RUSTUP_TOOLCHAIN=nightly grcov . --binary-path ./libraries/opensk/target/debug/ --source-dir libraries/opensk/ --output-type lcov --ignore-not-existing ---output-path ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
       - uses: coverallsapp/github-action@1.1.3

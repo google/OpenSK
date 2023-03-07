@@ -3,7 +3,6 @@ name: OpenSK code coverage report
 on:
   push:
     paths:
-      - 'src/**/*.rs'
       - 'libraries/**/*.rs'
   pull_request:
     types: [opened, synchronize, reopened]
@@ -27,22 +26,24 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
       - name: Install llvm tools
-        run: rustup component add llvm-tools-preview
+        run: rustup +nightly component add llvm-tools-preview
 
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo +stable install grcov; fi
       - uses: actions-rs/cargo@v1
         with:
+          toolchain: nightly
           command: test
-          args: --features "with_ctap1,vendor_hid,ed25519,with_nfc,std" --no-fail-fast
+          args: --manifest-path libraries/opensk/Cargo.toml --features "std,with_ctap1,vendor_hid,ed25519" --no-fail-fast
         env:
-          RUSTFLAGS: "-Zinstrument-coverage"
+          RUSTFLAGS: "-Cinstrument-coverage"
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"
       - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ --source-dir . --output-type lcov --ignore-not-existing ---output-path ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
+        run: RUSTUP_TOOLCHAIN=nightly grcov . --binary-path ./libraries/opensk/target/debug/ --source-dir libraries/opensk/ --output-type lcov --ignore-not-existing ---output-path ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
       - uses: coverallsapp/github-action@1.1.3
         name: upload report to coveralls
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: "./lcov.info"
+          base-path: "libraries/opensk"
 

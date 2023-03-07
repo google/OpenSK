@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange, Partition};
-use crate::api::upgrade_storage::UpgradeStorage;
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use arrayref::array_ref;
@@ -22,6 +20,8 @@ use core::cell::Cell;
 use crypto::sha256::Sha256;
 use crypto::{ecdsa, Hash256};
 use libtock_core::{callback, syscalls};
+use opensk::api::upgrade_storage::helper::{find_slice, is_aligned, ModRange, Partition};
+use opensk::api::upgrade_storage::UpgradeStorage;
 use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const DRIVER_NUMBER: usize = 0x50003;
@@ -470,8 +470,8 @@ fn verify_signature(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::env::test::TestEnv;
-    use crate::env::Env;
+    use opensk::env::test::TestEnv;
+    use opensk::env::Env;
 
     #[test]
     fn test_check_metadata() {

@@ -1,6 +1,4 @@
-fuzz/artifacts
-fuzz/corpus
-fuzz/coverage
+libraries/**/Cargo.lock
 target/
 
 # Local installation of elf2tab.

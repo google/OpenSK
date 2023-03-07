@@ -16,24 +16,27 @@
 set -ex
 
 echo "Checking formatting..."
-cargo fmt --all -- --check
+cargo fmt -- --check
+cd libraries/opensk
+cargo +nightly fmt -- --check
+cd ../..
 cd libraries/cbor
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/crypto
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/rng256
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd libraries/persistent_store
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd tools/heapviz
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ../..
 cd bootloader
-cargo fmt --all -- --check
+cargo fmt -- --check
 cd ..
 
 echo "Running Clippy lints..."
@@ -70,12 +73,15 @@ cargo check --release --target=thumbv7em-none-eabi
 cd ..
 
 echo "Checking that fuzz targets build properly..."
-cargo fuzz build
+# Uses nightly since our old toolchain causes problems.
+cd libraries/opensk
+cargo +nightly fuzz build
+cd ../..
 cd libraries/cbor
-cargo fuzz build
+cargo +nightly fuzz build
 cd ../..
 cd libraries/persistent_store
-cargo fuzz build
+cargo +nightly fuzz build
 cd ../..
 
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
@@ -101,6 +107,7 @@ echo "Checking deployment of other boards..."
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."
+  cargo test --release --features std
   cd libraries/cbor
   cargo test --release
   cd ../..
@@ -113,6 +120,7 @@ then
   cargo test --release --features std
 
   echo "Running unit tests on the desktop (debug mode)..."
+  cargo test --features std
   cd libraries/cbor
   cargo test
   cd ../..
@@ -124,9 +132,14 @@ then
   cd ../..
   cargo test --features std
 
-  echo "Running unit tests on the desktop (release mode + CTAP1 + Vendor HID)..."
-  cargo test --release --features std,with_ctap1,vendor_hid
+  cd libraries/opensk
+  echo "Running CTAP library unit tests (release mode)..."
+  cargo +nightly test --release --features std
+  echo "Running CTAP library unit tests (release mode + all features)..."
+  cargo +nightly test --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
 
-  echo "Running unit tests on the desktop (debug mode + CTAP1)..."
-  cargo test --features std,with_ctap1,vendor_hid
+  echo "Running CTAP library unit tests (debug mode)..."
+  cargo +nightly test --features std
+  echo "Running CTAP library unit tests (debug mode + all features)..."
+  cargo +nightly test --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
 fi

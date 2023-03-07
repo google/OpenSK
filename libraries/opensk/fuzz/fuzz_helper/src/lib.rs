@@ -12,26 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This explicit "extern crate" is needed to make the linker aware of the
-// `libtock_alloc_init` symbol.
-extern crate lang_items;
-
 use arbitrary::{Arbitrary, Unstructured};
 use arrayref::array_ref;
 use core::convert::TryFrom;
-use ctap2::api::customization::is_valid;
-use ctap2::ctap::command::{
+use opensk::api::customization::is_valid;
+use opensk::ctap::command::{
     AuthenticatorClientPinParameters, AuthenticatorGetAssertionParameters,
     AuthenticatorMakeCredentialParameters, Command,
 };
-use ctap2::ctap::data_formats::EnterpriseAttestationMode;
-use ctap2::ctap::hid::{
+use opensk::ctap::data_formats::EnterpriseAttestationMode;
+use opensk::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
-use ctap2::ctap::{cbor_read, Channel, CtapState};
-use ctap2::env::test::customization::TestCustomization;
-use ctap2::env::test::TestEnv;
-use ctap2::{test_helpers, Ctap, Transport};
+use opensk::ctap::{cbor_read, Channel, CtapState};
+use opensk::env::test::customization::TestCustomization;
+use opensk::env::test::TestEnv;
+use opensk::{test_helpers, Ctap, Transport};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 

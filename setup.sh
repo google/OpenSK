@@ -38,6 +38,8 @@ source tools/gen_key_materials.sh
 generate_crypto_materials N
 
 rustup show
+# Nightly is used for testing and fuzzing libraries
+rustup install nightly 
 pip3 install --upgrade -r requirements.txt
 
 # Install dependency to create applications.

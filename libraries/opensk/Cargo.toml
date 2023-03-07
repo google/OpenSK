@@ -1,5 +1,5 @@
 [package]
-name = "ctap2"
+name = "opensk"
 version = "1.0.0"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
@@ -9,16 +9,13 @@ authors = [
 ]
 license = "Apache-2.0"
 edition = "2018"
+rust-version = "1.47"
 
 [dependencies]
-libtock_core = { path = "third_party/libtock-rs/core" }
-libtock_drivers = { path = "third_party/libtock-drivers" }
-lang_items = { path = "third_party/lang-items" }
-opensk = { path = "libraries/opensk" }
-sk-cbor = { path = "libraries/cbor" }
-crypto = { path = "libraries/crypto" }
-rng256 = { path = "libraries/rng256" }
-persistent_store = { path = "libraries/persistent_store" }
+sk-cbor = { path = "../cbor" }
+crypto = { path = "../crypto" }
+rng256 = { path = "../rng256" }
+persistent_store = { path = "../persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
@@ -27,21 +24,18 @@ rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 
 [features]
-debug_allocations = ["lang_items/debug_allocations"]
-debug_ctap = ["libtock_drivers/debug_ctap", "opensk/debug_ctap"]
-panic_console = ["lang_items/panic_console"]
-std = ["crypto/std", "lang_items/std", "persistent_store/std", "rng256/std", "rand", "opensk/std"]
-verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
-with_ctap1 = ["crypto/with_ctap1", "opensk/with_ctap1"]
-with_nfc = ["libtock_drivers/with_nfc"]
-vendor_hid = ["opensk/vendor_hid"]
-ed25519 = ["ed25519-compact", "opensk/ed25519"]
+debug_ctap = []
+std = ["crypto/std", "persistent_store/std", "rng256/std", "rand"]
+with_ctap1 = ["crypto/with_ctap1"]
+vendor_hid = []
+fuzz = ["arbitrary", "std"]
+ed25519 = ["ed25519-compact"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"
 
 [build-dependencies]
-sk-cbor = { path = "libraries/cbor" }
+sk-cbor = { path = "../cbor" }
 uuid = { version = "0.8", features = ["v4"] }
 openssl = "0.10.36"
 

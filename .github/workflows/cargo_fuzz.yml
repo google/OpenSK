@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
+          toolchain: nightly
           submodules: "true"
       - name: Install Rust toolchain
         run: rustup show
@@ -25,8 +26,8 @@ jobs:
         run: ./fuzzing_setup.sh
 
       - name: Cargo fuzz build
-        run: cargo fuzz build
+        run: cd libraries/opensk && cargo +nightly fuzz build
       - name: Cargo fuzz build (libraries/cbor)
-        run: cd libraries/cbor && cargo fuzz build && cd ../..
+        run: cd libraries/cbor && cargo +nightly fuzz build
       - name: Cargo fuzz build (libraries/persistent_store)
-        run: cd libraries/persistent_store && cargo fuzz build && cd ../..
+        run: cd libraries/persistent_store && cargo +nightly fuzz build

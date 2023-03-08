@@ -150,15 +150,12 @@ impl ModRange {
     }
 }
 
+#[derive(Default)]
 pub struct Partition {
     ranges: Vec<ModRange>,
 }
 
 impl Partition {
-    pub fn new() -> Partition {
-        Partition { ranges: Vec::new() }
-    }
-
     /// Total length of all ranges.
     pub fn length(&self) -> usize {
         self.ranges.iter().map(|r| r.length()).sum()
@@ -339,7 +336,7 @@ mod tests {
 
     #[test]
     fn partition_append() {
-        let mut partition = Partition::new();
+        let mut partition = Partition::default();
         partition.append(ModRange::new(0x4000, 0x1000));
         partition.append(ModRange::new(0x20000, 0x20000));
         partition.append(ModRange::new(0x40000, 0x20000));
@@ -349,7 +346,7 @@ mod tests {
 
     #[test]
     fn partition_find_address() {
-        let mut partition = Partition::new();
+        let mut partition = Partition::default();
         partition.append(ModRange::new(0x4000, 0x1000));
         partition.append(ModRange::new(0x20000, 0x20000));
         partition.append(ModRange::new(0x40000, 0x20000));
@@ -364,7 +361,7 @@ mod tests {
 
     #[test]
     fn partition_ranges_from() {
-        let mut partition = Partition::new();
+        let mut partition = Partition::default();
         partition.append(ModRange::new(0x4000, 0x1000));
         partition.append(ModRange::new(0x20000, 0x20000));
         partition.append(ModRange::new(0x40000, 0x20000));

@@ -1513,6 +1513,8 @@ mod test {
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
 
+        // Fails when removing `to_vec` for `SUPPORTED_CRED_PARAMS` as linted.
+        #[allow(clippy::unnecessary_to_owned)]
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
                     #[cfg(feature = "with_ctap1")]

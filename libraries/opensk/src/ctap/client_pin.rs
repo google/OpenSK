@@ -1224,7 +1224,7 @@ mod test {
             ),
             // Reject PIN "12'\0'4" (a zero byte at index 2).
             (
-                b"12\x004".to_vec(),
+                [b'1', b'2', 0, b'4'].to_vec(),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION),
             ),
             // PINs must be at most 63 bytes long, to allow for a trailing 0u8 padding.

@@ -261,7 +261,7 @@ impl TockUpgradeStorage {
     pub fn new() -> StorageResult<TockUpgradeStorage> {
         let mut locations = TockUpgradeStorage {
             page_size: get_info(command_nr::get_info_nr::PAGE_SIZE, 0)?,
-            partition: Partition::new(),
+            partition: Partition::default(),
             metadata: ModRange::new_empty(),
             running_metadata: ModRange::new_empty(),
             identifier: Self::PARTITION_ADDRESS_A as u32,

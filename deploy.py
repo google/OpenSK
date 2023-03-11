@@ -795,6 +795,7 @@ class OpenSKInstaller:
       info("No application selected.")
     else:
       self.build_example()
+      self.args.configure = False
 
     # Erase persistent storage
     if self.args.clear_storage:
@@ -888,6 +889,18 @@ class OpenSKInstaller:
       self.configure()
     return 0
 
+  def print_configure_help(self):
+    vendor_hid = " --vendor-hid" if "vendor_hid" in self.args.features else ""
+    info("Your device is not yet configured, and lacks some functionality. "
+         "You can check its configuration status with:\n\n"
+         f"./tools/configure.py{vendor_hid}\n\n"
+         "If you run into issues, this command might help:\n\n"
+         f"./tools/configure.py{vendor_hid} \\\n"
+         "    --certificate=crypto_data/opensk_cert.pem \\\n"
+         "    --private-key=crypto_data/opensk.key\n\n"
+         "Please read the Certificate considerations in docs/customization.md"
+         " to understand the privacy trade-off.")
+
   def configure(self):
     info("Configuring device.")
     # Trying to check or configure the device. Booting might take some time.
@@ -899,6 +912,7 @@ class OpenSKInstaller:
         break
 
     if not devices:
+      self.print_configure_help()
       fatal("No device to configure found.")
     status = self.configure_device()
     if not status:
@@ -907,13 +921,7 @@ class OpenSKInstaller:
     if status["cert"] and status["pkey"]:
       info("You're all set!")
     else:
-      info("Your device is not yet configured, and lacks some functionality. "
-           "If you run into issues, this command might help:\n\n"
-           "./tools/configure.py \\\n"
-           "    --certificate=crypto_data/opensk_cert.pem \\\n"
-           "    --private-key=crypto_data/opensk.key\n\n"
-           "Please read the Certificate considerations in docs/customization.md"
-           " to understand the privacy trade-off.")
+      self.print_configure_help()
     return 0
 
 

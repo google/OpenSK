@@ -96,13 +96,22 @@ impl<E: Env> Ctap<E> {
     ) -> HidPacketIterator {
         match transport {
             Transport::MainHid => {
+                #[cfg(not(feature = "vendor_hid"))]
+                let is_disabled = false;
+                #[cfg(feature = "vendor_hid")]
+                let is_disabled = self.vendor_hid.has_channel_lock(&mut self.env);
                 self.hid
-                    .process_hid_packet(&mut self.env, packet, &mut self.state)
+                    .process_hid_packet(&mut self.env, packet, is_disabled, &mut self.state)
             }
             #[cfg(feature = "vendor_hid")]
             Transport::VendorHid => {
-                self.vendor_hid
-                    .process_hid_packet(&mut self.env, packet, &mut self.state)
+                let is_disabled = self.hid.has_channel_lock(&mut self.env);
+                self.vendor_hid.process_hid_packet(
+                    &mut self.env,
+                    packet,
+                    is_disabled,
+                    &mut self.state,
+                )
             }
         }
     }

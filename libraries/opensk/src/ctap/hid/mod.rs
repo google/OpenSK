@@ -22,6 +22,7 @@ pub use self::receive::MessageAssembler;
 use self::receive::MessageAssembler;
 pub use self::send::HidPacketIterator;
 use super::status_code::Ctap2StatusCode;
+use crate::api::clock::Clock;
 #[cfg(test)]
 use crate::env::test::TestEnv;
 use crate::env::Env;
@@ -55,7 +56,6 @@ pub type ChannelID = [u8; 4];
 pub enum CtapHidCommand {
     Ping = 0x01,
     Msg = 0x03,
-    // Lock is optional and may be used in the future.
     Lock = 0x04,
     Init = 0x06,
     Wink = 0x08,
@@ -92,7 +92,7 @@ pub enum CtapHidError {
     /// The command in the request is invalid.
     InvalidCmd = 0x01,
     /// A parameter in the request is invalid.
-    _InvalidPar = 0x02,
+    InvalidPar = 0x02,
     /// The length of a message is too big.
     InvalidLen = 0x03,
     /// Expected a continuation packet with a specific sequence number, got another sequence number.
@@ -187,6 +187,8 @@ pub struct CtapHid<E: Env> {
     // TODO(kaczmarczyck) We might want to limit or timeout open channels.
     allocated_cids: usize,
     capabilities: u8,
+    locked_cid: Option<ChannelID>,
+    lock_timer: <E::Clock as Clock>::Timer,
 }
 
 impl<E: Env> CtapHid<E> {
@@ -203,7 +205,21 @@ impl<E: Env> CtapHid<E> {
             assembler: MessageAssembler::default(),
             allocated_cids: 0,
             capabilities,
+            locked_cid: None,
+            lock_timer: <E::Clock as Clock>::Timer::default(),
         }
+    }
+
+    fn locked_channel(&mut self, env: &mut E) -> Option<ChannelID> {
+        if env.clock().is_elapsed(&self.lock_timer) {
+            self.locked_cid = None;
+        }
+        self.locked_cid
+    }
+
+    /// Returns whether this transport claims a lock.
+    pub fn has_channel_lock(&mut self, env: &mut E) -> bool {
+        self.locked_channel(env).is_some()
     }
 
     /// Parses a packet, and preprocesses some messages and errors.
@@ -225,11 +241,23 @@ impl<E: Env> CtapHid<E> {
     /// Ignoring the others is incorrect behavior. You have to at least replace them with an error
     /// message:
     /// `Self::error_message(message.cid, CtapHidError::InvalidCmd)`
-    pub fn parse_packet(&mut self, env: &mut E, packet: &HidPacket) -> Option<Message> {
-        match self.assembler.parse_packet(env, packet) {
+    pub fn parse_packet(
+        &mut self,
+        env: &mut E,
+        packet: &HidPacket,
+        is_transport_disabled: bool,
+    ) -> Option<Message> {
+        let locked_cid = if is_transport_disabled {
+            // We use the reserved channel ID to block all valid channels. If we also think we hold
+            // a lock, we wait and rely on timeouts to resolve the deadlock.
+            Some(CHANNEL_RESERVED)
+        } else {
+            self.locked_channel(env)
+        };
+        match self.assembler.parse_packet(env, packet, locked_cid) {
             Ok(Some(message)) => {
                 debug_ctap!(env, "Received message: {:02x?}", message);
-                self.preprocess_message(message)
+                self.preprocess_message(env, message)
             }
             Ok(None) => {
                 // Waiting for more packets to assemble the message, nothing to send for now.
@@ -255,7 +283,7 @@ impl<E: Env> CtapHid<E> {
     /// - ERROR
     /// - Unknown and unexpected commands like KEEPALIVE
     /// - LOCK is not implemented and currently treated like an unknown command
-    fn preprocess_message(&mut self, message: Message) -> Option<Message> {
+    fn preprocess_message(&mut self, env: &mut E, message: Message) -> Option<Message> {
         let cid = message.cid;
         if !self.has_valid_channel(&message) {
             return Some(Self::error_message(cid, CtapHidError::InvalidChannel));
@@ -306,6 +334,26 @@ impl<E: Env> CtapHid<E> {
                 None
             }
             CtapHidCommand::Wink => Some(message),
+            CtapHidCommand::Lock => {
+                if message.payload.len() != 1 {
+                    return Some(Self::error_message(cid, CtapHidError::InvalidLen));
+                }
+                if message.payload[0] > 10 {
+                    return Some(Self::error_message(cid, CtapHidError::InvalidPar));
+                }
+                if message.payload[0] == 0 {
+                    self.locked_cid = None;
+                } else {
+                    self.locked_cid = Some(cid);
+                    let lock_duration_ms = 1000 * message.payload[0] as usize;
+                    self.lock_timer = env.clock().make_timer(lock_duration_ms);
+                }
+                Some(Message {
+                    cid,
+                    cmd: CtapHidCommand::Lock,
+                    payload: Vec::new(),
+                })
+            }
             _ => {
                 // Unknown or unsupported command.
                 Some(Self::error_message(cid, CtapHidError::InvalidCmd))
@@ -399,6 +447,8 @@ impl<E: Env> CtapHid<E> {
                 assembler: MessageAssembler::default(),
                 allocated_cids: 1,
                 capabilities: 0x0D,
+                locked_cid: None,
+                lock_timer: <E::Clock as Clock>::Timer::default(),
             },
             [0x00, 0x00, 0x00, 0x01],
         )
@@ -422,7 +472,7 @@ mod test {
             let mut messages = Vec::new();
             let mut assembler = MessageAssembler::<TestEnv>::default();
             for packet in HidPacketIterator::new(message.clone()).unwrap() {
-                match assembler.parse_packet(&mut env, &packet) {
+                match assembler.parse_packet(&mut env, &packet, None) {
                     Ok(Some(msg)) => messages.push(msg),
                     Ok(None) => (),
                     Err(_) => panic!("Couldn't assemble packet: {:02x?}", &packet as &[u8]),
@@ -440,18 +490,19 @@ mod test {
         let mut packet = [0x00; 64];
         packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
         // Continuation packets are silently ignored.
-        assert_eq!(ctap_hid.parse_packet(&mut env, &packet), None);
+        assert_eq!(ctap_hid.parse_packet(&mut env, &packet, false), None);
     }
 
     #[test]
     fn test_command_init() {
+        let mut env = TestEnv::default();
         let mut ctap_hid = CtapHid::<TestEnv>::new(0x0D);
         let init_message = Message {
             cid: CHANNEL_BROADCAST,
             cmd: CtapHidCommand::Init,
             payload: vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0],
         };
-        let reply = ctap_hid.preprocess_message(init_message);
+        let reply = ctap_hid.preprocess_message(&mut env, init_message);
         assert_eq!(
             reply,
             Some(Message {
@@ -483,9 +534,9 @@ mod test {
         packet2[4..15].copy_from_slice(&[
             0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
         ]);
-        assert_eq!(ctap_hid.parse_packet(&mut env, &packet1), None);
+        assert_eq!(ctap_hid.parse_packet(&mut env, &packet1, false), None);
         assert_eq!(
-            ctap_hid.parse_packet(&mut env, &packet2),
+            ctap_hid.parse_packet(&mut env, &packet2, false),
             Some(Message {
                 cid,
                 cmd: CtapHidCommand::Init,
@@ -509,7 +560,7 @@ mod test {
         ping_packet[..4].copy_from_slice(&cid);
         ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
         assert_eq!(
-            ctap_hid.parse_packet(&mut env, &ping_packet),
+            ctap_hid.parse_packet(&mut env, &ping_packet, false),
             Some(Message {
                 cid,
                 cmd: CtapHidCommand::Ping,
@@ -527,7 +578,7 @@ mod test {
         cancel_packet[..4].copy_from_slice(&cid);
         cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
 
-        let response = ctap_hid.parse_packet(&mut env, &cancel_packet);
+        let response = ctap_hid.parse_packet(&mut env, &cancel_packet, false);
         assert_eq!(response, None);
     }
 
@@ -618,5 +669,113 @@ mod test {
                 payload: vec![0x01],
             }
         );
+    }
+
+    #[test]
+    fn test_locked_transport() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&cid);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &ping_packet, true),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![0x06]
+            })
+        );
+    }
+
+    #[test]
+    fn test_command_lock_expires() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x1]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Lock,
+                payload: vec![]
+            })
+        );
+        assert!(ctap_hid.has_channel_lock(&mut env));
+        env.clock().advance(999);
+        assert!(ctap_hid.has_channel_lock(&mut env));
+        env.clock().advance(1);
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+    }
+
+    #[test]
+    fn test_command_lock_releases() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x1]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Lock,
+                payload: vec![]
+            })
+        );
+        assert!(ctap_hid.has_channel_lock(&mut env));
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x0]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Lock,
+                payload: vec![]
+            })
+        );
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+    }
+
+    #[test]
+    fn test_command_lock_invalid() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x0B]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![0x02]
+            })
+        );
+        assert!(!ctap_hid.has_channel_lock(&mut env));
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..9].copy_from_slice(&[0x84, 0x00, 0x02, 0x01, 0x01]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![0x03]
+            })
+        );
+        assert!(!ctap_hid.has_channel_lock(&mut env));
     }
 }

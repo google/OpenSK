@@ -56,9 +56,10 @@ impl<E: Env> MainHid<E> {
         &mut self,
         env: &mut E,
         packet: &HidPacket,
+        is_transport_disabled: bool,
         ctap_state: &mut CtapState<E>,
     ) -> HidPacketIterator {
-        if let Some(message) = self.hid.parse_packet(env, packet) {
+        if let Some(message) = self.hid.parse_packet(env, packet, is_transport_disabled) {
             let processed_message = self.process_message(env, message, ctap_state);
             debug_ctap!(env, "Sending message: {:02x?}", processed_message);
             CtapHid::<E>::split_message(processed_message)
@@ -119,6 +120,11 @@ impl<E: Env> MainHid<E> {
         }
     }
 
+    /// Returns whether this transport claims a lock.
+    pub fn has_channel_lock(&mut self, env: &mut E) -> bool {
+        self.hid.has_channel_lock(env)
+    }
+
     /// Returns whether a wink permission is currently granted.
     pub fn should_wink(&self, env: &mut E) -> bool {
         !env.clock().is_elapsed(&self.wink_permission)
@@ -175,7 +181,8 @@ mod test {
         ping_packet[..4].copy_from_slice(&cid);
         ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
 
-        let mut response = main_hid.process_hid_packet(&mut env, &ping_packet, &mut ctap_state);
+        let mut response =
+            main_hid.process_hid_packet(&mut env, &ping_packet, false, &mut ctap_state);
         assert_eq!(response.next(), Some(ping_packet));
         assert_eq!(response.next(), None);
     }
@@ -190,7 +197,8 @@ mod test {
         cancel_packet[..4].copy_from_slice(&cid);
         cancel_packet[4..7].copy_from_slice(&[0x91, 0x00, 0x00]);
 
-        let mut response = main_hid.process_hid_packet(&mut env, &cancel_packet, &mut ctap_state);
+        let mut response =
+            main_hid.process_hid_packet(&mut env, &cancel_packet, false, &mut ctap_state);
         assert_eq!(response.next(), None);
     }
 
@@ -205,11 +213,31 @@ mod test {
         wink_packet[..4].copy_from_slice(&cid);
         wink_packet[4..7].copy_from_slice(&[0x88, 0x00, 0x00]);
 
-        let mut response = main_hid.process_hid_packet(&mut env, &wink_packet, &mut ctap_state);
+        let mut response =
+            main_hid.process_hid_packet(&mut env, &wink_packet, false, &mut ctap_state);
         assert_eq!(response.next(), Some(wink_packet));
         assert_eq!(response.next(), None);
         assert!(main_hid.should_wink(&mut env));
         env.clock().advance(WINK_TIMEOUT_DURATION_MS);
         assert!(!main_hid.should_wink(&mut env));
+    }
+
+    #[test]
+    fn test_locked_channels() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        let (mut main_hid, cid) = new_initialized();
+
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&cid);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+
+        let mut response =
+            main_hid.process_hid_packet(&mut env, &ping_packet, true, &mut ctap_state);
+        let mut error_packet = [0x00; 64];
+        error_packet[..4].copy_from_slice(&cid);
+        error_packet[4..8].copy_from_slice(&[0xBF, 0x00, 0x01, 0x06]);
+        assert_eq!(response.next(), Some(error_packet));
+        assert_eq!(response.next(), None);
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use self::crypto::TockCrypto;
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use clock::TockClock;
 use core::cell::Cell;
@@ -36,6 +37,7 @@ use persistent_store::{StorageResult, Store};
 use rng256::Rng256;
 
 mod clock;
+mod crypto;
 mod storage;
 
 pub const AAGUID: &[u8; AAGUID_LENGTH] =
@@ -249,6 +251,7 @@ impl Env for TockEnv {
     type Write = Console;
     type Customization = CustomizationImpl;
     type HidConnection = TockHidConnection;
+    type Crypto = TockCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

@@ -268,9 +268,11 @@ pub fn decrypt_credential_id(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::api::crypto::ecdsa::SecretKey as EcdsaSecretKey;
     use crate::api::customization::Customization;
     use crate::ctap::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::SignatureAlgorithm;
+    use crate::env::test::crypto::TestEcdsaSecretKey;
     use crate::env::test::TestEnv;
     use crypto::hmac::hmac_256;
 
@@ -380,13 +382,13 @@ mod test {
     /// This is a copy of the function that genereated deprecated key handles.
     fn legacy_encrypt_to_credential_id(
         env: &mut impl Env,
-        private_key: crypto::ecdsa::SecKey,
+        private_key: TestEcdsaSecretKey,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let aes_enc_key =
             crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
         let mut plaintext = [0; 64];
-        private_key.to_bytes(array_mut_ref!(plaintext, 0, 32));
+        private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
         let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;

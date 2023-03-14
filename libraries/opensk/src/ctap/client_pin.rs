@@ -20,8 +20,12 @@ use super::pin_protocol::{verify_pin_uv_auth_token, PinProtocol, SharedSecret};
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
+#[cfg(test)]
+use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
 use crate::api::customization::Customization;
 use crate::ctap::storage;
+#[cfg(test)]
+use crate::env::EcdhSk;
 use crate::env::Env;
 use alloc::boxed::Box;
 use alloc::str;
@@ -105,8 +109,8 @@ pub enum PinPermission {
 }
 
 pub struct ClientPin<E: Env> {
-    pin_protocol_v1: PinProtocol,
-    pin_protocol_v2: PinProtocol,
+    pin_protocol_v1: PinProtocol<E>,
+    pin_protocol_v2: PinProtocol<E>,
     consecutive_pin_mismatches: u8,
     pin_uv_auth_token_state: PinUvAuthTokenState<E>,
 }
@@ -122,7 +126,7 @@ impl<E: Env> ClientPin<E> {
     }
 
     /// Gets a reference to the PIN protocol of the given version.
-    fn get_pin_protocol(&self, pin_uv_auth_protocol: PinUvAuthProtocol) -> &PinProtocol {
+    fn get_pin_protocol(&self, pin_uv_auth_protocol: PinUvAuthProtocol) -> &PinProtocol<E> {
         match pin_uv_auth_protocol {
             PinUvAuthProtocol::V1 => &self.pin_protocol_v1,
             PinUvAuthProtocol::V2 => &self.pin_protocol_v2,
@@ -133,7 +137,7 @@ impl<E: Env> ClientPin<E> {
     fn get_mut_pin_protocol(
         &mut self,
         pin_uv_auth_protocol: PinUvAuthProtocol,
-    ) -> &mut PinProtocol {
+    ) -> &mut PinProtocol<E> {
         match pin_uv_auth_protocol {
             PinUvAuthProtocol::V1 => &mut self.pin_protocol_v1,
             PinUvAuthProtocol::V2 => &mut self.pin_protocol_v2,
@@ -558,20 +562,21 @@ impl<E: Env> ClientPin<E> {
     #[cfg(test)]
     pub fn new_test(
         env: &mut E,
-        key_agreement_key: crypto::ecdh::SecKey,
+        key_agreement_key: EcdhSk<E>,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> Self {
+        let random_key = EcdhSk::<E>::random(env.rng());
         let (key_agreement_key_v1, key_agreement_key_v2) = match pin_uv_auth_protocol {
-            PinUvAuthProtocol::V1 => (key_agreement_key, crypto::ecdh::SecKey::gensk(env.rng())),
-            PinUvAuthProtocol::V2 => (crypto::ecdh::SecKey::gensk(env.rng()), key_agreement_key),
+            PinUvAuthProtocol::V1 => (key_agreement_key, random_key),
+            PinUvAuthProtocol::V2 => (random_key, key_agreement_key),
         };
         let mut pin_uv_auth_token_state = PinUvAuthTokenState::new();
         pin_uv_auth_token_state.set_permissions(0xFF);
         pin_uv_auth_token_state.begin_using_pin_uv_auth_token(env);
         Self {
-            pin_protocol_v1: PinProtocol::new_test(key_agreement_key_v1, pin_uv_auth_token),
-            pin_protocol_v2: PinProtocol::new_test(key_agreement_key_v2, pin_uv_auth_token),
+            pin_protocol_v1: PinProtocol::<E>::new_test(key_agreement_key_v1, pin_uv_auth_token),
+            pin_protocol_v2: PinProtocol::<E>::new_test(key_agreement_key_v2, pin_uv_auth_token),
             consecutive_pin_mismatches: 0,
             pin_uv_auth_token_state,
         }
@@ -582,6 +587,8 @@ impl<E: Env> ClientPin<E> {
 mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
+    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
     use alloc::vec;
 
@@ -613,9 +620,9 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> (ClientPin<TestEnv>, Box<dyn SharedSecret>) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
-        let pk = key_agreement_key.genpk();
-        let key_agreement = CoseKey::from(pk);
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let pk = key_agreement_key.public_key();
+        let key_agreement = CoseKey::from_ecdh_public_key(pk);
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -1165,7 +1172,7 @@ mod test {
 
     fn test_helper_decrypt_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
-        let pin_protocol = PinProtocol::new(env.rng());
+        let pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
         let shared_secret = pin_protocol
             .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
             .unwrap();
@@ -1209,7 +1216,7 @@ mod test {
 
     fn test_helper_check_and_store_new_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
-        let pin_protocol = PinProtocol::new(env.rng());
+        let pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
         let shared_secret = pin_protocol
             .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
             .unwrap();

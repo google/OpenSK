@@ -14,13 +14,15 @@
 
 use super::crypto_wrapper::PrivateKey;
 use super::status_code::Ctap2StatusCode;
+use crate::api::crypto::ecdh::PublicKey as EcdhPublicKey;
+use crate::api::crypto::ecdsa::PublicKey as EcdsaPublicKey;
+use crate::api::crypto::EC_FIELD_BYTE_SIZE;
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
 use arbitrary::Arbitrary;
 use arrayref::array_ref;
 use core::convert::TryFrom;
-use crypto::{ecdh, ecdsa};
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 use sk_cbor as cbor;
@@ -728,8 +730,8 @@ impl PublicKeyCredentialSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct CoseKey {
-    x_bytes: [u8; ecdh::NBYTES],
-    y_bytes: [u8; ecdh::NBYTES],
+    x_bytes: [u8; EC_FIELD_BYTE_SIZE],
+    y_bytes: [u8; EC_FIELD_BYTE_SIZE],
     algorithm: i64,
     key_type: i64,
     curve: i64,
@@ -748,6 +750,83 @@ impl CoseKey {
     const P_256_CURVE: i64 = 1;
     #[cfg(feature = "ed25519")]
     const ED25519_CURVE: i64 = 6;
+
+    // Ideally, this would be an impl From.
+    // CoseKey needs to be refactored to allow that.
+    pub fn from_ecdh_public_key(pk: impl EcdhPublicKey) -> Self {
+        let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: CoseKey::ECDH_ALGORITHM,
+            key_type: CoseKey::EC2_KEY_TYPE,
+            curve: CoseKey::P_256_CURVE,
+        }
+    }
+
+    // Same as `from_ecdh_public_key`
+    pub fn from_ecdsa_public_key(pk: impl EcdsaPublicKey) -> Self {
+        let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: ES256_ALGORITHM,
+            key_type: CoseKey::EC2_KEY_TYPE,
+            curve: CoseKey::P_256_CURVE,
+        }
+    }
+
+    // This function is a workaround for this coherence:
+    // https://rust-lang.github.io/rfcs/2451-re-rebalancing-coherence.html
+    // Ideally, we could implement `TryFrom` for any `EcdhPublicKey`.
+    pub fn try_into_ecdh_coordinates(
+        self,
+    ) -> Result<([u8; EC_FIELD_BYTE_SIZE], [u8; EC_FIELD_BYTE_SIZE]), Ctap2StatusCode> {
+        let CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm,
+            key_type,
+            curve,
+        } = self;
+
+        // Since algorithm can be used for different COSE key types, we check
+        // whether the current type is correct for ECDH. For an OpenSSH bugfix,
+        // the algorithm ES256_ALGORITHM is allowed here too.
+        // https://github.com/google/OpenSK/issues/90
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        if key_type != CoseKey::EC2_KEY_TYPE || curve != CoseKey::P_256_CURVE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        Ok((x_bytes, y_bytes))
+    }
+
+    #[cfg(test)]
+    pub fn example_ecdh_pubkey() -> Self {
+        let x_bytes = [
+            0x74, 0x4A, 0x48, 0xA0, 0xDC, 0x56, 0x9A, 0x42, 0x0B, 0x3F, 0x58, 0xBF, 0xD8, 0xD9,
+            0x62, 0xCF, 0x3A, 0xEA, 0xB1, 0x5A, 0x32, 0x03, 0xC1, 0xA4, 0x23, 0x8B, 0x57, 0x75,
+            0x74, 0xA4, 0x29, 0x50,
+        ];
+        let y_bytes = [
+            0xCD, 0x93, 0x26, 0x4A, 0xAF, 0x2A, 0xBA, 0xD1, 0x09, 0x3D, 0x2E, 0xD6, 0x8C, 0xC0,
+            0x59, 0xB1, 0xD9, 0xAB, 0xD7, 0x81, 0x71, 0x60, 0x35, 0xFE, 0xFF, 0xE8, 0xE1, 0x94,
+            0x05, 0x60, 0xA0, 0xBC,
+        ];
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: CoseKey::ECDH_ALGORITHM,
+            key_type: CoseKey::EC2_KEY_TYPE,
+            curve: CoseKey::P_256_CURVE,
+        }
+    }
 }
 
 // This conversion accepts both ECDH and ECDSA.
@@ -767,17 +846,15 @@ impl TryFrom<cbor::Value> for CoseKey {
         }
 
         let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
-        let nbytes = match algorithm {
-            CoseKey::ECDH_ALGORITHM => ecdh::NBYTES,
-            ES256_ALGORITHM => ecdsa::NBYTES,
-            _ => return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         };
         let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
-        if x_bytes.len() != nbytes {
+        if x_bytes.len() != EC_FIELD_BYTE_SIZE {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let y_bytes = extract_byte_string(ok_or_missing(y_bytes)?)?;
-        if y_bytes.len() != nbytes {
+        if y_bytes.len() != EC_FIELD_BYTE_SIZE {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let curve = extract_integer(ok_or_missing(curve)?)?;
@@ -790,8 +867,8 @@ impl TryFrom<cbor::Value> for CoseKey {
         }
 
         Ok(CoseKey {
-            x_bytes: *array_ref![x_bytes.as_slice(), 0, ecdh::NBYTES],
-            y_bytes: *array_ref![y_bytes.as_slice(), 0, ecdh::NBYTES],
+            x_bytes: *array_ref![x_bytes.as_slice(), 0, EC_FIELD_BYTE_SIZE],
+            y_bytes: *array_ref![y_bytes.as_slice(), 0, EC_FIELD_BYTE_SIZE],
             algorithm,
             key_type,
             curve,
@@ -819,36 +896,6 @@ impl From<CoseKey> for cbor::Value {
     }
 }
 
-impl From<ecdh::PubKey> for CoseKey {
-    fn from(pk: ecdh::PubKey) -> Self {
-        let mut x_bytes = [0; ecdh::NBYTES];
-        let mut y_bytes = [0; ecdh::NBYTES];
-        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
-        CoseKey {
-            x_bytes,
-            y_bytes,
-            algorithm: CoseKey::ECDH_ALGORITHM,
-            key_type: CoseKey::EC2_KEY_TYPE,
-            curve: CoseKey::P_256_CURVE,
-        }
-    }
-}
-
-impl From<ecdsa::PubKey> for CoseKey {
-    fn from(pk: ecdsa::PubKey) -> Self {
-        let mut x_bytes = [0; ecdsa::NBYTES];
-        let mut y_bytes = [0; ecdsa::NBYTES];
-        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
-        CoseKey {
-            x_bytes,
-            y_bytes,
-            algorithm: ES256_ALGORITHM,
-            key_type: CoseKey::EC2_KEY_TYPE,
-            curve: CoseKey::P_256_CURVE,
-        }
-    }
-}
-
 #[cfg(feature = "ed25519")]
 impl From<ed25519_compact::PublicKey> for CoseKey {
     fn from(pk: ed25519_compact::PublicKey) -> Self {
@@ -859,56 +906,6 @@ impl From<ed25519_compact::PublicKey> for CoseKey {
             curve: CoseKey::ED25519_CURVE,
             algorithm: EDDSA_ALGORITHM,
         }
-    }
-}
-
-impl TryFrom<CoseKey> for ecdh::PubKey {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
-        let CoseKey {
-            x_bytes,
-            y_bytes,
-            algorithm,
-            key_type,
-            curve,
-        } = cose_key;
-
-        // Since algorithm can be used for different COSE key types, we check
-        // whether the current type is correct for ECDH. For an OpenSSH bugfix,
-        // the algorithm ES256_ALGORITHM is allowed here too.
-        // https://github.com/google/OpenSK/issues/90
-        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        if key_type != CoseKey::EC2_KEY_TYPE || curve != CoseKey::P_256_CURVE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        ecdh::PubKey::from_coordinates(&x_bytes, &y_bytes)
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-    }
-}
-
-impl TryFrom<CoseKey> for ecdsa::PubKey {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cose_key: CoseKey) -> Result<Self, Ctap2StatusCode> {
-        let CoseKey {
-            x_bytes,
-            y_bytes,
-            algorithm,
-            key_type,
-            curve,
-        } = cose_key;
-
-        if algorithm != ES256_ALGORITHM
-            || key_type != CoseKey::EC2_KEY_TYPE
-            || curve != CoseKey::P_256_CURVE
-        {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        ecdsa::PubKey::from_coordinates(&x_bytes, &y_bytes)
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
     }
 }
 
@@ -1240,6 +1237,7 @@ pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2Status
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
+    use crate::env::test::crypto::{TestEcdhPublicKey, TestEcdsaPublicKey};
     use crate::env::test::TestEnv;
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
@@ -1733,10 +1731,7 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_default_protocol() {
-        let mut env = TestEnv::default();
-        let sk = crypto::ecdh::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk);
+        let cose_key = CoseKey::example_ecdh_pubkey();
         let cbor_extensions = cbor_map! {
             "credBlob" => true,
             "hmac-secret" => cbor_map! {
@@ -1763,10 +1758,7 @@ mod test {
 
     #[test]
     fn test_from_get_assertion_extensions_with_protocol() {
-        let mut env = TestEnv::default();
-        let sk = crypto::ecdh::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk);
+        let cose_key = CoseKey::example_ecdh_pubkey();
         let cbor_extensions = cbor_map! {
             "credBlob" => true,
             "hmac-secret" => cbor_map! {
@@ -1938,20 +1930,29 @@ mod test {
 
     #[test]
     fn test_from_into_cose_key_ecdh() {
-        let mut env = TestEnv::default();
-        let sk = crypto::ecdh::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk.clone());
-        let created_pk = ecdh::PubKey::try_from(cose_key);
-        assert_eq!(created_pk, Ok(pk));
+        let cose_key = CoseKey::example_ecdh_pubkey();
+        let (x_bytes, y_bytes) = cose_key.clone().try_into_ecdh_coordinates().unwrap();
+        let created_pk = TestEcdhPublicKey::from_coordinates(&x_bytes, &y_bytes).unwrap();
+        let new_cose_key = CoseKey::from_ecdh_public_key(created_pk);
+        assert_eq!(cose_key, new_cose_key);
     }
 
     #[test]
-    fn test_into_cose_key_ecdsa() {
-        let mut env = TestEnv::default();
-        let sk = crypto::ecdsa::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk);
+    fn test_from_cose_key_ecdsa() {
+        let x_bytes = [
+            0x74, 0x4A, 0x48, 0xA0, 0xDC, 0x56, 0x9A, 0x42, 0x0B, 0x3F, 0x58, 0xBF, 0xD8, 0xD9,
+            0x62, 0xCF, 0x3A, 0xEA, 0xB1, 0x5A, 0x32, 0x03, 0xC1, 0xA4, 0x23, 0x8B, 0x57, 0x75,
+            0x74, 0xA4, 0x29, 0x50,
+        ];
+        let y_bytes = [
+            0xCD, 0x93, 0x26, 0x4A, 0xAF, 0x2A, 0xBA, 0xD1, 0x09, 0x3D, 0x2E, 0xD6, 0x8C, 0xC0,
+            0x59, 0xB1, 0xD9, 0xAB, 0xD7, 0x81, 0x71, 0x60, 0x35, 0xFE, 0xFF, 0xE8, 0xE1, 0x94,
+            0x05, 0x60, 0xA0, 0xBC,
+        ];
+        let created_pk = TestEcdsaPublicKey::from_coordinates(&x_bytes, &y_bytes).unwrap();
+        let cose_key = CoseKey::from_ecdsa_public_key(created_pk);
+        assert_eq!(cose_key.x_bytes, x_bytes);
+        assert_eq!(cose_key.y_bytes, y_bytes);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
     }
 

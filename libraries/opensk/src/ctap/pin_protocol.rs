@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::ecdh::{
+    PublicKey as EcdhPublicKey, SecretKey as EcdhSecretKey, SharedSecret as EcdhSharedSecret,
+};
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
+use crate::env::{EcdhPk, EcdhSk, Env};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::convert::TryInto;
 use crypto::hkdf::hkdf_empty_salt_256;
 #[cfg(test)]
 use crypto::hmac::hmac_256;
@@ -28,17 +31,17 @@ use crypto::Hash256;
 use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
-pub struct PinProtocol {
-    key_agreement_key: crypto::ecdh::SecKey,
+pub struct PinProtocol<E: Env> {
+    key_agreement_key: EcdhSk<E>,
     pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
 }
 
-impl PinProtocol {
+impl<E: Env> PinProtocol<E> {
     /// This process is run by the authenticator at power-on.
     ///
     /// This function implements "initialize" from the specification.
-    pub fn new(rng: &mut impl Rng256) -> PinProtocol {
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
+    pub fn new(rng: &mut impl Rng256) -> Self {
+        let key_agreement_key = EcdhSk::<E>::random(rng);
         let pin_uv_auth_token = rng.gen_uniform_u8x32();
         PinProtocol {
             key_agreement_key,
@@ -48,7 +51,7 @@ impl PinProtocol {
 
     /// Generates a fresh public key.
     pub fn regenerate(&mut self, rng: &mut impl Rng256) {
-        self.key_agreement_key = crypto::ecdh::SecKey::gensk(rng);
+        self.key_agreement_key = EcdhSk::<E>::random(rng);
     }
 
     /// Generates a fresh pinUvAuthToken.
@@ -58,7 +61,7 @@ impl PinProtocol {
 
     /// Returns the authenticator’s public key as a CoseKey structure.
     pub fn get_public_key(&self) -> CoseKey {
-        CoseKey::from(self.key_agreement_key.genpk())
+        CoseKey::from_ecdh_public_key(self.key_agreement_key.public_key())
     }
 
     /// Processes the peer's encapsulated CoseKey and returns the shared secret.
@@ -67,8 +70,13 @@ impl PinProtocol {
         peer_cose_key: CoseKey,
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> Result<Box<dyn SharedSecret>, Ctap2StatusCode> {
-        let pk: crypto::ecdh::PubKey = CoseKey::try_into(peer_cose_key)?;
-        let handshake = self.key_agreement_key.exchange_x(&pk);
+        let (x_bytes, y_bytes) = peer_cose_key.try_into_ecdh_coordinates()?;
+        let pk = EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let handshake = self
+            .key_agreement_key
+            .diffie_hellman(&pk)
+            .raw_secret_bytes();
         match pin_uv_auth_protocol {
             PinUvAuthProtocol::V1 => Ok(Box::new(SharedSecretV1::new(handshake))),
             PinUvAuthProtocol::V2 => Ok(Box::new(SharedSecretV2::new(handshake))),
@@ -83,9 +91,9 @@ impl PinProtocol {
     /// This is used for debugging to inject key material.
     #[cfg(test)]
     pub fn new_test(
-        key_agreement_key: crypto::ecdh::SecKey,
+        key_agreement_key: EcdhSk<E>,
         pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
-    ) -> PinProtocol {
+    ) -> Self {
         PinProtocol {
             key_agreement_key,
             pin_uv_auth_token,
@@ -235,7 +243,7 @@ mod test {
     #[test]
     fn test_pin_protocol_public_key() {
         let mut env = TestEnv::default();
-        let mut pin_protocol = PinProtocol::new(env.rng());
+        let mut pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
         let public_key = pin_protocol.get_public_key();
         pin_protocol.regenerate(env.rng());
         let new_public_key = pin_protocol.get_public_key();
@@ -245,7 +253,7 @@ mod test {
     #[test]
     fn test_pin_protocol_pin_uv_auth_token() {
         let mut env = TestEnv::default();
-        let mut pin_protocol = PinProtocol::new(env.rng());
+        let mut pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
         let token = *pin_protocol.get_pin_uv_auth_token();
         pin_protocol.reset_pin_uv_auth_token(env.rng());
         let new_token = pin_protocol.get_pin_uv_auth_token();
@@ -328,8 +336,8 @@ mod test {
     #[test]
     fn test_decapsulate_symmetric() {
         let mut env = TestEnv::default();
-        let pin_protocol1 = PinProtocol::new(env.rng());
-        let pin_protocol2 = PinProtocol::new(env.rng());
+        let pin_protocol1 = PinProtocol::<TestEnv>::new(env.rng());
+        let pin_protocol2 = PinProtocol::<TestEnv>::new(env.rng());
         for &protocol in &[PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
             let shared_secret1 = pin_protocol1
                 .decapsulate(pin_protocol2.get_public_key(), protocol)

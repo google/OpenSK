@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::ecdsa::SecretKey as EcdsaSecretKey;
+use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
-use crypto::ecdsa::SecKey;
 use persistent_store::StoreError;
 use rng256::Rng256;
-
-use crate::env::Env;
 
 /// Provides storage for secret keys.
 ///
@@ -63,7 +62,7 @@ impl<T: Helper> KeyStore for T {
     }
 
     fn derive_ecdsa(&mut self, seed: &[u8; 32]) -> Result<[u8; 32], Error> {
-        match SecKey::from_bytes(seed) {
+        match EcdsaSk::<T>::from_slice(seed) {
             None => Err(Error),
             Some(_) => Ok(*seed),
         }
@@ -71,7 +70,7 @@ impl<T: Helper> KeyStore for T {
 
     fn generate_ecdsa_seed(&mut self) -> Result<[u8; 32], Error> {
         let mut seed = [0; 32];
-        SecKey::gensk(self.rng()).to_bytes(&mut seed);
+        EcdsaSk::<T>::random(self.rng()).to_slice(&mut seed);
         Ok(seed)
     }
 

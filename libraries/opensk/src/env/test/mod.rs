@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use self::crypto::TestCrypto;
 use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
@@ -26,6 +27,13 @@ use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rng256::Rng256;
+
+#[cfg(not(feature = "rust_crypto"))]
+pub mod crypto;
+#[cfg(feature = "rust_crypto")]
+pub mod rust_crypto;
+#[cfg(feature = "rust_crypto")]
+pub use rust_crypto as crypto;
 
 pub mod customization;
 mod upgrade_storage;
@@ -217,6 +225,7 @@ impl Env for TestEnv {
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
+    type Crypto = TestCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

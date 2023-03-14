@@ -15,6 +15,9 @@
 use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
 use crate::api::connection::HidConnection;
+use crate::api::crypto::ecdh::Ecdh;
+use crate::api::crypto::ecdsa::Ecdsa;
+use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::key_store::KeyStore;
@@ -25,6 +28,11 @@ use rng256::Rng256;
 
 #[cfg(feature = "std")]
 pub mod test;
+
+pub type EcdhSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::SecretKey;
+pub type EcdhPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::PublicKey;
+pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::SecretKey;
+pub type EcdsaPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::PublicKey;
 
 /// Describes what CTAP needs to function.
 pub trait Env {
@@ -39,6 +47,7 @@ pub trait Env {
     type HidConnection: HidConnection;
     type AttestationStore: AttestationStore;
     type Clock: Clock;
+    type Crypto: Crypto;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;

@@ -276,7 +276,6 @@ impl PubKey {
         ExponentP256::modn(u.to_int()) == *sign.r.as_exponent()
     }
 
-    #[cfg(feature = "std")]
     pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
     where
         H: Hash256,

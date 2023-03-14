@@ -359,6 +359,8 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::super::CtapState;
     use super::*;
+    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
     use rng256::Rng256;
 
@@ -384,7 +386,7 @@ mod test {
 
     fn test_helper_process_get_creds_metadata(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -468,7 +470,7 @@ mod test {
     #[test]
     fn test_process_enumerate_rps_with_uv() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -563,7 +565,7 @@ mod test {
     #[test]
     fn test_process_enumerate_rps_completeness() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -646,7 +648,7 @@ mod test {
     #[test]
     fn test_process_enumerate_credentials_with_uv() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -749,7 +751,7 @@ mod test {
     #[test]
     fn test_process_delete_credential() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -821,7 +823,7 @@ mod test {
     #[test]
     fn test_process_update_user_information() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,

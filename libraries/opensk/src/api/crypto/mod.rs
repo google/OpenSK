@@ -1,4 +1,4 @@
-// Copyright 2022-2023 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! APIs for the environment.
-//!
-//! The [environment](crate::env::Env) is split into components. Each component has an API described
-//! by a trait. This module gathers the API of those components.
+pub mod ecdh;
+pub mod ecdsa;
 
-pub mod attestation_store;
-pub mod clock;
-pub mod connection;
-pub mod crypto;
-pub mod customization;
-pub mod firmware_protection;
-pub mod key_store;
-pub mod upgrade_storage;
-pub mod user_presence;
+use self::ecdh::Ecdh;
+use self::ecdsa::Ecdsa;
+
+/// The size of field elements in the elliptic curve P256.
+pub const EC_FIELD_BYTE_SIZE: usize = 32;
+
+/// The size of a serialized ECDSA signature.
+pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_BYTE_SIZE;
+
+/// Necessary cryptographic primitives for CTAP.
+///
+/// This is zero-sized type is a collection of other zero-sized types, one for each required
+/// cryptographic primitive.
+pub trait Crypto {
+    type Ecdh: Ecdh;
+    type Ecdsa: Ecdsa;
+}

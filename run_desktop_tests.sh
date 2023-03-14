@@ -137,6 +137,8 @@ then
   cargo +nightly test --release --features std
   echo "Running CTAP library unit tests (release mode + all features)..."
   cargo +nightly test --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
+  echo "Running CTAP library unit tests (release mode + experimental rust crypto)..."
+  cargo +nightly test --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto
 
   echo "Running CTAP library unit tests (debug mode)..."
   cargo +nightly test --features std

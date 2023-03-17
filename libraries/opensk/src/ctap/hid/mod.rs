@@ -227,9 +227,9 @@ impl<E: Env> CtapHid<E> {
     /// The preprocessed commands are:
     /// - INIT
     /// - CANCEL
+    /// - LOCK
     /// - ERROR
     /// - Unknown and unexpected commands like KEEPALIVE
-    /// - LOCK is not implemented and currently treated like an unknown command
     ///
     /// Commands that may still be processed:
     /// - PING
@@ -280,9 +280,9 @@ impl<E: Env> CtapHid<E> {
     /// The preprocessed commands are:
     /// - INIT
     /// - CANCEL
+    /// - LOCK
     /// - ERROR
     /// - Unknown and unexpected commands like KEEPALIVE
-    /// - LOCK is not implemented and currently treated like an unknown command
     fn preprocess_message(&mut self, env: &mut E, message: Message) -> Option<Message> {
         let cid = message.cid;
         if !self.has_valid_channel(&message) {
@@ -672,6 +672,47 @@ mod test {
     }
 
     #[test]
+    fn test_locked_channel_id() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut init_packet = [0x00; 64];
+        init_packet[..4].copy_from_slice(&[0xFF; 4]);
+        init_packet[4..15].copy_from_slice(&[
+            0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+        ]);
+        let init_response = ctap_hid
+            .parse_packet(&mut env, &init_packet, false)
+            .unwrap();
+        assert_eq!(init_response.cmd, CtapHidCommand::Init);
+        let new_cid = *array_ref!(init_response.payload, 8, 4);
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x01]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Lock,
+                payload: vec![]
+            })
+        );
+
+        let mut lock_packet = [0x00; 64];
+        lock_packet[..4].copy_from_slice(&new_cid);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x00]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &lock_packet, false),
+            Some(Message {
+                cid: new_cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![0x06]
+            })
+        );
+    }
+
+    #[test]
     fn test_locked_transport() {
         let mut env = TestEnv::default();
         let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
@@ -697,7 +738,7 @@ mod test {
 
         let mut lock_packet = [0x00; 64];
         lock_packet[..4].copy_from_slice(&cid);
-        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x1]);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x01]);
         assert_eq!(
             ctap_hid.parse_packet(&mut env, &lock_packet, false),
             Some(Message {
@@ -721,7 +762,7 @@ mod test {
 
         let mut lock_packet = [0x00; 64];
         lock_packet[..4].copy_from_slice(&cid);
-        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x1]);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x01]);
         assert_eq!(
             ctap_hid.parse_packet(&mut env, &lock_packet, false),
             Some(Message {
@@ -734,7 +775,7 @@ mod test {
 
         let mut lock_packet = [0x00; 64];
         lock_packet[..4].copy_from_slice(&cid);
-        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x0]);
+        lock_packet[4..8].copy_from_slice(&[0x84, 0x00, 0x01, 0x00]);
         assert_eq!(
             ctap_hid.parse_packet(&mut env, &lock_packet, false),
             Some(Message {

@@ -25,7 +25,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use crypto::sha256::Sha256;
 use crypto::Hash256;
 
-/// The length of the truncated hash that as appended to the large blob data.
+/// The length of the truncated hash that is appended to the large blob data.
 const TRUNCATED_HASH_LEN: usize = 16;
 
 pub struct LargeBlobs {

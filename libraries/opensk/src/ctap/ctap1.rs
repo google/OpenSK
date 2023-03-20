@@ -17,9 +17,7 @@ use super::credential_id::{decrypt_credential_id, encrypt_to_credential_id};
 use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
-use crate::api::crypto::ecdsa::{
-    PublicKey as EcdsaPublicKey, SecretKey as EcdsaSecretKey, Signature,
-};
+use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_BYTE_SIZE;
 use crate::env::Env;
 use alloc::vec::Vec;
@@ -160,7 +158,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     }
 }
 
-fn to_uncompressed(public_key: &impl EcdsaPublicKey) -> [u8; 1 + 2 * EC_FIELD_BYTE_SIZE] {
+fn to_uncompressed(public_key: &impl ecdsa::PublicKey) -> [u8; 1 + 2 * EC_FIELD_BYTE_SIZE] {
     // Formatting according to:
     // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
     const B0_BYTE_MARKER: u8 = 0x04;

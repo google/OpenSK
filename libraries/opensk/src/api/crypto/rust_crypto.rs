@@ -26,31 +26,32 @@ use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+// TODO: implement CryptoRngCore for our Rng instead
 use rand_core::OsRng;
 use rng256::Rng256;
 
-pub struct TestCrypto;
-pub struct TestEcdh;
-pub struct TestEcdsa;
+pub struct SoftwareCrypto;
+pub struct SoftwareEcdh;
+pub struct SoftwareEcdsa;
 
-impl Crypto for TestCrypto {
-    type Ecdh = TestEcdh;
-    type Ecdsa = TestEcdsa;
+impl Crypto for SoftwareCrypto {
+    type Ecdh = SoftwareEcdh;
+    type Ecdsa = SoftwareEcdsa;
 }
 
-impl ecdh::Ecdh for TestEcdh {
-    type SecretKey = TestEcdhSecretKey;
-    type PublicKey = TestEcdhPublicKey;
-    type SharedSecret = TestEcdhSharedSecret;
+impl ecdh::Ecdh for SoftwareEcdh {
+    type SecretKey = SoftwareEcdhSecretKey;
+    type PublicKey = SoftwareEcdhPublicKey;
+    type SharedSecret = SoftwareEcdhSharedSecret;
 }
 
-pub struct TestEcdhSecretKey {
+pub struct SoftwareEcdhSecretKey {
     ephemeral_secret: EphemeralSecret,
 }
 
-impl ecdh::SecretKey for TestEcdhSecretKey {
-    type PublicKey = TestEcdhPublicKey;
-    type SharedSecret = TestEcdhSharedSecret;
+impl ecdh::SecretKey for SoftwareEcdhSecretKey {
+    type PublicKey = SoftwareEcdhPublicKey;
+    type SharedSecret = SoftwareEcdhSharedSecret;
 
     fn random(_rng: &mut impl Rng256) -> Self {
         let ephemeral_secret = EphemeralSecret::random(&mut OsRng);
@@ -59,20 +60,20 @@ impl ecdh::SecretKey for TestEcdhSecretKey {
 
     fn public_key(&self) -> Self::PublicKey {
         let public_key = self.ephemeral_secret.public_key();
-        TestEcdhPublicKey { public_key }
+        SoftwareEcdhPublicKey { public_key }
     }
 
-    fn diffie_hellman(&self, public_key: &TestEcdhPublicKey) -> Self::SharedSecret {
+    fn diffie_hellman(&self, public_key: &SoftwareEcdhPublicKey) -> Self::SharedSecret {
         let shared_secret = self.ephemeral_secret.diffie_hellman(&public_key.public_key);
-        TestEcdhSharedSecret { shared_secret }
+        SoftwareEcdhSharedSecret { shared_secret }
     }
 }
 
-pub struct TestEcdhPublicKey {
+pub struct SoftwareEcdhPublicKey {
     public_key: p256::PublicKey,
 }
 
-impl ecdh::PublicKey for TestEcdhPublicKey {
+impl ecdh::PublicKey for SoftwareEcdhPublicKey {
     fn from_coordinates(
         x: &[u8; EC_FIELD_BYTE_SIZE],
         y: &[u8; EC_FIELD_BYTE_SIZE],
@@ -90,11 +91,11 @@ impl ecdh::PublicKey for TestEcdhPublicKey {
     }
 }
 
-pub struct TestEcdhSharedSecret {
+pub struct SoftwareEcdhSharedSecret {
     shared_secret: p256::ecdh::SharedSecret,
 }
 
-impl ecdh::SharedSecret for TestEcdhSharedSecret {
+impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
     fn raw_secret_bytes(&self) -> [u8; EC_FIELD_BYTE_SIZE] {
         let mut bytes = [0; EC_FIELD_BYTE_SIZE];
         bytes.copy_from_slice(self.shared_secret.raw_secret_bytes().as_slice());
@@ -102,38 +103,38 @@ impl ecdh::SharedSecret for TestEcdhSharedSecret {
     }
 }
 
-impl ecdsa::Ecdsa for TestEcdsa {
-    type SecretKey = TestEcdsaSecretKey;
-    type PublicKey = TestEcdsaPublicKey;
-    type Signature = TestEcdsaSignature;
+impl ecdsa::Ecdsa for SoftwareEcdsa {
+    type SecretKey = SoftwareEcdsaSecretKey;
+    type PublicKey = SoftwareEcdsaPublicKey;
+    type Signature = SoftwareEcdsaSignature;
 }
 
-pub struct TestEcdsaSecretKey {
+pub struct SoftwareEcdsaSecretKey {
     signing_key: SigningKey,
 }
 
-impl ecdsa::SecretKey for TestEcdsaSecretKey {
-    type PublicKey = TestEcdsaPublicKey;
-    type Signature = TestEcdsaSignature;
+impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
+    type PublicKey = SoftwareEcdsaPublicKey;
+    type Signature = SoftwareEcdsaSignature;
 
     fn random(_rng: &mut impl Rng256) -> Self {
         let signing_key = SigningKey::random(&mut OsRng);
-        TestEcdsaSecretKey { signing_key }
+        SoftwareEcdsaSecretKey { signing_key }
     }
 
     fn from_slice(bytes: &[u8; EC_FIELD_BYTE_SIZE]) -> Option<Self> {
         let signing_key = SigningKey::from_slice(bytes).ok()?;
-        Some(TestEcdsaSecretKey { signing_key })
+        Some(SoftwareEcdsaSecretKey { signing_key })
     }
 
     fn public_key(&self) -> Self::PublicKey {
         let verifying_key = VerifyingKey::from(&self.signing_key);
-        TestEcdsaPublicKey { verifying_key }
+        SoftwareEcdsaPublicKey { verifying_key }
     }
 
     fn sign(&self, message: &[u8]) -> Self::Signature {
         let signature = self.signing_key.sign(message);
-        TestEcdsaSignature { signature }
+        SoftwareEcdsaSignature { signature }
     }
 
     fn to_slice(&self, bytes: &mut [u8; EC_FIELD_BYTE_SIZE]) {
@@ -141,12 +142,12 @@ impl ecdsa::SecretKey for TestEcdsaSecretKey {
     }
 }
 
-pub struct TestEcdsaPublicKey {
+pub struct SoftwareEcdsaPublicKey {
     verifying_key: VerifyingKey,
 }
 
-impl ecdsa::PublicKey for TestEcdsaPublicKey {
-    type Signature = TestEcdsaSignature;
+impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
+    type Signature = SoftwareEcdsaSignature;
 
     fn from_coordinates(
         x: &[u8; EC_FIELD_BYTE_SIZE],
@@ -155,7 +156,7 @@ impl ecdsa::PublicKey for TestEcdsaPublicKey {
         let encoded_point: p256::EncodedPoint =
             p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
         let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
-        Some(TestEcdsaPublicKey { verifying_key })
+        Some(SoftwareEcdsaPublicKey { verifying_key })
     }
 
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
@@ -171,11 +172,11 @@ impl ecdsa::PublicKey for TestEcdsaPublicKey {
     }
 }
 
-pub struct TestEcdsaSignature {
+pub struct SoftwareEcdsaSignature {
     signature: p256::ecdsa::Signature,
 }
 
-impl ecdsa::Signature for TestEcdsaSignature {
+impl ecdsa::Signature for SoftwareEcdsaSignature {
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
         // Assumes EC_SIGNATURE_SIZE == 2 * EC_FIELD_BYTE_SIZE
         let r = &bytes[..EC_FIELD_BYTE_SIZE];
@@ -185,7 +186,7 @@ impl ecdsa::Signature for TestEcdsaSignature {
         let r = p256::FieldBytes::from(r);
         let s = p256::FieldBytes::from(s);
         let signature = p256::ecdsa::Signature::from_scalars(r, s).ok()?;
-        Some(TestEcdsaSignature { signature })
+        Some(SoftwareEcdsaSignature { signature })
     }
 
     fn to_der(&self) -> Vec<u8> {
@@ -205,8 +206,8 @@ mod test {
     #[test]
     fn test_shared_secret_symmetric() {
         let mut env = TestEnv::default();
-        let private1 = TestEcdhSecretKey::random(env.rng());
-        let private2 = TestEcdhSecretKey::random(env.rng());
+        let private1 = SoftwareEcdhSecretKey::random(env.rng());
+        let private2 = SoftwareEcdhSecretKey::random(env.rng());
         let pub1 = private1.public_key();
         let pub2 = private2.public_key();
         let shared1 = private1.diffie_hellman(&pub2);
@@ -217,12 +218,12 @@ mod test {
     #[test]
     fn test_ecdh_public_key_from_to_bytes() {
         let mut env = TestEnv::default();
-        let first_key = TestEcdhSecretKey::random(env.rng());
+        let first_key = SoftwareEcdhSecretKey::random(env.rng());
         let first_public = first_key.public_key();
         let mut x = [0; EC_FIELD_BYTE_SIZE];
         let mut y = [0; EC_FIELD_BYTE_SIZE];
         first_public.to_coordinates(&mut x, &mut y);
-        let new_public = TestEcdhPublicKey::from_coordinates(&x, &y).unwrap();
+        let new_public = SoftwareEcdhPublicKey::from_coordinates(&x, &y).unwrap();
         let mut new_x = [0; EC_FIELD_BYTE_SIZE];
         let mut new_y = [0; EC_FIELD_BYTE_SIZE];
         new_public.to_coordinates(&mut new_x, &mut new_y);
@@ -233,7 +234,7 @@ mod test {
     #[test]
     fn test_sign_verify() {
         let mut env = TestEnv::default();
-        let private_key = TestEcdsaSecretKey::random(env.rng());
+        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
         let public_key = private_key.public_key();
         let message = [0x12, 0x34, 0x56, 0x78];
         let signature = private_key.sign(&message);
@@ -243,10 +244,10 @@ mod test {
     #[test]
     fn test_ecdsa_secret_key_from_to_bytes() {
         let mut env = TestEnv::default();
-        let first_key = TestEcdsaSecretKey::random(env.rng());
+        let first_key = SoftwareEcdsaSecretKey::random(env.rng());
         let mut key_bytes = [0; EC_FIELD_BYTE_SIZE];
         first_key.to_slice(&mut key_bytes);
-        let second_key = TestEcdsaSecretKey::from_slice(&key_bytes).unwrap();
+        let second_key = SoftwareEcdsaSecretKey::from_slice(&key_bytes).unwrap();
         let mut new_bytes = [0; EC_FIELD_BYTE_SIZE];
         second_key.to_slice(&mut new_bytes);
         assert_eq!(key_bytes, new_bytes);

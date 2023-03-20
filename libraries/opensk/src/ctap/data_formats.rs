@@ -14,9 +14,7 @@
 
 use super::crypto_wrapper::PrivateKey;
 use super::status_code::Ctap2StatusCode;
-use crate::api::crypto::ecdh::PublicKey as EcdhPublicKey;
-use crate::api::crypto::ecdsa::PublicKey as EcdsaPublicKey;
-use crate::api::crypto::EC_FIELD_BYTE_SIZE;
+use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_BYTE_SIZE};
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -751,9 +749,7 @@ impl CoseKey {
     #[cfg(feature = "ed25519")]
     const ED25519_CURVE: i64 = 6;
 
-    // Ideally, this would be an impl From.
-    // CoseKey needs to be refactored to allow that.
-    pub fn from_ecdh_public_key(pk: impl EcdhPublicKey) -> Self {
+    pub fn from_ecdh_public_key(pk: impl ecdh::PublicKey) -> Self {
         let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
         let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
@@ -766,8 +762,7 @@ impl CoseKey {
         }
     }
 
-    // Same as `from_ecdh_public_key`
-    pub fn from_ecdsa_public_key(pk: impl EcdsaPublicKey) -> Self {
+    pub fn from_ecdsa_public_key(pk: impl ecdsa::PublicKey) -> Self {
         let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
         let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
@@ -780,9 +775,7 @@ impl CoseKey {
         }
     }
 
-    // This function is a workaround for this coherence:
-    // https://rust-lang.github.io/rfcs/2451-re-rebalancing-coherence.html
-    // Ideally, we could implement `TryFrom` for any `EcdhPublicKey`.
+    /// Returns the x and y coordinates, if the key is an ECDH public key.
     pub fn try_into_ecdh_coordinates(
         self,
     ) -> Result<([u8; EC_FIELD_BYTE_SIZE], [u8; EC_FIELD_BYTE_SIZE]), Ctap2StatusCode> {
@@ -1237,6 +1230,8 @@ pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2Status
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
+    use crate::api::crypto::ecdh::PublicKey as _;
+    use crate::api::crypto::ecdsa::PublicKey as _;
     use crate::env::test::crypto::{TestEcdhPublicKey, TestEcdsaPublicKey};
     use crate::env::test::TestEnv;
     use cbor::{

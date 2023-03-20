@@ -14,6 +14,12 @@
 
 pub mod ecdh;
 pub mod ecdsa;
+#[cfg(feature = "rust_crypto")]
+pub mod rust_crypto;
+#[cfg(not(feature = "rust_crypto"))]
+pub mod software_crypto;
+#[cfg(feature = "rust_crypto")]
+pub use rust_crypto as software_crypto;
 
 use self::ecdh::Ecdh;
 use self::ecdsa::Ecdsa;
@@ -25,9 +31,6 @@ pub const EC_FIELD_BYTE_SIZE: usize = 32;
 pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_BYTE_SIZE;
 
 /// Necessary cryptographic primitives for CTAP.
-///
-/// This is zero-sized type is a collection of other zero-sized types, one for each required
-/// cryptographic primitive.
 pub trait Crypto {
     type Ecdh: Ecdh;
     type Ecdsa: Ecdsa;

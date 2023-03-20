@@ -65,7 +65,7 @@ use self::u2f_up::U2fUserPresenceState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
-use crate::api::crypto::ecdsa::{SecretKey as EcdsaSecretKey, Signature};
+use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
@@ -1450,7 +1450,7 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
-    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization;
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::crypto::TestEcdhSecretKey;

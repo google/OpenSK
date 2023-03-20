@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::ecdsa::SecretKey as EcdsaSecretKey;
+use crate::api::crypto::ecdsa::SecretKey as _;
 use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
 use persistent_store::StoreError;

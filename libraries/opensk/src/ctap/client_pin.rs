@@ -21,7 +21,7 @@ use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
 #[cfg(test)]
-use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+use crate::api::crypto::ecdh::SecretKey as _;
 use crate::api::customization::Customization;
 use crate::ctap::storage;
 #[cfg(test)]
@@ -587,7 +587,6 @@ impl<E: Env> ClientPin<E> {
 mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
-    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
     use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
     use alloc::vec;

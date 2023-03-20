@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::ecdsa::{SecretKey as EcdsaSecretKey, Signature};
+use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::status_code::Ctap2StatusCode;

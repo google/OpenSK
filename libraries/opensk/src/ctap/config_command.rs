@@ -123,7 +123,7 @@ pub fn process_config<E: Env>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization::Customization;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;

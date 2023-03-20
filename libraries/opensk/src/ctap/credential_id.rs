@@ -268,7 +268,7 @@ pub fn decrypt_credential_id(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::crypto::ecdsa::SecretKey as EcdsaSecretKey;
+    use crate::api::crypto::ecdsa::SecretKey as _;
     use crate::api::customization::Customization;
     use crate::ctap::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::SignatureAlgorithm;

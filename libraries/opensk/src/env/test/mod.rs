@@ -28,13 +28,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rng256::Rng256;
 
-#[cfg(not(feature = "rust_crypto"))]
 pub mod crypto;
-#[cfg(feature = "rust_crypto")]
-pub mod rust_crypto;
-#[cfg(feature = "rust_crypto")]
-pub use rust_crypto as crypto;
-
 pub mod customization;
 mod upgrade_storage;
 

@@ -359,7 +359,7 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::super::CtapState;
     use super::*;
-    use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::api::crypto::ecdh::SecretKey as _;
     use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
     use rng256::Rng256;

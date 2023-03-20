@@ -19,7 +19,7 @@ use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_SIZE;
-use crate::env::Env;
+use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
 use core::convert::TryFrom;
@@ -249,8 +249,8 @@ impl Ctap1Command {
     // +------+-------------------+-----------------+------------+--------------------+
     // + 0x00 | application (32B) | challenge (32B) | key handle | User pub key (65B) |
     // +------+-------------------+-----------------+------------+--------------------+
-    fn process_register(
-        env: &mut impl Env,
+    fn process_register<E: Env>(
+        env: &mut E,
         challenge: [u8; 32],
         application: [u8; 32],
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
@@ -290,10 +290,10 @@ impl Ctap1Command {
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
-        let attestation_key = crypto::ecdsa::SecKey::from_bytes(&private_key).unwrap();
-        let signature = attestation_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+        let attestation_key = EcdsaSk::<E>::from_slice(&private_key).unwrap();
+        let signature = attestation_key.sign(&signature_data);
 
-        response.extend(signature.to_asn1_der());
+        response.extend(signature.to_der());
         Ok(response)
     }
 
@@ -357,10 +357,11 @@ mod test {
     use super::super::data_formats::SignatureAlgorithm;
     use super::super::TOUCH_TIMEOUT_MS;
     use super::*;
+    use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
     use crate::ctap::storage;
     use crate::env::test::TestEnv;
-    use crypto::Hash256;
+    use crate::env::Sha;
 
     fn create_register_message(application: &[u8; 32]) -> Vec<u8> {
         let mut message = vec![
@@ -497,7 +498,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
@@ -514,7 +515,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let application = [0x55; 32];
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
@@ -532,7 +533,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message = create_authenticate_message(
             &application,
@@ -566,7 +567,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
@@ -585,7 +586,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
@@ -604,7 +605,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
@@ -631,7 +632,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
@@ -657,7 +658,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let rp_id = "example.com";
-        let application = crypto::sha256::Sha256::hash(rp_id.as_bytes());
+        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
         let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
         let message = create_authenticate_message(
             &application,

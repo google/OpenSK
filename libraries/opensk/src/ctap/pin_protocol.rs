@@ -12,22 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::ecdh::{
-    PublicKey as EcdhPublicKey, SecretKey as EcdhSecretKey, SharedSecret as EcdhSharedSecret,
-};
+use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _};
+use crate::api::crypto::hmac256::Hmac256;
+use crate::api::crypto::sha256::Sha256;
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::env::{EcdhPk, EcdhSk, Env};
-use alloc::boxed::Box;
-use alloc::vec::Vec;
-use crypto::hkdf::hkdf_empty_salt_256;
 #[cfg(test)]
-use crypto::hmac::hmac_256;
-use crypto::hmac::{verify_hmac_256, verify_hmac_256_first_128bits};
-use crypto::sha256::Sha256;
-use crypto::Hash256;
+use crate::env::test::TestEnv;
+use crate::env::{EcdhPk, EcdhSk, Env, Hmac, Sha};
+use alloc::vec::Vec;
+use core::marker::PhantomData;
+use crypto::hkdf::hkdf_empty_salt_256;
 use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
@@ -69,7 +66,7 @@ impl<E: Env> PinProtocol<E> {
         &self,
         peer_cose_key: CoseKey,
         pin_uv_auth_protocol: PinUvAuthProtocol,
-    ) -> Result<Box<dyn SharedSecret>, Ctap2StatusCode> {
+    ) -> Result<SharedSecret<E>, Ctap2StatusCode> {
         let (x_bytes, y_bytes) = peer_cose_key.try_into_ecdh_coordinates()?;
         let pk = EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
@@ -77,10 +74,7 @@ impl<E: Env> PinProtocol<E> {
             .key_agreement_key
             .diffie_hellman(&pk)
             .raw_secret_bytes();
-        match pin_uv_auth_protocol {
-            PinUvAuthProtocol::V1 => Ok(Box::new(SharedSecretV1::new(handshake))),
-            PinUvAuthProtocol::V2 => Ok(Box::new(SharedSecretV2::new(handshake))),
-        }
+        Ok(SharedSecret::new(pin_uv_auth_protocol, handshake))
     }
 
     /// Getter for pinUvAuthToken.
@@ -109,79 +103,127 @@ pub fn authenticate_pin_uv_auth_token(
     pin_uv_auth_protocol: PinUvAuthProtocol,
 ) -> Vec<u8> {
     match pin_uv_auth_protocol {
-        PinUvAuthProtocol::V1 => hmac_256::<Sha256>(token, message)[..16].to_vec(),
-        PinUvAuthProtocol::V2 => hmac_256::<Sha256>(token, message).to_vec(),
+        PinUvAuthProtocol::V1 => Hmac::<TestEnv>::mac(token, message)[..16].to_vec(),
+        PinUvAuthProtocol::V2 => Hmac::<TestEnv>::mac(token, message).to_vec(),
     }
 }
 
 /// Verifies the pinUvAuthToken for the given PIN protocol.
-pub fn verify_pin_uv_auth_token(
+pub fn verify_pin_uv_auth_token<E: Env>(
     token: &[u8; PIN_TOKEN_LENGTH],
     message: &[u8],
     signature: &[u8],
     pin_uv_auth_protocol: PinUvAuthProtocol,
 ) -> Result<(), Ctap2StatusCode> {
     match pin_uv_auth_protocol {
-        PinUvAuthProtocol::V1 => verify_v1(token, message, signature),
-        PinUvAuthProtocol::V2 => verify_v2(token, message, signature),
+        PinUvAuthProtocol::V1 => verify_v1::<E>(token, message, signature),
+        PinUvAuthProtocol::V2 => verify_v2::<E>(token, message, signature),
     }
 }
 
-pub trait SharedSecret {
+pub enum SharedSecret<E: Env> {
+    V1(SharedSecretV1<E>),
+    V2(SharedSecretV2<E>),
+}
+
+impl<E: Env> SharedSecret<E> {
+    /// Creates a new shared secret for the respective PIN protocol.
+    ///
+    /// This enum wraps all types of shared secrets.
+    fn new(pin_uv_auth_protocol: PinUvAuthProtocol, handshake: [u8; 32]) -> Self {
+        match pin_uv_auth_protocol {
+            PinUvAuthProtocol::V1 => SharedSecret::V1(SharedSecretV1::new(handshake)),
+            PinUvAuthProtocol::V2 => SharedSecret::V2(SharedSecretV2::new(handshake)),
+        }
+    }
+
     /// Returns the encrypted plaintext.
-    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode>;
+    pub fn encrypt(
+        &self,
+        rng: &mut dyn Rng256,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+        match self {
+            SharedSecret::V1(s) => s.encrypt(rng, plaintext),
+            SharedSecret::V2(s) => s.encrypt(rng, plaintext),
+        }
+    }
 
     /// Returns the decrypted ciphertext.
-    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode>;
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        match self {
+            SharedSecret::V1(s) => s.decrypt(ciphertext),
+            SharedSecret::V2(s) => s.decrypt(ciphertext),
+        }
+    }
 
     /// Verifies that the signature is a valid MAC for the given message.
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode>;
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+        match self {
+            SharedSecret::V1(s) => s.verify(message, signature),
+            SharedSecret::V2(s) => s.verify(message, signature),
+        }
+    }
 
     /// Creates a signature that matches verify.
     #[cfg(test)]
-    fn authenticate(&self, message: &[u8]) -> Vec<u8>;
-}
-
-fn verify_v1(key: &[u8; 32], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-    if signature.len() != 16 {
-        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-    }
-    if verify_hmac_256_first_128bits::<Sha256>(key, message, array_ref![signature, 0, 16]) {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-    }
-}
-
-fn verify_v2(key: &[u8; 32], message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-    if signature.len() != 32 {
-        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-    }
-    if verify_hmac_256::<Sha256>(key, message, array_ref![signature, 0, 32]) {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
-    }
-}
-
-pub struct SharedSecretV1 {
-    common_secret: [u8; 32],
-    aes_enc_key: crypto::aes256::EncryptionKey,
-}
-
-impl SharedSecretV1 {
-    /// Creates a new shared secret from the handshake result.
-    fn new(handshake: [u8; 32]) -> SharedSecretV1 {
-        let common_secret = Sha256::hash(&handshake);
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&common_secret);
-        SharedSecretV1 {
-            common_secret,
-            aes_enc_key,
+    pub fn authenticate(&self, message: &[u8]) -> Vec<u8> {
+        match self {
+            SharedSecret::V1(s) => s.authenticate(message),
+            SharedSecret::V2(s) => s.authenticate(message),
         }
     }
 }
 
-impl SharedSecret for SharedSecretV1 {
+fn verify_v1<E: Env>(
+    key: &[u8; 32],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), Ctap2StatusCode> {
+    if signature.len() != 16 {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    if Hmac::<E>::verify_truncated_left(key, message, array_ref![signature, 0, 16]) {
+        Ok(())
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+    }
+}
+
+fn verify_v2<E: Env>(
+    key: &[u8; 32],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), Ctap2StatusCode> {
+    if signature.len() != 32 {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    if Hmac::<E>::verify(key, message, array_ref![signature, 0, 32]) {
+        Ok(())
+    } else {
+        Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+    }
+}
+
+pub struct SharedSecretV1<E: Env> {
+    common_secret: [u8; 32],
+    aes_enc_key: crypto::aes256::EncryptionKey,
+    // TODO: remove after porting AES to env crypto
+    phantom: PhantomData<E>,
+}
+
+impl<E: Env> SharedSecretV1<E> {
+    /// Creates a new shared secret from the handshake result.
+    fn new(handshake: [u8; 32]) -> Self {
+        let common_secret = Sha::<E>::digest(&handshake);
+        let aes_enc_key = crypto::aes256::EncryptionKey::new(&common_secret);
+        SharedSecretV1 {
+            common_secret,
+            aes_enc_key,
+            phantom: PhantomData,
+        }
+    }
+
     fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
         aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, false)
     }
@@ -191,32 +233,33 @@ impl SharedSecret for SharedSecretV1 {
     }
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-        verify_v1(&self.common_secret, message, signature)
+        verify_v1::<E>(&self.common_secret, message, signature)
     }
 
     #[cfg(test)]
     fn authenticate(&self, message: &[u8]) -> Vec<u8> {
-        hmac_256::<Sha256>(&self.common_secret, message)[..16].to_vec()
+        Hmac::<E>::mac(&self.common_secret, message)[..16].to_vec()
     }
 }
 
-pub struct SharedSecretV2 {
+pub struct SharedSecretV2<E: Env> {
     aes_enc_key: crypto::aes256::EncryptionKey,
     hmac_key: [u8; 32],
+    // TODO: remove after porting AES to env crypto
+    phantom: PhantomData<E>,
 }
 
-impl SharedSecretV2 {
+impl<E: Env> SharedSecretV2<E> {
     /// Creates a new shared secret from the handshake result.
-    fn new(handshake: [u8; 32]) -> SharedSecretV2 {
-        let aes_key = hkdf_empty_salt_256::<Sha256>(&handshake, b"CTAP2 AES key");
+    fn new(handshake: [u8; 32]) -> Self {
+        let aes_key = hkdf_empty_salt_256::<crypto::sha256::Sha256>(&handshake, b"CTAP2 AES key");
         SharedSecretV2 {
             aes_enc_key: crypto::aes256::EncryptionKey::new(&aes_key),
-            hmac_key: hkdf_empty_salt_256::<Sha256>(&handshake, b"CTAP2 HMAC key"),
+            hmac_key: hkdf_empty_salt_256::<crypto::sha256::Sha256>(&handshake, b"CTAP2 HMAC key"),
+            phantom: PhantomData,
         }
     }
-}
 
-impl SharedSecret for SharedSecretV2 {
     fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
         aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, true)
     }
@@ -226,12 +269,12 @@ impl SharedSecret for SharedSecretV2 {
     }
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
-        verify_v2(&self.hmac_key, message, signature)
+        verify_v2::<E>(&self.hmac_key, message, signature)
     }
 
     #[cfg(test)]
     fn authenticate(&self, message: &[u8]) -> Vec<u8> {
-        hmac_256::<Sha256>(&self.hmac_key, message).to_vec()
+        Hmac::<E>::mac(&self.hmac_key, message).to_vec()
     }
 }
 
@@ -263,7 +306,7 @@ mod test {
     #[test]
     fn test_shared_secret_v1_encrypt_decrypt() {
         let mut env = TestEnv::default();
-        let shared_secret = SharedSecretV1::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
@@ -271,7 +314,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v1_authenticate_verify() {
-        let shared_secret = SharedSecretV1::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
         let message = [0xAA; 32];
         let signature = shared_secret.authenticate(&message);
         assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
@@ -279,7 +322,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v1_verify() {
-        let shared_secret = SharedSecretV1::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
         let message = [0xAA];
         let signature = [
             0x8B, 0x60, 0x15, 0x7D, 0xF3, 0x44, 0x82, 0x2E, 0x54, 0x34, 0x7A, 0x01, 0xFB, 0x02,
@@ -299,7 +342,7 @@ mod test {
     #[test]
     fn test_shared_secret_v2_encrypt_decrypt() {
         let mut env = TestEnv::default();
-        let shared_secret = SharedSecretV2::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
         let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
@@ -307,7 +350,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_authenticate_verify() {
-        let shared_secret = SharedSecretV2::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
         let message = [0xAA; 32];
         let signature = shared_secret.authenticate(&message);
         assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
@@ -315,7 +358,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_verify() {
-        let shared_secret = SharedSecretV2::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
         let message = [0xAA];
         let signature = [
             0xC0, 0x3F, 0x2A, 0x22, 0x5C, 0xC3, 0x4E, 0x05, 0xC1, 0x0E, 0x72, 0x9C, 0x8D, 0xD5,
@@ -360,11 +403,16 @@ mod test {
             0x49, 0x68,
         ];
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &signature, PinUvAuthProtocol::V1),
+            verify_pin_uv_auth_token::<TestEnv>(
+                &token,
+                &message,
+                &signature,
+                PinUvAuthProtocol::V1
+            ),
             Ok(())
         );
         assert_eq!(
-            verify_pin_uv_auth_token(
+            verify_pin_uv_auth_token::<TestEnv>(
                 &[0x12; PIN_TOKEN_LENGTH],
                 &message,
                 &signature,
@@ -373,11 +421,16 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &[0xBB], &signature, PinUvAuthProtocol::V1),
+            verify_pin_uv_auth_token::<TestEnv>(&token, &[0xBB], &signature, PinUvAuthProtocol::V1),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &[0x12; 16], PinUvAuthProtocol::V1),
+            verify_pin_uv_auth_token::<TestEnv>(
+                &token,
+                &message,
+                &[0x12; 16],
+                PinUvAuthProtocol::V1
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
@@ -392,11 +445,16 @@ mod test {
             0x36, 0x93, 0xF7, 0x84,
         ];
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &signature, PinUvAuthProtocol::V2),
+            verify_pin_uv_auth_token::<TestEnv>(
+                &token,
+                &message,
+                &signature,
+                PinUvAuthProtocol::V2
+            ),
             Ok(())
         );
         assert_eq!(
-            verify_pin_uv_auth_token(
+            verify_pin_uv_auth_token::<TestEnv>(
                 &[0x12; PIN_TOKEN_LENGTH],
                 &message,
                 &signature,
@@ -405,11 +463,16 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &[0xBB], &signature, PinUvAuthProtocol::V2),
+            verify_pin_uv_auth_token::<TestEnv>(&token, &[0xBB], &signature, PinUvAuthProtocol::V2),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
         assert_eq!(
-            verify_pin_uv_auth_token(&token, &message, &[0x12; 32], PinUvAuthProtocol::V2),
+            verify_pin_uv_auth_token::<TestEnv>(
+                &token,
+                &message,
+                &[0x12; 32],
+                PinUvAuthProtocol::V2
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }

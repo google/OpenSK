@@ -24,6 +24,8 @@ rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 p256 = { version = "0.13.0", features = ["ecdh"], optional = true }
 rand_core = { version = "0.6.4", optional = true }
+sha2 = { version = "0.10.6", optional = true }
+hmac = { version = "0.12.1", optional = true }
 
 [features]
 debug_ctap = []
@@ -32,7 +34,7 @@ with_ctap1 = ["crypto/with_ctap1"]
 vendor_hid = []
 fuzz = ["arbitrary", "std"]
 ed25519 = ["ed25519-compact"]
-rust_crypto = ["p256", "rand_core"]
+rust_crypto = ["p256", "rand_core", "sha2", "hmac"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

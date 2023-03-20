@@ -20,8 +20,14 @@
 //!
 //! If you want to use OpenSK outside of Tock v1, maybe this is useful for you though!
 
-use crate::api::crypto::{ecdh, ecdsa, Crypto, EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
+use crate::api::crypto::hmac256::Hmac256;
+use crate::api::crypto::sha256::Sha256;
+use crate::api::crypto::{
+    ecdh, ecdsa, Crypto, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE, HMAC_KEY_SIZE,
+    TRUNCATED_HMAC_SIZE,
+};
 use core::convert::TryFrom;
+use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
 use p256::ecdsa::{SigningKey, VerifyingKey};
@@ -29,6 +35,7 @@ use p256::elliptic_curve::sec1::ToEncodedPoint;
 // TODO: implement CryptoRngCore for our Rng instead
 use rand_core::OsRng;
 use rng256::Rng256;
+use sha2::Digest;
 
 pub struct SoftwareCrypto;
 pub struct SoftwareEcdh;
@@ -37,6 +44,8 @@ pub struct SoftwareEcdsa;
 impl Crypto for SoftwareCrypto {
     type Ecdh = SoftwareEcdh;
     type Ecdsa = SoftwareEcdsa;
+    type Sha256 = SoftwareSha256;
+    type Hmac256 = SoftwareHmac256;
 }
 
 impl ecdh::Ecdh for SoftwareEcdh {
@@ -188,6 +197,57 @@ impl ecdsa::Signature for SoftwareEcdsaSignature {
     }
 }
 
+pub struct SoftwareSha256 {
+    hasher: sha2::Sha256,
+}
+
+impl Sha256 for SoftwareSha256 {
+    fn digest(data: &[u8]) -> [u8; HASH_SIZE] {
+        sha2::Sha256::digest(data).into()
+    }
+
+    fn new() -> Self {
+        let hasher = sha2::Sha256::new();
+        Self { hasher }
+    }
+
+    /// Digest the next part of the message to hash.
+    fn update(&mut self, data: &[u8]) {
+        self.hasher.update(data);
+    }
+
+    /// Finalizes the hashing process, returns the hash value.
+    fn finalize(self) -> [u8; HASH_SIZE] {
+        self.hasher.finalize().into()
+    }
+}
+
+pub struct SoftwareHmac256;
+
+impl Hmac256 for SoftwareHmac256 {
+    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8]) -> [u8; HASH_SIZE] {
+        let mut hmac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+        hmac.update(data);
+        hmac.finalize().into_bytes().into()
+    }
+
+    fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
+        let mut hmac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+        hmac.update(data);
+        hmac.verify_slice(mac).is_ok()
+    }
+
+    fn verify_truncated_left(
+        key: &[u8; HMAC_KEY_SIZE],
+        data: &[u8],
+        mac: &[u8; TRUNCATED_HMAC_SIZE],
+    ) -> bool {
+        let mut hmac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+        hmac.update(data);
+        hmac.verify_truncated_left(mac).is_ok()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -245,5 +305,28 @@ mod test {
         let mut new_bytes = [0; EC_FIELD_SIZE];
         second_key.to_slice(&mut new_bytes);
         assert_eq!(key_bytes, new_bytes);
+    }
+
+    #[test]
+    fn test_sha256_hash_matches() {
+        let data = [0x55; 16];
+        let mut hasher = SoftwareSha256::new();
+        hasher.update(&data);
+        assert_eq!(SoftwareSha256::digest(&data), hasher.finalize());
+    }
+
+    #[test]
+    fn test_hmac256_verifies() {
+        let key = [0xAA; HMAC_KEY_SIZE];
+        let data = [0x55; 16];
+        let mac = SoftwareHmac256::mac(&key, &data);
+        assert!(SoftwareHmac256::verify(&key, &data, &mac));
+        let truncated_mac =
+            <&[u8; TRUNCATED_HMAC_SIZE]>::try_from(&mac[..TRUNCATED_HMAC_SIZE]).unwrap();
+        assert!(SoftwareHmac256::verify_truncated_left(
+            &key,
+            &data,
+            &truncated_mac
+        ));
     }
 }

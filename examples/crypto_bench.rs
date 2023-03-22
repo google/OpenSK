@@ -31,7 +31,7 @@ use libtock_runtime::{set_main, stack_size, TockSyscalls};
 use platform::DefaultConfig;
 use rng256::TockRng256;
 
-stack_size! {0x800}
+stack_size! {0x2000}
 set_main! {main}
 
 type Syscalls = TockSyscalls;

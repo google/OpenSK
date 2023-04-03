@@ -25,10 +25,10 @@ use self::ecdh::Ecdh;
 use self::ecdsa::Ecdsa;
 
 /// The size of field elements in the elliptic curve P256.
-pub const EC_FIELD_BYTE_SIZE: usize = 32;
+pub const EC_FIELD_SIZE: usize = 32;
 
 /// The size of a serialized ECDSA signature.
-pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_BYTE_SIZE;
+pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_SIZE;
 
 /// Necessary cryptographic primitives for CTAP.
 pub trait Crypto {

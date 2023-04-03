@@ -20,7 +20,7 @@
 //!
 //! If you want to use OpenSK outside of Tock v1, maybe this is useful for you though!
 
-use crate::api::crypto::{ecdh, ecdsa, Crypto, EC_FIELD_BYTE_SIZE, EC_SIGNATURE_SIZE};
+use crate::api::crypto::{ecdh, ecdsa, Crypto, EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
 use core::convert::TryFrom;
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
@@ -74,17 +74,14 @@ pub struct SoftwareEcdhPublicKey {
 }
 
 impl ecdh::PublicKey for SoftwareEcdhPublicKey {
-    fn from_coordinates(
-        x: &[u8; EC_FIELD_BYTE_SIZE],
-        y: &[u8; EC_FIELD_BYTE_SIZE],
-    ) -> Option<Self> {
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         let encoded_point: p256::EncodedPoint =
             p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
         let public_key = p256::PublicKey::from_sec1_bytes(encoded_point.as_bytes()).ok()?;
         Some(Self { public_key })
     }
 
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         let point = self.public_key.to_encoded_point(false);
         x.copy_from_slice(point.x().unwrap());
         y.copy_from_slice(point.y().unwrap());
@@ -96,8 +93,8 @@ pub struct SoftwareEcdhSharedSecret {
 }
 
 impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_BYTE_SIZE] {
-        let mut bytes = [0; EC_FIELD_BYTE_SIZE];
+    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE] {
+        let mut bytes = [0; EC_FIELD_SIZE];
         bytes.copy_from_slice(self.shared_secret.raw_secret_bytes().as_slice());
         bytes
     }
@@ -122,7 +119,7 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         SoftwareEcdsaSecretKey { signing_key }
     }
 
-    fn from_slice(bytes: &[u8; EC_FIELD_BYTE_SIZE]) -> Option<Self> {
+    fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         let signing_key = SigningKey::from_slice(bytes).ok()?;
         Some(SoftwareEcdsaSecretKey { signing_key })
     }
@@ -137,7 +134,7 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         SoftwareEcdsaSignature { signature }
     }
 
-    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_SIZE]) {
         bytes.copy_from_slice(&self.signing_key.to_bytes());
     }
 }
@@ -149,10 +146,7 @@ pub struct SoftwareEcdsaPublicKey {
 impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
 
-    fn from_coordinates(
-        x: &[u8; EC_FIELD_BYTE_SIZE],
-        y: &[u8; EC_FIELD_BYTE_SIZE],
-    ) -> Option<Self> {
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         let encoded_point: p256::EncodedPoint =
             p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
         let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
@@ -165,7 +159,7 @@ impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
             .is_ok()
     }
 
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         let point = self.verifying_key.to_encoded_point(false);
         x.copy_from_slice(point.x().unwrap());
         y.copy_from_slice(point.y().unwrap());
@@ -178,9 +172,9 @@ pub struct SoftwareEcdsaSignature {
 
 impl ecdsa::Signature for SoftwareEcdsaSignature {
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
-        // Assumes EC_SIGNATURE_SIZE == 2 * EC_FIELD_BYTE_SIZE
-        let r = &bytes[..EC_FIELD_BYTE_SIZE];
-        let s = &bytes[EC_FIELD_BYTE_SIZE..];
+        // Assumes EC_SIGNATURE_SIZE == 2 * EC_FIELD_SIZE
+        let r = &bytes[..EC_FIELD_SIZE];
+        let s = &bytes[EC_FIELD_SIZE..];
         let r = p256::NonZeroScalar::try_from(r).ok()?;
         let s = p256::NonZeroScalar::try_from(s).ok()?;
         let r = p256::FieldBytes::from(r);
@@ -220,12 +214,12 @@ mod test {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdhSecretKey::random(env.rng());
         let first_public = first_key.public_key();
-        let mut x = [0; EC_FIELD_BYTE_SIZE];
-        let mut y = [0; EC_FIELD_BYTE_SIZE];
+        let mut x = [0; EC_FIELD_SIZE];
+        let mut y = [0; EC_FIELD_SIZE];
         first_public.to_coordinates(&mut x, &mut y);
         let new_public = SoftwareEcdhPublicKey::from_coordinates(&x, &y).unwrap();
-        let mut new_x = [0; EC_FIELD_BYTE_SIZE];
-        let mut new_y = [0; EC_FIELD_BYTE_SIZE];
+        let mut new_x = [0; EC_FIELD_SIZE];
+        let mut new_y = [0; EC_FIELD_SIZE];
         new_public.to_coordinates(&mut new_x, &mut new_y);
         assert_eq!(x, new_x);
         assert_eq!(y, new_y);
@@ -245,10 +239,10 @@ mod test {
     fn test_ecdsa_secret_key_from_to_bytes() {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let mut key_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut key_bytes = [0; EC_FIELD_SIZE];
         first_key.to_slice(&mut key_bytes);
         let second_key = SoftwareEcdsaSecretKey::from_slice(&key_bytes).unwrap();
-        let mut new_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut new_bytes = [0; EC_FIELD_SIZE];
         second_key.to_slice(&mut new_bytes);
         assert_eq!(key_bytes, new_bytes);
     }

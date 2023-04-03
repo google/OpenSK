@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::EC_FIELD_BYTE_SIZE;
+use super::EC_FIELD_SIZE;
 use rng256::Rng256;
 
 /// Container for all ECDH cryptographic material.
@@ -40,15 +40,14 @@ pub trait SecretKey {
 /// ECDH public key.
 pub trait PublicKey: Sized {
     /// Creates a public key from its coordinates.
-    fn from_coordinates(x: &[u8; EC_FIELD_BYTE_SIZE], y: &[u8; EC_FIELD_BYTE_SIZE])
-        -> Option<Self>;
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
 
     /// Writes the public key coordinates into the passed in parameters.
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]);
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]);
 }
 
 /// ECDH shared secret.
 pub trait SharedSecret {
     /// Exports the x component of the point computed by Diffie–Hellman.
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_BYTE_SIZE];
+    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE];
 }

@@ -18,7 +18,7 @@ use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
-use crate::api::crypto::EC_FIELD_BYTE_SIZE;
+use crate::api::crypto::EC_FIELD_SIZE;
 use crate::env::Env;
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
@@ -158,17 +158,12 @@ impl TryFrom<&[u8]> for U2fCommand {
     }
 }
 
-fn to_uncompressed(public_key: &impl ecdsa::PublicKey) -> [u8; 1 + 2 * EC_FIELD_BYTE_SIZE] {
+fn to_uncompressed(public_key: &impl ecdsa::PublicKey) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
     // Formatting according to:
     // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
     const B0_BYTE_MARKER: u8 = 0x04;
-    let mut representation = [0; 1 + 2 * EC_FIELD_BYTE_SIZE];
-    let (marker, x, y) = mut_array_refs![
-        &mut representation,
-        1,
-        EC_FIELD_BYTE_SIZE,
-        EC_FIELD_BYTE_SIZE
-    ];
+    let mut representation = [0; 1 + 2 * EC_FIELD_SIZE];
+    let (marker, x, y) = mut_array_refs![&mut representation, 1, EC_FIELD_SIZE, EC_FIELD_SIZE];
     marker[0] = B0_BYTE_MARKER;
     public_key.to_coordinates(x, y);
     representation

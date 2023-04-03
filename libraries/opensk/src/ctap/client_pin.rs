@@ -587,8 +587,8 @@ impl<E: Env> ClientPin<E> {
 mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
-    use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
+    use crate::env::EcdhSk;
     use alloc::vec;
 
     /// Stores a PIN hash corresponding to the dummy PIN "1234".
@@ -619,7 +619,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> (ClientPin<TestEnv>, Box<dyn SharedSecret>) {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pk = key_agreement_key.public_key();
         let key_agreement = CoseKey::from_ecdh_public_key(pk);
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];

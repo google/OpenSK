@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::{ecdh, ecdsa, Crypto, EC_FIELD_BYTE_SIZE, EC_SIGNATURE_SIZE};
+use crate::api::crypto::{ecdh, ecdsa, Crypto, EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
 use alloc::vec::Vec;
 use rng256::Rng256;
 
@@ -60,24 +60,21 @@ pub struct SoftwareEcdhPublicKey {
 }
 
 impl ecdh::PublicKey for SoftwareEcdhPublicKey {
-    fn from_coordinates(
-        x: &[u8; EC_FIELD_BYTE_SIZE],
-        y: &[u8; EC_FIELD_BYTE_SIZE],
-    ) -> Option<Self> {
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         crypto::ecdh::PubKey::from_coordinates(x, y).map(|k| Self { pub_key: k })
     }
 
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         self.pub_key.to_coordinates(x, y);
     }
 }
 
 pub struct SoftwareEcdhSharedSecret {
-    shared_secret: [u8; EC_FIELD_BYTE_SIZE],
+    shared_secret: [u8; EC_FIELD_SIZE],
 }
 
 impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_BYTE_SIZE] {
+    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE] {
         self.shared_secret
     }
 }
@@ -101,7 +98,7 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         Self { sec_key }
     }
 
-    fn from_slice(bytes: &[u8; EC_FIELD_BYTE_SIZE]) -> Option<Self> {
+    fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         crypto::ecdsa::SecKey::from_bytes(bytes).map(|k| Self { sec_key: k })
     }
 
@@ -115,7 +112,7 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         SoftwareEcdsaSignature { signature }
     }
 
-    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_SIZE]) {
         self.sec_key.to_bytes(bytes);
     }
 }
@@ -127,10 +124,7 @@ pub struct SoftwareEcdsaPublicKey {
 impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
 
-    fn from_coordinates(
-        x: &[u8; EC_FIELD_BYTE_SIZE],
-        y: &[u8; EC_FIELD_BYTE_SIZE],
-    ) -> Option<Self> {
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
         crypto::ecdsa::PubKey::from_coordinates(x, y).map(|k| Self { pub_key: k })
     }
 
@@ -139,7 +133,7 @@ impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
             .verify_vartime::<crypto::sha256::Sha256>(message, &signature.signature)
     }
 
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]) {
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         self.pub_key.to_coordinates(x, y);
     }
 }
@@ -184,12 +178,12 @@ mod test {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdhSecretKey::random(env.rng());
         let first_public = first_key.public_key();
-        let mut x = [0; EC_FIELD_BYTE_SIZE];
-        let mut y = [0; EC_FIELD_BYTE_SIZE];
+        let mut x = [0; EC_FIELD_SIZE];
+        let mut y = [0; EC_FIELD_SIZE];
         first_public.to_coordinates(&mut x, &mut y);
         let new_public = SoftwareEcdhPublicKey::from_coordinates(&x, &y).unwrap();
-        let mut new_x = [0; EC_FIELD_BYTE_SIZE];
-        let mut new_y = [0; EC_FIELD_BYTE_SIZE];
+        let mut new_x = [0; EC_FIELD_SIZE];
+        let mut new_y = [0; EC_FIELD_SIZE];
         new_public.to_coordinates(&mut new_x, &mut new_y);
         assert_eq!(x, new_x);
         assert_eq!(y, new_y);
@@ -209,10 +203,10 @@ mod test {
     fn test_ecdsa_secret_key_from_to_bytes() {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let mut key_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut key_bytes = [0; EC_FIELD_SIZE];
         first_key.to_slice(&mut key_bytes);
         let second_key = SoftwareEcdsaSecretKey::from_slice(&key_bytes).unwrap();
-        let mut new_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut new_bytes = [0; EC_FIELD_SIZE];
         second_key.to_slice(&mut new_bytes);
         assert_eq!(key_bytes, new_bytes);
     }

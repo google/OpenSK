@@ -1453,8 +1453,8 @@ mod test {
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization;
     use crate::api::user_presence::UserPresenceResult;
-    use crate::env::test::crypto::TestEcdhSecretKey;
     use crate::env::test::TestEnv;
+    use crate::env::EcdhSk;
     use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
@@ -2034,7 +2034,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -2396,7 +2396,7 @@ mod test {
     }
 
     fn get_assertion_hmac_secret_params(
-        key_agreement_key: TestEcdhSecretKey,
+        key_agreement_key: EcdhSk<TestEnv>,
         key_agreement_response: ResponseData,
         credential_id: Option<Vec<u8>>,
         pin_uv_auth_protocol: PinUvAuthProtocol,
@@ -2450,7 +2450,7 @@ mod test {
 
     fn test_helper_process_get_assertion_hmac_secret(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let make_extensions = MakeCredentialExtensions {
@@ -2506,7 +2506,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let make_extensions = MakeCredentialExtensions {
@@ -2901,7 +2901,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x88; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -3505,7 +3505,7 @@ mod test {
     #[test]
     fn test_credential_management_timeout() {
         let mut env = TestEnv::default();
-        let key_agreement_key = TestEcdhSecretKey::random(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,

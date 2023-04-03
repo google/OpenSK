@@ -14,7 +14,7 @@
 
 use super::crypto_wrapper::PrivateKey;
 use super::status_code::Ctap2StatusCode;
-use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_BYTE_SIZE};
+use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_SIZE};
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -728,8 +728,8 @@ impl PublicKeyCredentialSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct CoseKey {
-    x_bytes: [u8; EC_FIELD_BYTE_SIZE],
-    y_bytes: [u8; EC_FIELD_BYTE_SIZE],
+    x_bytes: [u8; EC_FIELD_SIZE],
+    y_bytes: [u8; EC_FIELD_SIZE],
     algorithm: i64,
     key_type: i64,
     curve: i64,
@@ -750,8 +750,8 @@ impl CoseKey {
     const ED25519_CURVE: i64 = 6;
 
     pub fn from_ecdh_public_key(pk: impl ecdh::PublicKey) -> Self {
-        let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
-        let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut x_bytes = [0; EC_FIELD_SIZE];
+        let mut y_bytes = [0; EC_FIELD_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,
@@ -763,8 +763,8 @@ impl CoseKey {
     }
 
     pub fn from_ecdsa_public_key(pk: impl ecdsa::PublicKey) -> Self {
-        let mut x_bytes = [0; EC_FIELD_BYTE_SIZE];
-        let mut y_bytes = [0; EC_FIELD_BYTE_SIZE];
+        let mut x_bytes = [0; EC_FIELD_SIZE];
+        let mut y_bytes = [0; EC_FIELD_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,
@@ -778,7 +778,7 @@ impl CoseKey {
     /// Returns the x and y coordinates, if the key is an ECDH public key.
     pub fn try_into_ecdh_coordinates(
         self,
-    ) -> Result<([u8; EC_FIELD_BYTE_SIZE], [u8; EC_FIELD_BYTE_SIZE]), Ctap2StatusCode> {
+    ) -> Result<([u8; EC_FIELD_SIZE], [u8; EC_FIELD_SIZE]), Ctap2StatusCode> {
         let CoseKey {
             x_bytes,
             y_bytes,
@@ -843,11 +843,11 @@ impl TryFrom<cbor::Value> for CoseKey {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         };
         let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
-        if x_bytes.len() != EC_FIELD_BYTE_SIZE {
+        if x_bytes.len() != EC_FIELD_SIZE {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let y_bytes = extract_byte_string(ok_or_missing(y_bytes)?)?;
-        if y_bytes.len() != EC_FIELD_BYTE_SIZE {
+        if y_bytes.len() != EC_FIELD_SIZE {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         let curve = extract_integer(ok_or_missing(curve)?)?;
@@ -860,8 +860,8 @@ impl TryFrom<cbor::Value> for CoseKey {
         }
 
         Ok(CoseKey {
-            x_bytes: *array_ref![x_bytes.as_slice(), 0, EC_FIELD_BYTE_SIZE],
-            y_bytes: *array_ref![y_bytes.as_slice(), 0, EC_FIELD_BYTE_SIZE],
+            x_bytes: *array_ref![x_bytes.as_slice(), 0, EC_FIELD_SIZE],
+            y_bytes: *array_ref![y_bytes.as_slice(), 0, EC_FIELD_SIZE],
             algorithm,
             key_type,
             curve,
@@ -1232,8 +1232,8 @@ mod test {
     use super::*;
     use crate::api::crypto::ecdh::PublicKey as _;
     use crate::api::crypto::ecdsa::PublicKey as _;
-    use crate::env::test::crypto::{TestEcdhPublicKey, TestEcdsaPublicKey};
     use crate::env::test::TestEnv;
+    use crate::env::{EcdhPk, EcdsaPk};
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
@@ -1927,7 +1927,7 @@ mod test {
     fn test_from_into_cose_key_ecdh() {
         let cose_key = CoseKey::example_ecdh_pubkey();
         let (x_bytes, y_bytes) = cose_key.clone().try_into_ecdh_coordinates().unwrap();
-        let created_pk = TestEcdhPublicKey::from_coordinates(&x_bytes, &y_bytes).unwrap();
+        let created_pk = EcdhPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
         let new_cose_key = CoseKey::from_ecdh_public_key(created_pk);
         assert_eq!(cose_key, new_cose_key);
     }
@@ -1944,7 +1944,7 @@ mod test {
             0x59, 0xB1, 0xD9, 0xAB, 0xD7, 0x81, 0x71, 0x60, 0x35, 0xFE, 0xFF, 0xE8, 0xE1, 0x94,
             0x05, 0x60, 0xA0, 0xBC,
         ];
-        let created_pk = TestEcdsaPublicKey::from_coordinates(&x_bytes, &y_bytes).unwrap();
+        let created_pk = EcdsaPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
         let cose_key = CoseKey::from_ecdsa_public_key(created_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
         assert_eq!(cose_key.y_bytes, y_bytes);

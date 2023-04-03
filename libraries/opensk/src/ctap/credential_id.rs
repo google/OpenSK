@@ -272,8 +272,8 @@ mod test {
     use crate::api::customization::Customization;
     use crate::ctap::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::SignatureAlgorithm;
-    use crate::env::test::crypto::TestEcdsaSecretKey;
     use crate::env::test::TestEnv;
+    use crate::env::EcdsaSk;
     use crypto::hmac::hmac_256;
 
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
@@ -382,7 +382,7 @@ mod test {
     /// This is a copy of the function that genereated deprecated key handles.
     fn legacy_encrypt_to_credential_id(
         env: &mut impl Env,
-        private_key: TestEcdsaSecretKey,
+        private_key: EcdsaSk<TestEnv>,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         let aes_enc_key =

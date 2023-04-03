@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{EC_FIELD_BYTE_SIZE, EC_SIGNATURE_SIZE};
+use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
 use alloc::vec::Vec;
 use rng256::Rng256;
 
@@ -32,7 +32,7 @@ pub trait SecretKey: Sized {
     fn random(rng: &mut impl Rng256) -> Self;
 
     /// Creates a signing key from its representation in bytes.
-    fn from_slice(bytes: &[u8; EC_FIELD_BYTE_SIZE]) -> Option<Self>;
+    fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
 
     /// Computes the corresponding public key for this private key.
     fn public_key(&self) -> Self::PublicKey;
@@ -43,7 +43,7 @@ pub trait SecretKey: Sized {
     fn sign(&self, message: &[u8]) -> Self::Signature;
 
     /// Writes the signing key bytes into the passed in parameter.
-    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_BYTE_SIZE]);
+    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_SIZE]);
 }
 
 /// ECDSA verifying key.
@@ -51,8 +51,7 @@ pub trait PublicKey: Sized {
     type Signature: Signature;
 
     /// Creates a public key from its coordinates.
-    fn from_coordinates(x: &[u8; EC_FIELD_BYTE_SIZE], y: &[u8; EC_FIELD_BYTE_SIZE])
-        -> Option<Self>;
+    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
 
     /// Verifies if the signature matches the message.
     ///
@@ -60,7 +59,7 @@ pub trait PublicKey: Sized {
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
 
     /// Writes the public key coordinates into the passed in parameters.
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_BYTE_SIZE], y: &mut [u8; EC_FIELD_BYTE_SIZE]);
+    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]);
 }
 
 /// ECDSA signature.

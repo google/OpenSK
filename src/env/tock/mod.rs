@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use self::crypto::TockCrypto;
 pub use self::storage::{TockStorage, TockUpgradeStorage};
 use clock::TockClock;
 use core::cell::Cell;
@@ -28,6 +27,7 @@ use opensk::api::attestation_store::AttestationStore;
 use opensk::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
+use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
 use opensk::api::firmware_protection::FirmwareProtection;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
@@ -37,7 +37,6 @@ use persistent_store::{StorageResult, Store};
 use rng256::Rng256;
 
 mod clock;
-mod crypto;
 mod storage;
 
 pub const AAGUID: &[u8; AAGUID_LENGTH] =
@@ -251,7 +250,7 @@ impl Env for TockEnv {
     type Write = Console;
     type Customization = CustomizationImpl;
     type HidConnection = TockHidConnection;
-    type Crypto = TockCrypto;
+    type Crypto = SoftwareCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

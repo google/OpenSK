@@ -20,11 +20,13 @@ pub mod rust_crypto;
 pub mod software_crypto;
 #[cfg(feature = "rust_crypto")]
 pub use rust_crypto as software_crypto;
+pub mod hkdf256;
 pub mod hmac256;
 pub mod sha256;
 
 use self::ecdh::Ecdh;
 use self::ecdsa::Ecdsa;
+use self::hkdf256::Hkdf256;
 use self::hmac256::Hmac256;
 use self::sha256::Sha256;
 
@@ -51,4 +53,5 @@ pub trait Crypto {
     type Ecdsa: Ecdsa;
     type Sha256: Sha256;
     type Hmac256: Hmac256;
+    type Hkdf256: Hkdf256;
 }

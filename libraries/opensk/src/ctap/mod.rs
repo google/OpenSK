@@ -66,20 +66,19 @@ use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
+use crate::api::crypto::hmac256::Hmac256;
+use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
-use crate::env::{EcdsaSk, Env};
+use crate::env::{EcdsaSk, Env, Hmac, Sha};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-use crypto::hmac::hmac_256;
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -781,7 +780,7 @@ impl<E: Env> CtapState<E> {
         };
         flags |= UP_FLAG | AT_FLAG;
 
-        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+        let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
                 if self.check_cred_protect_for_listed_credential(
@@ -958,7 +957,7 @@ impl<E: Env> CtapState<E> {
     ) -> Result<[u8; 32], Ctap2StatusCode> {
         let entropy = private_key.to_bytes();
         let key = storage::cred_random_secret(env, has_uv)?;
-        Ok(hmac_256::<Sha256>(&key, &entropy))
+        Ok(Hmac::<E>::mac(&key, &entropy))
     }
 
     // Processes the input of a get_assertion operation for a given credential
@@ -1135,7 +1134,7 @@ impl<E: Env> CtapState<E> {
             flags |= ED_FLAG;
         }
 
-        let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+        let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         let (credential, next_credential_keys) = if let Some(allow_list) = allow_list {
             (
                 self.get_any_credential_from_allow_list(
@@ -1382,7 +1381,7 @@ impl<E: Env> CtapState<E> {
         params: AuthenticatorVendorUpgradeParameters,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         let AuthenticatorVendorUpgradeParameters { offset, data, hash } = params;
-        let calculated_hash = Sha256::hash(&data);
+        let calculated_hash = Sha::<E>::digest(&data);
         if hash != calculated_hash {
             return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
         }
@@ -2415,7 +2414,7 @@ mod test {
             .unwrap();
 
         let salt = vec![0x01; 32];
-        let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
+        let salt_enc = shared_secret.encrypt(env.rng(), &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: CoseKey::from_ecdh_public_key(platform_public_key),
@@ -3332,9 +3331,9 @@ mod test {
 
         const METADATA_LEN: usize = 0x1000;
         let metadata = vec![0xFF; METADATA_LEN];
-        let metadata_hash = Sha256::hash(&metadata);
+        let metadata_hash = Sha::<TestEnv>::digest(&metadata);
         let data = vec![0xFF; 0x1000];
-        let hash = Sha256::hash(&data);
+        let hash = Sha::<TestEnv>::digest(&data);
 
         // Write to partition.
         let response = ctap_state.process_vendor_upgrade(
@@ -3410,7 +3409,7 @@ mod test {
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let data = vec![0xFF; 0x1000];
-        let hash = Sha256::hash(&data);
+        let hash = Sha::<TestEnv>::digest(&data);
         let response = ctap_state.process_vendor_upgrade(
             &mut env,
             AuthenticatorVendorUpgradeParameters {

@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use crate::api::clock::Clock;
+use crate::api::crypto::sha256::Sha256;
 use crate::ctap::client_pin::PinPermission;
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::env::Env;
+use crate::env::{Env, Sha};
 use alloc::string::String;
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 
 /// Timeout for auth tokens.
 ///
@@ -87,7 +86,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     /// Checks if the permissions RPID's association matches the hash.
     pub fn has_permissions_rp_id_hash(&self, rp_id_hash: &[u8]) -> Result<(), Ctap2StatusCode> {
         match &self.permissions_rp_id {
-            Some(p) if rp_id_hash == Sha256::hash(p.as_bytes()) => Ok(()),
+            Some(p) if rp_id_hash == Sha::<E>::digest(p.as_bytes()) => Ok(()),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
         }
     }
@@ -210,7 +209,7 @@ mod test {
     #[test]
     fn test_permissions_rp_id_none() {
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        let example_hash = Sha256::hash(b"example.com");
+        let example_hash = Sha::<TestEnv>::digest(b"example.com");
         token_state.set_permissions_rp_id(None);
         assert_eq!(token_state.has_no_permissions_rp_id(), Ok(()));
         assert_eq!(
@@ -226,7 +225,7 @@ mod test {
     #[test]
     fn test_permissions_rp_id_some() {
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        let example_hash = Sha256::hash(b"example.com");
+        let example_hash = Sha::<TestEnv>::digest(b"example.com");
         token_state.set_permissions_rp_id(Some(String::from("example.com")));
 
         assert_eq!(

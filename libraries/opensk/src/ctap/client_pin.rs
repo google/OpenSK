@@ -22,18 +22,16 @@ use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
 #[cfg(test)]
 use crate::api::crypto::ecdh::SecretKey as _;
+use crate::api::crypto::hmac256::Hmac256;
+use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::ctap::storage;
 #[cfg(test)]
 use crate::env::EcdhSk;
-use crate::env::Env;
-use alloc::boxed::Box;
+use crate::env::{Env, Hmac, Sha};
 use alloc::str;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crypto::hmac::hmac_256;
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 use subtle::ConstantTimeEq;
@@ -60,8 +58,8 @@ pub const PIN_TOKEN_LENGTH: usize = 32;
 const PIN_PADDED_LENGTH: usize = 64;
 
 /// Decrypts the new_pin_enc and outputs the found PIN.
-fn decrypt_pin(
-    shared_secret: &dyn SharedSecret,
+fn decrypt_pin<E: Env>(
+    shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
     let decrypted_pin = shared_secret.decrypt(&new_pin_enc)?;
@@ -79,9 +77,9 @@ fn decrypt_pin(
 /// The new PIN is passed encrypted, so it is first decrypted and stripped from
 /// padding. Next, it is checked against the PIN policy. Last, it is hashed and
 /// truncated for persistent storage.
-fn check_and_store_new_pin(
-    env: &mut impl Env,
-    shared_secret: &dyn SharedSecret,
+fn check_and_store_new_pin<E: Env>(
+    env: &mut E,
+    shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
 ) -> Result<(), Ctap2StatusCode> {
     let pin = decrypt_pin(shared_secret, new_pin_enc)?;
@@ -91,7 +89,7 @@ fn check_and_store_new_pin(
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let mut pin_hash = [0u8; PIN_AUTH_LENGTH];
-    pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..PIN_AUTH_LENGTH]);
+    pin_hash.copy_from_slice(&Sha::<E>::digest(&pin[..])[..PIN_AUTH_LENGTH]);
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
     storage::set_pin(env, &pin_hash, pin_length as u8)?;
     Ok(())
@@ -149,7 +147,7 @@ impl<E: Env> ClientPin<E> {
         &self,
         pin_uv_auth_protocol: PinUvAuthProtocol,
         key_agreement: CoseKey,
-    ) -> Result<Box<dyn SharedSecret>, Ctap2StatusCode> {
+    ) -> Result<SharedSecret<E>, Ctap2StatusCode> {
         self.get_pin_protocol(pin_uv_auth_protocol)
             .decapsulate(key_agreement, pin_uv_auth_protocol)
     }
@@ -163,7 +161,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         pin_uv_auth_protocol: PinUvAuthProtocol,
-        shared_secret: &dyn SharedSecret,
+        shared_secret: &SharedSecret<E>,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
         match storage::pin_hash(env)? {
@@ -247,7 +245,7 @@ impl<E: Env> ClientPin<E> {
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
         shared_secret.verify(&new_pin_enc, &pin_uv_auth_param)?;
 
-        check_and_store_new_pin(env, shared_secret.as_ref(), new_pin_enc)?;
+        check_and_store_new_pin(env, &shared_secret, new_pin_enc)?;
         storage::reset_pin_retries(env)?;
         Ok(())
     }
@@ -277,14 +275,9 @@ impl<E: Env> ClientPin<E> {
         let mut auth_param_data = new_pin_enc.clone();
         auth_param_data.extend(&pin_hash_enc);
         shared_secret.verify(&auth_param_data, &pin_uv_auth_param)?;
-        self.verify_pin_hash_enc(
-            env,
-            pin_uv_auth_protocol,
-            shared_secret.as_ref(),
-            pin_hash_enc,
-        )?;
+        self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
 
-        check_and_store_new_pin(env, shared_secret.as_ref(), new_pin_enc)?;
+        check_and_store_new_pin(env, &shared_secret, new_pin_enc)?;
         self.pin_protocol_v1.reset_pin_uv_auth_token(env.rng());
         self.pin_protocol_v2.reset_pin_uv_auth_token(env.rng());
         Ok(())
@@ -313,12 +306,7 @@ impl<E: Env> ClientPin<E> {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
         }
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
-        self.verify_pin_hash_enc(
-            env,
-            pin_uv_auth_protocol,
-            shared_secret.as_ref(),
-            pin_hash_enc,
-        )?;
+        self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
         if storage::has_force_pin_change(env)? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
@@ -435,7 +423,7 @@ impl<E: Env> ClientPin<E> {
         if !self.pin_uv_auth_token_state.is_in_use() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
-        verify_pin_uv_auth_token(
+        verify_pin_uv_auth_token::<E>(
             self.get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token(),
             hmac_contents,
@@ -483,9 +471,9 @@ impl<E: Env> ClientPin<E> {
         if decrypted_salts.len() != 32 && decrypted_salts.len() != 64 {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let mut output = hmac_256::<Sha256>(cred_random, &decrypted_salts[..32]).to_vec();
+        let mut output = Hmac::<E>::mac(cred_random, &decrypted_salts[..32]).to_vec();
         if decrypted_salts.len() == 64 {
-            let mut output2 = hmac_256::<Sha256>(cred_random, &decrypted_salts[32..]).to_vec();
+            let mut output2 = Hmac::<E>::mac(cred_random, &decrypted_salts[32..]).to_vec();
             output.append(&mut output2);
         }
         shared_secret.encrypt(env.rng(), &output)
@@ -596,12 +584,12 @@ mod test {
         let mut pin = [0u8; 64];
         pin[..4].copy_from_slice(b"1234");
         let mut pin_hash = [0u8; 16];
-        pin_hash.copy_from_slice(&Sha256::hash(&pin[..])[..16]);
+        pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(&pin[..])[..16]);
         storage::set_pin(env, &pin_hash, 4).unwrap();
     }
 
     /// Fails on PINs bigger than 64 bytes.
-    fn encrypt_pin(shared_secret: &dyn SharedSecret, pin: Vec<u8>) -> Vec<u8> {
+    fn encrypt_pin(shared_secret: &SharedSecret<TestEnv>, pin: Vec<u8>) -> Vec<u8> {
         assert!(pin.len() <= 64);
         let mut env = TestEnv::default();
         let mut padded_pin = [0u8; 64];
@@ -617,7 +605,7 @@ mod test {
     /// should fail.
     fn create_client_pin_and_shared_secret(
         pin_uv_auth_protocol: PinUvAuthProtocol,
-    ) -> (ClientPin<TestEnv>, Box<dyn SharedSecret>) {
+    ) -> (ClientPin<TestEnv>, SharedSecret<TestEnv>) {
         let mut env = TestEnv::default();
         let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pk = key_agreement_key.public_key();
@@ -649,16 +637,10 @@ mod test {
         let pin = b"1234";
         let mut padded_pin = [0u8; 64];
         padded_pin[..pin.len()].copy_from_slice(&pin[..]);
-        let pin_hash = Sha256::hash(&padded_pin);
-        let new_pin_enc = shared_secret
-            .as_ref()
-            .encrypt(env.rng(), &padded_pin)
-            .unwrap();
-        let pin_uv_auth_param = shared_secret.as_ref().authenticate(&new_pin_enc);
-        let pin_hash_enc = shared_secret
-            .as_ref()
-            .encrypt(env.rng(), &pin_hash[..16])
-            .unwrap();
+        let pin_hash = Sha::<TestEnv>::digest(&padded_pin);
+        let new_pin_enc = shared_secret.encrypt(env.rng(), &padded_pin).unwrap();
+        let pin_uv_auth_param = shared_secret.authenticate(&new_pin_enc);
+        let pin_hash_enc = shared_secret.encrypt(env.rng(), &pin_hash[..16]).unwrap();
         let (permissions, permissions_rp_id) = match sub_command {
             ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions
             | ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => {
@@ -739,15 +721,12 @@ mod test {
         ];
         storage::set_pin(&mut env, &pin_hash, 4).unwrap();
 
-        let pin_hash_enc = shared_secret
-            .as_ref()
-            .encrypt(env.rng(), &pin_hash)
-            .unwrap();
+        let pin_hash_enc = shared_secret.encrypt(env.rng(), &pin_hash).unwrap();
         assert_eq!(
             client_pin.verify_pin_hash_enc(
                 &mut env,
                 pin_uv_auth_protocol,
-                shared_secret.as_ref(),
+                &shared_secret,
                 pin_hash_enc
             ),
             Ok(())
@@ -758,22 +737,19 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut env,
                 pin_uv_auth_protocol,
-                shared_secret.as_ref(),
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
 
-        let pin_hash_enc = shared_secret
-            .as_ref()
-            .encrypt(env.rng(), &pin_hash)
-            .unwrap();
+        let pin_hash_enc = shared_secret.encrypt(env.rng(), &pin_hash).unwrap();
         client_pin.consecutive_pin_mismatches = 3;
         assert_eq!(
             client_pin.verify_pin_hash_enc(
                 &mut env,
                 pin_uv_auth_protocol,
-                shared_secret.as_ref(),
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
@@ -785,7 +761,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut env,
                 pin_uv_auth_protocol,
-                shared_secret.as_ref(),
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -796,7 +772,7 @@ mod test {
             client_pin.verify_pin_hash_enc(
                 &mut env,
                 pin_uv_auth_protocol,
-                shared_secret.as_ref(),
+                &shared_secret,
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -1176,29 +1152,29 @@ mod test {
             .decapsulate(pin_protocol.get_public_key(), pin_uv_auth_protocol)
             .unwrap();
 
-        let new_pin_enc = encrypt_pin(shared_secret.as_ref(), b"1234".to_vec());
+        let new_pin_enc = encrypt_pin(&shared_secret, b"1234".to_vec());
         assert_eq!(
-            decrypt_pin(shared_secret.as_ref(), new_pin_enc),
+            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
             Ok(b"1234".to_vec()),
         );
 
-        let new_pin_enc = encrypt_pin(shared_secret.as_ref(), b"123".to_vec());
+        let new_pin_enc = encrypt_pin(&shared_secret, b"123".to_vec());
         assert_eq!(
-            decrypt_pin(shared_secret.as_ref(), new_pin_enc),
+            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
             Ok(b"123".to_vec()),
         );
 
         // Encrypted PIN is too short.
         let new_pin_enc = vec![0x44; 63];
         assert_eq!(
-            decrypt_pin(shared_secret.as_ref(), new_pin_enc),
+            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
 
         // Encrypted PIN is too long.
         let new_pin_enc = vec![0x44; 65];
         assert_eq!(
-            decrypt_pin(shared_secret.as_ref(), new_pin_enc),
+            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
     }
@@ -1241,10 +1217,10 @@ mod test {
         ];
         for (pin, result) in test_cases {
             let old_pin_hash = storage::pin_hash(&mut env).unwrap();
-            let new_pin_enc = encrypt_pin(shared_secret.as_ref(), pin);
+            let new_pin_enc = encrypt_pin(&shared_secret, pin);
 
             assert_eq!(
-                check_and_store_new_pin(&mut env, shared_secret.as_ref(), new_pin_enc),
+                check_and_store_new_pin(&mut env, &shared_secret, new_pin_enc),
                 result
             );
             if result.is_ok() {
@@ -1274,7 +1250,7 @@ mod test {
         let mut env = TestEnv::default();
         let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 
-        let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
+        let salt_enc = shared_secret.encrypt(env.rng(), &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: client_pin
@@ -1285,7 +1261,7 @@ mod test {
             pin_uv_auth_protocol,
         };
         let output = client_pin.process_hmac_secret(&mut env, hmac_secret_input, cred_random);
-        output.map(|v| shared_secret.as_ref().decrypt(&v).unwrap())
+        output.map(|v| shared_secret.decrypt(&v).unwrap())
     }
 
     fn test_helper_process_hmac_secret_bad_salt_auth(pin_uv_auth_protocol: PinUvAuthProtocol) {
@@ -1322,7 +1298,7 @@ mod test {
         let cred_random = [0xC9; 32];
 
         let salt = vec![0x01; 32];
-        let expected_output = hmac_256::<Sha256>(&cred_random, &salt);
+        let expected_output = Hmac::<TestEnv>::mac(&cred_random, &salt);
 
         let output =
             get_process_hmac_secret_decrypted_output(pin_uv_auth_protocol, &cred_random, salt)
@@ -1345,8 +1321,8 @@ mod test {
 
         let salt1 = [0x01; 32];
         let salt2 = [0x02; 32];
-        let expected_output1 = hmac_256::<Sha256>(&cred_random, &salt1);
-        let expected_output2 = hmac_256::<Sha256>(&cred_random, &salt2);
+        let expected_output1 = Hmac::<TestEnv>::mac(&cred_random, &salt1);
+        let expected_output2 = Hmac::<TestEnv>::mac(&cred_random, &salt2);
 
         let mut salt12 = vec![0x00; 64];
         salt12[..32].copy_from_slice(&salt1);
@@ -1460,7 +1436,7 @@ mod test {
     fn test_has_no_or_rp_id_hash_permission() {
         let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
-        let rp_id_hash = Sha256::hash(b"example.com");
+        let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         assert_eq!(
             client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash),
             Ok(())

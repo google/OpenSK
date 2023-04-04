@@ -18,14 +18,13 @@ use super::data_formats::{
 };
 use super::status_code::Ctap2StatusCode;
 use super::{cbor_read, cbor_write};
+use crate::api::crypto::hmac256::Hmac256;
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_byte_string, extract_map};
-use crate::env::Env;
+use crate::env::{Env, Hmac};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
-use crypto::hmac::{hmac_256, verify_hmac_256};
-use crypto::sha256::Sha256;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
 
 pub const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
@@ -161,8 +160,8 @@ fn remove_padding(data: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
 ///
 /// Other information, such as a user name, are not stored. Since encrypted credential IDs are
 /// stored server-side, this information is already available (unencrypted).
-pub fn encrypt_to_credential_id(
-    env: &mut impl Env,
+pub fn encrypt_to_credential_id<E: Env>(
+    env: &mut E,
     private_key: &PrivateKey,
     rp_id_hash: &[u8; 32],
     cred_protect_policy: Option<CredentialProtectionPolicy>,
@@ -183,7 +182,7 @@ pub fn encrypt_to_credential_id(
     let mut credential_id = encrypted_payload;
     credential_id.insert(0, CBOR_CREDENTIAL_ID_VERSION);
 
-    let id_hmac = hmac_256::<Sha256>(
+    let id_hmac = Hmac::<E>::mac(
         &env.key_store().key_handle_authentication()?,
         &credential_id[..],
     );
@@ -208,8 +207,8 @@ pub fn encrypt_to_credential_id(
 /// -  16 bytes: initialization vector for AES-256,
 /// - 192 bytes: encrypted CBOR-encoded credential source fields,
 /// -  32 bytes: HMAC-SHA256 over everything else.
-pub fn decrypt_credential_id(
-    env: &mut impl Env,
+pub fn decrypt_credential_id<E: Env>(
+    env: &mut E,
     credential_id: Vec<u8>,
     rp_id_hash: &[u8],
 ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
@@ -217,7 +216,7 @@ pub fn decrypt_credential_id(
         return Ok(None);
     }
     let hmac_message_size = credential_id.len() - 32;
-    if !verify_hmac_256::<Sha256>(
+    if !Hmac::<E>::verify(
         &env.key_store().key_handle_authentication()?,
         &credential_id[..hmac_message_size],
         array_ref![credential_id, hmac_message_size, 32],
@@ -274,7 +273,6 @@ mod test {
     use crate::ctap::SignatureAlgorithm;
     use crate::env::test::TestEnv;
     use crate::env::EcdsaSk;
-    use crypto::hmac::hmac_256;
 
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
@@ -315,7 +313,7 @@ mod test {
         // Override the HMAC to pass the check.
         encrypted_id.truncate(&encrypted_id.len() - 32);
         let hmac_key = env.key_store().key_handle_authentication().unwrap();
-        let id_hmac = hmac_256::<Sha256>(&hmac_key, &encrypted_id[..]);
+        let id_hmac = Hmac::<TestEnv>::mac(&hmac_key, &encrypted_id[..]);
         encrypted_id.extend(&id_hmac);
 
         assert_eq!(
@@ -392,7 +390,7 @@ mod test {
         plaintext[32..64].copy_from_slice(application);
 
         let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
-        let id_hmac = hmac_256::<Sha256>(
+        let id_hmac = Hmac::<TestEnv>::mac(
             &env.key_store().key_handle_authentication()?,
             &encrypted_id[..],
         );

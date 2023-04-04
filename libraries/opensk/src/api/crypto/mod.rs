@@ -20,9 +20,13 @@ pub mod rust_crypto;
 pub mod software_crypto;
 #[cfg(feature = "rust_crypto")]
 pub use rust_crypto as software_crypto;
+pub mod hmac256;
+pub mod sha256;
 
 use self::ecdh::Ecdh;
 use self::ecdsa::Ecdsa;
+use self::hmac256::Hmac256;
+use self::sha256::Sha256;
 
 /// The size of field elements in the elliptic curve P256.
 pub const EC_FIELD_SIZE: usize = 32;
@@ -30,8 +34,21 @@ pub const EC_FIELD_SIZE: usize = 32;
 /// The size of a serialized ECDSA signature.
 pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_SIZE;
 
+/// The size in bytes of a SHA256.
+pub const HASH_SIZE: usize = 32;
+
+/// The size in bytes of an HMAC.
+pub const HMAC_KEY_SIZE: usize = 32;
+
+/// The size in bytes of a truncated HMAC.
+///
+/// Truncated HMACs are used in PIN protocol V1 in CTAP2.
+pub const TRUNCATED_HMAC_SIZE: usize = 16;
+
 /// Necessary cryptographic primitives for CTAP.
 pub trait Crypto {
     type Ecdh: Ecdh;
     type Ecdsa: Ecdsa;
+    type Sha256: Sha256;
+    type Hmac256: Hmac256;
 }

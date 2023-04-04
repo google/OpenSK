@@ -22,14 +22,13 @@ use super::data_formats::{
 use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::{Channel, StatefulCommand, StatefulPermission};
+use crate::api::crypto::sha256::Sha256;
 use crate::ctap::storage;
-use crate::env::Env;
+use crate::env::{Env, Sha};
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 
 /// Generates a set with all existing RP IDs.
 fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2StatusCode> {
@@ -43,11 +42,11 @@ fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2Status
 }
 
 /// Generates the response for subcommands enumerating RPs.
-fn enumerate_rps_response(
+fn enumerate_rps_response<E: Env>(
     rp_id: String,
     total_rps: Option<u64>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp_id_hash = Some(Sha256::hash(rp_id.as_bytes()).to_vec());
+    let rp_id_hash = Some(Sha::<E>::digest(rp_id.as_bytes()).to_vec());
     let rp = Some(PublicKeyCredentialRpEntity {
         rp_id,
         rp_name: None,
@@ -150,7 +149,7 @@ fn process_enumerate_rps_begin<E: Env>(
         .into_iter()
         .next()
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-    enumerate_rps_response(rp_id, Some(total_rps as u64))
+    enumerate_rps_response::<E>(rp_id, Some(total_rps as u64))
 }
 
 /// Processes the subcommand enumerateRPsGetNextRP for CredentialManagement.
@@ -165,7 +164,7 @@ fn process_enumerate_rps_get_next_rp<E: Env>(
         .into_iter()
         .nth(rp_id_index)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)?;
-    enumerate_rps_response(rp_id, None)
+    enumerate_rps_response::<E>(rp_id, None)
 }
 
 /// Processes the subcommand enumerateCredentialsBegin for CredentialManagement.
@@ -184,7 +183,7 @@ fn process_enumerate_credentials_begin<E: Env>(
     let iter = storage::iter_credentials(env, &mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
         .filter_map(|(key, credential)| {
-            let cred_rp_id_hash = Sha256::hash(credential.rp_id.as_bytes());
+            let cred_rp_id_hash = Sha::<E>::digest(credential.rp_id.as_bytes());
             if cred_rp_id_hash == rp_id_hash.as_slice() {
                 Some(key)
             } else {
@@ -511,7 +510,7 @@ mod test {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
                 assert_eq!(response.total_rps, Some(2));
                 let rp_id = response.rp.unwrap().rp_id;
-                let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+                let rp_id_hash = Sha::<TestEnv>::digest(rp_id.as_bytes());
                 assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
                 rp_id
             }
@@ -535,7 +534,7 @@ mod test {
             ResponseData::AuthenticatorCredentialManagement(Some(response)) => {
                 assert_eq!(response.total_rps, None);
                 let rp_id = response.rp.unwrap().rp_id;
-                let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+                let rp_id_hash = Sha::<TestEnv>::digest(rp_id.as_bytes());
                 assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
                 rp_id
             }
@@ -617,7 +616,7 @@ mod test {
                         assert_eq!(response.total_rps, None);
                     }
                     let rp_id = response.rp.unwrap().rp_id;
-                    let rp_id_hash = Sha256::hash(rp_id.as_bytes());
+                    let rp_id_hash = Sha::<TestEnv>::digest(rp_id.as_bytes());
                     assert_eq!(rp_id_hash, response.rp_id_hash.unwrap().as_slice());
                     assert!(!rp_set.contains(&rp_id));
                     rp_set.insert(rp_id);
@@ -676,7 +675,7 @@ mod test {
         ]);
 
         let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: Some(Sha256::hash(b"example.com").to_vec()),
+            rp_id_hash: Some(Sha::<TestEnv>::digest(b"example.com").to_vec()),
             credential_id: None,
             user: None,
         };

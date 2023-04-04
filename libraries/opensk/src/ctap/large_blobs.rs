@@ -16,14 +16,13 @@ use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
+use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::ctap::storage;
-use crate::env::Env;
+use crate::env::{Env, Sha};
 use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{ByteOrder, LittleEndian};
-use crypto::sha256::Sha256;
-use crypto::Hash256;
 
 /// The length of the truncated hash that is appended to the large blob data.
 const TRUNCATED_HASH_LEN: usize = 16;
@@ -97,7 +96,7 @@ impl LargeBlobs {
                 let mut offset_bytes = [0u8; 4];
                 LittleEndian::write_u32(&mut offset_bytes, offset as u32);
                 large_blob_data.extend(&offset_bytes);
-                large_blob_data.extend(&Sha256::hash(set.as_slice()));
+                large_blob_data.extend(&Sha::<E>::digest(set.as_slice()));
                 client_pin.verify_pin_uv_auth_token(
                     &large_blob_data,
                     &pin_uv_auth_param,
@@ -118,7 +117,7 @@ impl LargeBlobs {
                 self.expected_next_offset = 0;
                 // Must be a positive number.
                 let buffer_hash_index = self.buffer.len() - TRUNCATED_HASH_LEN;
-                if Sha256::hash(&self.buffer[..buffer_hash_index])[..TRUNCATED_HASH_LEN]
+                if Sha::<E>::digest(&self.buffer[..buffer_hash_index])[..TRUNCATED_HASH_LEN]
                     != self.buffer[buffer_hash_index..]
                 {
                     self.buffer = Vec::new();
@@ -195,7 +194,8 @@ mod test {
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
         let mut large_blob = vec![0x1B; DATA_LEN];
-        large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
+        large_blob
+            .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: None,
@@ -261,7 +261,8 @@ mod test {
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
         let mut large_blob = vec![0x1B; DATA_LEN];
-        large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
+        large_blob
+            .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: None,
@@ -311,7 +312,8 @@ mod test {
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
         let mut large_blob = vec![0x1B; DATA_LEN];
-        large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
+        large_blob
+            .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: None,
@@ -420,13 +422,14 @@ mod test {
         const BLOB_LEN: usize = 20;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
         let mut large_blob = vec![0x1B; DATA_LEN];
-        large_blob.extend_from_slice(&Sha256::hash(&large_blob[..])[..TRUNCATED_HASH_LEN]);
+        large_blob
+            .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
         storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
         let mut large_blob_data = vec![0xFF; 32];
         // Command constant and offset bytes.
         large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        large_blob_data.extend(&Sha256::hash(&large_blob));
+        large_blob_data.extend(&Sha::<TestEnv>::digest(&large_blob));
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
             &large_blob_data,

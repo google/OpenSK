@@ -33,6 +33,8 @@ pub type EcdhSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::SecretKey;
 pub type EcdhPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::PublicKey;
 pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::SecretKey;
 pub type EcdsaPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::PublicKey;
+pub type Sha<E> = <<E as Env>::Crypto as Crypto>::Sha256;
+pub type Hmac<E> = <<E as Env>::Crypto as Crypto>::Hmac256;
 
 /// Describes what CTAP needs to function.
 pub trait Env {

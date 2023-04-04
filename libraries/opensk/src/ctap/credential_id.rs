@@ -18,10 +18,11 @@ use super::data_formats::{
 };
 use super::status_code::Ctap2StatusCode;
 use super::{cbor_read, cbor_write};
+use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_byte_string, extract_map};
-use crate::env::{Env, Hmac};
+use crate::env::{AesKey, Env, Hmac};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
@@ -64,12 +65,12 @@ impl From<CredentialSourceField> for sk_cbor::Value {
     }
 }
 
-fn decrypt_legacy_credential_id(
-    env: &mut impl Env,
+fn decrypt_legacy_credential_id<E: Env>(
+    env: &mut E,
     bytes: &[u8],
 ) -> Result<Option<CredentialSource>, Ctap2StatusCode> {
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-    let plaintext = aes256_cbc_decrypt(&aes_enc_key, bytes, true)?;
+    let aes_key = AesKey::<E>::new(&env.key_store().key_handle_encryption()?);
+    let plaintext = aes256_cbc_decrypt::<E>(&aes_key, bytes, true)?;
     if plaintext.len() != 64 {
         return Ok(None);
     }
@@ -86,12 +87,12 @@ fn decrypt_legacy_credential_id(
     }))
 }
 
-fn decrypt_cbor_credential_id(
-    env: &mut impl Env,
+fn decrypt_cbor_credential_id<E: Env>(
+    env: &mut E,
     bytes: &[u8],
 ) -> Result<Option<CredentialSource>, Ctap2StatusCode> {
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-    let mut plaintext = aes256_cbc_decrypt(&aes_enc_key, bytes, true)?;
+    let aes_key = AesKey::<E>::new(&env.key_store().key_handle_encryption()?);
+    let mut plaintext = aes256_cbc_decrypt::<E>(&aes_key, bytes, true)?;
     remove_padding(&mut plaintext)?;
 
     let cbor_credential_source = cbor_read(plaintext.as_slice())?;
@@ -177,8 +178,8 @@ pub fn encrypt_to_credential_id<E: Env>(
     cbor_write(cbor, &mut payload)?;
     add_padding(&mut payload)?;
 
-    let aes_enc_key = crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
-    let encrypted_payload = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &payload, true)?;
+    let aes_key = AesKey::<E>::new(&env.key_store().key_handle_encryption()?);
+    let encrypted_payload = aes256_cbc_encrypt::<E>(env.rng(), &aes_key, &payload, true)?;
     let mut credential_id = encrypted_payload;
     credential_id.insert(0, CBOR_CREDENTIAL_ID_VERSION);
 
@@ -383,13 +384,13 @@ mod test {
         private_key: EcdsaSk<TestEnv>,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
-        let aes_enc_key =
-            crypto::aes256::EncryptionKey::new(&env.key_store().key_handle_encryption()?);
+        let aes_key = AesKey::<TestEnv>::new(&env.key_store().key_handle_encryption()?);
         let mut plaintext = [0; 64];
         private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
-        let mut encrypted_id = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true)?;
+        let mut encrypted_id =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true)?;
         let id_hmac = Hmac::<TestEnv>::mac(
             &env.key_store().key_handle_authentication()?,
             &encrypted_id[..],

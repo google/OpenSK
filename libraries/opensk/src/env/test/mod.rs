@@ -16,6 +16,7 @@ use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
+use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
@@ -217,6 +218,7 @@ impl Env for TestEnv {
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
+    type Crypto = SoftwareCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::env::Env;
+use crate::env::{EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use crypto::cbc::{cbc_decrypt, cbc_encrypt};
-use crypto::ecdsa;
-use crypto::sha256::Sha256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
@@ -129,7 +128,7 @@ impl PrivateKey {
     }
 
     /// Returns the ECDSA private key.
-    pub fn ecdsa_key(&self, env: &mut impl Env) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
+    pub fn ecdsa_key<E: Env>(&self, env: &mut E) -> Result<EcdsaSk<E>, Ctap2StatusCode> {
         match self {
             PrivateKey::Ecdsa(seed) => ecdsa_key_from_seed(env, seed),
             #[allow(unreachable_patterns)]
@@ -141,7 +140,7 @@ impl PrivateKey {
     pub fn get_pub_key(&self, env: &mut impl Env) -> Result<CoseKey, Ctap2StatusCode> {
         Ok(match self {
             PrivateKey::Ecdsa(ecdsa_seed) => {
-                CoseKey::from(ecdsa_key_from_seed(env, ecdsa_seed)?.genpk())
+                CoseKey::from_ecdsa_public_key(ecdsa_key_from_seed(env, ecdsa_seed)?.public_key())
             }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
@@ -155,9 +154,9 @@ impl PrivateKey {
         message: &[u8],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
         Ok(match self {
-            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_key_from_seed(env, ecdsa_seed)?
-                .sign_rfc6979::<Sha256>(message)
-                .to_asn1_der(),
+            PrivateKey::Ecdsa(ecdsa_seed) => {
+                ecdsa_key_from_seed(env, ecdsa_seed)?.sign(message).to_der()
+            }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message, None).to_vec(),
         })
@@ -182,12 +181,12 @@ impl PrivateKey {
     }
 }
 
-fn ecdsa_key_from_seed(
-    env: &mut impl Env,
+fn ecdsa_key_from_seed<E: Env>(
+    env: &mut E,
     seed: &[u8; 32],
-) -> Result<ecdsa::SecKey, Ctap2StatusCode> {
+) -> Result<EcdsaSk<E>, Ctap2StatusCode> {
     let ecdsa_bytes = env.key_store().derive_ecdsa(seed)?;
-    Ok(ecdsa::SecKey::from_bytes(&ecdsa_bytes).unwrap())
+    Ok(EcdsaSk::<E>::from_slice(&ecdsa_bytes).unwrap())
 }
 
 impl From<&PrivateKey> for cbor::Value {
@@ -334,10 +333,10 @@ mod test {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
-        let public_key = ecdsa_key.genpk();
+        let public_key = ecdsa_key.public_key();
         assert_eq!(
             private_key.get_pub_key(&mut env),
-            Ok(CoseKey::from(public_key))
+            Ok(CoseKey::from_ecdsa_public_key(public_key))
         );
     }
 
@@ -347,7 +346,7 @@ mod test {
         let message = [0x5A; 32];
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let ecdsa_key = private_key.ecdsa_key(&mut env).unwrap();
-        let signature = ecdsa_key.sign_rfc6979::<Sha256>(&message).to_asn1_der();
+        let signature = ecdsa_key.sign(&message).to_der();
         assert_eq!(
             private_key.sign_and_encode(&mut env, &message),
             Ok(signature)

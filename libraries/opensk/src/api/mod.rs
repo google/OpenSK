@@ -20,6 +20,7 @@
 pub mod attestation_store;
 pub mod clock;
 pub mod connection;
+pub mod crypto;
 pub mod customization;
 pub mod firmware_protection;
 pub mod key_store;

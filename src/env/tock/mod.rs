@@ -27,6 +27,7 @@ use opensk::api::attestation_store::AttestationStore;
 use opensk::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
+use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
 use opensk::api::firmware_protection::FirmwareProtection;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
@@ -249,6 +250,7 @@ impl Env for TockEnv {
     type Write = Console;
     type Customization = CustomizationImpl;
     type HidConnection = TockHidConnection;
+    type Crypto = SoftwareCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng

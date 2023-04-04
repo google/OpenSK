@@ -17,9 +17,11 @@ use super::credential_id::{decrypt_credential_id, encrypt_to_credential_id};
 use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
+use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
+use crate::api::crypto::EC_FIELD_SIZE;
 use crate::env::Env;
 use alloc::vec::Vec;
-use arrayref::array_ref;
+use arrayref::{array_ref, mut_array_refs};
 use core::convert::TryFrom;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
@@ -156,6 +158,17 @@ impl TryFrom<&[u8]> for U2fCommand {
     }
 }
 
+fn to_uncompressed(public_key: &impl ecdsa::PublicKey) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
+    // Formatting according to:
+    // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
+    const B0_BYTE_MARKER: u8 = 0x04;
+    let mut representation = [0; 1 + 2 * EC_FIELD_SIZE];
+    let (marker, x, y) = mut_array_refs![&mut representation, 1, EC_FIELD_SIZE, EC_FIELD_SIZE];
+    marker[0] = B0_BYTE_MARKER;
+    public_key.to_coordinates(x, y);
+    representation
+}
+
 pub struct Ctap1Command {}
 
 impl Ctap1Command {
@@ -245,7 +258,7 @@ impl Ctap1Command {
         let sk = private_key
             .ecdsa_key(env)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let pk = sk.genpk();
+        let pk = sk.public_key();
         let key_handle = encrypt_to_credential_id(env, &private_key, &application, None, None)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
@@ -263,7 +276,7 @@ impl Ctap1Command {
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
-        let user_pk = pk.to_uncompressed();
+        let user_pk = to_uncompressed(&pk);
         response.extend_from_slice(&user_pk);
         response.push(key_handle.len() as u8);
         response.extend(key_handle.clone());
@@ -327,10 +340,10 @@ impl Ctap1Command {
                 )
                 .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
             signature_data.extend(&challenge);
-            let signature = ecdsa_key.sign_rfc6979::<crypto::sha256::Sha256>(&signature_data);
+            let signature = ecdsa_key.sign(&signature_data);
 
             let mut response = signature_data[application.len()..application.len() + 5].to_vec();
-            response.extend(signature.to_asn1_der());
+            response.extend(signature.to_der());
             Ok(response)
         } else {
             Err(Ctap1StatusCode::SW_WRONG_DATA)

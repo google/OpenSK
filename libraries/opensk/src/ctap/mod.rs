@@ -65,11 +65,12 @@ use self::u2f_up::U2fUserPresenceState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
+use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
-use crate::env::Env;
+use crate::env::{EcdsaSk, Env};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -78,7 +79,7 @@ use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 use crypto::hmac::hmac_256;
 use crypto::sha256::Sha256;
-use crypto::{ecdsa, Hash256};
+use crypto::Hash256;
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
@@ -921,11 +922,9 @@ impl<E: Env> CtapState<E> {
                     .attestation_store()
                     .get(&id)?
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-                let attestation_key = ecdsa::SecKey::from_bytes(&private_key).unwrap();
+                let attestation_key = EcdsaSk::<E>::from_slice(&private_key).unwrap();
                 (
-                    attestation_key
-                        .sign_rfc6979::<Sha256>(&signature_data)
-                        .to_asn1_der(),
+                    attestation_key.sign(&signature_data).to_der(),
                     Some(vec![certificate]),
                 )
             }
@@ -1451,9 +1450,11 @@ mod test {
     };
     use super::pin_protocol::{authenticate_pin_uv_auth_token, PinProtocol};
     use super::*;
+    use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization;
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
+    use crate::env::EcdhSk;
     use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
@@ -2033,7 +2034,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -2395,20 +2396,20 @@ mod test {
     }
 
     fn get_assertion_hmac_secret_params(
-        key_agreement_key: crypto::ecdh::SecKey,
+        key_agreement_key: EcdhSk<TestEnv>,
         key_agreement_response: ResponseData,
         credential_id: Option<Vec<u8>>,
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> AuthenticatorGetAssertionParameters {
         let mut env = TestEnv::default();
-        let platform_public_key = key_agreement_key.genpk();
+        let platform_public_key = key_agreement_key.public_key();
         let public_key = match key_agreement_response {
             ResponseData::AuthenticatorClientPin(Some(client_pin_response)) => {
                 client_pin_response.key_agreement.unwrap()
             }
             _ => panic!("Invalid response type"),
         };
-        let pin_protocol = PinProtocol::new_test(key_agreement_key, [0x91; 32]);
+        let pin_protocol = PinProtocol::<TestEnv>::new_test(key_agreement_key, [0x91; 32]);
         let shared_secret = pin_protocol
             .decapsulate(public_key, pin_uv_auth_protocol)
             .unwrap();
@@ -2417,7 +2418,7 @@ mod test {
         let salt_enc = shared_secret.as_ref().encrypt(env.rng(), &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement: CoseKey::from(platform_public_key),
+            key_agreement: CoseKey::from_ecdh_public_key(platform_public_key),
             salt_enc,
             salt_auth,
             pin_uv_auth_protocol,
@@ -2449,7 +2450,7 @@ mod test {
 
     fn test_helper_process_get_assertion_hmac_secret(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let make_extensions = MakeCredentialExtensions {
@@ -2505,7 +2506,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let make_extensions = MakeCredentialExtensions {
@@ -2900,7 +2901,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x88; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,
@@ -3504,7 +3505,7 @@ mod test {
     #[test]
     fn test_credential_management_timeout() {
         let mut env = TestEnv::default();
-        let key_agreement_key = crypto::ecdh::SecKey::gensk(env.rng());
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,

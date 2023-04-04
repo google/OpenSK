@@ -627,7 +627,6 @@ mod test {
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
-    use crate::env::test::TestEnv;
     use cbor::{cbor_array, cbor_map};
 
     #[test]
@@ -740,11 +739,7 @@ mod test {
 
     #[test]
     fn test_from_cbor_client_pin_parameters() {
-        let mut env = TestEnv::default();
-        let sk = crypto::ecdh::SecKey::gensk(env.rng());
-        let pk = sk.genpk();
-        let cose_key = CoseKey::from(pk);
-
+        let cose_key = CoseKey::example_ecdh_pubkey();
         let cbor_value = cbor_map! {
             0x01 => 1,
             0x02 => ClientPinSubCommand::GetPinRetries,

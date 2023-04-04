@@ -38,13 +38,3 @@ enum-iterator = "0.6.0"
 sk-cbor = { path = "../cbor" }
 uuid = { version = "0.8", features = ["v4"] }
 openssl = "0.10.36"
-
-[profile.dev]
-panic = "abort"
-lto = true # Link Time Optimization usually reduces size of binaries and static libraries
-
-[profile.release]
-panic = "abort"
-lto = true # Link Time Optimization usually reduces size of binaries and static libraries
-opt-level = "z"
-codegen-units = 1

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::{
@@ -31,6 +32,7 @@ impl Crypto for SoftwareCrypto {
     type Ecdsa = SoftwareEcdsa;
     type Sha256 = SoftwareSha256;
     type Hmac256 = SoftwareHmac256;
+    type Hkdf256 = SoftwareHkdf256;
 }
 
 impl ecdh::Ecdh for SoftwareEcdh {
@@ -201,6 +203,14 @@ impl Hmac256 for SoftwareHmac256 {
     }
 }
 
+pub struct SoftwareHkdf256;
+
+impl Hkdf256 for SoftwareHkdf256 {
+    fn hkdf_empty_salt_256(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE] {
+        crypto::hkdf::hkdf_empty_salt_256::<crypto::sha256::Sha256>(ikm, info)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -282,5 +292,15 @@ mod test {
             &data,
             truncated_mac
         ));
+    }
+
+    #[test]
+    fn test_hkdf_empty_salt_256_vector() {
+        let okm = [
+            0xf9, 0xbe, 0x72, 0x11, 0x6c, 0xb9, 0x7f, 0x41, 0x82, 0x82, 0x10, 0x28, 0x9c, 0xaa,
+            0xfe, 0xab, 0xde, 0x1f, 0x3d, 0xfb, 0x97, 0x23, 0xbf, 0x43, 0x53, 0x8a, 0xb1, 0x8f,
+            0x36, 0x66, 0x78, 0x3a,
+        ];
+        assert_eq!(&SoftwareHkdf256::hkdf_empty_salt_256(b"0", &[0]), &okm);
     }
 }

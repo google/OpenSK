@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _};
+use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
@@ -21,10 +22,9 @@ use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
 #[cfg(test)]
 use crate::env::test::TestEnv;
-use crate::env::{EcdhPk, EcdhSk, Env, Hmac, Sha};
+use crate::env::{EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use crypto::hkdf::hkdf_empty_salt_256;
 use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
@@ -252,10 +252,10 @@ pub struct SharedSecretV2<E: Env> {
 impl<E: Env> SharedSecretV2<E> {
     /// Creates a new shared secret from the handshake result.
     fn new(handshake: [u8; 32]) -> Self {
-        let aes_key = hkdf_empty_salt_256::<crypto::sha256::Sha256>(&handshake, b"CTAP2 AES key");
+        let aes_key = Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 AES key");
         SharedSecretV2 {
             aes_enc_key: crypto::aes256::EncryptionKey::new(&aes_key),
-            hmac_key: hkdf_empty_salt_256::<crypto::sha256::Sha256>(&handshake, b"CTAP2 HMAC key"),
+            hmac_key: Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 HMAC key"),
             phantom: PhantomData,
         }
     }

@@ -21,14 +21,14 @@ pub trait Hmac256 {
 
     /// Verifies the HMAC.
     ///
-    /// When implementing, make sure that you don't leak side channel information about the key,
-    /// i.e. by using constant time comparisons of the computed and given MAC.
+    /// This function does best effort to not leak information about the key through side-channels
+    /// (e.g. usage of constant time comparison).
     fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool;
 
     /// Verifies the first bytes of an HMAC.
     ///
-    /// When implementing, make sure that you don't leak side channel information about the key,
-    /// i.e. by using constant time comparisons of the computed and given truncated MAC.
+    /// This function does best effort to not leak information about the key through side-channels
+    /// (e.g. usage of constant time comparison).
     fn verify_truncated_left(
         key: &[u8; HMAC_KEY_SIZE],
         data: &[u8],

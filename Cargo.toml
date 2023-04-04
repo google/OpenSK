@@ -21,8 +21,6 @@ rng256 = { path = "libraries/rng256" }
 persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
-subtle = { version = "2.2", default-features = false, features = ["nightly"] }
-arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 rand = { version = "0.8.4", optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 

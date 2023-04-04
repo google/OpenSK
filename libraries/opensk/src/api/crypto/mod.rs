@@ -37,10 +37,12 @@ pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_SIZE;
 /// The size in bytes of a SHA256.
 pub const HASH_SIZE: usize = 32;
 
-/// The size in bytes of truncated HMAC.
+/// The size in bytes of an HMAC.
 pub const HMAC_KEY_SIZE: usize = 32;
 
-/// The size in bytes of truncated HMAC.
+/// The size in bytes of a truncated HMAC.
+///
+/// Truncated HMACs are used in PIN protocol V1 in CTAP2.
 pub const TRUNCATED_HMAC_SIZE: usize = 16;
 
 /// Necessary cryptographic primitives for CTAP.

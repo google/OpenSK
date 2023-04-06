@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::key_store::KeyStore;
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::env::{EcdsaSk, Env};
+use crate::env::{AesKey, EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-use crypto::cbc::{cbc_decrypt, cbc_encrypt};
 use rng256::Rng256;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
-pub fn aes256_cbc_encrypt(
+pub fn aes256_cbc_encrypt<E: Env>(
     rng: &mut dyn Rng256,
-    aes_enc_key: &crypto::aes256::EncryptionKey,
+    aes_key: &AesKey<E>,
     plaintext: &[u8],
     embeds_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -46,13 +46,13 @@ pub fn aes256_cbc_encrypt(
     };
     let start = ciphertext.len();
     ciphertext.extend_from_slice(plaintext);
-    cbc_encrypt(aes_enc_key, iv, &mut ciphertext[start..]);
+    aes_key.encrypt_cbc(&iv, &mut ciphertext[start..]);
     Ok(ciphertext)
 }
 
 /// Wraps the AES256-CBC decryption to match what we need in CTAP.
-pub fn aes256_cbc_decrypt(
-    aes_enc_key: &crypto::aes256::EncryptionKey,
+pub fn aes256_cbc_decrypt<E: Env>(
+    aes_key: &AesKey<E>,
     ciphertext: &[u8],
     embeds_iv: bool,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -61,13 +61,12 @@ pub fn aes256_cbc_decrypt(
     }
     let (iv, ciphertext) = if embeds_iv {
         let (iv, ciphertext) = ciphertext.split_at(16);
-        (*array_ref!(iv, 0, 16), ciphertext)
+        (array_ref!(iv, 0, 16), ciphertext)
     } else {
-        ([0u8; 16], ciphertext)
+        (&[0u8; 16], ciphertext)
     };
     let mut plaintext = ciphertext.to_vec();
-    let aes_dec_key = crypto::aes256::DecryptionKey::new(aes_enc_key);
-    cbc_decrypt(&aes_dec_key, iv, &mut plaintext);
+    aes_key.decrypt_cbc(iv, &mut plaintext);
     Ok(plaintext)
 }
 
@@ -226,58 +225,63 @@ mod test {
     #[test]
     fn test_encrypt_decrypt_with_iv() {
         let mut env = TestEnv::default();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
-        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, true).unwrap();
+        let ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
+        let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, true).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_encrypt_decrypt_without_iv() {
         let mut env = TestEnv::default();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, false).unwrap();
-        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, false).unwrap();
+        let ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, false).unwrap();
+        let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, false).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_correct_iv_usage() {
         let mut env = TestEnv::default();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let mut ciphertext_no_iv =
-            aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, false).unwrap();
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, false).unwrap();
         let mut ciphertext_with_iv = vec![0u8; 16];
         ciphertext_with_iv.append(&mut ciphertext_no_iv);
-        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext_with_iv, true).unwrap();
+        let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext_with_iv, true).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_iv_manipulation_property() {
         let mut env = TestEnv::default();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let mut ciphertext = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
+        let mut ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
         let mut expected_plaintext = plaintext;
         for i in 0..16 {
             ciphertext[i] ^= 0xBB;
             expected_plaintext[i] ^= 0xBB;
         }
-        let decrypted = aes256_cbc_decrypt(&aes_enc_key, &ciphertext, true).unwrap();
+        let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, true).unwrap();
         assert_eq!(decrypted, expected_plaintext);
     }
 
     #[test]
     fn test_chaining() {
         let mut env = TestEnv::default();
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&[0xC2; 32]);
+        let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext1 = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
-        let ciphertext2 = aes256_cbc_encrypt(env.rng(), &aes_enc_key, &plaintext, true).unwrap();
+        let ciphertext1 =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
+        let ciphertext2 =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
         assert_eq!(ciphertext1.len(), 80);
         assert_eq!(ciphertext2.len(), 80);
         // The ciphertext should mutate in all blocks with a different IV.

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
@@ -22,9 +23,8 @@ use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::status_code::Ctap2StatusCode;
 #[cfg(test)]
 use crate::env::test::TestEnv;
-use crate::env::{EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
+use crate::env::{AesKey, EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
@@ -207,29 +207,26 @@ fn verify_v2<E: Env>(
 
 pub struct SharedSecretV1<E: Env> {
     common_secret: [u8; 32],
-    aes_enc_key: crypto::aes256::EncryptionKey,
-    // TODO: remove after porting AES to env crypto
-    phantom: PhantomData<E>,
+    aes_key: AesKey<E>,
 }
 
 impl<E: Env> SharedSecretV1<E> {
     /// Creates a new shared secret from the handshake result.
     fn new(handshake: [u8; 32]) -> Self {
         let common_secret = Sha::<E>::digest(&handshake);
-        let aes_enc_key = crypto::aes256::EncryptionKey::new(&common_secret);
+        let aes_key = AesKey::<E>::new(&common_secret);
         SharedSecretV1 {
             common_secret,
-            aes_enc_key,
-            phantom: PhantomData,
+            aes_key,
         }
     }
 
     fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, false)
+        aes256_cbc_encrypt::<E>(rng, &self.aes_key, plaintext, false)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_decrypt(&self.aes_enc_key, ciphertext, false)
+        aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, false)
     }
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
@@ -243,10 +240,8 @@ impl<E: Env> SharedSecretV1<E> {
 }
 
 pub struct SharedSecretV2<E: Env> {
-    aes_enc_key: crypto::aes256::EncryptionKey,
+    aes_key: AesKey<E>,
     hmac_key: [u8; 32],
-    // TODO: remove after porting AES to env crypto
-    phantom: PhantomData<E>,
 }
 
 impl<E: Env> SharedSecretV2<E> {
@@ -254,18 +249,17 @@ impl<E: Env> SharedSecretV2<E> {
     fn new(handshake: [u8; 32]) -> Self {
         let aes_key = Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 AES key");
         SharedSecretV2 {
-            aes_enc_key: crypto::aes256::EncryptionKey::new(&aes_key),
+            aes_key: AesKey::<E>::new(&aes_key),
             hmac_key: Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 HMAC key"),
-            phantom: PhantomData,
         }
     }
 
     fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(rng, &self.aes_enc_key, plaintext, true)
+        aes256_cbc_encrypt::<E>(rng, &self.aes_key, plaintext, true)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_decrypt(&self.aes_enc_key, ciphertext, true)
+        aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, true)
     }
 
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {

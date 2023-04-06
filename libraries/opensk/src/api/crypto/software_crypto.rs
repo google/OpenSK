@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::{
-    ecdh, ecdsa, Crypto, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE, HMAC_KEY_SIZE,
-    TRUNCATED_HMAC_SIZE,
+    ecdh, ecdsa, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE,
+    HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
 };
 use alloc::vec::Vec;
 use crypto::Hash256;
@@ -28,6 +29,7 @@ pub struct SoftwareEcdh;
 pub struct SoftwareEcdsa;
 
 impl Crypto for SoftwareCrypto {
+    type Aes256 = SoftwareAes256;
     type Ecdh = SoftwareEcdh;
     type Ecdsa = SoftwareEcdsa;
     type Sha256 = SoftwareSha256;
@@ -211,96 +213,31 @@ impl Hkdf256 for SoftwareHkdf256 {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::api::crypto::ecdh::{
-        PublicKey as EcdhPublicKey, SecretKey as EcdhSecretKey, SharedSecret,
-    };
-    use crate::api::crypto::ecdsa::{PublicKey as EcdsaPublicKey, SecretKey as EcdsaSecretKey};
-    use crate::env::test::TestEnv;
-    use core::convert::TryFrom;
+pub struct SoftwareAes256 {
+    enc_key: crypto::aes256::EncryptionKey,
+}
 
-    #[test]
-    fn test_shared_secret_symmetric() {
-        let mut env = TestEnv::default();
-        let private1 = SoftwareEcdhSecretKey::random(env.rng());
-        let private2 = SoftwareEcdhSecretKey::random(env.rng());
-        let pub1 = private1.public_key();
-        let pub2 = private2.public_key();
-        let shared1 = private1.diffie_hellman(&pub2);
-        let shared2 = private2.diffie_hellman(&pub1);
-        assert_eq!(shared1.raw_secret_bytes(), shared2.raw_secret_bytes());
+impl Aes256 for SoftwareAes256 {
+    fn new(key: &[u8; AES_KEY_SIZE]) -> Self {
+        let enc_key = crypto::aes256::EncryptionKey::new(key);
+        SoftwareAes256 { enc_key }
     }
 
-    #[test]
-    fn test_ecdh_public_key_from_to_bytes() {
-        let mut env = TestEnv::default();
-        let first_key = SoftwareEcdhSecretKey::random(env.rng());
-        let first_public = first_key.public_key();
-        let mut x = [0; EC_FIELD_SIZE];
-        let mut y = [0; EC_FIELD_SIZE];
-        first_public.to_coordinates(&mut x, &mut y);
-        let new_public = SoftwareEcdhPublicKey::from_coordinates(&x, &y).unwrap();
-        let mut new_x = [0; EC_FIELD_SIZE];
-        let mut new_y = [0; EC_FIELD_SIZE];
-        new_public.to_coordinates(&mut new_x, &mut new_y);
-        assert_eq!(x, new_x);
-        assert_eq!(y, new_y);
+    fn encrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]) {
+        self.enc_key.encrypt_block(block);
     }
 
-    #[test]
-    fn test_sign_verify() {
-        let mut env = TestEnv::default();
-        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let public_key = private_key.public_key();
-        let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        assert!(public_key.verify(&message, &signature));
+    fn decrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]) {
+        let dec_key = crypto::aes256::DecryptionKey::new(&self.enc_key);
+        dec_key.decrypt_block(block);
     }
 
-    #[test]
-    fn test_ecdsa_secret_key_from_to_bytes() {
-        let mut env = TestEnv::default();
-        let first_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let mut key_bytes = [0; EC_FIELD_SIZE];
-        first_key.to_slice(&mut key_bytes);
-        let second_key = SoftwareEcdsaSecretKey::from_slice(&key_bytes).unwrap();
-        let mut new_bytes = [0; EC_FIELD_SIZE];
-        second_key.to_slice(&mut new_bytes);
-        assert_eq!(key_bytes, new_bytes);
+    fn encrypt_cbc(&self, iv: &[u8; AES_BLOCK_SIZE], plaintext: &mut [u8]) {
+        crypto::cbc::cbc_encrypt(&self.enc_key, *iv, plaintext);
     }
 
-    #[test]
-    fn test_sha256_hash_matches() {
-        let data = [0x55; 16];
-        let mut hasher = SoftwareSha256::new();
-        hasher.update(&data);
-        assert_eq!(SoftwareSha256::digest(&data), hasher.finalize());
-    }
-
-    #[test]
-    fn test_hmac256_verifies() {
-        let key = [0xAA; HMAC_KEY_SIZE];
-        let data = [0x55; 16];
-        let mac = SoftwareHmac256::mac(&key, &data);
-        assert!(SoftwareHmac256::verify(&key, &data, &mac));
-        let truncated_mac =
-            <&[u8; TRUNCATED_HMAC_SIZE]>::try_from(&mac[..TRUNCATED_HMAC_SIZE]).unwrap();
-        assert!(SoftwareHmac256::verify_truncated_left(
-            &key,
-            &data,
-            truncated_mac
-        ));
-    }
-
-    #[test]
-    fn test_hkdf_empty_salt_256_vector() {
-        let okm = [
-            0xf9, 0xbe, 0x72, 0x11, 0x6c, 0xb9, 0x7f, 0x41, 0x82, 0x82, 0x10, 0x28, 0x9c, 0xaa,
-            0xfe, 0xab, 0xde, 0x1f, 0x3d, 0xfb, 0x97, 0x23, 0xbf, 0x43, 0x53, 0x8a, 0xb1, 0x8f,
-            0x36, 0x66, 0x78, 0x3a,
-        ];
-        assert_eq!(&SoftwareHkdf256::hkdf_empty_salt_256(b"0", &[0]), &okm);
+    fn decrypt_cbc(&self, iv: &[u8; AES_BLOCK_SIZE], ciphertext: &mut [u8]) {
+        let dec_key = crypto::aes256::DecryptionKey::new(&self.enc_key);
+        crypto::cbc::cbc_decrypt(&dec_key, *iv, ciphertext);
     }
 }

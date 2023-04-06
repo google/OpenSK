@@ -29,6 +29,7 @@ use rng256::Rng256;
 #[cfg(feature = "std")]
 pub mod test;
 
+pub type AesKey<E> = <<E as Env>::Crypto as Crypto>::Aes256;
 pub type EcdhSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::SecretKey;
 pub type EcdhPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::PublicKey;
 pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::SecretKey;

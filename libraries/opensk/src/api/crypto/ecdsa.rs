@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
+use crate::api::rng::Rng;
 use alloc::vec::Vec;
-use rng256::Rng256;
 
 /// Container for all ECDSA cryptographic material.
 pub trait Ecdsa {
@@ -29,7 +29,7 @@ pub trait SecretKey: Sized {
     type Signature: Signature;
 
     /// Generates a new random secret key.
-    fn random(rng: &mut impl Rng256) -> Self;
+    fn random(rng: &mut impl Rng) -> Self;
 
     /// Creates a signing key from its representation in bytes.
     fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self>;

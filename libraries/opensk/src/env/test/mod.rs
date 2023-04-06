@@ -19,20 +19,21 @@ use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
 use crate::env::Env;
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use rng256::Rng256;
+use rand::SeedableRng;
+use rand_core::{CryptoRng, Error, RngCore};
 
 pub mod customization;
 mod upgrade_storage;
 
 pub struct TestEnv {
-    rng: TestRng256,
+    rng: TestRng,
     user_presence: TestUserPresence,
     store: Store<BufferStorage>,
     upgrade_storage: Option<BufferUpgradeStorage>,
@@ -40,23 +41,38 @@ pub struct TestEnv {
     clock: TestClock,
 }
 
-pub struct TestRng256 {
+pub struct TestRng {
     rng: StdRng,
 }
 
-impl TestRng256 {
+impl TestRng {
     pub fn seed_from_u64(&mut self, state: u64) {
         self.rng = StdRng::seed_from_u64(state);
     }
 }
 
-impl Rng256 for TestRng256 {
-    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
-        let mut result = [Default::default(); 32];
-        self.rng.fill(&mut result);
-        result
+// This is okay since we only use it for testing.
+impl CryptoRng for TestRng {}
+
+impl RngCore for TestRng {
+    fn next_u32(&mut self) -> u32 {
+        self.rng.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.rng.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.rng.fill_bytes(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        self.rng.try_fill_bytes(dest)
     }
 }
+
+impl Rng for TestRng {}
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TestTimer {
@@ -131,7 +147,7 @@ impl HidConnection for TestEnv {
 
 impl Default for TestEnv {
     fn default() -> Self {
-        let rng = TestRng256 {
+        let rng = TestRng {
             rng: StdRng::seed_from_u64(0),
         };
         let user_presence = TestUserPresence {
@@ -162,7 +178,7 @@ impl TestEnv {
         &mut self.customization
     }
 
-    pub fn rng(&mut self) -> &mut TestRng256 {
+    pub fn rng(&mut self) -> &mut TestRng {
         &mut self.rng
     }
 }
@@ -207,7 +223,7 @@ impl AttestationStore for TestEnv {
 }
 
 impl Env for TestEnv {
-    type Rng = TestRng256;
+    type Rng = TestRng;
     type UserPresence = TestUserPresence;
     type Storage = BufferStorage;
     type KeyStore = Self;

@@ -359,9 +359,9 @@ mod test {
     use super::super::CtapState;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
+    use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
-    use rng256::Rng256;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 

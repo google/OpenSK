@@ -143,7 +143,7 @@ mod test {
         assert!(SoftwareHmac256::verify_truncated_left(
             &key,
             &data,
-            &truncated_mac
+            truncated_mac
         ));
     }
 

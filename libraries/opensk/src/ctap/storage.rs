@@ -17,6 +17,7 @@ mod key;
 use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
+use crate::api::rng::Rng;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
@@ -31,7 +32,6 @@ use arrayref::array_ref;
 use core::cmp;
 use core::convert::TryInto;
 use persistent_store::{fragment, StoreUpdate};
-use rng256::Rng256;
 use sk_cbor::cbor_array_vec;
 
 /// Wrapper for PIN properties.
@@ -626,7 +626,6 @@ mod test {
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
     use crate::env::test::TestEnv;
-    use rng256::Rng256;
 
     fn create_credential_source(
         env: &mut TestEnv,

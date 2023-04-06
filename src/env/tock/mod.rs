@@ -30,11 +30,12 @@ use opensk::api::connection::{
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
 use opensk::api::firmware_protection::FirmwareProtection;
+use opensk::api::rng::Rng;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use opensk::api::{attestation_store, key_store};
 use opensk::env::Env;
 use persistent_store::{StorageResult, Store};
-use rng256::Rng256;
+use rand_core::{impls, CryptoRng, Error, RngCore};
 
 mod clock;
 mod storage;
@@ -48,15 +49,30 @@ const TOCK_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
 };
 
 /// RNG backed by the TockOS rng driver.
-pub struct TockRng256 {}
+pub struct TockRng {}
 
-impl Rng256 for TockRng256 {
-    fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
-        let mut buf: [u8; 32] = [Default::default(); 32];
-        rng::fill_buffer(&mut buf);
-        buf
+impl CryptoRng for TockRng {}
+
+impl RngCore for TockRng {
+    fn next_u32(&mut self) -> u32 {
+        impls::next_u32_via_fill(self)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        impls::next_u64_via_fill(self)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        rng::fill_buffer(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        self.fill_bytes(dest);
+        Ok(())
     }
 }
+
+impl Rng for TockRng {}
 
 pub struct TockHidConnection {
     endpoint: UsbEndpoint,
@@ -80,7 +96,7 @@ impl HidConnection for TockHidConnection {
 }
 
 pub struct TockEnv {
-    rng: TockRng256,
+    rng: TockRng,
     store: Store<TockStorage>,
     upgrade_storage: Option<TockUpgradeStorage>,
     main_connection: TockHidConnection,
@@ -102,7 +118,7 @@ impl Default for TockEnv {
         let store = Store::new(storage).ok().unwrap();
         let upgrade_storage = TockUpgradeStorage::new().ok();
         TockEnv {
-            rng: TockRng256 {},
+            rng: TockRng {},
             store,
             upgrade_storage,
             main_connection: TockHidConnection {
@@ -239,7 +255,7 @@ impl AttestationStore for TockEnv {
 }
 
 impl Env for TockEnv {
-    type Rng = TockRng256;
+    type Rng = TockRng;
     type UserPresence = Self;
     type Storage = TockStorage;
     type KeyStore = Self;

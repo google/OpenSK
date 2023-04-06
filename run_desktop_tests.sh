@@ -26,9 +26,6 @@ cd ../..
 cd libraries/crypto
 cargo fmt -- --check
 cd ../..
-cd libraries/rng256
-cargo fmt -- --check
-cd ../..
 cd libraries/persistent_store
 cargo fmt -- --check
 cd ../..
@@ -111,9 +108,6 @@ then
   cd libraries/cbor
   cargo test --release
   cd ../..
-  cd libraries/rng256
-  cargo test --release --features std
-  cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
   cd ../..
@@ -123,9 +117,6 @@ then
   cargo test --features std
   cd libraries/cbor
   cargo test
-  cd ../..
-  cd libraries/rng256
-  cargo test --features std
   cd ../..
   cd libraries/persistent_store
   cargo test --features std

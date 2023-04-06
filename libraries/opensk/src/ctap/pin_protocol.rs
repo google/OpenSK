@@ -17,6 +17,7 @@ use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
+use crate::api::rng::Rng;
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
@@ -25,7 +26,6 @@ use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::test::TestEnv;
 use crate::env::{AesKey, EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
-use rng256::Rng256;
 
 /// Implements common functions between existing PIN protocols for handshakes.
 pub struct PinProtocol<E: Env> {
@@ -37,9 +37,9 @@ impl<E: Env> PinProtocol<E> {
     /// This process is run by the authenticator at power-on.
     ///
     /// This function implements "initialize" from the specification.
-    pub fn new(rng: &mut impl Rng256) -> Self {
-        let key_agreement_key = EcdhSk::<E>::random(rng);
-        let pin_uv_auth_token = rng.gen_uniform_u8x32();
+    pub fn new(env: &mut E) -> Self {
+        let key_agreement_key = EcdhSk::<E>::random(env.rng());
+        let pin_uv_auth_token = env.rng().gen_uniform_u8x32();
         PinProtocol {
             key_agreement_key,
             pin_uv_auth_token,
@@ -47,13 +47,13 @@ impl<E: Env> PinProtocol<E> {
     }
 
     /// Generates a fresh public key.
-    pub fn regenerate(&mut self, rng: &mut impl Rng256) {
-        self.key_agreement_key = EcdhSk::<E>::random(rng);
+    pub fn regenerate(&mut self, env: &mut E) {
+        self.key_agreement_key = EcdhSk::<E>::random(env.rng());
     }
 
     /// Generates a fresh pinUvAuthToken.
-    pub fn reset_pin_uv_auth_token(&mut self, rng: &mut impl Rng256) {
-        self.pin_uv_auth_token = rng.gen_uniform_u8x32();
+    pub fn reset_pin_uv_auth_token(&mut self, env: &mut E) {
+        self.pin_uv_auth_token = env.rng().gen_uniform_u8x32();
     }
 
     /// Returns the authenticator’s public key as a CoseKey structure.
@@ -138,14 +138,10 @@ impl<E: Env> SharedSecret<E> {
     }
 
     /// Returns the encrypted plaintext.
-    pub fn encrypt(
-        &self,
-        rng: &mut dyn Rng256,
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+    pub fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
         match self {
-            SharedSecret::V1(s) => s.encrypt(rng, plaintext),
-            SharedSecret::V2(s) => s.encrypt(rng, plaintext),
+            SharedSecret::V1(s) => s.encrypt(env, plaintext),
+            SharedSecret::V2(s) => s.encrypt(env, plaintext),
         }
     }
 
@@ -221,8 +217,8 @@ impl<E: Env> SharedSecretV1<E> {
         }
     }
 
-    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt::<E>(rng, &self.aes_key, plaintext, false)
+    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_encrypt(env, &self.aes_key, plaintext, false)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -254,8 +250,8 @@ impl<E: Env> SharedSecretV2<E> {
         }
     }
 
-    fn encrypt(&self, rng: &mut dyn Rng256, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt::<E>(rng, &self.aes_key, plaintext, true)
+    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+        aes256_cbc_encrypt(env, &self.aes_key, plaintext, true)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -280,9 +276,9 @@ mod test {
     #[test]
     fn test_pin_protocol_public_key() {
         let mut env = TestEnv::default();
-        let mut pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
+        let mut pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
         let public_key = pin_protocol.get_public_key();
-        pin_protocol.regenerate(env.rng());
+        pin_protocol.regenerate(&mut env);
         let new_public_key = pin_protocol.get_public_key();
         assert_ne!(public_key, new_public_key);
     }
@@ -290,9 +286,9 @@ mod test {
     #[test]
     fn test_pin_protocol_pin_uv_auth_token() {
         let mut env = TestEnv::default();
-        let mut pin_protocol = PinProtocol::<TestEnv>::new(env.rng());
+        let mut pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
         let token = *pin_protocol.get_pin_uv_auth_token();
-        pin_protocol.reset_pin_uv_auth_token(env.rng());
+        pin_protocol.reset_pin_uv_auth_token(&mut env);
         let new_token = pin_protocol.get_pin_uv_auth_token();
         assert_ne!(&token, new_token);
     }
@@ -302,7 +298,7 @@ mod test {
         let mut env = TestEnv::default();
         let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
+        let ciphertext = shared_secret.encrypt(&mut env, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
@@ -338,7 +334,7 @@ mod test {
         let mut env = TestEnv::default();
         let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = shared_secret.encrypt(env.rng(), &plaintext).unwrap();
+        let ciphertext = shared_secret.encrypt(&mut env, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
@@ -373,8 +369,8 @@ mod test {
     #[test]
     fn test_decapsulate_symmetric() {
         let mut env = TestEnv::default();
-        let pin_protocol1 = PinProtocol::<TestEnv>::new(env.rng());
-        let pin_protocol2 = PinProtocol::<TestEnv>::new(env.rng());
+        let pin_protocol1 = PinProtocol::<TestEnv>::new(&mut env);
+        let pin_protocol2 = PinProtocol::<TestEnv>::new(&mut env);
         for &protocol in &[PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
             let shared_secret1 = pin_protocol1
                 .decapsulate(pin_protocol2.get_public_key(), protocol)
@@ -383,7 +379,7 @@ mod test {
                 .decapsulate(pin_protocol1.get_public_key(), protocol)
                 .unwrap();
             let plaintext = vec![0xAA; 64];
-            let ciphertext = shared_secret1.encrypt(env.rng(), &plaintext).unwrap();
+            let ciphertext = shared_secret1.encrypt(&mut env, &plaintext).unwrap();
             assert_eq!(plaintext, shared_secret2.decrypt(&ciphertext).unwrap());
         }
     }

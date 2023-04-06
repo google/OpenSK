@@ -28,6 +28,7 @@ use crate::api::crypto::{
     ecdh, ecdsa, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE,
     HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
 };
+use crate::api::rng::Rng;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{
     BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, KeyInit, KeyIvInit,
@@ -38,9 +39,6 @@ use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-// TODO: implement CryptoRngCore for our Rng instead
-use rand_core::OsRng;
-use rng256::Rng256;
 use sha2::Digest;
 
 pub struct SoftwareCrypto;
@@ -70,8 +68,8 @@ impl ecdh::SecretKey for SoftwareEcdhSecretKey {
     type PublicKey = SoftwareEcdhPublicKey;
     type SharedSecret = SoftwareEcdhSharedSecret;
 
-    fn random(_rng: &mut impl Rng256) -> Self {
-        let ephemeral_secret = EphemeralSecret::random(&mut OsRng);
+    fn random(rng: &mut impl Rng) -> Self {
+        let ephemeral_secret = EphemeralSecret::random(rng);
         Self { ephemeral_secret }
     }
 
@@ -131,8 +129,8 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
 
-    fn random(_rng: &mut impl Rng256) -> Self {
-        let signing_key = SigningKey::random(&mut OsRng);
+    fn random(rng: &mut impl Rng) -> Self {
+        let signing_key = SigningKey::random(rng);
         SoftwareEcdsaSecretKey { signing_key }
     }
 
@@ -273,7 +271,7 @@ pub struct SoftwareAes256 {
 
 impl Aes256 for SoftwareAes256 {
     fn new(key: &[u8; AES_KEY_SIZE]) -> Self {
-        SoftwareAes256 { key: key.clone() }
+        SoftwareAes256 { key: *key }
     }
 
     fn encrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]) {

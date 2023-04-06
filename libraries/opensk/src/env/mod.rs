@@ -21,10 +21,10 @@ use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::key_store::KeyStore;
+use crate::api::rng::Rng;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::UserPresence;
 use persistent_store::{Storage, Store};
-use rng256::Rng256;
 
 #[cfg(feature = "std")]
 pub mod test;
@@ -40,7 +40,7 @@ pub type Hkdf<E> = <<E as Env>::Crypto as Crypto>::Hkdf256;
 
 /// Describes what CTAP needs to function.
 pub trait Env {
-    type Rng: Rng256;
+    type Rng: Rng;
     type UserPresence: UserPresence;
     type Storage: Storage;
     type KeyStore: KeyStore;

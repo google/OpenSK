@@ -21,7 +21,7 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
-use ctap2::env::tock::TockRng256;
+use ctap2::env::tock::TockRng;
 use libtock_drivers::console::Console;
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
@@ -36,7 +36,7 @@ fn main() {
     let mut with_callback = timer::with_callback(|_, _| {});
     let timer = with_callback.init().flex_unwrap();
 
-    let mut rng = TockRng256 {};
+    let mut rng = TockRng {};
 
     writeln!(console, "****************************************").unwrap();
     writeln!(

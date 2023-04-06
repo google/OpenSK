@@ -17,18 +17,17 @@ lang_items = { path = "third_party/lang-items" }
 opensk = { path = "libraries/opensk" }
 sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
-rng256 = { path = "libraries/rng256" }
 persistent_store = { path = "libraries/persistent_store" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
-rand = { version = "0.8.4", optional = true }
+rand_core = "0.6.4"
 ed25519-compact = { version = "1", default-features = false, optional = true }
 
 [features]
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap", "opensk/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["crypto/std", "lang_items/std", "persistent_store/std", "rng256/std", "rand", "opensk/std"]
+std = ["crypto/std", "lang_items/std", "persistent_store/std", "opensk/std"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1", "opensk/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]

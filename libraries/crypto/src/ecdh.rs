@@ -16,7 +16,7 @@ use super::ec::exponent256::NonZeroExponentP256;
 use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
-use rng256::Rng256;
+use rand_core::RngCore;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -32,7 +32,7 @@ pub struct PubKey {
 impl SecKey {
     pub fn gensk<R>(rng: &mut R) -> SecKey
     where
-        R: Rng256,
+        R: RngCore,
     {
         SecKey {
             a: NonZeroExponentP256::gen_uniform(rng),
@@ -99,7 +99,7 @@ impl PubKey {
 #[cfg(test)]
 mod test {
     use super::*;
-    use rng256::ThreadRng256;
+    use rand_core::OsRng;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]
@@ -110,7 +110,7 @@ mod test {
     /** Test that key generation creates valid keys **/
     #[test]
     fn test_gen_pub_is_valid_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -122,7 +122,7 @@ mod test {
     /** Test that the exchanged key is the same on both sides **/
     #[test]
     fn test_exchange_x_is_symmetric() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk_a = SecKey::gensk(&mut rng);
@@ -135,7 +135,7 @@ mod test {
 
     #[test]
     fn test_exchange_x_bytes_is_symmetric() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk_a = SecKey::gensk(&mut rng);

@@ -24,5 +24,6 @@ pub mod crypto;
 pub mod customization;
 pub mod firmware_protection;
 pub mod key_store;
+pub mod rng;
 pub mod upgrade_storage;
 pub mod user_presence;

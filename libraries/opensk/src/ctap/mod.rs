@@ -70,6 +70,7 @@ use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
+use crate::api::rng::Rng;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::env::{EcdsaSk, Env, Hmac, Sha};
@@ -79,7 +80,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-use rng256::Rng256;
+use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 
@@ -510,7 +511,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
     ) -> Result<(), Ctap2StatusCode> {
         if env.customization().use_signature_counter() {
-            let increment = env.rng().gen_uniform_u32x8()[0] % 8 + 1;
+            let increment = env.rng().next_u32() % 8 + 1;
             storage::incr_global_signature_counter(env, increment)?;
         }
         Ok(())
@@ -2414,7 +2415,7 @@ mod test {
             .unwrap();
 
         let salt = vec![0x01; 32];
-        let salt_enc = shared_secret.encrypt(env.rng(), &salt).unwrap();
+        let salt_enc = shared_secret.encrypt(&mut env, &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
             key_agreement: CoseKey::from_ecdh_public_key(platform_public_key),

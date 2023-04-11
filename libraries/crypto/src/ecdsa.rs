@@ -24,7 +24,7 @@ use alloc::vec::Vec;
 use arrayref::array_mut_ref;
 use arrayref::{array_ref, mut_array_refs};
 use core::marker::PhantomData;
-use rng256::Rng256;
+use rand_core::RngCore;
 
 pub const NBYTES: usize = int256::NBYTES;
 
@@ -46,7 +46,7 @@ pub struct PubKey {
 impl SecKey {
     pub fn gensk<R>(rng: &mut R) -> SecKey
     where
-        R: Rng256,
+        R: RngCore,
     {
         SecKey {
             k: NonZeroExponentP256::gen_uniform(rng),
@@ -67,7 +67,7 @@ impl SecKey {
     pub fn sign_rng<H, R>(&self, msg: &[u8], rng: &mut R) -> Signature
     where
         H: Hash256,
-        R: Rng256,
+        R: RngCore,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -347,7 +347,7 @@ where
 mod test {
     use super::super::sha256::Sha256;
     use super::*;
-    use rng256::ThreadRng256;
+    use rand_core::OsRng;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]
@@ -355,10 +355,16 @@ mod test {
     #[cfg(debug_assertions)]
     const ITERATIONS: u32 = 500;
 
+    fn gen_random_message(rng: &mut impl RngCore) -> [u8; 32] {
+        let mut bytes = [0; 32];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
     /** Test that key generation creates valid keys **/
     #[test]
     fn test_genpk_is_valid_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -370,7 +376,7 @@ mod test {
     /** Serialization **/
     #[test]
     fn test_seckey_to_bytes_from_bytes() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -461,10 +467,10 @@ mod test {
     // Test that signed message hashes are correctly verified.
     #[test]
     fn test_sign_rfc6979_verify_hash_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rfc6979::<Sha256>(&msg);
@@ -476,10 +482,10 @@ mod test {
     // Test that signed messages are correctly verified.
     #[test]
     fn test_sign_rfc6979_verify_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rfc6979::<Sha256>(&msg);
@@ -490,10 +496,10 @@ mod test {
     // Test that signed messages are correctly verified.
     #[test]
     fn test_sign_verify_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rng::<Sha256, _>(&msg, &mut rng);
@@ -578,10 +584,10 @@ mod test {
     fn test_self_sign_ring_verify() {
         use ring::signature::VerificationAlgorithm;
 
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg_bytes = rng.gen_uniform_u8x32();
+            let msg_bytes = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rng::<Sha256, _>(&msg_bytes, &mut rng);

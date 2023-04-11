@@ -179,7 +179,7 @@ pub fn encrypt_to_credential_id<E: Env>(
     add_padding(&mut payload)?;
 
     let aes_key = AesKey::<E>::new(&env.key_store().key_handle_encryption()?);
-    let encrypted_payload = aes256_cbc_encrypt::<E>(env.rng(), &aes_key, &payload, true)?;
+    let encrypted_payload = aes256_cbc_encrypt(env, &aes_key, &payload, true)?;
     let mut credential_id = encrypted_payload;
     credential_id.insert(0, CBOR_CREDENTIAL_ID_VERSION);
 
@@ -380,7 +380,7 @@ mod test {
 
     /// This is a copy of the function that genereated deprecated key handles.
     fn legacy_encrypt_to_credential_id(
-        env: &mut impl Env,
+        env: &mut TestEnv,
         private_key: EcdsaSk<TestEnv>,
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Ctap2StatusCode> {
@@ -389,8 +389,7 @@ mod test {
         private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
-        let mut encrypted_id =
-            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true)?;
+        let mut encrypted_id = aes256_cbc_encrypt(env, &aes_key, &plaintext, true)?;
         let id_hmac = Hmac::<TestEnv>::mac(
             &env.key_store().key_handle_authentication()?,
             &encrypted_id[..],

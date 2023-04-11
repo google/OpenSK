@@ -20,9 +20,9 @@ use crate::api::crypto::{
     ecdh, ecdsa, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE,
     HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
 };
+use crate::api::rng::Rng;
 use alloc::vec::Vec;
 use crypto::Hash256;
-use rng256::Rng256;
 
 pub struct SoftwareCrypto;
 pub struct SoftwareEcdh;
@@ -51,7 +51,7 @@ impl ecdh::SecretKey for SoftwareEcdhSecretKey {
     type PublicKey = SoftwareEcdhPublicKey;
     type SharedSecret = SoftwareEcdhSharedSecret;
 
-    fn random(rng: &mut impl Rng256) -> Self {
+    fn random(rng: &mut impl Rng) -> Self {
         let sec_key = crypto::ecdh::SecKey::gensk(rng);
         Self { sec_key }
     }
@@ -105,7 +105,7 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
 
-    fn random(rng: &mut impl Rng256) -> Self {
+    fn random(rng: &mut impl Rng) -> Self {
         let sec_key = crypto::ecdsa::SecKey::gensk(rng);
         Self { sec_key }
     }

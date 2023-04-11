@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
-use rng256::Rng256;
+use rand_core::RngCore;
 use subtle::{self, Choice, ConditionallySelectable, ConstantTimeEq};
 
 const BITS_PER_DIGIT: usize = 32;
@@ -119,11 +119,13 @@ impl Int256 {
     // Generates a uniformly distributed integer 0 <= x < 2^256
     pub fn gen_uniform_256<R>(r: &mut R) -> Int256
     where
-        R: Rng256,
+        R: RngCore,
     {
-        Int256 {
-            digits: r.gen_uniform_u32x8(),
+        let mut digits = [0; NDIGITS];
+        for i in 0..NDIGITS {
+            digits[i] = r.next_u32();
         }
+        Int256 { digits }
     }
 
     /** Serialization **/

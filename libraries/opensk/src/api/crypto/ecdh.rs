@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::EC_FIELD_SIZE;
-use rng256::Rng256;
+use crate::api::rng::Rng;
 
 /// Container for all ECDH cryptographic material.
 pub trait Ecdh {
@@ -28,7 +28,7 @@ pub trait SecretKey {
     type SharedSecret: SharedSecret;
 
     /// Generates a new random secret key.
-    fn random(rng: &mut impl Rng256) -> Self;
+    fn random(rng: &mut impl Rng) -> Self;
 
     /// Computes the corresponding public key for this private key.
     fn public_key(&self) -> Self::PublicKey;

@@ -72,6 +72,7 @@ mod test {
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
     use crate::api::crypto::ecdsa::{PublicKey as _, SecretKey as _};
     use crate::env::test::TestEnv;
+    use crate::env::Env;
     use core::convert::TryFrom;
 
     #[test]
@@ -143,7 +144,7 @@ mod test {
         assert!(SoftwareHmac256::verify_truncated_left(
             &key,
             &data,
-            &truncated_mac
+            truncated_mac
         ));
     }
 

@@ -27,7 +27,6 @@ use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rand_core::{CryptoRng, Error, RngCore};
 
 pub mod customization;
 mod upgrade_storage;
@@ -41,36 +40,7 @@ pub struct TestEnv {
     clock: TestClock,
 }
 
-pub struct TestRng {
-    rng: StdRng,
-}
-
-impl TestRng {
-    pub fn seed_from_u64(&mut self, state: u64) {
-        self.rng = StdRng::seed_from_u64(state);
-    }
-}
-
-// This is okay since we only use it for testing.
-impl CryptoRng for TestRng {}
-
-impl RngCore for TestRng {
-    fn next_u32(&mut self) -> u32 {
-        self.rng.next_u32()
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.rng.next_u64()
-    }
-
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.rng.fill_bytes(dest);
-    }
-
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
-        self.rng.try_fill_bytes(dest)
-    }
-}
+pub type TestRng = StdRng;
 
 impl Rng for TestRng {}
 
@@ -147,9 +117,7 @@ impl HidConnection for TestEnv {
 
 impl Default for TestEnv {
     fn default() -> Self {
-        let rng = TestRng {
-            rng: StdRng::seed_from_u64(0),
-        };
+        let rng = StdRng::seed_from_u64(0);
         let user_presence = TestUserPresence {
             check: Box::new(|| Ok(())),
         };
@@ -178,8 +146,8 @@ impl TestEnv {
         &mut self.customization
     }
 
-    pub fn rng(&mut self) -> &mut TestRng {
-        &mut self.rng
+    pub fn seed_rng_from_u64(&mut self, seed: u64) {
+        self.rng = StdRng::seed_from_u64(seed);
     }
 }
 

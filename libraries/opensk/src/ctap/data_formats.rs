@@ -1234,7 +1234,7 @@ mod test {
     use crate::api::crypto::ecdsa::PublicKey as _;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
-    use crate::env::{EcdhPk, EcdsaPk};
+    use crate::env::{EcdhPk, EcdsaPk, Env};
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,

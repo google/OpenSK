@@ -137,7 +137,7 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::default();
-    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
@@ -184,7 +184,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::default();
-    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     if !is_type(data, input_type) {
@@ -218,7 +218,7 @@ pub fn process_ctap_structured(data: &[u8], input_type: InputType) -> FuzzResult
     let unstructured = &mut Unstructured::new(data);
 
     let mut env = TestEnv::default();
-    env.rng().seed_from_u64(u64::arbitrary(unstructured)?);
+    env.seed_rng_from_u64(u64::arbitrary(unstructured)?);
     setup_customization(unstructured, env.customization_mut())?;
 
     let mut state = CtapState::new(&mut env);
@@ -255,7 +255,7 @@ pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
     let mut unstructured = Unstructured::new(data);
 
     let mut env = TestEnv::default();
-    env.rng().seed_from_u64(u64::arbitrary(&mut unstructured)?);
+    env.seed_rng_from_u64(u64::arbitrary(&mut unstructured)?);
 
     let data = unstructured.take_rest();
     let message = raw_to_message(data);

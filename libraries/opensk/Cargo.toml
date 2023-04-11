@@ -28,6 +28,7 @@ hmac = { version = "0.12.1", optional = true }
 hkdf = { version = "0.12.3", optional = true }
 aes = { version = "0.8.2", optional = true }
 cbc = { version = "0.1.2", optional = true }
+zeroize = { version = "1.5.7", features = ["derive"] }
 
 [features]
 debug_ctap = []

@@ -17,13 +17,14 @@ use super::int256::Int256;
 use super::precomputed;
 use core::ops::{Add, Mul, Sub};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroize;
 
 pub const NLIMBS: usize = 9;
 pub const BOTTOM_28_BITS: u32 = 0x0fff_ffff;
 pub const BOTTOM_29_BITS: u32 = 0x1fff_ffff;
 
 /** Field element on the secp256r1 curve, represented in Montgomery form **/
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Zeroize)]
 pub struct Montgomery {
     // The 9 limbs use 28 or 29 bits, alternatively: even limbs use 29 bits, odd limbs use 28 bits.
     // The Montgomery form stores a field element x as (x * 2^257) mod P.

@@ -49,5 +49,5 @@ pub trait PublicKey: Sized {
 /// ECDH shared secret.
 pub trait SharedSecret {
     /// Exports the x component of the point computed by Diffie–Hellman.
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE];
+    fn raw_secret_bytes(&self, secret: &mut [u8; EC_FIELD_SIZE]);
 }

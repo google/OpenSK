@@ -624,6 +624,7 @@ mod test {
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
+    use crate::ctap::secret::Secret;
     use crate::env::test::TestEnv;
 
     fn create_credential_source(
@@ -936,7 +937,7 @@ mod test {
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_attestation = Attestation {
-            private_key: [0x41; 32],
+            private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()
@@ -1083,7 +1084,7 @@ mod test {
         let mut env = TestEnv::default();
 
         let dummy_attestation = Attestation {
-            private_key: [0x41; 32],
+            private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()

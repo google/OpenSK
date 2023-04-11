@@ -343,7 +343,8 @@ impl TockUpgradeStorage {
             // The hash implementation handles this in chunks, so no memory issues.
             hasher.update(partition_slice);
         }
-        let computed_hash = hasher.finalize();
+        let mut computed_hash = [0; 32];
+        hasher.finalize(&mut computed_hash);
         if &computed_hash != parse_metadata_hash(metadata) {
             return Err(StorageError::CustomError);
         }

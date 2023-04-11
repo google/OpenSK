@@ -33,16 +33,30 @@ pub mod util;
 pub trait Hash256: Sized {
     fn new() -> Self;
     fn update(&mut self, contents: &[u8]);
-    fn finalize(self) -> [u8; 32];
+    fn finalize(self, output: &mut [u8; 32]);
 
     fn hash(contents: &[u8]) -> [u8; 32] {
         let mut h = Self::new();
         h.update(contents);
-        h.finalize()
+        let mut output = [0; 32];
+        h.finalize(&mut output);
+        output
+    }
+
+    fn hash_mut(contents: &[u8], output: &mut [u8; 32]) {
+        let mut h = Self::new();
+        h.update(contents);
+        h.finalize(output)
     }
 
     fn hmac(key: &[u8; 32], contents: &[u8]) -> [u8; 32] {
-        hmac::software_hmac_256::<Self>(key, contents)
+        let mut output = [0; 32];
+        hmac::software_hmac_256::<Self>(key, contents, &mut output);
+        output
+    }
+
+    fn hmac_mut(key: &[u8; 32], contents: &[u8], output: &mut [u8; 32]) {
+        hmac::software_hmac_256::<Self>(key, contents, output);
     }
 }
 

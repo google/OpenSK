@@ -23,7 +23,11 @@ use crate::api::crypto::{
 use crate::api::rng::Rng;
 use alloc::vec::Vec;
 use crypto::Hash256;
+use zeroize::Zeroize;
 
+/// Cryptography implementation using our own library of primitives.
+///
+/// Warning: The used library does not implement zeroization.
 pub struct SoftwareCrypto;
 pub struct SoftwareEcdh;
 pub struct SoftwareEcdsa;
@@ -81,13 +85,14 @@ impl ecdh::PublicKey for SoftwareEcdhPublicKey {
     }
 }
 
+#[derive(Zeroize)]
 pub struct SoftwareEcdhSharedSecret {
     shared_secret: [u8; EC_FIELD_SIZE],
 }
 
 impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE] {
-        self.shared_secret
+    fn raw_secret_bytes(&self, secret: &mut [u8; EC_FIELD_SIZE]) {
+        secret.copy_from_slice(&self.shared_secret);
     }
 }
 
@@ -190,16 +195,16 @@ impl Sha256 for SoftwareSha256 {
     }
 
     /// Finalizes the hashing process, returns the hash value.
-    fn finalize(self) -> [u8; HASH_SIZE] {
-        self.hasher.finalize()
+    fn finalize(self, output: &mut [u8; HASH_SIZE]) {
+        self.hasher.finalize(output)
     }
 }
 
 pub struct SoftwareHmac256;
 
 impl Hmac256 for SoftwareHmac256 {
-    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8]) -> [u8; HASH_SIZE] {
-        crypto::hmac::hmac_256::<crypto::sha256::Sha256>(key, data)
+    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8], output: &mut [u8; HASH_SIZE]) {
+        crypto::hmac::hmac_256::<crypto::sha256::Sha256>(key, data, output)
     }
 
     fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
@@ -218,8 +223,8 @@ impl Hmac256 for SoftwareHmac256 {
 pub struct SoftwareHkdf256;
 
 impl Hkdf256 for SoftwareHkdf256 {
-    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE] {
-        crypto::hkdf::hkdf_256::<crypto::sha256::Sha256>(ikm, salt, info)
+    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8], okm: &mut [u8; HASH_SIZE]) {
+        crypto::hkdf::hkdf_256::<crypto::sha256::Sha256>(ikm, salt, info, okm);
     }
 }
 

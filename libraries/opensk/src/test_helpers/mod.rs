@@ -15,6 +15,7 @@
 use crate::api::attestation_store::{self, AttestationStore};
 use crate::ctap::command::{AuthenticatorConfigParameters, Command};
 use crate::ctap::data_formats::ConfigSubCommand;
+use crate::ctap::secret::Secret;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{Channel, CtapState};
 use crate::env::Env;
@@ -28,7 +29,7 @@ pub fn enable_enterprise_attestation<E: Env>(
     env: &mut E,
 ) -> Result<attestation_store::Attestation, Ctap2StatusCode> {
     let attestation = attestation_store::Attestation {
-        private_key: [0x41; 32],
+        private_key: Secret::from_exposed_secret([0x41; 32]),
         certificate: vec![0xdd; 20],
     };
     env.attestation_store()

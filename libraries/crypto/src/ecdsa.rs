@@ -16,7 +16,6 @@ use super::ec::exponent256::{ExponentP256, NonZeroExponentP256};
 use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
-use super::hmac::hmac_256;
 use super::Hash256;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -25,20 +24,22 @@ use arrayref::array_mut_ref;
 use arrayref::{array_ref, mut_array_refs};
 use core::marker::PhantomData;
 use rand_core::RngCore;
+use zeroize::Zeroize;
 
 pub const NBYTES: usize = int256::NBYTES;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
 
+#[derive(Zeroize)]
 pub struct Signature {
     r: NonZeroExponentP256,
     s: NonZeroExponentP256,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Zeroize)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -310,15 +311,15 @@ where
         Int256::to_bin(&sk.k.to_int(), contents_k);
         Int256::to_bin(&Int256::from_bin(&h1).modd(&Int256::N), contents_h1);
 
-        let k = hmac_256::<H>(&k, &contents);
-        let v = hmac_256::<H>(&k, &v);
+        let k = H::hmac(&k, &contents);
+        let v = H::hmac(&k, &v);
 
         let (contents_v, marker, _) = mut_array_refs![&mut contents, 32, 1, 64];
         contents_v.copy_from_slice(&v);
         marker[0] = 0x01;
 
-        let k = hmac_256::<H>(&k, &contents);
-        let v = hmac_256::<H>(&k, &v);
+        let k = H::hmac(&k, &contents);
+        let v = H::hmac(&k, &v);
 
         Rfc6979 {
             k,
@@ -330,14 +331,14 @@ where
     fn next(&mut self) -> Int256 {
         // Note: at this step, the logic from RFC 6979 is simplified, because the HMAC produces 256
         // bits and we need 256 bits.
-        let t = hmac_256::<H>(&self.k, &self.v);
+        let t = H::hmac(&self.k, &self.v);
         let result = Int256::from_bin(&t);
 
         let mut v1 = [0; 33];
         v1[..32].copy_from_slice(&self.v);
         v1[32] = 0x00;
-        self.k = hmac_256::<H>(&self.k, &v1);
-        self.v = hmac_256::<H>(&self.k, &self.v);
+        self.k = H::hmac(&self.k, &v1);
+        self.v = H::hmac(&self.k, &self.v);
 
         result
     }

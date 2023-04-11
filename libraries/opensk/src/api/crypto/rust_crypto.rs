@@ -34,6 +34,7 @@ use aes::cipher::{
     BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, KeyInit, KeyIvInit,
 };
 use core::convert::TryFrom;
+use hmac::digest::FixedOutput;
 use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
@@ -109,10 +110,8 @@ pub struct SoftwareEcdhSharedSecret {
 }
 
 impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
-    fn raw_secret_bytes(&self) -> [u8; EC_FIELD_SIZE] {
-        let mut bytes = [0; EC_FIELD_SIZE];
-        bytes.copy_from_slice(self.shared_secret.raw_secret_bytes().as_slice());
-        bytes
+    fn raw_secret_bytes(&self, secret: &mut [u8; EC_FIELD_SIZE]) {
+        secret.copy_from_slice(self.shared_secret.raw_secret_bytes().as_slice());
     }
 }
 
@@ -235,18 +234,18 @@ impl Sha256 for SoftwareSha256 {
     }
 
     /// Finalizes the hashing process, returns the hash value.
-    fn finalize(self) -> [u8; HASH_SIZE] {
-        self.hasher.finalize().into()
+    fn finalize(self, output: &mut [u8; HASH_SIZE]) {
+        FixedOutput::finalize_into(self.hasher, output.into());
     }
 }
 
 pub struct SoftwareHmac256;
 
 impl Hmac256 for SoftwareHmac256 {
-    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8]) -> [u8; HASH_SIZE] {
+    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8], output: &mut [u8; HASH_SIZE]) {
         let mut hmac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).unwrap();
         hmac.update(data);
-        hmac.finalize().into_bytes().into()
+        hmac.finalize_into(output.into());
     }
 
     fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
@@ -269,11 +268,9 @@ impl Hmac256 for SoftwareHmac256 {
 pub struct SoftwareHkdf256;
 
 impl Hkdf256 for SoftwareHkdf256 {
-    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE] {
+    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8], okm: &mut [u8; HASH_SIZE]) {
         let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm);
-        let mut okm = [0u8; HASH_SIZE];
-        hk.expand(info, &mut okm).unwrap();
-        okm
+        hk.expand(info, okm).unwrap();
     }
 }
 

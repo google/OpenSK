@@ -359,6 +359,7 @@ mod test {
     use super::*;
     use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
+    use crate::ctap::secret::Secret;
     use crate::ctap::storage;
     use crate::env::test::TestEnv;
     use crate::env::Sha;
@@ -432,7 +433,7 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let attestation = Attestation {
-            private_key: [0x41; 32],
+            private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0x99; 100],
         };
         env.attestation_store()

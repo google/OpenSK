@@ -24,7 +24,8 @@ pub fn verify_hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8], mac: &[u8; HASH
 where
     H: Hash256,
 {
-    let expected_mac = hmac_256::<H>(key, contents);
+    let mut expected_mac = [0; HASH_SIZE];
+    hmac_256::<H>(key, contents, &mut expected_mac);
     bool::from(expected_mac.ct_eq(mac))
 }
 
@@ -38,19 +39,23 @@ pub fn verify_hmac_256_first_128bits<H>(
 where
     H: Hash256,
 {
-    let expected_mac = hmac_256::<H>(key, contents);
+    let mut expected_mac = [0; HASH_SIZE];
+    hmac_256::<H>(key, contents, &mut expected_mac);
     bool::from(array_ref![expected_mac, 0, 16].ct_eq(pin))
 }
 
-pub fn hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8]) -> [u8; HASH_SIZE]
+pub fn hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8], output: &mut [u8; HASH_SIZE])
 where
     H: Hash256,
 {
-    H::hmac(key, contents)
+    H::hmac_mut(key, contents, output)
 }
 
-pub(crate) fn software_hmac_256<H>(key: &[u8; KEY_SIZE], contents: &[u8]) -> [u8; HASH_SIZE]
-where
+pub(crate) fn software_hmac_256<H>(
+    key: &[u8; KEY_SIZE],
+    contents: &[u8],
+    output: &mut [u8; HASH_SIZE],
+) where
     H: Hash256,
 {
     let mut ipad: [u8; BLOCK_SIZE] = [0x36; BLOCK_SIZE];
@@ -64,13 +69,13 @@ where
     let mut ihasher = H::new();
     ihasher.update(&ipad);
     ihasher.update(contents);
-    let ihash = ihasher.finalize();
+    let mut ihash = [0; HASH_SIZE];
+    ihasher.finalize(&mut ihash);
 
     let mut ohasher = H::new();
     ohasher.update(&opad);
     ohasher.update(&ihash);
-
-    ohasher.finalize()
+    ohasher.finalize(output);
 }
 
 fn xor_pads(ipad: &mut [u8; BLOCK_SIZE], opad: &mut [u8; BLOCK_SIZE], key: &[u8; KEY_SIZE]) {
@@ -91,7 +96,8 @@ mod test {
         for len in 0..128 {
             let key = [0; KEY_SIZE];
             let contents = vec![0; len];
-            let mac = hmac_256::<Sha256>(&key, &contents);
+            let mut mac = [0; HASH_SIZE];
+            hmac_256::<Sha256>(&key, &contents, &mut mac);
             assert!(verify_hmac_256::<Sha256>(&key, &contents, &mac));
         }
     }
@@ -102,7 +108,8 @@ mod test {
         for len in 0..128 {
             let key = [0; KEY_SIZE];
             let contents = vec![0; len];
-            let mac = hmac_256::<Sha256>(&key, &contents);
+            let mut mac = [0; HASH_SIZE];
+            hmac_256::<Sha256>(&key, &contents, &mut mac);
 
             // Check that invalid MACs don't verify, by changing any byte of the valid MAC.
             for i in 0..HASH_SIZE {
@@ -116,14 +123,21 @@ mod test {
     #[test]
     fn test_hmac_sha256_examples() {
         let key = [0; KEY_SIZE];
+        let mut mac = [0; HASH_SIZE];
+        hmac_256::<Sha256>(&key, &[], &mut mac);
         assert_eq!(
-            hmac_256::<Sha256>(&key, &[]),
+            mac,
             hex::decode("b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad")
                 .unwrap()
                 .as_slice()
         );
+        hmac_256::<Sha256>(
+            &key,
+            b"The quick brown fox jumps over the lazy dog",
+            &mut mac,
+        );
         assert_eq!(
-            hmac_256::<Sha256>(&key, b"The quick brown fox jumps over the lazy dog"),
+            mac,
             hex::decode("fb011e6154a19b9a4c767373c305275a5a69e8b68b0b4c9200c383dced19a416")
                 .unwrap()
                 .as_slice()
@@ -274,11 +288,10 @@ mod test {
 
         let mut input = Vec::new();
         let key = [b'A'; KEY_SIZE];
+        let mut mac = [0; HASH_SIZE];
         for i in 0..128 {
-            assert_eq!(
-                hmac_256::<Sha256>(&key, &input),
-                hex::decode(hashes[i] as &[u8]).unwrap().as_slice()
-            );
+            hmac_256::<Sha256>(&key, &input, &mut mac);
+            assert_eq!(mac, hex::decode(hashes[i] as &[u8]).unwrap().as_slice());
             input.push(b'A');
         }
     }

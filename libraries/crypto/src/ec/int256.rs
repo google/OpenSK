@@ -19,6 +19,7 @@ use byteorder::{BigEndian, ByteOrder};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 use rand_core::RngCore;
 use subtle::{self, Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroize;
 
 const BITS_PER_DIGIT: usize = 32;
 const BYTES_PER_DIGIT: usize = BITS_PER_DIGIT >> 3;
@@ -29,7 +30,7 @@ pub type Digit = u32;
 type DoubleDigit = u64;
 type SignedDoubleDigit = i64;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]

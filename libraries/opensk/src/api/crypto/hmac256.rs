@@ -17,7 +17,7 @@ use super::{HASH_SIZE, HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE};
 /// For a given hash function, computes and verifies the HMAC.
 pub trait Hmac256 {
     /// Computes the HMAC.
-    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8]) -> [u8; HASH_SIZE];
+    fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8], output: &mut [u8; HASH_SIZE]);
 
     /// Verifies the HMAC.
     ///

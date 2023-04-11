@@ -26,7 +26,7 @@ pub trait Hkdf256 {
     ///
     /// This implementation is equivalent to a standard HKD, with `salt` fixed at a length of
     /// 32 byte and the output length l as 32.
-    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE];
+    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8], okm: &mut [u8; HASH_SIZE]);
 
     /// Computes the HKDF with empty salt and 256 bit (one block) output.
     ///
@@ -37,7 +37,7 @@ pub trait Hkdf256 {
     ///
     /// This implementation is equivalent to a standard HKDF, with `salt` set to the
     /// default block of zeros and the output length l as 32.
-    fn hkdf_empty_salt_256(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE] {
-        Self::hkdf_256(ikm, &[0; HASH_SIZE], info)
+    fn hkdf_empty_salt_256(ikm: &[u8], info: &[u8], okm: &mut [u8; HASH_SIZE]) {
+        Self::hkdf_256(ikm, &[0; HASH_SIZE], info, okm)
     }
 }

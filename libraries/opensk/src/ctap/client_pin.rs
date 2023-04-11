@@ -18,6 +18,7 @@ use super::data_formats::{
 };
 use super::pin_protocol::{verify_pin_uv_auth_token, PinProtocol, SharedSecret};
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
+use super::secret::Secret;
 use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
 #[cfg(test)]
@@ -32,6 +33,7 @@ use crate::env::{Env, Hmac, Sha};
 use alloc::str;
 use alloc::string::String;
 use alloc::vec::Vec;
+use arrayref::array_ref;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 use subtle::ConstantTimeEq;
@@ -61,7 +63,7 @@ const PIN_PADDED_LENGTH: usize = 64;
 fn decrypt_pin<E: Env>(
     shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
+) -> Result<Secret<[u8]>, Ctap2StatusCode> {
     let decrypted_pin = shared_secret.decrypt(&new_pin_enc)?;
     if decrypted_pin.len() != PIN_PADDED_LENGTH {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -69,7 +71,13 @@ fn decrypt_pin<E: Env>(
     // In CTAP 2.1, the specification changed. The new wording might lead to
     // different behavior when there are non-zero bytes after zero bytes.
     // This implementation consistently ignores those degenerate cases.
-    Ok(decrypted_pin.into_iter().take_while(|&c| c != 0).collect())
+    let len = decrypted_pin
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(decrypted_pin.len());
+    let mut result = Secret::new(len);
+    result.copy_from_slice(&decrypted_pin[..len]);
+    Ok(result)
 }
 
 /// Stores a hash prefix of the new PIN in the persistent storage, if correct.
@@ -88,10 +96,14 @@ fn check_and_store_new_pin<E: Env>(
     if pin_length < min_pin_length || pin.len() == PIN_PADDED_LENGTH {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
-    let mut pin_hash = [0u8; PIN_AUTH_LENGTH];
-    pin_hash.copy_from_slice(&Sha::<E>::digest(&pin[..])[..PIN_AUTH_LENGTH]);
+    let mut pin_hash = Secret::default();
+    Sha::<E>::digest_mut(&pin, &mut pin_hash);
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
-    storage::set_pin(env, &pin_hash, pin_length as u8)?;
+    storage::set_pin(
+        env,
+        array_ref!(pin_hash, 0, PIN_AUTH_LENGTH),
+        pin_length as u8,
+    )?;
     Ok(())
 }
 
@@ -471,10 +483,18 @@ impl<E: Env> ClientPin<E> {
         if decrypted_salts.len() != 32 && decrypted_salts.len() != 64 {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        let mut output = Hmac::<E>::mac(cred_random, &decrypted_salts[..32]).to_vec();
+        let mut output = Secret::new(decrypted_salts.len());
+        Hmac::<E>::mac(
+            cred_random,
+            &decrypted_salts[..32],
+            array_mut_ref![&mut output, 0, 32],
+        );
         if decrypted_salts.len() == 64 {
-            let mut output2 = Hmac::<E>::mac(cred_random, &decrypted_salts[32..]).to_vec();
-            output.append(&mut output2);
+            Hmac::<E>::mac(
+                cred_random,
+                &decrypted_salts[32..],
+                array_mut_ref![&mut output, 32, 32],
+            );
         }
         shared_secret.encrypt(env, &output)
     }
@@ -575,6 +595,7 @@ impl<E: Env> ClientPin<E> {
 mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
+    use crate::api::crypto::HASH_SIZE;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
     use alloc::vec;
@@ -681,30 +702,30 @@ mod test {
             .unwrap();
         let ciphertext = shared_secret_v1.encrypt(&mut env, &message).unwrap();
         let plaintext = shared_secret_v2.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
         let ciphertext = shared_secret_v2.encrypt(&mut env, &message).unwrap();
         let plaintext = shared_secret_v1.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
 
         let fake_secret_v1 = pin_protocol_v1
             .decapsulate(pin_protocol_v2.get_public_key(), PinUvAuthProtocol::V1)
             .unwrap();
         let ciphertext = shared_secret_v1.encrypt(&mut env, &message).unwrap();
         let plaintext = fake_secret_v1.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
         let ciphertext = fake_secret_v1.encrypt(&mut env, &message).unwrap();
         let plaintext = shared_secret_v1.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
 
         let fake_secret_v2 = pin_protocol_v2
             .decapsulate(pin_protocol_v1.get_public_key(), PinUvAuthProtocol::V2)
             .unwrap();
         let ciphertext = shared_secret_v2.encrypt(&mut env, &message).unwrap();
         let plaintext = fake_secret_v2.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
         let ciphertext = fake_secret_v2.encrypt(&mut env, &message).unwrap();
         let plaintext = shared_secret_v2.decrypt(&ciphertext).unwrap();
-        assert_ne!(&message, &plaintext);
+        assert_ne!(&message, &*plaintext);
     }
 
     fn test_helper_verify_pin_hash_enc(pin_uv_auth_protocol: PinUvAuthProtocol) {
@@ -964,7 +985,7 @@ mod test {
             _ => panic!("Invalid response type"),
         };
         assert_eq!(
-            &shared_secret.decrypt(&encrypted_token).unwrap(),
+            &*shared_secret.decrypt(&encrypted_token).unwrap(),
             client_pin
                 .get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token()
@@ -1058,7 +1079,7 @@ mod test {
             _ => panic!("Invalid response type"),
         };
         assert_eq!(
-            &shared_secret.decrypt(&encrypted_token).unwrap(),
+            &*shared_secret.decrypt(&encrypted_token).unwrap(),
             client_pin
                 .get_pin_protocol(pin_uv_auth_protocol)
                 .get_pin_uv_auth_token()
@@ -1154,14 +1175,14 @@ mod test {
 
         let new_pin_enc = encrypt_pin(&shared_secret, b"1234".to_vec());
         assert_eq!(
-            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
-            Ok(b"1234".to_vec()),
+            &*decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc).unwrap(),
+            b"1234",
         );
 
         let new_pin_enc = encrypt_pin(&shared_secret, b"123".to_vec());
         assert_eq!(
-            decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc),
-            Ok(b"123".to_vec()),
+            &*decrypt_pin::<TestEnv>(&shared_secret, new_pin_enc).unwrap(),
+            b"123",
         );
 
         // Encrypted PIN is too short.
@@ -1261,7 +1282,7 @@ mod test {
             pin_uv_auth_protocol,
         };
         let output = client_pin.process_hmac_secret(&mut env, hmac_secret_input, cred_random);
-        output.map(|v| shared_secret.decrypt(&v).unwrap())
+        output.map(|v| shared_secret.decrypt(&v).unwrap().expose_secret_to_vec())
     }
 
     fn test_helper_process_hmac_secret_bad_salt_auth(pin_uv_auth_protocol: PinUvAuthProtocol) {
@@ -1298,12 +1319,13 @@ mod test {
         let cred_random = [0xC9; 32];
 
         let salt = vec![0x01; 32];
-        let expected_output = Hmac::<TestEnv>::mac(&cred_random, &salt);
+        let mut expected_output = [0; HASH_SIZE];
+        Hmac::<TestEnv>::mac(&cred_random, &salt, &mut expected_output);
 
         let output =
             get_process_hmac_secret_decrypted_output(pin_uv_auth_protocol, &cred_random, salt)
                 .unwrap();
-        assert_eq!(&output, &expected_output);
+        assert_eq!(&*output, &expected_output);
     }
 
     #[test]
@@ -1321,8 +1343,10 @@ mod test {
 
         let salt1 = [0x01; 32];
         let salt2 = [0x02; 32];
-        let expected_output1 = Hmac::<TestEnv>::mac(&cred_random, &salt1);
-        let expected_output2 = Hmac::<TestEnv>::mac(&cred_random, &salt2);
+        let mut expected_output1 = [0; HASH_SIZE];
+        let mut expected_output2 = [0; HASH_SIZE];
+        Hmac::<TestEnv>::mac(&cred_random, &salt1, &mut expected_output1);
+        Hmac::<TestEnv>::mac(&cred_random, &salt2, &mut expected_output2);
 
         let mut salt12 = vec![0x00; 64];
         salt12[..32].copy_from_slice(&salt1);

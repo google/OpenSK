@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::api::crypto::EC_FIELD_SIZE;
+use crate::ctap::secret::Secret;
 use crate::env::Env;
 use alloc::vec::Vec;
 use persistent_store::{StoreError, StoreUpdate};
@@ -27,7 +28,7 @@ pub enum Id {
 #[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
 pub struct Attestation {
     /// ECDSA private key (big-endian).
-    pub private_key: [u8; EC_FIELD_SIZE],
+    pub private_key: Secret<[u8; EC_FIELD_SIZE]>,
     pub certificate: Vec<u8>,
 }
 
@@ -69,7 +70,7 @@ pub fn helper_get(env: &mut impl Env) -> Result<Option<Attestation>, Error> {
         return Err(Error::Internal);
     }
     Ok(Some(Attestation {
-        private_key: *array_ref![private_key, 0, EC_FIELD_SIZE],
+        private_key: Secret::from_exposed_secret(*array_ref![private_key, 0, EC_FIELD_SIZE]),
         certificate,
     }))
 }

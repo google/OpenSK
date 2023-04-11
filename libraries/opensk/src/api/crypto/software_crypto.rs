@@ -208,8 +208,8 @@ impl Hmac256 for SoftwareHmac256 {
 pub struct SoftwareHkdf256;
 
 impl Hkdf256 for SoftwareHkdf256 {
-    fn hkdf_empty_salt_256(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE] {
-        crypto::hkdf::hkdf_empty_salt_256::<crypto::sha256::Sha256>(ikm, info)
+    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE] {
+        crypto::hkdf::hkdf_256::<crypto::sha256::Sha256>(ikm, salt, info)
     }
 }
 

@@ -66,14 +66,14 @@ use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
-use crate::api::crypto::hmac256::Hmac256;
+use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::rng::Rng;
 use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
-use crate::env::{EcdsaSk, Env, Hmac, Sha};
+use crate::env::{EcdsaSk, Env, Hkdf, Sha};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -956,9 +956,10 @@ impl<E: Env> CtapState<E> {
         private_key: &PrivateKey,
         has_uv: bool,
     ) -> Result<[u8; 32], Ctap2StatusCode> {
-        let entropy = private_key.to_bytes();
+        let private_key_bytes = private_key.to_bytes();
+        let salt = array_ref!(private_key_bytes, 0, 32);
         let key = storage::cred_random_secret(env, has_uv)?;
-        Ok(Hmac::<E>::mac(&key, &entropy))
+        Ok(Hkdf::<E>::hkdf_256(&key, salt, b"credRandom"))
     }
 
     // Processes the input of a get_assertion operation for a given credential

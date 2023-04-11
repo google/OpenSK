@@ -257,8 +257,8 @@ impl Hmac256 for SoftwareHmac256 {
 pub struct SoftwareHkdf256;
 
 impl Hkdf256 for SoftwareHkdf256 {
-    fn hkdf_empty_salt_256(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE] {
-        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(&[0; HASH_SIZE]), ikm);
+    fn hkdf_256(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE] {
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm);
         let mut okm = [0u8; HASH_SIZE];
         hk.expand(info, &mut okm).unwrap();
         okm

@@ -159,6 +159,16 @@ mod test {
     }
 
     #[test]
+    fn test_hkdf_256_matches() {
+        let ikm = [0x11; 16];
+        let salt = [0; 32];
+        let info = [0x22; 16];
+        let empty_salt_output = SoftwareHkdf256::hkdf_empty_salt_256(&ikm, &info);
+        let explicit_output = SoftwareHkdf256::hkdf_256(&ikm, &salt, &info);
+        assert_eq!(empty_salt_output, explicit_output);
+    }
+
+    #[test]
     fn test_aes_encrypt_decrypt_block() {
         let mut block = [0x55; AES_BLOCK_SIZE];
         let aes = SoftwareAes256::new(&[0xAA; AES_KEY_SIZE]);

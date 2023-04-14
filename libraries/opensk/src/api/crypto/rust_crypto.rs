@@ -36,6 +36,7 @@ use aes::cipher::{
 use core::convert::TryFrom;
 use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
+use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
@@ -174,6 +175,12 @@ impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
             .is_ok()
     }
 
+    fn verify_prehash(&self, prehash: &[u8; HASH_SIZE], signature: &Self::Signature) -> bool {
+        self.verifying_key
+            .verify_prehash(prehash, &signature.signature)
+            .is_ok()
+    }
+
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         let point = self.verifying_key.to_encoded_point(false);
         x.copy_from_slice(point.x().unwrap());
@@ -196,6 +203,11 @@ impl ecdsa::Signature for SoftwareEcdsaSignature {
         let s = p256::FieldBytes::from(s);
         let signature = p256::ecdsa::Signature::from_scalars(r, s).ok()?;
         Some(SoftwareEcdsaSignature { signature })
+    }
+
+    #[cfg(feature = "std")]
+    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
+        bytes.copy_from_slice(&self.signature.to_bytes());
     }
 
     fn to_der(&self) -> Vec<u8> {

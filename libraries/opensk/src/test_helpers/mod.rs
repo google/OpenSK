@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ctap::command::{
-    AuthenticatorAttestationMaterial, AuthenticatorConfigParameters,
-    AuthenticatorVendorConfigureParameters, Command, ATTESTATION_PRIVATE_KEY_LENGTH,
-};
+use crate::api::attestation_store::{self, AttestationStore};
+use crate::ctap::command::{AuthenticatorConfigParameters, Command};
 use crate::ctap::data_formats::ConfigSubCommand;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::{Channel, CtapState};
@@ -24,29 +22,17 @@ use crate::env::Env;
 // In tests where we define a dummy user-presence check that immediately returns, the channel
 // ID is irrelevant, so we pass this (dummy but valid) value.
 const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
-#[cfg(feature = "vendor_hid")]
-const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
 pub fn enable_enterprise_attestation<E: Env>(
     state: &mut CtapState<E>,
     env: &mut E,
-) -> Result<AuthenticatorAttestationMaterial, Ctap2StatusCode> {
-    let dummy_key = [0x41; ATTESTATION_PRIVATE_KEY_LENGTH];
-    let dummy_cert = vec![0xdd; 20];
-    let attestation_material = AuthenticatorAttestationMaterial {
-        certificate: dummy_cert,
-        private_key: dummy_key,
+) -> Result<attestation_store::Attestation, Ctap2StatusCode> {
+    let attestation = attestation_store::Attestation {
+        private_key: [0x41; 32],
+        certificate: vec![0xdd; 20],
     };
-    let configure_params = AuthenticatorVendorConfigureParameters {
-        lockdown: false,
-        attestation_material: Some(attestation_material.clone()),
-    };
-    #[cfg(feature = "vendor_hid")]
-    let vendor_channel = VENDOR_CHANNEL;
-    #[cfg(not(feature = "vendor_hid"))]
-    let vendor_channel = DUMMY_CHANNEL;
-    let vendor_command = Command::AuthenticatorVendorConfigure(configure_params);
-    state.process_parsed_command(env, vendor_command, vendor_channel)?;
+    env.attestation_store()
+        .set(&attestation_store::Id::Batch, Some(&attestation))?;
 
     let config_params = AuthenticatorConfigParameters {
         sub_command: ConfigSubCommand::EnableEnterpriseAttestation,
@@ -57,5 +43,5 @@ pub fn enable_enterprise_attestation<E: Env>(
     let config_command = Command::AuthenticatorConfig(config_params);
     state.process_parsed_command(env, config_command, DUMMY_CHANNEL)?;
 
-    Ok(attestation_material)
+    Ok(attestation)
 }

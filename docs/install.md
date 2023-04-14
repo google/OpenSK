@@ -28,7 +28,7 @@ following:
 *   `nrfutil` (can be installed using `pip3 install nrfutil`) if you want to flash
     a device with DFU
 *   `uuid-runtime` if you are missing the `uuidgen` command.
-*   `llvm` if you want to use the upgradability feature.
+*   `llvm` and `gcc-arm-none-eabi` if you want to use the upgradability feature.
 
 The proprietary software to use the default programmer can be found on the
 [Segger website](https://www.segger.com/downloads/jlink). Please follow their

@@ -37,8 +37,7 @@ pub mod vendor_hid;
 
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
-    AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters,
-    AuthenticatorVendorConfigureParameters, AuthenticatorVendorUpgradeParameters, Command,
+    AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
 };
 use self::config_command::process_config;
 use self::credential_id::{
@@ -56,8 +55,7 @@ use self::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPa
 use self::large_blobs::LargeBlobs;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
-    AuthenticatorMakeCredentialResponse, AuthenticatorVendorConfigureResponse,
-    AuthenticatorVendorUpgradeInfoResponse, ResponseData,
+    AuthenticatorMakeCredentialResponse, ResponseData,
 };
 use self::status_code::Ctap2StatusCode;
 #[cfg(feature = "with_ctap1")]
@@ -69,9 +67,7 @@ use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
-use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::rng::Rng;
-use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::env::{EcdsaSk, Env, Hkdf, Sha};
 use alloc::boxed::Box;
@@ -183,7 +179,7 @@ pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
 }
 
-fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
+pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
     cbor::writer::write_nested(value, encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
@@ -283,7 +279,7 @@ fn send_keepalive_up_needed<E: Env>(
 /// Blocks for user presence.
 ///
 /// Returns an error in case of timeout, user declining presence request, or keepalive error.
-fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap2StatusCode> {
+pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap2StatusCode> {
     env.user_presence().check_init();
 
     // The timeout is N times the keepalive delay.
@@ -385,7 +381,7 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Clears all state if communication is coming from a different channel.
-    pub fn clear_old_channels(&mut self, channel: &Channel) {
+    pub fn clear_old_channels(&mut self, channel: Channel) {
         // There are different possible choices for incoming traffic on a different channel:
         // A) Always reset state (our choice).
         // B) Only reset state if the new command is stateful.
@@ -396,7 +392,7 @@ impl<E: Env> StatefulPermission<E> {
         // However, interleaving (stateless) commands could delete credentials or change the PIN,
         // which could invalidate our access. Some read-only commands should be okay to run,
         // but (A) is the safest and easiest solution.
-        if let Some(c) = &self.channel {
+        if let Some(c) = self.channel {
             if c != channel {
                 self.clear();
             }
@@ -525,12 +521,28 @@ impl<E: Env> CtapState<E> {
         Ok(!storage::has_always_uv(env)?)
     }
 
+    fn clear_other_channels(&mut self, channel: Channel) {
+        // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
+        #[cfg(feature = "with_ctap1")]
+        {
+            // We create a block statement to wrap this assignment expression, because attributes
+            // (like #[cfg]) are not supported on expressions.
+            self.u2f_up_state = U2fUserPresenceState::new();
+        }
+        self.stateful_command_permission.clear_old_channels(channel);
+    }
+
     pub fn process_command(
         &mut self,
         env: &mut E,
         command_cbor: &[u8],
         channel: Channel,
     ) -> Vec<u8> {
+        if let Some(response) = env.process_vendor_command(command_cbor, channel) {
+            self.clear_other_channels(channel);
+            self.stateful_command_permission.clear();
+            return response;
+        }
         let cmd = Command::deserialize(command_cbor);
         debug_ctap!(env, "Received command: {:#?}", cmd);
         let response = cmd.and_then(|command| self.process_parsed_command(env, command, channel));
@@ -562,15 +574,7 @@ impl<E: Env> CtapState<E> {
         // The auth token timeouts are checked once here, to make error codes consistent. If your
         // auth token hasn't timed out now, you can fully use it for this command.
         self.client_pin.update_timeouts(env);
-        // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
-        #[cfg(feature = "with_ctap1")]
-        {
-            // We create a block statement to wrap this assignment expression, because attributes
-            // (like #[cfg]) are not supported on expressions.
-            self.u2f_up_state = U2fUserPresenceState::new();
-        }
-        self.stateful_command_permission
-            .clear_old_channels(&channel);
+        self.clear_other_channels(channel);
         match (&command, self.stateful_command_permission.get_command(env)) {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
             | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
@@ -591,10 +595,10 @@ impl<E: Env> CtapState<E> {
             ) => (),
             (_, _) => self.stateful_command_permission.clear(),
         }
-        match &channel {
+        match channel {
             Channel::MainHid(_) => self.process_fido_command(env, command, channel),
             #[cfg(feature = "vendor_hid")]
-            Channel::VendorHid(_) => self.process_vendor_command(env, command, channel),
+            Channel::VendorHid(_) => self.process_vendor_command(env, command),
         }
     }
 
@@ -630,25 +634,16 @@ impl<E: Env> CtapState<E> {
             Command::AuthenticatorConfig(params) => {
                 process_config(env, &mut self.client_pin, params)
             }
-            #[cfg(feature = "vendor_hid")]
-            _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
-            #[cfg(not(feature = "vendor_hid"))]
-            _ => self.process_vendor_command(env, command, channel),
         }
     }
 
+    #[cfg(feature = "vendor_hid")]
     fn process_vendor_command(
         &mut self,
         env: &mut E,
         command: Command,
-        channel: Channel,
     ) -> Result<ResponseData, Ctap2StatusCode> {
         match command {
-            Command::AuthenticatorVendorConfigure(params) => {
-                self.process_vendor_configure(env, params, channel)
-            }
-            Command::AuthenticatorVendorUpgrade(params) => self.process_vendor_upgrade(env, params),
-            Command::AuthenticatorVendorUpgradeInfo => self.process_vendor_upgrade_info(env),
             Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
@@ -1277,7 +1272,7 @@ impl<E: Env> CtapState<E> {
                 ),
                 force_pin_change: Some(storage::has_force_pin_change(env)?),
                 min_pin_length: storage::min_pin_length(env)?,
-                firmware_version: env.upgrade_storage().map(|u| u.running_firmware_version()),
+                firmware_version: env.firmware_version(),
                 max_cred_blob_length: Some(env.customization().max_cred_blob_length() as u64),
                 max_rp_ids_for_set_min_pin_length: Some(
                     env.customization().max_rp_ids_length() as u64
@@ -1323,88 +1318,6 @@ impl<E: Env> CtapState<E> {
         Ok(ResponseData::AuthenticatorSelection)
     }
 
-    fn process_vendor_configure(
-        &mut self,
-        env: &mut E,
-        params: AuthenticatorVendorConfigureParameters,
-        channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
-        if params.attestation_material.is_some() || params.lockdown {
-            check_user_presence(env, channel)?;
-        }
-        // This command is for U2F support and we use the batch attestation there.
-        let attestation_id = attestation_store::Id::Batch;
-
-        // Sanity checks
-        let current_attestation = env.attestation_store().get(&attestation_id)?;
-        let response = match params.attestation_material {
-            None => AuthenticatorVendorConfigureResponse {
-                cert_programmed: current_attestation.is_some(),
-                pkey_programmed: current_attestation.is_some(),
-            },
-            Some(data) => {
-                // We don't overwrite the attestation if it's already set. We don't return any error
-                // to not leak information.
-                if current_attestation.is_none() {
-                    let attestation = Attestation {
-                        private_key: data.private_key,
-                        certificate: data.certificate,
-                    };
-                    env.attestation_store()
-                        .set(&attestation_id, Some(&attestation))?;
-                }
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            }
-        };
-        if params.lockdown {
-            // To avoid bricking the authenticator, we only allow lockdown
-            // to happen if both values are programmed or if both U2F/CTAP1 and
-            // batch attestation are disabled.
-            #[cfg(feature = "with_ctap1")]
-            let need_certificate = true;
-            #[cfg(not(feature = "with_ctap1"))]
-            let need_certificate = env.customization().use_batch_attestation();
-
-            if (need_certificate && !(response.pkey_programmed && response.cert_programmed))
-                || !env.firmware_protection().lock()
-            {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
-        }
-        Ok(ResponseData::AuthenticatorVendorConfigure(response))
-    }
-
-    fn process_vendor_upgrade(
-        &mut self,
-        env: &mut E,
-        params: AuthenticatorVendorUpgradeParameters,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
-        let AuthenticatorVendorUpgradeParameters { offset, data, hash } = params;
-        let calculated_hash = Sha::<E>::digest(&data);
-        if hash != calculated_hash {
-            return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
-        }
-        env.upgrade_storage()
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?
-            .write_bundle(offset, data)
-            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        Ok(ResponseData::AuthenticatorVendorUpgrade)
-    }
-
-    fn process_vendor_upgrade_info(&self, env: &mut E) -> Result<ResponseData, Ctap2StatusCode> {
-        let upgrade_locations = env
-            .upgrade_storage()
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
-        Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
-            AuthenticatorVendorUpgradeInfoResponse {
-                info: upgrade_locations.bundle_identifier(),
-            },
-        ))
-    }
-
     pub fn generate_auth_data(
         &self,
         env: &mut E,
@@ -1440,8 +1353,7 @@ impl<E: Env> CtapState<E> {
 mod test {
     use super::client_pin::PIN_TOKEN_LENGTH;
     use super::command::{
-        AuthenticatorAttestationMaterial, AuthenticatorClientPinParameters,
-        AuthenticatorCredentialManagementParameters, ATTESTATION_PRIVATE_KEY_LENGTH,
+        AuthenticatorClientPinParameters, AuthenticatorCredentialManagementParameters,
     };
     use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
@@ -3219,228 +3131,6 @@ mod test {
     }
 
     #[test]
-    fn test_vendor_configure() {
-        let mut env = TestEnv::default();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
-
-        // Nothing should be configured at the beginning
-        let response = ctap_state.process_vendor_configure(
-            &mut env,
-            AuthenticatorVendorConfigureParameters {
-                lockdown: false,
-                attestation_material: None,
-            },
-            DUMMY_CHANNEL,
-        );
-        assert_eq!(
-            response,
-            Ok(ResponseData::AuthenticatorVendorConfigure(
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: false,
-                    pkey_programmed: false,
-                }
-            ))
-        );
-
-        // Inject dummy values
-        let dummy_key = [0x41u8; ATTESTATION_PRIVATE_KEY_LENGTH];
-        let dummy_cert = [0xddu8; 20];
-        let response = ctap_state.process_vendor_configure(
-            &mut env,
-            AuthenticatorVendorConfigureParameters {
-                lockdown: false,
-                attestation_material: Some(AuthenticatorAttestationMaterial {
-                    certificate: dummy_cert.to_vec(),
-                    private_key: dummy_key,
-                }),
-            },
-            DUMMY_CHANNEL,
-        );
-        assert_eq!(
-            response,
-            Ok(ResponseData::AuthenticatorVendorConfigure(
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            ))
-        );
-        assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
-            Ok(Some(Attestation {
-                private_key: dummy_key,
-                certificate: dummy_cert.to_vec(),
-            }))
-        );
-
-        // Try to inject other dummy values and check that initial values are retained.
-        let other_dummy_key = [0x44u8; ATTESTATION_PRIVATE_KEY_LENGTH];
-        let response = ctap_state.process_vendor_configure(
-            &mut env,
-            AuthenticatorVendorConfigureParameters {
-                lockdown: false,
-                attestation_material: Some(AuthenticatorAttestationMaterial {
-                    certificate: dummy_cert.to_vec(),
-                    private_key: other_dummy_key,
-                }),
-            },
-            DUMMY_CHANNEL,
-        );
-        assert_eq!(
-            response,
-            Ok(ResponseData::AuthenticatorVendorConfigure(
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            ))
-        );
-        assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
-            Ok(Some(Attestation {
-                private_key: dummy_key,
-                certificate: dummy_cert.to_vec(),
-            }))
-        );
-
-        // Now try to lock the device
-        let response = ctap_state.process_vendor_configure(
-            &mut env,
-            AuthenticatorVendorConfigureParameters {
-                lockdown: true,
-                attestation_material: None,
-            },
-            DUMMY_CHANNEL,
-        );
-        assert_eq!(
-            response,
-            Ok(ResponseData::AuthenticatorVendorConfigure(
-                AuthenticatorVendorConfigureResponse {
-                    cert_programmed: true,
-                    pkey_programmed: true,
-                }
-            ))
-        );
-    }
-
-    #[test]
-    fn test_vendor_upgrade() {
-        // The test partition storage has size 0x40000.
-        // The test metadata storage has size 0x1000.
-        // The test identifier matches partition B.
-        let mut env = TestEnv::default();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
-
-        const METADATA_LEN: usize = 0x1000;
-        let metadata = vec![0xFF; METADATA_LEN];
-        let metadata_hash = Sha::<TestEnv>::digest(&metadata);
-        let data = vec![0xFF; 0x1000];
-        let hash = Sha::<TestEnv>::digest(&data);
-
-        // Write to partition.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0x20000,
-                data: data.clone(),
-                hash,
-            },
-        );
-        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
-
-        // TestEnv doesn't check the metadata, test its parser in your Env.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0,
-                data: metadata.clone(),
-                hash: metadata_hash,
-            },
-        );
-        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
-
-        // TestEnv doesn't check the metadata, test its parser in your Env.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: METADATA_LEN,
-                data: data.clone(),
-                hash,
-            },
-        );
-        assert_eq!(response, Ok(ResponseData::AuthenticatorVendorUpgrade));
-
-        // Write metadata of a wrong size.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0,
-                data: metadata[..METADATA_LEN - 1].to_vec(),
-                hash: metadata_hash,
-            },
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
-
-        // Write outside of the partition.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0x41000,
-                data: data.clone(),
-                hash,
-            },
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
-
-        // Write a bad hash.
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0x20000,
-                data,
-                hash: [0xEE; 32],
-            },
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE));
-    }
-
-    #[test]
-    fn test_vendor_upgrade_no_second_partition() {
-        let mut env = TestEnv::default();
-        env.disable_upgrade_storage();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
-
-        let data = vec![0xFF; 0x1000];
-        let hash = Sha::<TestEnv>::digest(&data);
-        let response = ctap_state.process_vendor_upgrade(
-            &mut env,
-            AuthenticatorVendorUpgradeParameters {
-                offset: 0,
-                data,
-                hash,
-            },
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
-    }
-
-    #[test]
-    fn test_vendor_upgrade_info() {
-        let mut env = TestEnv::default();
-        let ctap_state = CtapState::<TestEnv>::new(&mut env);
-        let bundle_identifier = env.upgrade_storage().unwrap().bundle_identifier();
-
-        let upgrade_info_reponse = ctap_state.process_vendor_upgrade_info(&mut env);
-        assert_eq!(
-            upgrade_info_reponse,
-            Ok(ResponseData::AuthenticatorVendorUpgradeInfo(
-                AuthenticatorVendorUpgradeInfoResponse {
-                    info: bundle_identifier,
-                }
-            ))
-        );
-    }
-
-    #[test]
     fn test_permission_timeout() {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -3734,18 +3424,12 @@ mod test {
 
         let response = ctap_state.process_parsed_command(
             &mut env,
-            Command::AuthenticatorVendorUpgradeInfo,
+            Command::AuthenticatorGetInfo,
             VENDOR_CHANNEL,
         );
         assert!(matches!(
             response,
-            Ok(ResponseData::AuthenticatorVendorUpgradeInfo(_))
+            Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
-        let response = ctap_state.process_parsed_command(
-            &mut env,
-            Command::AuthenticatorVendorUpgradeInfo,
-            DUMMY_CHANNEL,
-        );
-        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND));
     }
 }

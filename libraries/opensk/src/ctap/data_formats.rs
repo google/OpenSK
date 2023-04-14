@@ -1163,14 +1163,14 @@ impl From<CredentialManagementSubCommandParameters> for cbor::Value {
     }
 }
 
-pub(super) fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
+pub fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Unsigned(unsigned) => Ok(unsigned),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
+pub fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Unsigned(unsigned) => {
             if unsigned <= core::i64::MAX as u64 {
@@ -1191,21 +1191,21 @@ pub fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2Stat
     }
 }
 
-pub(super) fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
+pub fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::TextString(text_string) => Ok(text_string),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>, Ctap2StatusCode> {
+pub fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Array(array) => Ok(array),
         _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
     }
 }
 
-pub(super) fn extract_map(
+pub fn extract_map(
     cbor_value: cbor::Value,
 ) -> Result<Vec<(cbor::Value, cbor::Value)>, Ctap2StatusCode> {
     match cbor_value {
@@ -1214,7 +1214,7 @@ pub(super) fn extract_map(
     }
 }
 
-pub(super) fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusCode> {
+pub fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusCode> {
     match cbor_value {
         cbor::Value::Simple(cbor::SimpleValue::FalseValue) => Ok(false),
         cbor::Value::Simple(cbor::SimpleValue::TrueValue) => Ok(true),
@@ -1222,7 +1222,7 @@ pub(super) fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusC
     }
 }
 
-pub(super) fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
+pub fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
     value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
 }
 

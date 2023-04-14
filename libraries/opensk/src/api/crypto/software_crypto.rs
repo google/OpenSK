@@ -145,6 +145,11 @@ impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
             .verify_vartime::<crypto::sha256::Sha256>(message, &signature.signature)
     }
 
+    fn verify_prehash(&self, prehash: &[u8; HASH_SIZE], signature: &Self::Signature) -> bool {
+        self.pub_key
+            .verify_hash_vartime(prehash, &signature.signature)
+    }
+
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         self.pub_key.to_coordinates(x, y);
     }
@@ -157,6 +162,11 @@ pub struct SoftwareEcdsaSignature {
 impl ecdsa::Signature for SoftwareEcdsaSignature {
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
         crypto::ecdsa::Signature::from_bytes(bytes).map(|s| SoftwareEcdsaSignature { signature: s })
+    }
+
+    #[cfg(feature = "std")]
+    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
+        self.signature.to_bytes(bytes);
     }
 
     fn to_der(&self) -> Vec<u8> {

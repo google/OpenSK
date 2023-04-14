@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use self::upgrade_storage::BufferUpgradeStorage;
 use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
-use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
@@ -29,13 +27,11 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 pub mod customization;
-mod upgrade_storage;
 
 pub struct TestEnv {
     rng: TestRng,
     user_presence: TestUserPresence,
     store: Store<BufferStorage>,
-    upgrade_storage: Option<BufferUpgradeStorage>,
     customization: TestCustomization,
     clock: TestClock,
 }
@@ -123,14 +119,12 @@ impl Default for TestEnv {
         };
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
-        let upgrade_storage = Some(BufferUpgradeStorage::new().unwrap());
         let customization = DEFAULT_CUSTOMIZATION.into();
         let clock = TestClock::default();
         TestEnv {
             rng,
             user_presence,
             store,
-            upgrade_storage,
             customization,
             clock,
         }
@@ -138,10 +132,6 @@ impl Default for TestEnv {
 }
 
 impl TestEnv {
-    pub fn disable_upgrade_storage(&mut self) {
-        self.upgrade_storage = None;
-    }
-
     pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }
@@ -163,12 +153,6 @@ impl UserPresence for TestUserPresence {
         (self.check)()
     }
     fn check_complete(&mut self) {}
-}
-
-impl FirmwareProtection for TestEnv {
-    fn lock(&mut self) -> bool {
-        true
-    }
 }
 
 impl key_store::Helper for TestEnv {}
@@ -197,8 +181,6 @@ impl Env for TestEnv {
     type KeyStore = Self;
     type AttestationStore = Self;
     type Clock = TestClock;
-    type UpgradeStorage = BufferUpgradeStorage;
-    type FirmwareProtection = Self;
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
@@ -228,14 +210,6 @@ impl Env for TestEnv {
         &mut self.clock
     }
 
-    fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
-        self.upgrade_storage.as_mut()
-    }
-
-    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
-        self
-    }
-
     fn write(&mut self) -> Self::Write {
         TestWrite
     }
@@ -251,6 +225,10 @@ impl Env for TestEnv {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
         self
+    }
+
+    fn firmware_version(&self) -> Option<u64> {
+        Some(0)
     }
 }
 

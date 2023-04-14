@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
+use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE};
 use crate::api::rng::Rng;
 use alloc::vec::Vec;
 
@@ -58,6 +58,11 @@ pub trait PublicKey: Sized {
     /// For hashing, SHA256 is used implicitly.
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
 
+    /// Verifies if the signature matches the hash of the message.
+    ///
+    /// Prehash is the SHA256 of the signed message.
+    fn verify_prehash(&self, prehash: &[u8; HASH_SIZE], signature: &Self::Signature) -> bool;
+
     /// Writes the public key coordinates into the passed in parameters.
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]);
 }
@@ -66,6 +71,10 @@ pub trait PublicKey: Sized {
 pub trait Signature: Sized {
     /// Creates a signature from its affine coordinates, represented as concatenated bytes.
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self>;
+
+    /// Writes the signature bytes into the passed in parameter.
+    #[cfg(feature = "std")]
+    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]);
 
     /// Encodes the signatures as ASN1 DER.
     fn to_der(&self) -> Vec<u8>;

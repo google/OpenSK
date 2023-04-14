@@ -12,33 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use self::storage::{TockStorage, TockUpgradeStorage};
+use alloc::vec::Vec;
 use clock::TockClock;
 use core::cell::Cell;
 use core::convert::TryFrom;
+#[cfg(not(feature = "std"))]
 use core::sync::atomic::{AtomicBool, Ordering};
 use libtock_core::result::{CommandError, EALREADY};
 use libtock_drivers::buttons::{self, ButtonState};
 use libtock_drivers::console::Console;
+#[cfg(not(feature = "std"))]
+use libtock_drivers::crp;
 use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
-use libtock_drivers::{crp, led, rng, timer, usb_ctap_hid};
+use libtock_drivers::{led, rng, timer, usb_ctap_hid};
 use opensk::api::attestation_store::AttestationStore;
 use opensk::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
-use opensk::api::firmware_protection::FirmwareProtection;
 use opensk::api::rng::Rng;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use opensk::api::{attestation_store, key_store};
+use opensk::ctap::Channel;
 use opensk::env::Env;
+#[cfg(feature = "std")]
+use persistent_store::{BufferOptions, BufferStorage};
 use persistent_store::{StorageResult, Store};
 use rand_core::{impls, CryptoRng, Error, RngCore};
 
+#[cfg(feature = "std")]
+mod buffer_upgrade_storage;
 mod clock;
+mod commands;
+#[cfg(not(feature = "std"))]
 mod storage;
+mod storage_helper;
+mod upgrade_helper;
+
+#[cfg(not(feature = "std"))]
+pub type Storage = storage::TockStorage;
+#[cfg(feature = "std")]
+pub type Storage = BufferStorage;
+
+#[cfg(not(feature = "std"))]
+type UpgradeStorage = storage::TockUpgradeStorage;
+#[cfg(feature = "std")]
+type UpgradeStorage = buffer_upgrade_storage::BufferUpgradeStorage;
 
 pub const AAGUID: &[u8; AAGUID_LENGTH] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
@@ -97,8 +118,8 @@ impl HidConnection for TockHidConnection {
 
 pub struct TockEnv {
     rng: TockRng,
-    store: Store<TockStorage>,
-    upgrade_storage: Option<TockUpgradeStorage>,
+    store: Store<Storage>,
+    upgrade_storage: Option<UpgradeStorage>,
     main_connection: TockHidConnection,
     #[cfg(feature = "vendor_hid")]
     vendor_connection: TockHidConnection,
@@ -116,7 +137,7 @@ impl Default for TockEnv {
         // We rely on `take_storage` to ensure that this function is called only once.
         let storage = take_storage().unwrap();
         let store = Store::new(storage).ok().unwrap();
-        let upgrade_storage = TockUpgradeStorage::new().ok();
+        let upgrade_storage = UpgradeStorage::new().ok();
         TockEnv {
             rng: TockRng {},
             store,
@@ -134,16 +155,65 @@ impl Default for TockEnv {
     }
 }
 
+impl TockEnv {
+    /// Returns the upgrade storage instance.
+    ///
+    /// Upgrade storage is optional, so implementations may return `None`. However, implementations
+    /// should either always return `None` or always return `Some`.
+    pub fn upgrade_storage(&mut self) -> Option<&mut UpgradeStorage> {
+        self.upgrade_storage.as_mut()
+    }
+
+    pub fn disable_upgrade_storage(&mut self) {
+        self.upgrade_storage = None;
+    }
+
+    pub fn lock_firmware_protection(&mut self) -> bool {
+        #[cfg(not(feature = "std"))]
+        {
+            matches!(
+                crp::set_protection(crp::ProtectionLevel::FullyLocked),
+                Ok(())
+                    | Err(TockError::Command(CommandError {
+                        return_code: EALREADY,
+                        ..
+                    }))
+            )
+        }
+        #[cfg(feature = "std")]
+        {
+            true
+        }
+    }
+}
+
 /// Returns the unique storage instance.
 ///
 /// # Panics
 ///
 /// - If called a second time.
-pub fn take_storage() -> StorageResult<TockStorage> {
+#[cfg(not(feature = "std"))]
+pub fn take_storage() -> StorageResult<Storage> {
     // Make sure the storage was not already taken.
     static TAKEN: AtomicBool = AtomicBool::new(false);
     assert!(!TAKEN.fetch_or(true, Ordering::SeqCst));
-    TockStorage::new()
+    Storage::new()
+}
+
+#[cfg(feature = "std")]
+pub fn take_storage() -> StorageResult<Storage> {
+    // Use the Nordic configuration.
+    const PAGE_SIZE: usize = 0x1000;
+    const NUM_PAGES: usize = 20;
+    let store = vec![0xff; NUM_PAGES * PAGE_SIZE].into_boxed_slice();
+    let options = BufferOptions {
+        word_size: 4,
+        page_size: PAGE_SIZE,
+        max_word_writes: 2,
+        max_page_erases: 10000,
+        strict_mode: true,
+    };
+    Ok(BufferStorage::new(store, options))
 }
 
 impl UserPresence for TockEnv {
@@ -216,19 +286,6 @@ impl UserPresence for TockEnv {
     }
 }
 
-impl FirmwareProtection for TockEnv {
-    fn lock(&mut self) -> bool {
-        matches!(
-            crp::set_protection(crp::ProtectionLevel::FullyLocked),
-            Ok(())
-                | Err(TockError::Command(CommandError {
-                    return_code: EALREADY,
-                    ..
-                }))
-        )
-    }
-}
-
 impl key_store::Helper for TockEnv {}
 
 impl AttestationStore for TockEnv {
@@ -257,12 +314,10 @@ impl AttestationStore for TockEnv {
 impl Env for TockEnv {
     type Rng = TockRng;
     type UserPresence = Self;
-    type Storage = TockStorage;
+    type Storage = Storage;
     type KeyStore = Self;
     type AttestationStore = Self;
     type Clock = TockClock;
-    type UpgradeStorage = TockUpgradeStorage;
-    type FirmwareProtection = Self;
     type Write = Console;
     type Customization = CustomizationImpl;
     type HidConnection = TockHidConnection;
@@ -292,14 +347,6 @@ impl Env for TockEnv {
         &mut self.clock
     }
 
-    fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage> {
-        self.upgrade_storage.as_mut()
-    }
-
-    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection {
-        self
-    }
-
     fn write(&mut self) -> Self::Write {
         Console::new()
     }
@@ -315,6 +362,16 @@ impl Env for TockEnv {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
         &mut self.vendor_connection
+    }
+
+    fn process_vendor_command(&mut self, bytes: &[u8], channel: Channel) -> Option<Vec<u8>> {
+        commands::process_vendor_command(self, bytes, channel)
+    }
+
+    fn firmware_version(&self) -> Option<u64> {
+        self.upgrade_storage
+            .as_ref()
+            .map(|u| u.running_firmware_version())
     }
 }
 

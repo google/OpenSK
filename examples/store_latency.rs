@@ -21,7 +21,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use core::fmt::Write;
-use ctap2::env::tock::{take_storage, TockStorage};
+use ctap2::env::tock::{take_storage, Storage};
 use libtock_drivers::console::Console;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use persistent_store::Store;
@@ -39,7 +39,7 @@ fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>
     (result, after - before)
 }
 
-fn boot_store(mut storage: TockStorage, erase: bool) -> Store<TockStorage> {
+fn boot_store(mut storage: Storage, erase: bool) -> Store<Storage> {
     use persistent_store::Storage;
     let num_pages = storage.num_pages();
     if erase {
@@ -55,7 +55,7 @@ struct StorageConfig {
     num_pages: usize,
 }
 
-fn storage_config(storage: &TockStorage) -> StorageConfig {
+fn storage_config(storage: &Storage) -> StorageConfig {
     use persistent_store::Storage;
     StorageConfig {
         num_pages: storage.num_pages(),
@@ -73,12 +73,12 @@ struct Stat {
 }
 
 fn compute_latency(
-    storage: TockStorage,
+    storage: Storage,
     timer: &Timer,
     num_pages: usize,
     key_increment: usize,
     word_length: usize,
-) -> (TockStorage, Stat) {
+) -> (Storage, Stat) {
     let mut stat = Stat {
         key_increment,
         entry_length: word_length,

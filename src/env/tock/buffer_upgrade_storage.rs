@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::upgrade_storage::helper::ModRange;
-use crate::api::upgrade_storage::UpgradeStorage;
+use super::storage_helper::ModRange;
 use alloc::boxed::Box;
 use persistent_store::{StorageError, StorageResult};
 
@@ -44,10 +43,8 @@ impl BufferUpgradeStorage {
             Err(StorageError::OutOfBounds)
         }
     }
-}
 
-impl UpgradeStorage for BufferUpgradeStorage {
-    fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()> {
+    pub fn write_bundle(&mut self, offset: usize, data: Vec<u8>) -> StorageResult<()> {
         if offset == 0 && data.len() != METADATA_LENGTH {
             return Err(StorageError::OutOfBounds);
         }
@@ -63,11 +60,11 @@ impl UpgradeStorage for BufferUpgradeStorage {
         }
     }
 
-    fn bundle_identifier(&self) -> u32 {
+    pub fn bundle_identifier(&self) -> u32 {
         0x60000
     }
 
-    fn running_firmware_version(&self) -> u64 {
+    pub fn running_firmware_version(&self) -> u64 {
         0
     }
 }

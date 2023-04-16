@@ -19,11 +19,11 @@ use crate::api::crypto::ecdh::Ecdh;
 use crate::api::crypto::ecdsa::Ecdsa;
 use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
-use crate::api::firmware_protection::FirmwareProtection;
 use crate::api::key_store::KeyStore;
 use crate::api::rng::Rng;
-use crate::api::upgrade_storage::UpgradeStorage;
 use crate::api::user_presence::UserPresence;
+use crate::ctap::Channel;
+use alloc::vec::Vec;
 use persistent_store::{Storage, Store};
 
 #[cfg(feature = "std")]
@@ -34,6 +34,7 @@ pub type EcdhSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::SecretKey;
 pub type EcdhPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::PublicKey;
 pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::SecretKey;
 pub type EcdsaPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::PublicKey;
+pub type EcdsaSignature<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::Signature;
 pub type Sha<E> = <<E as Env>::Crypto as Crypto>::Sha256;
 pub type Hmac<E> = <<E as Env>::Crypto as Crypto>::Hmac256;
 pub type Hkdf<E> = <<E as Env>::Crypto as Crypto>::Hkdf256;
@@ -44,8 +45,6 @@ pub trait Env {
     type UserPresence: UserPresence;
     type Storage: Storage;
     type KeyStore: KeyStore;
-    type UpgradeStorage: UpgradeStorage;
-    type FirmwareProtection: FirmwareProtection;
     type Write: core::fmt::Write;
     type Customization: Customization;
     type HidConnection: HidConnection;
@@ -59,14 +58,6 @@ pub trait Env {
     fn key_store(&mut self) -> &mut Self::KeyStore;
     fn attestation_store(&mut self) -> &mut Self::AttestationStore;
     fn clock(&mut self) -> &mut Self::Clock;
-
-    /// Returns the upgrade storage instance.
-    ///
-    /// Upgrade storage is optional, so implementations may return `None`. However, implementations
-    /// should either always return `None` or always return `Some`.
-    fn upgrade_storage(&mut self) -> Option<&mut Self::UpgradeStorage>;
-
-    fn firmware_protection(&mut self) -> &mut Self::FirmwareProtection;
 
     /// Creates a write instance for debugging.
     ///
@@ -84,4 +75,22 @@ pub trait Env {
     /// I/O connection for sending packets implementing vendor extensions to CTAP HID protocol.
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
+
+    /// Option to return a firmware version that is shown as device info.
+    fn firmware_version(&self) -> Option<u64> {
+        None
+    }
+
+    /// Option to process a CBOR command before standard parsing.
+    ///
+    /// Responses are sent on the same channel they were received. Return `None` to continue
+    /// regular parsing. Parsing vendor commands may still have side effects, like dropping state
+    /// from other commands.
+    ///
+    /// For standard commands, the format for bytes is one byte of CTAP2 command and a CBOR encoded
+    /// map. To be able to reliably detect your payload, consider starting your messages with a
+    /// vendor reserved command byte.
+    fn process_vendor_command(&mut self, _bytes: &[u8], _channel: Channel) -> Option<Vec<u8>> {
+        None
+    }
 }

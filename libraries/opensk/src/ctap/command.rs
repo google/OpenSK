@@ -14,9 +14,9 @@
 
 use super::cbor_read;
 use super::data_formats::{
-    extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
-    extract_unsigned, ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams,
-    CoseKey, CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
+    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
+    ok_or_missing, ClientPinSubCommand, ConfigSubCommand, ConfigSubCommandParams, CoseKey,
+    CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
     GetAssertionExtensions, GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions,
     PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
     PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, SetMinPinLengthParams,
@@ -26,16 +26,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
 use arbitrary::Arbitrary;
-use arrayref::array_ref;
 use core::convert::TryFrom;
 use sk_cbor as cbor;
 use sk_cbor::destructure_cbor_map;
 
 // This constant is a consequence of the structure of messages.
 const MIN_LARGE_BLOB_LEN: usize = 17;
-
-/// Expected length of the passed in attestation key bytes during configuration.
-pub const ATTESTATION_PRIVATE_KEY_LENGTH: usize = 32;
 
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq, Eq)]
@@ -51,10 +47,6 @@ pub enum Command {
     AuthenticatorSelection,
     AuthenticatorLargeBlobs(AuthenticatorLargeBlobsParameters),
     AuthenticatorConfig(AuthenticatorConfigParameters),
-    // Vendor specific commands
-    AuthenticatorVendorConfigure(AuthenticatorVendorConfigureParameters),
-    AuthenticatorVendorUpgrade(AuthenticatorVendorUpgradeParameters),
-    AuthenticatorVendorUpgradeInfo,
 }
 
 impl Command {
@@ -71,13 +63,10 @@ impl Command {
     const AUTHENTICATOR_LARGE_BLOBS: u8 = 0x0C;
     const AUTHENTICATOR_CONFIG: u8 = 0x0D;
     const _AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
-    const AUTHENTICATOR_VENDOR_CONFIGURE: u8 = 0x40;
     // This commands is the same as AUTHENTICATOR_CREDENTIAL_MANAGEMENT but is duplicated as a
     // vendor command for legacy and compatibility reasons. See
     // https://github.com/Yubico/libfido2/issues/628 for more information.
     const AUTHENTICATOR_VENDOR_CREDENTIAL_MANAGEMENT: u8 = 0x41;
-    const AUTHENTICATOR_VENDOR_UPGRADE: u8 = 0x42;
-    const AUTHENTICATOR_VENDOR_UPGRADE_INFO: u8 = 0x43;
     const _AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
     pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
@@ -140,22 +129,6 @@ impl Command {
                 Ok(Command::AuthenticatorConfig(
                     AuthenticatorConfigParameters::try_from(decoded_cbor)?,
                 ))
-            }
-            Command::AUTHENTICATOR_VENDOR_CONFIGURE => {
-                let decoded_cbor = cbor_read(&bytes[1..])?;
-                Ok(Command::AuthenticatorVendorConfigure(
-                    AuthenticatorVendorConfigureParameters::try_from(decoded_cbor)?,
-                ))
-            }
-            Command::AUTHENTICATOR_VENDOR_UPGRADE => {
-                let decoded_cbor = cbor_read(&bytes[1..])?;
-                Ok(Command::AuthenticatorVendorUpgrade(
-                    AuthenticatorVendorUpgradeParameters::try_from(decoded_cbor)?,
-                ))
-            }
-            Command::AUTHENTICATOR_VENDOR_UPGRADE_INFO => {
-                // Parameters are ignored.
-                Ok(Command::AuthenticatorVendorUpgradeInfo)
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
@@ -498,35 +471,6 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AuthenticatorAttestationMaterial {
-    pub certificate: Vec<u8>,
-    pub private_key: [u8; ATTESTATION_PRIVATE_KEY_LENGTH],
-}
-
-impl TryFrom<cbor::Value> for AuthenticatorAttestationMaterial {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        destructure_cbor_map! {
-            let {
-                0x01 => certificate,
-                0x02 => private_key,
-            } = extract_map(cbor_value)?;
-        }
-        let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
-        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
-        if private_key.len() != ATTESTATION_PRIVATE_KEY_LENGTH {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-        let private_key = array_ref!(private_key, 0, ATTESTATION_PRIVATE_KEY_LENGTH);
-        Ok(AuthenticatorAttestationMaterial {
-            certificate,
-            private_key: *private_key,
-        })
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorCredentialManagementParameters {
     pub sub_command: CredentialManagementSubCommand,
@@ -563,59 +507,6 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
             pin_uv_auth_protocol,
             pin_uv_auth_param,
         })
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct AuthenticatorVendorConfigureParameters {
-    pub lockdown: bool,
-    pub attestation_material: Option<AuthenticatorAttestationMaterial>,
-}
-
-impl TryFrom<cbor::Value> for AuthenticatorVendorConfigureParameters {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        destructure_cbor_map! {
-            let {
-                0x01 => lockdown,
-                0x02 => attestation_material,
-            } = extract_map(cbor_value)?;
-        }
-        let lockdown = lockdown.map_or(Ok(false), extract_bool)?;
-        let attestation_material = attestation_material
-            .map(AuthenticatorAttestationMaterial::try_from)
-            .transpose()?;
-        Ok(AuthenticatorVendorConfigureParameters {
-            lockdown,
-            attestation_material,
-        })
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct AuthenticatorVendorUpgradeParameters {
-    pub offset: usize,
-    pub data: Vec<u8>,
-    pub hash: [u8; 32],
-}
-
-impl TryFrom<cbor::Value> for AuthenticatorVendorUpgradeParameters {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
-        destructure_cbor_map! {
-            let {
-                0x01 => offset,
-                0x02 => data,
-                0x03 => hash,
-            } = extract_map(cbor_value)?;
-        }
-        let offset = extract_unsigned(ok_or_missing(offset)?)? as usize;
-        let data = extract_byte_string(ok_or_missing(data)?)?;
-        let hash = <[u8; 32]>::try_from(extract_byte_string(ok_or_missing(hash)?)?)
-            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        Ok(AuthenticatorVendorUpgradeParameters { offset, data, hash })
     }
 }
 
@@ -1001,155 +892,5 @@ mod test {
             AuthenticatorLargeBlobsParameters::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
-    }
-
-    #[test]
-    fn test_vendor_configure() {
-        // Incomplete command
-        let mut cbor_bytes = vec![Command::AUTHENTICATOR_VENDOR_CONFIGURE];
-        let command = Command::deserialize(&cbor_bytes);
-        assert_eq!(command, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR));
-
-        cbor_bytes.extend(&[0xA1, 0x01, 0xF5]);
-        let command = Command::deserialize(&cbor_bytes);
-        assert_eq!(
-            command,
-            Ok(Command::AuthenticatorVendorConfigure(
-                AuthenticatorVendorConfigureParameters {
-                    lockdown: true,
-                    attestation_material: None
-                }
-            ))
-        );
-
-        let dummy_cert = [0xddu8; 20];
-        let dummy_pkey = [0x41u8; ATTESTATION_PRIVATE_KEY_LENGTH];
-
-        // Attestation key is too short.
-        let cbor_value = cbor_map! {
-            0x01 => false,
-            0x02 => cbor_map! {
-                0x01 => dummy_cert,
-                0x02 => dummy_pkey[..ATTESTATION_PRIVATE_KEY_LENGTH - 1]
-            }
-        };
-        assert_eq!(
-            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
-
-        // Missing private key
-        let cbor_value = cbor_map! {
-            0x01 => false,
-            0x02 => cbor_map! {
-                0x01 => dummy_cert
-            }
-        };
-        assert_eq!(
-            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        // Missing certificate
-        let cbor_value = cbor_map! {
-            0x01 => false,
-            0x02 => cbor_map! {
-                0x02 => dummy_pkey
-            }
-        };
-        assert_eq!(
-            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        // Valid
-        let cbor_value = cbor_map! {
-            0x01 => false,
-            0x02 => cbor_map! {
-                0x01 => dummy_cert,
-                0x02 => dummy_pkey
-            },
-        };
-        assert_eq!(
-            AuthenticatorVendorConfigureParameters::try_from(cbor_value),
-            Ok(AuthenticatorVendorConfigureParameters {
-                lockdown: false,
-                attestation_material: Some(AuthenticatorAttestationMaterial {
-                    certificate: dummy_cert.to_vec(),
-                    private_key: dummy_pkey
-                }),
-            })
-        );
-    }
-
-    #[test]
-    fn test_vendor_upgrade() {
-        // Incomplete command
-        let cbor_bytes = vec![Command::AUTHENTICATOR_VENDOR_UPGRADE];
-        let command = Command::deserialize(&cbor_bytes);
-        assert_eq!(command, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR));
-
-        // Missing offset
-        let cbor_value = cbor_map! {
-            0x02 => [0xFF; 0x100],
-            0x03 => [0x44; 32],
-        };
-        assert_eq!(
-            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        // Missing data
-        let cbor_value = cbor_map! {
-            0x01 => 0x1000,
-            0x03 => [0x44; 32],
-        };
-        assert_eq!(
-            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        // Invalid hash size
-        let cbor_value = cbor_map! {
-            0x01 => 0x1000,
-            0x02 => [0xFF; 0x100],
-            0x03 => [0x44; 33],
-        };
-        assert_eq!(
-            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
-
-        // Missing hash
-        let cbor_value = cbor_map! {
-            0x01 => 0x1000,
-            0x02 => [0xFF; 0x100],
-        };
-        assert_eq!(
-            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        // Valid
-        let cbor_value = cbor_map! {
-            0x01 => 0x1000,
-            0x02 => [0xFF; 0x100],
-            0x03 => [0x44; 32],
-        };
-        assert_eq!(
-            AuthenticatorVendorUpgradeParameters::try_from(cbor_value),
-            Ok(AuthenticatorVendorUpgradeParameters {
-                offset: 0x1000,
-                data: vec![0xFF; 0x100],
-                hash: [0x44; 32],
-            })
-        );
-    }
-
-    #[test]
-    fn test_deserialize_vendor_upgrade_info() {
-        let cbor_bytes = [Command::AUTHENTICATOR_VENDOR_UPGRADE_INFO];
-        let command = Command::deserialize(&cbor_bytes);
-        assert_eq!(command, Ok(Command::AuthenticatorVendorUpgradeInfo));
     }
 }

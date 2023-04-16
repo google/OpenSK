@@ -620,7 +620,6 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 mod test {
     use super::*;
     use crate::api::attestation_store::{self, Attestation, AttestationStore};
-    use crate::ctap::command::ATTESTATION_PRIVATE_KEY_LENGTH;
     use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
@@ -937,7 +936,7 @@ mod test {
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_attestation = Attestation {
-            private_key: [0x41; ATTESTATION_PRIVATE_KEY_LENGTH],
+            private_key: [0x41; 32],
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()
@@ -1084,7 +1083,7 @@ mod test {
         let mut env = TestEnv::default();
 
         let dummy_attestation = Attestation {
-            private_key: [0x41; ATTESTATION_PRIVATE_KEY_LENGTH],
+            private_key: [0x41; 32],
             certificate: vec![0xdd; 20],
         };
         env.attestation_store()

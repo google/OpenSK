@@ -70,7 +70,7 @@ mod test {
     use super::software_crypto::*;
     use super::*;
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
-    use crate::api::crypto::ecdsa::{PublicKey as _, SecretKey as _};
+    use crate::api::crypto::ecdsa::{PublicKey as _, SecretKey as _, Signature};
     use crate::env::test::TestEnv;
     use crate::env::Env;
     use core::convert::TryFrom;
@@ -114,7 +114,18 @@ mod test {
     }
 
     #[test]
-    fn test_ecdsa_secret_key_from_to_bytes() {
+    fn test_sign_verify_hash() {
+        let mut env = TestEnv::default();
+        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
+        let public_key = private_key.public_key();
+        let message = [0x12, 0x34, 0x56, 0x78];
+        let signature = private_key.sign(&message);
+        let message_hash = SoftwareSha256::digest(&message);
+        assert!(public_key.verify_prehash(&message_hash, &signature));
+    }
+
+    #[test]
+    fn test_ecdsa_secret_key_from_to_slice() {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdsaSecretKey::random(env.rng());
         let mut key_bytes = [0; EC_FIELD_SIZE];
@@ -123,6 +134,20 @@ mod test {
         let mut new_bytes = [0; EC_FIELD_SIZE];
         second_key.to_slice(&mut new_bytes);
         assert_eq!(key_bytes, new_bytes);
+    }
+
+    #[test]
+    fn test_ecdsa_signature_from_to_slice() {
+        let mut env = TestEnv::default();
+        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
+        let message = [0x12, 0x34, 0x56, 0x78];
+        let signature = private_key.sign(&message);
+        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
+        signature.to_slice(&mut signature_bytes);
+        let new_signature = SoftwareEcdsaSignature::from_slice(&signature_bytes).unwrap();
+        let mut new_bytes = [0; EC_SIGNATURE_SIZE];
+        new_signature.to_slice(&mut new_bytes);
+        assert_eq!(signature_bytes, new_bytes);
     }
 
     #[test]

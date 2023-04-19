@@ -24,7 +24,6 @@ use zeroize::Zeroize;
 /// form, which is more convenient to operate on.
 ///
 /// Never call zeroize explicitly, to not invalidate any invariants.
-
 #[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 pub struct GFP256 {
     int: Int256,

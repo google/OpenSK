@@ -15,14 +15,16 @@
 use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::key_store::KeyStore;
-#[cfg(feature = "ed25519")]
-use crate::api::rng::Rng;
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
+use crate::ctap::secret::Secret;
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{AesKey, EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
+use core::ops::Deref;
+#[cfg(feature = "ed25519")]
+use core::ops::DerefMut;
 use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
@@ -56,7 +58,7 @@ pub fn aes256_cbc_decrypt<E: Env>(
     aes_key: &AesKey<E>,
     ciphertext: &[u8],
     embeds_iv: bool,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
+) -> Result<Secret<[u8]>, Ctap2StatusCode> {
     if ciphertext.len() % 16 != 0 || (embeds_iv && ciphertext.is_empty()) {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -66,7 +68,8 @@ pub fn aes256_cbc_decrypt<E: Env>(
     } else {
         (&[0u8; 16], ciphertext)
     };
-    let mut plaintext = ciphertext.to_vec();
+    let mut plaintext = Secret::new(ciphertext.len());
+    plaintext.copy_from_slice(ciphertext);
     aes_key.decrypt_cbc(iv, &mut plaintext);
     Ok(plaintext)
 }
@@ -78,7 +81,7 @@ pub fn aes256_cbc_decrypt<E: Env>(
 pub enum PrivateKey {
     // We store the seed instead of the key since we can't get the seed back from the key. We could
     // store both if we believe deriving the key is done more than once and costly.
-    Ecdsa([u8; 32]),
+    Ecdsa(Secret<[u8; 32]>),
     #[cfg(feature = "ed25519")]
     Ed25519(ed25519_compact::SecretKey),
 }
@@ -96,8 +99,9 @@ impl PrivateKey {
             }
             #[cfg(feature = "ed25519")]
             SignatureAlgorithm::Eddsa => {
-                let bytes = env.rng().gen_uniform_u8x32();
-                Self::new_ed25519_from_bytes(&bytes).unwrap()
+                let mut bytes: Secret<[u8; 32]> = Secret::default();
+                env.rng().fill_bytes(bytes.deref_mut());
+                Self::new_ed25519_from_bytes(&*bytes).unwrap()
             }
             SignatureAlgorithm::Unknown => unreachable!(),
         }
@@ -115,7 +119,9 @@ impl PrivateKey {
         if bytes.len() != 32 {
             return None;
         }
-        Some(PrivateKey::Ecdsa(*array_ref!(bytes, 0, 32)))
+        let mut seed: Secret<[u8; 32]> = Secret::default();
+        seed.copy_from_slice(bytes);
+        Some(PrivateKey::Ecdsa(seed))
     }
 
     #[cfg(feature = "ed25519")]
@@ -172,12 +178,14 @@ impl PrivateKey {
     }
 
     /// Writes the key bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Secret<[u8]> {
+        let mut bytes = Secret::new(32);
         match self {
-            PrivateKey::Ecdsa(ecdsa_seed) => ecdsa_seed.to_vec(),
+            PrivateKey::Ecdsa(ecdsa_seed) => bytes.copy_from_slice(ecdsa_seed.deref()),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
+            PrivateKey::Ed25519(ed25519_key) => bytes.copy_from_slice(ed25519_key.seed().deref()),
         }
+        bytes
     }
 }
 
@@ -190,10 +198,12 @@ fn ecdsa_key_from_seed<E: Env>(
 }
 
 impl From<&PrivateKey> for cbor::Value {
+    /// Writes a private key into CBOR format. This exposes the cryptographic secret.
+    // TODO called in encrypt_to_credential_id and PublicKeyCredentialSource, needs zeroization
     fn from(private_key: &PrivateKey) -> Self {
         cbor_array![
             cbor_int!(private_key.signature_algorithm() as i64),
-            cbor_bytes!(private_key.to_bytes()),
+            cbor_bytes!(private_key.to_bytes().expose_secret_to_vec()),
         ]
     }
 }
@@ -230,7 +240,7 @@ mod test {
         let plaintext = vec![0xAA; 64];
         let ciphertext = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, true).unwrap();
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, true).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
     }
 
     #[test]
@@ -240,7 +250,7 @@ mod test {
         let plaintext = vec![0xAA; 64];
         let ciphertext = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, false).unwrap();
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, false).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
     }
 
     #[test]
@@ -253,7 +263,7 @@ mod test {
         let mut ciphertext_with_iv = vec![0u8; 16];
         ciphertext_with_iv.append(&mut ciphertext_no_iv);
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext_with_iv, true).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
     }
 
     #[test]
@@ -268,7 +278,7 @@ mod test {
             expected_plaintext[i] ^= 0xBB;
         }
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, true).unwrap();
-        assert_eq!(decrypted, expected_plaintext);
+        assert_eq!(*decrypted, expected_plaintext);
     }
 
     #[test]

@@ -27,6 +27,7 @@ use opensk::ctap::check_user_presence;
 use opensk::ctap::data_formats::{
     extract_bool, extract_byte_string, extract_map, extract_unsigned, ok_or_missing,
 };
+use opensk::ctap::secret::Secret;
 use opensk::ctap::status_code::Ctap2StatusCode;
 use opensk::ctap::{cbor_read, cbor_write, Channel};
 use opensk::env::{Env, Sha};
@@ -110,7 +111,7 @@ fn process_vendor_configure(
             // to not leak information.
             if current_attestation.is_none() {
                 let attestation = Attestation {
-                    private_key: data.private_key,
+                    private_key: Secret::from_exposed_secret(data.private_key),
                     certificate: data.certificate,
                 };
                 env.attestation_store()
@@ -491,7 +492,7 @@ mod test {
         assert_eq!(
             env.attestation_store().get(&attestation_store::Id::Batch),
             Ok(Some(Attestation {
-                private_key: dummy_key,
+                private_key: Secret::from_exposed_secret(dummy_key),
                 certificate: dummy_cert.to_vec(),
             }))
         );
@@ -519,7 +520,7 @@ mod test {
         assert_eq!(
             env.attestation_store().get(&attestation_store::Id::Batch),
             Ok(Some(Attestation {
-                private_key: dummy_key,
+                private_key: Secret::from_exposed_secret(dummy_key),
                 certificate: dummy_cert.to_vec(),
             }))
         );

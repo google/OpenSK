@@ -21,11 +21,15 @@ use arrayref::array_mut_ref;
 use arrayref::array_ref;
 use core::ops::Add;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroize;
 
-// A point on the elliptic curve is represented by two field elements.
-// The "direct" representation with GFP256 (integer modulo p) is used for serialization of public
-// keys.
-#[derive(Clone, Copy)]
+/// A point on the elliptic curve, represented by two field elements.
+///
+/// The "direct" representation with GFP256 (integer modulo p) is used for serialization of public
+/// keys.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Zeroize)]
 pub struct PointP256 {
     x: GFP256,
     y: GFP256,
@@ -128,12 +132,15 @@ impl PointP256 {
     }
 }
 
-// A point on the elliptic curve in projective form.
-// This uses Montgomery representation for field elements.
-// This is in projective coordinates, i.e. it represents the point { x: x / z, y: y / z }.
-// This representation is more convenient to implement complete formulas for elliptic curve
-// arithmetic.
-#[derive(Clone, Copy)]
+/// A point on the elliptic curve in projective form.
+///
+/// This uses Montgomery representation for field elements.
+/// This is in projective coordinates, i.e. it represents the point { x: x / z, y: y / z }.
+/// This representation is more convenient to implement complete formulas for elliptic curve
+/// arithmetic.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Zeroize)]
 pub struct PointProjective {
     x: Montgomery,
     y: Montgomery,
@@ -150,8 +157,10 @@ impl ConditionallySelectable for PointProjective {
     }
 }
 
-// Equivalent to PointProjective { x, y, z: 1 }
-#[derive(Clone, Copy)]
+/// Equivalent to PointProjective { x, y, z: 1 }
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Zeroize)]
 pub struct PointAffine {
     x: Montgomery,
     y: Montgomery,

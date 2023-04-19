@@ -27,6 +27,7 @@ mod large_blobs;
 pub mod main_hid;
 mod pin_protocol;
 pub mod response;
+pub mod secret;
 pub mod status_code;
 mod storage;
 mod token_state;
@@ -57,6 +58,7 @@ use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, ResponseData,
 };
+use self::secret::Secret;
 use self::status_code::Ctap2StatusCode;
 #[cfg(feature = "with_ctap1")]
 use self::u2f_up::U2fUserPresenceState;
@@ -66,6 +68,7 @@ use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
+use crate::api::crypto::HASH_SIZE;
 use crate::api::customization::Customization;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
@@ -950,11 +953,13 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         private_key: &PrivateKey,
         has_uv: bool,
-    ) -> Result<[u8; 32], Ctap2StatusCode> {
+    ) -> Result<Secret<[u8; HASH_SIZE]>, Ctap2StatusCode> {
         let private_key_bytes = private_key.to_bytes();
         let salt = array_ref!(private_key_bytes, 0, 32);
         let key = storage::cred_random_secret(env, has_uv)?;
-        Ok(Hkdf::<E>::hkdf_256(&key, salt, b"credRandom"))
+        let mut output = Secret::default();
+        Hkdf::<E>::hkdf_256(&key, salt, b"credRandom", &mut output);
+        Ok(output)
     }
 
     // Processes the input of a get_assertion operation for a given credential

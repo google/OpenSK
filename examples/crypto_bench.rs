@@ -113,7 +113,8 @@ fn main() {
             || {
                 let mut sha = sha256::Sha256::new();
                 sha.update(&contents);
-                sha.finalize();
+                let mut dummy_hash = [0; 32];
+                sha.finalize(&mut dummy_hash);
             },
         );
     }

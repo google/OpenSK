@@ -17,14 +17,22 @@ use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
 use rand_core::RngCore;
+use zeroize::Zeroize;
 
 pub const NBYTES: usize = int256::NBYTES;
 
+/// A private key for ECDH.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Zeroize)]
 pub struct SecKey {
     a: NonZeroExponentP256,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A public key for ECDH.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Debug, PartialEq, Zeroize)]
 pub struct PubKey {
     p: PointP256,
 }

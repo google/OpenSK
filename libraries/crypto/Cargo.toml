@@ -20,6 +20,7 @@ serde = { version = "1.0", optional = true, features = ["derive"] }
 serde_json = { version = "=1.0.69", optional = true }
 regex = { version = "1", optional = true }
 rand_core = "0.6.4"
+zeroize = { version = "1.5.7", features = ["derive"] }
 
 [features]
 std = ["hex", "ring", "untrusted", "serde", "serde_json", "regex", "rand_core/getrandom"]

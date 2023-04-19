@@ -16,9 +16,12 @@ use super::int256::{Digit, Int256};
 use core::ops::Mul;
 use rand_core::RngCore;
 use subtle::{self, Choice, ConditionallySelectable, CtOption};
+use zeroize::Zeroize;
 
-// An exponent on the elliptic curve, that is an element modulo the curve order N.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An exponent on the elliptic curve, that is an element modulo the curve order N.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
@@ -90,8 +93,10 @@ impl Mul for &ExponentP256 {
     }
 }
 
-// A non-zero exponent on the elliptic curve.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A non-zero exponent on the elliptic curve.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]

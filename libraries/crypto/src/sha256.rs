@@ -17,6 +17,7 @@ use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::Cell;
 use core::num::Wrapping;
+use zeroize::Zeroize;
 
 const BLOCK_SIZE: usize = 64;
 
@@ -30,6 +31,17 @@ pub struct Sha256 {
     state: [Wrapping<u32>; 8],
     block: [u8; BLOCK_SIZE],
     total_len: usize,
+}
+
+impl Drop for Sha256 {
+    // TODO derive Zeroize instead when we upgrade the toolchain
+    fn drop(&mut self) {
+        for s in self.state.iter_mut() {
+            s.0.zeroize();
+        }
+        self.block.zeroize();
+        self.total_len.zeroize();
+    }
 }
 
 impl Hash256 for Sha256 {
@@ -72,7 +84,7 @@ impl Hash256 for Sha256 {
         }
     }
 
-    fn finalize(mut self) -> [u8; 32] {
+    fn finalize(mut self, output: &mut [u8; 32]) {
         // Last block and padding.
         let cursor_in_block = self.total_len % BLOCK_SIZE;
         self.block[cursor_in_block] = 0x80;
@@ -97,12 +109,10 @@ impl Hash256 for Sha256 {
         Sha256::hash_block(&mut self.state, &self.block);
 
         // Encode the state's 32-bit words into bytes, using big-endian.
-        let mut result: [u8; 32] = [0; 32];
         for i in 0..8 {
-            BigEndian::write_u32(array_mut_ref![result, 4 * i, 4], self.state[i].0);
+            BigEndian::write_u32(array_mut_ref![output, 4 * i, 4], self.state[i].0);
         }
         BUSY.set(false);
-        result
     }
 }
 
@@ -272,7 +282,9 @@ mod test {
                 h.update(&input[..i]);
                 h.update(&input[i..j]);
                 h.update(&input[j..]);
-                assert_eq!(h.finalize(), hash.as_slice());
+                let mut digest = [0; 32];
+                h.finalize(&mut digest);
+                assert_eq!(digest, hash.as_slice());
             }
         }
     }

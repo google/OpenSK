@@ -17,20 +17,22 @@ use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
-use crate::api::rng::Rng;
 use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
+use crate::ctap::secret::Secret;
 use crate::ctap::status_code::Ctap2StatusCode;
 #[cfg(test)]
 use crate::env::test::TestEnv;
 use crate::env::{AesKey, EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
+use core::ops::DerefMut;
+use rand_core::RngCore;
 
 /// Implements common functions between existing PIN protocols for handshakes.
 pub struct PinProtocol<E: Env> {
     key_agreement_key: EcdhSk<E>,
-    pin_uv_auth_token: [u8; PIN_TOKEN_LENGTH],
+    pin_uv_auth_token: Secret<[u8; PIN_TOKEN_LENGTH]>,
 }
 
 impl<E: Env> PinProtocol<E> {
@@ -39,7 +41,8 @@ impl<E: Env> PinProtocol<E> {
     /// This function implements "initialize" from the specification.
     pub fn new(env: &mut E) -> Self {
         let key_agreement_key = EcdhSk::<E>::random(env.rng());
-        let pin_uv_auth_token = env.rng().gen_uniform_u8x32();
+        let mut pin_uv_auth_token: Secret<[u8; 32]> = Secret::default();
+        env.rng().fill_bytes(pin_uv_auth_token.deref_mut());
         PinProtocol {
             key_agreement_key,
             pin_uv_auth_token,
@@ -53,7 +56,7 @@ impl<E: Env> PinProtocol<E> {
 
     /// Generates a fresh pinUvAuthToken.
     pub fn reset_pin_uv_auth_token(&mut self, env: &mut E) {
-        self.pin_uv_auth_token = env.rng().gen_uniform_u8x32();
+        env.rng().fill_bytes(self.pin_uv_auth_token.deref_mut());
     }
 
     /// Returns the authenticator’s public key as a CoseKey structure.
@@ -70,10 +73,10 @@ impl<E: Env> PinProtocol<E> {
         let (x_bytes, y_bytes) = peer_cose_key.try_into_ecdh_coordinates()?;
         let pk = EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-        let handshake = self
-            .key_agreement_key
+        let mut handshake = Secret::default();
+        self.key_agreement_key
             .diffie_hellman(&pk)
-            .raw_secret_bytes();
+            .raw_secret_bytes(&mut handshake);
         Ok(SharedSecret::new(pin_uv_auth_protocol, handshake))
     }
 
@@ -90,7 +93,7 @@ impl<E: Env> PinProtocol<E> {
     ) -> Self {
         PinProtocol {
             key_agreement_key,
-            pin_uv_auth_token,
+            pin_uv_auth_token: Secret::from_exposed_secret(pin_uv_auth_token),
         }
     }
 }
@@ -102,9 +105,11 @@ pub fn authenticate_pin_uv_auth_token(
     message: &[u8],
     pin_uv_auth_protocol: PinUvAuthProtocol,
 ) -> Vec<u8> {
+    let mut mac = [0; 32];
+    Hmac::<TestEnv>::mac(token, message, &mut mac);
     match pin_uv_auth_protocol {
-        PinUvAuthProtocol::V1 => Hmac::<TestEnv>::mac(token, message)[..16].to_vec(),
-        PinUvAuthProtocol::V2 => Hmac::<TestEnv>::mac(token, message).to_vec(),
+        PinUvAuthProtocol::V1 => mac[..16].to_vec(),
+        PinUvAuthProtocol::V2 => mac.to_vec(),
     }
 }
 
@@ -130,7 +135,7 @@ impl<E: Env> SharedSecret<E> {
     /// Creates a new shared secret for the respective PIN protocol.
     ///
     /// This enum wraps all types of shared secrets.
-    fn new(pin_uv_auth_protocol: PinUvAuthProtocol, handshake: [u8; 32]) -> Self {
+    fn new(pin_uv_auth_protocol: PinUvAuthProtocol, handshake: Secret<[u8; 32]>) -> Self {
         match pin_uv_auth_protocol {
             PinUvAuthProtocol::V1 => SharedSecret::V1(SharedSecretV1::new(handshake)),
             PinUvAuthProtocol::V2 => SharedSecret::V2(SharedSecretV2::new(handshake)),
@@ -146,7 +151,7 @@ impl<E: Env> SharedSecret<E> {
     }
 
     /// Returns the decrypted ciphertext.
-    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
         match self {
             SharedSecret::V1(s) => s.decrypt(ciphertext),
             SharedSecret::V2(s) => s.decrypt(ciphertext),
@@ -163,6 +168,7 @@ impl<E: Env> SharedSecret<E> {
 
     /// Creates a signature that matches verify.
     #[cfg(test)]
+    // Does not return a Secret as it is only used in tests.
     pub fn authenticate(&self, message: &[u8]) -> Vec<u8> {
         match self {
             SharedSecret::V1(s) => s.authenticate(message),
@@ -202,14 +208,15 @@ fn verify_v2<E: Env>(
 }
 
 pub struct SharedSecretV1<E: Env> {
-    common_secret: [u8; 32],
+    common_secret: Secret<[u8; 32]>,
     aes_key: AesKey<E>,
 }
 
 impl<E: Env> SharedSecretV1<E> {
     /// Creates a new shared secret from the handshake result.
-    fn new(handshake: [u8; 32]) -> Self {
-        let common_secret = Sha::<E>::digest(&handshake);
+    fn new(handshake: Secret<[u8; 32]>) -> Self {
+        let mut common_secret = Secret::default();
+        Sha::<E>::digest_mut(&*handshake, &mut common_secret);
         let aes_key = AesKey::<E>::new(&common_secret);
         SharedSecretV1 {
             common_secret,
@@ -221,7 +228,7 @@ impl<E: Env> SharedSecretV1<E> {
         aes256_cbc_encrypt(env, &self.aes_key, plaintext, false)
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
         aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, false)
     }
 
@@ -231,22 +238,27 @@ impl<E: Env> SharedSecretV1<E> {
 
     #[cfg(test)]
     fn authenticate(&self, message: &[u8]) -> Vec<u8> {
-        Hmac::<E>::mac(&self.common_secret, message)[..16].to_vec()
+        let mut output = [0; 32];
+        Hmac::<E>::mac(&self.common_secret, message, &mut output);
+        output[..16].to_vec()
     }
 }
 
 pub struct SharedSecretV2<E: Env> {
     aes_key: AesKey<E>,
-    hmac_key: [u8; 32],
+    hmac_key: Secret<[u8; 32]>,
 }
 
 impl<E: Env> SharedSecretV2<E> {
     /// Creates a new shared secret from the handshake result.
-    fn new(handshake: [u8; 32]) -> Self {
-        let aes_key = Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 AES key");
+    fn new(handshake: Secret<[u8; 32]>) -> Self {
+        let mut aes_key_bytes = Secret::default();
+        Hkdf::<E>::hkdf_empty_salt_256(&*handshake, b"CTAP2 AES key", &mut aes_key_bytes);
+        let mut hmac_key = Secret::default();
+        Hkdf::<E>::hkdf_empty_salt_256(&*handshake, b"CTAP2 HMAC key", &mut hmac_key);
         SharedSecretV2 {
-            aes_key: AesKey::<E>::new(&aes_key),
-            hmac_key: Hkdf::<E>::hkdf_empty_salt_256(&handshake, b"CTAP2 HMAC key"),
+            aes_key: AesKey::<E>::new(&aes_key_bytes),
+            hmac_key,
         }
     }
 
@@ -254,7 +266,7 @@ impl<E: Env> SharedSecretV2<E> {
         aes256_cbc_encrypt(env, &self.aes_key, plaintext, true)
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
         aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, true)
     }
 
@@ -264,7 +276,9 @@ impl<E: Env> SharedSecretV2<E> {
 
     #[cfg(test)]
     fn authenticate(&self, message: &[u8]) -> Vec<u8> {
-        Hmac::<E>::mac(&self.hmac_key, message).to_vec()
+        let mut output = [0; 32];
+        Hmac::<E>::mac(&self.hmac_key, message, &mut output);
+        output.to_vec()
     }
 }
 
@@ -296,15 +310,16 @@ mod test {
     #[test]
     fn test_shared_secret_v1_encrypt_decrypt() {
         let mut env = TestEnv::default();
-        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
-        let plaintext = vec![0xAA; 64];
+        let shared_secret = SharedSecretV1::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
+        let mut plaintext = Secret::new(64);
+        plaintext.fill(0xAA);
         let ciphertext = shared_secret.encrypt(&mut env, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
     #[test]
     fn test_shared_secret_v1_authenticate_verify() {
-        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
         let message = [0xAA; 32];
         let signature = shared_secret.authenticate(&message);
         assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
@@ -312,7 +327,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v1_verify() {
-        let shared_secret = SharedSecretV1::<TestEnv>::new([0x55; 32]);
+        let shared_secret = SharedSecretV1::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
         let message = [0xAA];
         let signature = [
             0x8B, 0x60, 0x15, 0x7D, 0xF3, 0x44, 0x82, 0x2E, 0x54, 0x34, 0x7A, 0x01, 0xFB, 0x02,
@@ -332,15 +347,16 @@ mod test {
     #[test]
     fn test_shared_secret_v2_encrypt_decrypt() {
         let mut env = TestEnv::default();
-        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
-        let plaintext = vec![0xAA; 64];
+        let shared_secret = SharedSecretV2::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
+        let mut plaintext = Secret::new(64);
+        plaintext.fill(0xAA);
         let ciphertext = shared_secret.encrypt(&mut env, &plaintext).unwrap();
         assert_eq!(shared_secret.decrypt(&ciphertext), Ok(plaintext));
     }
 
     #[test]
     fn test_shared_secret_v2_authenticate_verify() {
-        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
         let message = [0xAA; 32];
         let signature = shared_secret.authenticate(&message);
         assert_eq!(shared_secret.verify(&message, &signature), Ok(()));
@@ -348,7 +364,7 @@ mod test {
 
     #[test]
     fn test_shared_secret_v2_verify() {
-        let shared_secret = SharedSecretV2::<TestEnv>::new([0x55; 32]);
+        let shared_secret = SharedSecretV2::<TestEnv>::new(Secret::from_exposed_secret([0x55; 32]));
         let message = [0xAA];
         let signature = [
             0xC0, 0x3F, 0x2A, 0x22, 0x5C, 0xC3, 0x4E, 0x05, 0xC1, 0x0E, 0x72, 0x9C, 0x8D, 0xD5,
@@ -378,7 +394,8 @@ mod test {
             let shared_secret2 = pin_protocol2
                 .decapsulate(pin_protocol1.get_public_key(), protocol)
                 .unwrap();
-            let plaintext = vec![0xAA; 64];
+            let mut plaintext = Secret::new(64);
+            plaintext.fill(0xAA);
             let ciphertext = shared_secret1.encrypt(&mut env, &plaintext).unwrap();
             assert_eq!(plaintext, shared_secret2.decrypt(&ciphertext).unwrap());
         }

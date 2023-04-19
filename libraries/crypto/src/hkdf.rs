@@ -27,15 +27,15 @@ const HASH_SIZE: usize = 32;
 ///
 /// This implementation is equivalent to a standard HKD, with `salt` fixed at a length of
 /// 32 byte and the output length l as 32.
-pub fn hkdf_256<H>(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8]) -> [u8; HASH_SIZE]
+pub fn hkdf_256<H>(ikm: &[u8], salt: &[u8; HASH_SIZE], info: &[u8], okm: &mut [u8; HASH_SIZE])
 where
     H: Hash256,
 {
-    let prk = hmac_256::<H>(salt, ikm);
+    let prk = H::hmac(salt, ikm);
     // l is implicitly the block size, so we iterate exactly once.
     let mut t = info.to_vec();
     t.push(1);
-    hmac_256::<H>(&prk, t.as_slice())
+    hmac_256::<H>(&prk, t.as_slice(), okm);
 }
 
 /// Computes the HKDF with empty salt and 256 bit (one block) output.
@@ -47,12 +47,12 @@ where
 ///
 /// This implementation is equivalent to the below hkdf, with `salt` set to the
 /// default block of zeros and the output length l as 32.
-pub fn hkdf_empty_salt_256<H>(ikm: &[u8], info: &[u8]) -> [u8; HASH_SIZE]
+pub fn hkdf_empty_salt_256<H>(ikm: &[u8], info: &[u8], okm: &mut [u8; HASH_SIZE])
 where
     H: Hash256,
 {
     // Salt is a zero block here.
-    hkdf_256::<H>(ikm, &[0; HASH_SIZE], info)
+    hkdf_256::<H>(ikm, &[0; HASH_SIZE], info, okm);
 }
 
 #[cfg(test)]
@@ -81,10 +81,9 @@ mod test {
             // Byte i.
             let info = [i as u8];
             let okm = hex::decode(okm).unwrap();
-            assert_eq!(
-                &hkdf_empty_salt_256::<Sha256>(&ikm.as_bytes(), &info[..]),
-                array_ref!(okm, 0, 32)
-            );
+            let mut output = [0; HASH_SIZE];
+            hkdf_empty_salt_256::<Sha256>(&ikm.as_bytes(), &info[..], &mut output);
+            assert_eq!(&output, array_ref!(okm, 0, HASH_SIZE));
         }
     }
 
@@ -109,10 +108,9 @@ mod test {
             // Byte i.
             let info = [i as u8];
             let okm = hex::decode(okm).unwrap();
-            assert_eq!(
-                &hkdf_256::<Sha256>(&ikm.as_bytes(), &salt, &info[..]),
-                array_ref!(okm, 0, 32)
-            );
+            let mut output = [0; HASH_SIZE];
+            hkdf_256::<Sha256>(&ikm.as_bytes(), &salt, &info[..], &mut output);
+            assert_eq!(&output, array_ref!(okm, 0, HASH_SIZE));
         }
     }
 }

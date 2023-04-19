@@ -84,7 +84,11 @@ mod test {
         let pub2 = private2.public_key();
         let shared1 = private1.diffie_hellman(&pub2);
         let shared2 = private2.diffie_hellman(&pub1);
-        assert_eq!(shared1.raw_secret_bytes(), shared2.raw_secret_bytes());
+        let mut secret_bytes1 = [0; EC_FIELD_SIZE];
+        let mut secret_bytes2 = [0; EC_FIELD_SIZE];
+        shared1.raw_secret_bytes(&mut secret_bytes1);
+        shared2.raw_secret_bytes(&mut secret_bytes2);
+        assert_eq!(secret_bytes1, secret_bytes2);
     }
 
     #[test]
@@ -155,14 +159,20 @@ mod test {
         let data = [0x55; 16];
         let mut hasher = SoftwareSha256::new();
         hasher.update(&data);
-        assert_eq!(SoftwareSha256::digest(&data), hasher.finalize());
+        let mut hash_from_finalize = [0; HASH_SIZE];
+        hasher.finalize(&mut hash_from_finalize);
+        assert_eq!(SoftwareSha256::digest(&data), hash_from_finalize);
+        let mut hash_from_mut = [0; HASH_SIZE];
+        SoftwareSha256::digest_mut(&data, &mut hash_from_mut);
+        assert_eq!(SoftwareSha256::digest(&data), hash_from_mut);
     }
 
     #[test]
     fn test_hmac256_verifies() {
         let key = [0xAA; HMAC_KEY_SIZE];
         let data = [0x55; 16];
-        let mac = SoftwareHmac256::mac(&key, &data);
+        let mut mac = [0; HASH_SIZE];
+        SoftwareHmac256::mac(&key, &data, &mut mac);
         assert!(SoftwareHmac256::verify(&key, &data, &mac));
         let truncated_mac =
             <&[u8; TRUNCATED_HMAC_SIZE]>::try_from(&mac[..TRUNCATED_HMAC_SIZE]).unwrap();
@@ -175,12 +185,14 @@ mod test {
 
     #[test]
     fn test_hkdf_empty_salt_256_vector() {
-        let okm = [
+        let expected_okm = [
             0xf9, 0xbe, 0x72, 0x11, 0x6c, 0xb9, 0x7f, 0x41, 0x82, 0x82, 0x10, 0x28, 0x9c, 0xaa,
             0xfe, 0xab, 0xde, 0x1f, 0x3d, 0xfb, 0x97, 0x23, 0xbf, 0x43, 0x53, 0x8a, 0xb1, 0x8f,
             0x36, 0x66, 0x78, 0x3a,
         ];
-        assert_eq!(&SoftwareHkdf256::hkdf_empty_salt_256(b"0", &[0]), &okm);
+        let mut okm = [0; HASH_SIZE];
+        SoftwareHkdf256::hkdf_empty_salt_256(b"0", &[0], &mut okm);
+        assert_eq!(okm, expected_okm);
     }
 
     #[test]
@@ -188,8 +200,10 @@ mod test {
         let ikm = [0x11; 16];
         let salt = [0; 32];
         let info = [0x22; 16];
-        let empty_salt_output = SoftwareHkdf256::hkdf_empty_salt_256(&ikm, &info);
-        let explicit_output = SoftwareHkdf256::hkdf_256(&ikm, &salt, &info);
+        let mut empty_salt_output = [0; HASH_SIZE];
+        let mut explicit_output = [0; HASH_SIZE];
+        SoftwareHkdf256::hkdf_empty_salt_256(&ikm, &info, &mut empty_salt_output);
+        SoftwareHkdf256::hkdf_256(&ikm, &salt, &info, &mut explicit_output);
         assert_eq!(empty_salt_output, explicit_output);
     }
 

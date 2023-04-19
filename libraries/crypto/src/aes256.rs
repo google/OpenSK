@@ -12,21 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A portable and naive textbook implementation of AES-256
+
 use super::util::{xor_block_16, Block16};
 use arrayref::{array_mut_ref, array_ref};
 use zeroize::Zeroize;
 
-/** A portable and naive textbook implementation of AES-256 **/
 type Word = [u8; 4];
 
-/** This structure caches the round keys, to avoid re-computing the key schedule for each block. **/
+/// Encryption key for AES256.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Zeroize)]
 pub struct EncryptionKey {
+    // This structure caches the round keys, to avoid re-computing the key schedule for each block.
     enc_round_keys: [Block16; 15],
 }
 
+/// Decryption key for AES256.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Zeroize)]
 pub struct DecryptionKey {
+    // This structure caches the round keys, to avoid re-computing the key schedule for each block.
     dec_round_keys: [Block16; 15],
 }
 

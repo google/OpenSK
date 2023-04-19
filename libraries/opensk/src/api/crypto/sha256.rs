@@ -15,16 +15,17 @@
 use super::HASH_SIZE;
 
 /// Hashes data using SHA256.
+///
+/// When you implement this trait, make sure to implement `digest_mut` first, because the default
+/// implementations of `digest` relies on it.
 pub trait Sha256: Sized {
     /// Computes the hash of a given message as an array.
     ///
     /// This function does not let you control the memory allocation. It should therefore not be
     /// used for secrets that need zeroization.
     fn digest(data: &[u8]) -> [u8; HASH_SIZE] {
-        let mut hasher = Self::new();
-        hasher.update(data);
         let mut output = [0; HASH_SIZE];
-        hasher.finalize(&mut output);
+        Self::digest_mut(data, &mut output);
         output
     }
 

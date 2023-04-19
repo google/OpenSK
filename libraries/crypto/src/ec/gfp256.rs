@@ -17,10 +17,14 @@ use core::ops::Mul;
 use subtle::Choice;
 use zeroize::Zeroize;
 
-// A field element on the elliptic curve, that is an element modulo the prime P.
-// This is the format used to serialize coordinates of points on the curve.
-// This implements enough methods to validate points and to convert them to/from the Montgomery
-// form, which is more convenient to operate on.
+/// A field element on the elliptic curve, that is an element modulo the prime P.
+///
+/// This is the format used to serialize coordinates of points on the curve.
+/// This implements enough methods to validate points and to convert them to/from the Montgomery
+/// form, which is more convenient to operate on.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+
 #[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 pub struct GFP256 {
     int: Int256,

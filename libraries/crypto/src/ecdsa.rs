@@ -28,17 +28,26 @@ use zeroize::Zeroize;
 
 pub const NBYTES: usize = int256::NBYTES;
 
+/// A private key for ECDSA.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Clone, Debug, PartialEq, Eq, Zeroize)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
 
+/// An ECDSA signature.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Zeroize)]
 pub struct Signature {
     r: NonZeroExponentP256,
     s: NonZeroExponentP256,
 }
 
+/// A public key for ECDSA.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Clone, Zeroize)]
 pub struct PubKey {
     p: PointP256,

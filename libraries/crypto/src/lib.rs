@@ -27,19 +27,18 @@ pub mod hmac;
 pub mod sha256;
 pub mod util;
 
-// Trait for hash functions that returns a 256-bit hash.
-// The type must be Sized (size known at compile time) so that we can instanciate one on the stack
-// in the hash() method.
+/// Trait for hash functions that returns a 256-bit hash.
+///
+/// When you implement this trait, make sure to implement `hash_mut` and `hmac_mut` first, because
+/// the default implementations of `hash` and `hmac` rely on it.
 pub trait Hash256: Sized {
     fn new() -> Self;
     fn update(&mut self, contents: &[u8]);
     fn finalize(self, output: &mut [u8; 32]);
 
     fn hash(contents: &[u8]) -> [u8; 32] {
-        let mut h = Self::new();
-        h.update(contents);
         let mut output = [0; 32];
-        h.finalize(&mut output);
+        Self::hash_mut(contents, &mut output);
         output
     }
 
@@ -51,7 +50,7 @@ pub trait Hash256: Sized {
 
     fn hmac(key: &[u8; 32], contents: &[u8]) -> [u8; 32] {
         let mut output = [0; 32];
-        hmac::software_hmac_256::<Self>(key, contents, &mut output);
+        Self::hmac_mut(key, contents, &mut output);
         output
     }
 
@@ -60,7 +59,7 @@ pub trait Hash256: Sized {
     }
 }
 
-// Trait for hash functions that operate on 64-byte input blocks.
+/// Trait for hash functions that operate on 64-byte input blocks.
 pub trait HashBlockSize64Bytes {
     type State;
 

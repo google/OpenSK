@@ -30,6 +30,9 @@ pub type Digit = u32;
 type DoubleDigit = u64;
 type SignedDoubleDigit = i64;
 
+/// Big integer implementation with 256 bits.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
 #[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.

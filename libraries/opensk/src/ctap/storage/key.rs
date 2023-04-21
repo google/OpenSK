@@ -101,7 +101,7 @@ make_partition! {
     FORCE_PIN_CHANGE = 2040;
 
     /// The secret of the CredRandom feature.
-    CRED_RANDOM_SECRET = 2041;
+    _CRED_RANDOM_SECRET = 2041;
 
     /// List of RP IDs allowed to read the minimum PIN length.
     MIN_PIN_LENGTH_RP_IDS = 2042;

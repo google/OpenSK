@@ -17,7 +17,6 @@ mod key;
 use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
-use crate::api::rng::Rng;
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
@@ -45,15 +44,7 @@ struct PinProperties {
 
 /// Initializes the store by creating missing objects.
 pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    // Generate and store the CredRandom secrets if they are missing.
-    if env.store().find_handle(key::CRED_RANDOM_SECRET)?.is_none() {
-        let cred_random_with_uv = env.rng().gen_uniform_u8x32();
-        let cred_random_without_uv = env.rng().gen_uniform_u8x32();
-        let mut cred_random = Vec::with_capacity(64);
-        cred_random.extend_from_slice(&cred_random_without_uv);
-        cred_random.extend_from_slice(&cred_random_with_uv);
-        env.store().insert(key::CRED_RANDOM_SECRET, &cred_random)?;
-    }
+    env.key_store().init()?;
     Ok(())
 }
 
@@ -253,19 +244,6 @@ pub fn incr_global_signature_counter(
     env.store()
         .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
     Ok(())
-}
-
-/// Returns the CredRandom secret.
-pub fn cred_random_secret(env: &mut impl Env, has_uv: bool) -> Result<[u8; 32], Ctap2StatusCode> {
-    let cred_random_secret = env
-        .store()
-        .find(key::CRED_RANDOM_SECRET)?
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    if cred_random_secret.len() != 64 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    let offset = if has_uv { 32 } else { 0 };
-    Ok(*array_ref![cred_random_secret, offset, 32])
 }
 
 /// Reads the PIN properties and wraps them into PinProperties.
@@ -620,6 +598,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 mod test {
     use super::*;
     use crate::api::attestation_store::{self, Attestation, AttestationStore};
+    use crate::api::rng::Rng;
     use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
@@ -844,28 +823,6 @@ mod test {
             large_blob_key: None,
         };
         assert_eq!(found_credential, Some(expected_credential));
-    }
-
-    #[test]
-    fn test_cred_random_secret() {
-        let mut env = TestEnv::default();
-        init(&mut env).unwrap();
-
-        // CredRandom secrets stay the same within the same CTAP reset cycle.
-        let cred_random_with_uv_1 = cred_random_secret(&mut env, true).unwrap();
-        let cred_random_without_uv_1 = cred_random_secret(&mut env, false).unwrap();
-        let cred_random_with_uv_2 = cred_random_secret(&mut env, true).unwrap();
-        let cred_random_without_uv_2 = cred_random_secret(&mut env, false).unwrap();
-        assert_eq!(cred_random_with_uv_1, cred_random_with_uv_2);
-        assert_eq!(cred_random_without_uv_1, cred_random_without_uv_2);
-
-        // CredRandom secrets change after reset. This test may fail if the random generator produces the
-        // same keys.
-        reset(&mut env).unwrap();
-        let cred_random_with_uv_3 = cred_random_secret(&mut env, true).unwrap();
-        let cred_random_without_uv_3 = cred_random_secret(&mut env, false).unwrap();
-        assert!(cred_random_with_uv_1 != cred_random_with_uv_3);
-        assert!(cred_random_without_uv_1 != cred_random_without_uv_3);
     }
 
     #[test]

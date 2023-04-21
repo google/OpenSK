@@ -26,6 +26,7 @@ use crate::api::crypto::ecdh::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
+use crate::api::key_store::KeyStore;
 use crate::ctap::storage;
 #[cfg(test)]
 use crate::env::EcdhSk;
@@ -98,6 +99,9 @@ fn check_and_store_new_pin<E: Env>(
     }
     let mut pin_hash = Secret::default();
     Sha::<E>::digest_mut(&pin, &mut pin_hash);
+    let pin_hash = env
+        .key_store()
+        .encrypt_pin_hash(array_ref![pin_hash, 0, PIN_AUTH_LENGTH])?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
     storage::set_pin(
         env,
@@ -182,6 +186,7 @@ impl<E: Env> ClientPin<E> {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                 }
                 storage::decr_pin_retries(env)?;
+                let pin_hash = env.key_store().decrypt_pin_hash(&pin_hash)?;
                 let pin_hash_dec = shared_secret
                     .decrypt(&pin_hash_enc)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)?;

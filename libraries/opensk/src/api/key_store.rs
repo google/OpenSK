@@ -23,11 +23,25 @@ use rand_core::RngCore;
 ///
 /// Implementations may use the environment store: [`STORAGE_KEY`] is reserved for this usage.
 pub trait KeyStore {
+    /// Initializes the key store (if needed).
+    ///
+    /// This function should be a no-op if the key store is already initialized.
+    fn init(&mut self) -> Result<(), Error>;
+
     /// Returns the AES key for key handles encryption.
     fn key_handle_encryption(&mut self) -> Result<Secret<[u8; 32]>, Error>;
 
     /// Returns the key for key handles authentication.
     fn key_handle_authentication(&mut self) -> Result<Secret<[u8; 32]>, Error>;
+
+    /// Returns the key for the CredRandom feature.
+    fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
+
+    /// Encrypts a PIN hash.
+    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error>;
+
+    /// Decrypts a PIN hash.
+    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error>;
 
     /// Derives an ECDSA private key from a seed.
     ///
@@ -54,12 +68,28 @@ pub const STORAGE_KEY: usize = 2046;
 pub trait Helper: Env {}
 
 impl<T: Helper> KeyStore for T {
+    fn init(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn key_handle_encryption(&mut self) -> Result<Secret<[u8; 32]>, Error> {
         Ok(get_master_keys(self)?.encryption.clone())
     }
 
     fn key_handle_authentication(&mut self) -> Result<Secret<[u8; 32]>, Error> {
         Ok(get_master_keys(self)?.authentication.clone())
+    }
+
+    fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error> {
+        Ok(get_master_keys(self)?.cred_random[has_uv as usize].clone())
+    }
+
+    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error> {
+        Ok(*plain)
+    }
+
+    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error> {
+        Ok(Secret::from_exposed_secret(*cipher))
     }
 
     fn derive_ecdsa(&mut self, seed: &[u8; 32]) -> Result<Secret<[u8; 32]>, Error> {
@@ -91,14 +121,17 @@ struct MasterKeys {
 
     /// Master authentication key.
     authentication: Secret<[u8; 32]>,
+
+    /// Cred random keys (without and with UV in that order).
+    cred_random: [Secret<[u8; 32]>; 2],
 }
 
 fn get_master_keys(env: &mut impl Env) -> Result<MasterKeys, Error> {
     let master_keys = match env.store().find(STORAGE_KEY)? {
-        Some(x) if x.len() == 64 => x,
+        Some(x) if x.len() == 128 => x,
         Some(_) => return Err(Error),
         None => {
-            let mut master_keys = vec![0; 64];
+            let mut master_keys = vec![0; 128];
             env.rng().fill_bytes(&mut master_keys);
             env.store().insert(STORAGE_KEY, &master_keys)?;
             master_keys
@@ -108,9 +141,14 @@ fn get_master_keys(env: &mut impl Env) -> Result<MasterKeys, Error> {
     encryption.copy_from_slice(array_ref![master_keys, 0, 32]);
     let mut authentication: Secret<[u8; 32]> = Secret::default();
     authentication.copy_from_slice(array_ref![master_keys, 32, 32]);
+    let mut cred_random_no_uv: Secret<[u8; 32]> = Secret::default();
+    cred_random_no_uv.copy_from_slice(array_ref![master_keys, 64, 32]);
+    let mut cred_random_with_uv: Secret<[u8; 32]> = Secret::default();
+    cred_random_with_uv.copy_from_slice(array_ref![master_keys, 96, 32]);
     Ok(MasterKeys {
         encryption,
         authentication,
+        cred_random: [cred_random_no_uv, cred_random_with_uv],
     })
 }
 
@@ -133,11 +171,15 @@ mod test {
         // Master keys are well-defined and stable.
         let encryption_key = key_store.key_handle_encryption().unwrap();
         let authentication_key = key_store.key_handle_authentication().unwrap();
+        let cred_random_no_uv = key_store.cred_random(false).unwrap();
+        let cred_random_with_uv = key_store.cred_random(true).unwrap();
         assert_eq!(&key_store.key_handle_encryption().unwrap(), &encryption_key);
         assert_eq!(
             &key_store.key_handle_authentication().unwrap(),
             &authentication_key
         );
+        assert_eq!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
+        assert_eq!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
 
         // ECDSA seeds are well-defined and stable.
         let ecdsa_seed = key_store.generate_ecdsa_seed().unwrap();
@@ -152,5 +194,19 @@ mod test {
             key_store.key_handle_authentication().unwrap(),
             authentication_key
         );
+        assert_ne!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
+        assert_ne!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
+    }
+
+    #[test]
+    fn test_pin_hash_encrypt_decrypt() {
+        let mut env = TestEnv::default();
+        let key_store = env.key_store();
+        assert_eq!(key_store.init(), Ok(()));
+
+        let pin_hash = [0x55; 16];
+        let encrypted = key_store.encrypt_pin_hash(&pin_hash).unwrap();
+        let decrypted = key_store.decrypt_pin_hash(&encrypted).unwrap();
+        assert_eq!(pin_hash, *decrypted);
     }
 }

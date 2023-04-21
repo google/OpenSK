@@ -20,6 +20,8 @@ pub enum UserPresenceError {
     Canceled,
     /// User presence check timed out.
     Timeout,
+    /// Unexpected (e.g., hardware) failures
+    Fail,
 }
 
 pub type UserPresenceResult = Result<(), UserPresenceError>;

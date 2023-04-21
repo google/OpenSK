@@ -232,9 +232,9 @@ dependencies = [
 
 [[package]]
 name = "tock-registers"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f521a79accce68c417c9c77ce22108056b626126da1932f7e2e9b5bbffee0cea"
+checksum = "4ee8fba06c1f4d0b396ef61a54530bb6b28f0dc61c38bc8bc5a5a48161e6282e"
 
 [[package]]
 name = "typenum"

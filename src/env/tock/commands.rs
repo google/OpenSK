@@ -17,6 +17,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::TryFrom;
+use libtock_platform::Syscalls;
 use opensk::api::attestation_store::{self, Attestation, AttestationStore};
 use opensk::api::crypto::sha256::Sha256;
 use opensk::api::crypto::EC_FIELD_SIZE;
@@ -31,15 +32,18 @@ use opensk::ctap::secret::Secret;
 use opensk::ctap::status_code::Ctap2StatusCode;
 use opensk::ctap::{cbor_read, cbor_write, Channel};
 use opensk::env::{Env, Sha};
-use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
+use {libtock_platform as platform, sk_cbor as cbor};
 
 const VENDOR_COMMAND_CONFIGURE: u8 = 0x40;
 const VENDOR_COMMAND_UPGRADE: u8 = 0x42;
 const VENDOR_COMMAND_UPGRADE_INFO: u8 = 0x43;
 
-pub fn process_vendor_command(
-    env: &mut TockEnv,
+pub fn process_vendor_command<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+>(
+    env: &mut TockEnv<S, C>,
     bytes: &[u8],
     channel: Channel,
 ) -> Option<Vec<u8>> {
@@ -50,8 +54,8 @@ pub fn process_vendor_command(
     process_cbor(env, bytes, channel).unwrap_or_else(|e| Some(vec![e as u8]))
 }
 
-fn process_cbor(
-    env: &mut TockEnv,
+fn process_cbor<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config>(
+    env: &mut TockEnv<S, C>,
     bytes: &[u8],
     channel: Channel,
 ) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
@@ -85,8 +89,11 @@ fn encode_cbor(value: cbor::Value) -> Vec<u8> {
     }
 }
 
-fn process_vendor_configure(
-    env: &mut TockEnv,
+fn process_vendor_configure<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+>(
+    env: &mut TockEnv<S, C>,
     params: VendorConfigureParameters,
     // Unused in std only
     _channel: Channel,
@@ -141,12 +148,15 @@ fn process_vendor_configure(
     Ok(response)
 }
 
-fn process_vendor_upgrade(
-    env: &mut TockEnv,
+fn process_vendor_upgrade<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+>(
+    env: &mut TockEnv<S, C>,
     params: VendorUpgradeParameters,
 ) -> Result<(), Ctap2StatusCode> {
     let VendorUpgradeParameters { offset, data, hash } = params;
-    let calculated_hash = Sha::<TockEnv>::digest(&data);
+    let calculated_hash = Sha::<TockEnv<S>>::digest(&data);
     if hash != calculated_hash {
         return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
     }
@@ -156,8 +166,11 @@ fn process_vendor_upgrade(
         .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
 }
 
-fn process_vendor_upgrade_info(
-    env: &mut TockEnv,
+fn process_vendor_upgrade_info<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+>(
+    env: &mut TockEnv<S, C>,
 ) -> Result<VendorUpgradeInfoResponse, Ctap2StatusCode> {
     let upgrade_locations = env
         .upgrade_storage()
@@ -288,6 +301,7 @@ impl From<VendorUpgradeInfoResponse> for cbor::Value {
 mod test {
     use super::*;
     use cbor::cbor_map;
+    use libtock_unittest::fake::Syscalls;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
     #[cfg(feature = "vendor_hid")]
@@ -295,14 +309,14 @@ mod test {
 
     #[test]
     fn test_process_cbor_unrelated_input() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let cbor_bytes = vec![0x01];
         assert_eq!(process_cbor(&mut env, &cbor_bytes, DUMMY_CHANNEL), Ok(None));
     }
 
     #[test]
     fn test_process_cbor_invalid_input() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let cbor_bytes = vec![VENDOR_COMMAND_CONFIGURE];
         assert_eq!(
             process_cbor(&mut env, &cbor_bytes, DUMMY_CHANNEL),
@@ -312,7 +326,7 @@ mod test {
 
     #[test]
     fn test_process_cbor_valid_input() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let cbor_bytes = vec![VENDOR_COMMAND_UPGRADE_INFO];
         assert!(process_cbor(&mut env, &cbor_bytes, DUMMY_CHANNEL)
             .unwrap()
@@ -322,7 +336,7 @@ mod test {
     #[test]
     #[cfg(feature = "vendor_hid")]
     fn test_process_command_valid_vendor_hid() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let cbor_bytes = vec![VENDOR_COMMAND_UPGRADE_INFO];
         assert!(process_cbor(&mut env, &cbor_bytes, VENDOR_CHANNEL)
             .unwrap()
@@ -453,7 +467,7 @@ mod test {
 
     #[test]
     fn test_deserialize_vendor_upgrade_info() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let cbor_bytes = [VENDOR_COMMAND_UPGRADE_INFO];
         assert!(process_cbor(&mut env, &cbor_bytes, DUMMY_CHANNEL)
             .unwrap()
@@ -462,7 +476,7 @@ mod test {
 
     #[test]
     fn test_vendor_configure() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
 
         // Nothing should be configured at the beginning
         let response = process_vendor_configure(
@@ -538,7 +552,7 @@ mod test {
             }))
         );
 
-        // Now try to lock the device
+        // Now try to lock the device, but that is currently not supported.
         let response = process_vendor_configure(
             &mut env,
             VendorConfigureParameters {
@@ -549,10 +563,7 @@ mod test {
         );
         assert_eq!(
             response,
-            Ok(VendorConfigureResponse {
-                cert_programmed: true,
-                pkey_programmed: true,
-            })
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
     }
 
@@ -561,13 +572,13 @@ mod test {
         // The test partition storage has size 0x40000.
         // The test metadata storage has size 0x1000.
         // The test identifier matches partition B.
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
 
         const METADATA_LEN: usize = 0x1000;
         let metadata = vec![0xFF; METADATA_LEN];
-        let metadata_hash = Sha::<TockEnv>::digest(&metadata);
+        let metadata_hash = Sha::<TockEnv<Syscalls>>::digest(&metadata);
         let data = vec![0xFF; 0x1000];
-        let hash = Sha::<TockEnv>::digest(&data);
+        let hash = Sha::<TockEnv<Syscalls>>::digest(&data);
 
         // Write to partition.
         let response = process_vendor_upgrade(
@@ -638,11 +649,11 @@ mod test {
 
     #[test]
     fn test_vendor_upgrade_no_second_partition() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         env.disable_upgrade_storage();
 
         let data = vec![0xFF; 0x1000];
-        let hash = Sha::<TockEnv>::digest(&data);
+        let hash = Sha::<TockEnv<Syscalls>>::digest(&data);
         let response = process_vendor_upgrade(
             &mut env,
             VendorUpgradeParameters {
@@ -656,7 +667,7 @@ mod test {
 
     #[test]
     fn test_vendor_upgrade_info() {
-        let mut env = TockEnv::default();
+        let mut env = TockEnv::<Syscalls>::default();
         let bundle_identifier = env.upgrade_storage().unwrap().bundle_identifier();
 
         let upgrade_info_reponse = process_vendor_upgrade_info(&mut env);

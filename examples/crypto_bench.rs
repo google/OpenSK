@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![no_main]
 #![no_std]
 
 extern crate alloc;
@@ -22,29 +23,28 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
 use ctap2::env::tock::TockRng;
-use libtock_drivers::console::Console;
+use libtock_console::{Console, ConsoleWriter};
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
 
-libtock_core::stack_size! {0x800}
+stack_size! {0x2000}
+set_main! {main}
+
+type Syscalls = TockSyscalls;
 
 fn main() {
-    let mut console = Console::new();
+    let mut console = Console::<Syscalls>::writer();
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
-    let mut with_callback = timer::with_callback(|_, _| {});
+    let mut with_callback = timer::with_callback(|_| {});
     let timer = with_callback.init().flex_unwrap();
 
-    let mut rng = TockRng {};
+    let mut rng = TockRng::<Syscalls>::default();
 
     writeln!(console, "****************************************").unwrap();
-    writeln!(
-        console,
-        "Clock frequency: {} Hz",
-        timer.clock_frequency().hz()
-    )
-    .unwrap();
+    writeln!(console, "Clock frequency: {:?} Hz", timer.clock_frequency()).unwrap();
 
     // AES
     bench(&mut console, &timer, "aes256::EncryptionKey::new", || {
@@ -150,7 +150,7 @@ fn main() {
     writeln!(console, "****************************************").unwrap();
 }
 
-fn bench<F>(console: &mut Console, timer: &Timer, title: &str, mut f: F)
+fn bench<F>(console: &mut ConsoleWriter<Syscalls>, timer: &Timer<Syscalls>, title: &str, mut f: F)
 where
     F: FnMut(),
 {
@@ -159,11 +159,13 @@ where
     writeln!(console, "----------------------------------------").unwrap();
     let mut count = 1;
     for _ in 0..30 {
-        let start = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let start =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         for _ in 0..count {
             f();
         }
-        let end = Timestamp::<f64>::from_clock_value(timer.get_current_clock().flex_unwrap());
+        let end =
+            Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().flex_unwrap());
         let elapsed = (end - start).ms();
         writeln!(
             console,
@@ -173,7 +175,6 @@ where
             elapsed / (count as f64)
         )
         .unwrap();
-        console.flush();
         if elapsed > 1000.0 {
             break;
         }

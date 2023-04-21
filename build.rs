@@ -24,7 +24,7 @@ use uuid::Uuid;
 fn main() {
     const UPGRADE_FILE: &str = "crypto_data/opensk_upgrade_pub.pem";
     println!("cargo:rerun-if-changed=crypto_data/aaguid.txt");
-    println!("cargo:rerun-if-changed={}", UPGRADE_FILE);
+    println!("cargo:rerun-if-changed={UPGRADE_FILE}");
     println!("cargo:rerun-if-changed=layout.ld");
     println!("cargo:rerun-if-changed=nrf52840_layout.ld");
     println!("cargo:rerun-if-changed=nrf52840_layout_a.ld");
@@ -33,7 +33,7 @@ fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let aaguid_bin_path = Path::new(&out_dir).join("opensk_aaguid.bin");
 
-    let mut aaguid_bin_file = File::create(&aaguid_bin_path).unwrap();
+    let mut aaguid_bin_file = File::create(aaguid_bin_path).unwrap();
     let mut aaguid_txt_file = File::open("crypto_data/aaguid.txt").unwrap();
     let mut content = String::new();
     aaguid_txt_file.read_to_string(&mut content).unwrap();
@@ -52,6 +52,6 @@ fn main() {
         .to_bytes(&group, conversion_form, &mut ctx)
         .unwrap();
     let upgrade_pubkey_path = Path::new(&out_dir).join("opensk_upgrade_pubkey.bin");
-    let mut upgrade_pub_bin_file = File::create(&upgrade_pubkey_path).unwrap();
+    let mut upgrade_pub_bin_file = File::create(upgrade_pubkey_path).unwrap();
     upgrade_pub_bin_file.write_all(&raw_bytes).unwrap();
 }

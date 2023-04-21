@@ -14,20 +14,35 @@
 
 use super::storage_helper::ModRange;
 use alloc::boxed::Box;
+use core::marker::PhantomData;
+use libtock_platform as platform;
+use libtock_platform::Syscalls;
 use persistent_store::{StorageError, StorageResult};
+use platform::DefaultConfig;
 
 const PARTITION_LENGTH: usize = 0x41000;
 const METADATA_LENGTH: usize = 0x1000;
 
-pub struct BufferUpgradeStorage {
+pub struct BufferUpgradeStorage<
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config = DefaultConfig,
+> {
     /// Content of the partition storage.
     partition: Box<[u8]>,
+    s: PhantomData<S>,
+    c: PhantomData<C>,
 }
 
-impl BufferUpgradeStorage {
-    pub fn new() -> StorageResult<BufferUpgradeStorage> {
+impl<S, C> BufferUpgradeStorage<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
+    pub fn new() -> StorageResult<Self> {
         Ok(BufferUpgradeStorage {
             partition: vec![0xff; PARTITION_LENGTH].into_boxed_slice(),
+            s: PhantomData,
+            c: PhantomData,
         })
     }
 
@@ -72,10 +87,11 @@ impl BufferUpgradeStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libtock_unittest::fake::Syscalls;
 
     #[test]
     fn read_write_bundle() {
-        let mut storage = BufferUpgradeStorage::new().unwrap();
+        let mut storage = BufferUpgradeStorage::<Syscalls>::new().unwrap();
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0xFF]);
         assert!(storage.write_bundle(1, vec![0x88, 0x88]).is_ok());
         assert_eq!(storage.read_partition(0, 2).unwrap(), &[0xFF, 0x88]);
@@ -108,7 +124,7 @@ mod tests {
 
     #[test]
     fn partition_slice() {
-        let storage = BufferUpgradeStorage::new().unwrap();
+        let storage = BufferUpgradeStorage::<Syscalls>::new().unwrap();
         assert_eq!(storage.bundle_identifier(), 0x60000);
     }
 }

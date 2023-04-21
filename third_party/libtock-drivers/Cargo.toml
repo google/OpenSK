@@ -9,9 +9,10 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-libtock_core = { path = "../../third_party/libtock-rs/core" }
+libtock_console = { path = "../../third_party/libtock-rs/apis/console" }
+libtock_platform = { path = "../../third_party/libtock-rs/platform" }
 
 [features]
 debug_ctap = []
 verbose_usb = ["debug_ctap"]
-with_nfc=[]
+with_nfc = []

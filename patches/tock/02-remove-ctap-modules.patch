@@ -1,9 +1,9 @@
 diff --git a/boards/components/src/ctap.rs b/boards/components/src/ctap.rs
 deleted file mode 100644
-index 5e30702b0..000000000
+index 87b4ded9f..000000000
 --- a/boards/components/src/ctap.rs
 +++ /dev/null
-@@ -1,127 +0,0 @@
+@@ -1,130 +0,0 @@
 -//! Component for CTAP HID over USB support.
 -//!
 -//! This provides a component for using the CTAP driver. This allows for
@@ -57,31 +57,34 @@ index 5e30702b0..000000000
 -}
 -
 -pub struct CtapComponent<U: 'static + hil::usb::UsbController<'static>> {
+-    board_kernel: &'static kernel::Kernel,
+-    driver_num: usize,
 -    usb: &'static U,
 -    vendor_id: u16,
 -    product_id: u16,
 -    strings: &'static [&'static str; 3],
--    board_kernel: &'static kernel::Kernel,
 -    send_buffer: &'static mut [u8; 64],
 -    recv_buffer: &'static mut [u8; 64],
 -}
 -
 -impl<U: 'static + hil::usb::UsbController<'static>> CtapComponent<U> {
 -    pub fn new(
+-        board_kernel: &'static kernel::Kernel,
+-        driver_num: usize,
 -        usb: &'static U,
 -        vendor_id: u16,
 -        product_id: u16,
 -        strings: &'static [&'static str; 3],
--        board_kernel: &'static kernel::Kernel,
 -        send_buffer: &'static mut [u8; 64],
 -        recv_buffer: &'static mut [u8; 64],
 -    ) -> CtapComponent<U> {
 -        CtapComponent {
+-            board_kernel,
+-            driver_num,
 -            usb,
 -            vendor_id,
 -            product_id,
 -            strings,
--            board_kernel,
 -            send_buffer,
 -            recv_buffer,
 -        }
@@ -122,7 +125,7 @@ index 5e30702b0..000000000
 -                Some(ctap),
 -                self.send_buffer,
 -                self.recv_buffer,
--                self.board_kernel.create_grant(&grant_cap),
+-                self.board_kernel.create_grant(self.driver_num, &grant_cap),
 -            )
 -        );
 -
@@ -132,23 +135,23 @@ index 5e30702b0..000000000
 -    }
 -}
 diff --git a/boards/components/src/lib.rs b/boards/components/src/lib.rs
-index 95625f91f..cd542609e 100644
+index 120403652..92d45f7e3 100644
 --- a/boards/components/src/lib.rs
 +++ b/boards/components/src/lib.rs
-@@ -10,7 +10,6 @@ pub mod button;
+@@ -14,7 +14,6 @@ pub mod ccs811;
  pub mod cdc;
  pub mod console;
  pub mod crc;
 -pub mod ctap;
  pub mod debug_queue;
  pub mod debug_writer;
- pub mod firmware_protection;
+ pub mod digest;
 diff --git a/capsules/src/usb/ctap.rs b/capsules/src/usb/ctap.rs
 deleted file mode 100644
-index 32cb2d6f1..000000000
+index d085b7286..000000000
 --- a/capsules/src/usb/ctap.rs
 +++ /dev/null
-@@ -1,410 +0,0 @@
+@@ -1,406 +0,0 @@
 -//! Client to Authenticator Protocol CTAPv2 over USB HID
 -//!
 -//! Based on the spec avaliable at: <https://fidoalliance.org/specs/fido-v2.0-id-20180227/fido-client-to-authenticator-protocol-v2.0-id-20180227.html>
@@ -169,11 +172,11 @@ index 32cb2d6f1..000000000
 -use super::descriptors::TransferDirection;
 -use super::usbc_client_ctrl::ClientCtrl;
 -
--use kernel::common::cells::OptionalCell;
--use kernel::common::cells::TakeCell;
 -use kernel::hil;
 -use kernel::hil::usb::TransferType;
--use kernel::ReturnCode;
+-use kernel::utilities::cells::OptionalCell;
+-use kernel::utilities::cells::TakeCell;
+-use kernel::ErrorCode;
 -
 -/// Use 1 Interrupt transfer IN/OUT endpoint
 -const ENDPOINT_NUM: usize = 1;
@@ -349,7 +352,7 @@ index 32cb2d6f1..000000000
 -    fn send_buffer(
 -        &'a self,
 -        send: &'static mut [u8; 64],
--    ) -> Result<usize, (ReturnCode, &'static mut [u8; 64])> {
+-    ) -> Result<usize, (ErrorCode, &'static mut [u8; 64])> {
 -        let len = send.len();
 -
 -        self.send_buffer.replace(send);
@@ -358,17 +361,17 @@ index 32cb2d6f1..000000000
 -        Ok(len)
 -    }
 -
--    fn send_cancel(&'a self) -> Result<&'static mut [u8; 64], ReturnCode> {
+-    fn send_cancel(&'a self) -> Result<&'static mut [u8; 64], ErrorCode> {
 -        match self.send_buffer.take() {
 -            Some(buf) => Ok(buf),
--            None => Err(ReturnCode::EBUSY),
+-            None => Err(ErrorCode::BUSY),
 -        }
 -    }
 -
 -    fn receive_buffer(
 -        &'a self,
 -        recv: &'static mut [u8; 64],
--    ) -> Result<(), (ReturnCode, &'static mut [u8; 64])> {
+-    ) -> Result<(), (ErrorCode, &'static mut [u8; 64])> {
 -        self.recv_buffer.replace(recv);
 -
 -        if self.saved_endpoint.is_some() {
@@ -376,11 +379,7 @@ index 32cb2d6f1..000000000
 -            if self.can_receive() {
 -                self.recv_buffer.take().map(|buf| {
 -                    self.client.map(move |client| {
--                        client.packet_received(
--                            ReturnCode::SUCCESS,
--                            buf,
--                            self.saved_endpoint.take().unwrap(),
--                        );
+-                        client.packet_received(Ok(()), buf, self.saved_endpoint.take().unwrap());
 -                    });
 -                });
 -                // Reset the offset
@@ -394,11 +393,11 @@ index 32cb2d6f1..000000000
 -        Ok(())
 -    }
 -
--    fn receive_cancel(&'a self) -> Result<&'static mut [u8; 64], ReturnCode> {
+-    fn receive_cancel(&'a self) -> Result<&'static mut [u8; 64], ErrorCode> {
 -        self.saved_endpoint.take();
 -        match self.recv_buffer.take() {
 -            Some(buf) => Ok(buf),
--            None => Err(ReturnCode::EBUSY),
+-            None => Err(ErrorCode::BUSY),
 -        }
 -    }
 -}
@@ -524,7 +523,7 @@ index 32cb2d6f1..000000000
 -                        if total_received_bytes >= self.recv_len.get() {
 -                            if self.can_receive() {
 -                                self.client.map(move |client| {
--                                    client.packet_received(ReturnCode::SUCCESS, buf, endpoint);
+-                                    client.packet_received(Ok(()), buf, endpoint);
 -                                });
 -                                // Reset the offset
 -                                self.recv_offset.set(0);
@@ -554,18 +553,18 @@ index 32cb2d6f1..000000000
 -    fn packet_transmitted(&'a self, endpoint: usize) {
 -        self.send_buffer.take().map(|buf| {
 -            self.client.map(move |client| {
--                client.packet_transmitted(ReturnCode::SUCCESS, buf, endpoint);
+-                client.packet_transmitted(Ok(()), buf, endpoint);
 -            });
 -        });
 -    }
 -}
 diff --git a/capsules/src/usb/mod.rs b/capsules/src/usb/mod.rs
-index 17cab4c23..3f3a4f646 100644
+index 6d5daa444..767f5de83 100644
 --- a/capsules/src/usb/mod.rs
 +++ b/capsules/src/usb/mod.rs
 @@ -1,5 +1,4 @@
  pub mod cdc;
 -pub mod ctap;
  pub mod descriptors;
- pub mod usb_ctap;
  pub mod usb_user;
+ pub mod usbc_client;

@@ -10,14 +10,23 @@ authors = [
 license = "Apache-2.0"
 edition = "2018"
 
+[target.'cfg(any(target_arch = "arm", target_arch = "riscv32"))'.dependencies.libtock_runtime]
+path = "third_party/libtock-rs/runtime"
+default-features = false
+features = ["no_auto_layout", "no_debug_memop"]
+
 [dependencies]
-libtock_core = { path = "third_party/libtock-rs/core" }
+libtock_buttons = { path = "third_party/libtock-rs/apis/buttons" }
+libtock_platform = { path = "third_party/libtock-rs/platform" }
 libtock_drivers = { path = "third_party/libtock-drivers" }
+libtock_console = { path = "third_party/libtock-rs/apis/console" }
+libtock_leds = { path = "third_party/libtock-rs/apis/leds" }
 lang_items = { path = "third_party/lang-items" }
 opensk = { path = "libraries/opensk" }
 sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
 persistent_store = { path = "libraries/persistent_store" }
+libtock_unittest = { path = "third_party/libtock-rs/unittest", optional = true }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 rand_core = "0.6.4"
@@ -27,7 +36,7 @@ ed25519-compact = { version = "1", default-features = false, optional = true }
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap", "opensk/debug_ctap"]
 panic_console = ["lang_items/panic_console"]
-std = ["crypto/std", "lang_items/std", "persistent_store/std", "opensk/std"]
+std = ["crypto/std", "lang_items/std", "persistent_store/std", "opensk/std", "libtock_unittest"]
 verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["crypto/with_ctap1", "opensk/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]

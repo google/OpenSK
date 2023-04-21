@@ -25,7 +25,7 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
       - name: Run bloat on the PR
-        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> .github/workflows/bloat_output_new.txt
+        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no -C link-arg=-Tnrf52840_layout.ld" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> .github/workflows/bloat_output_new.txt
 
       # Second run: PR
       - uses: actions/checkout@v2
@@ -41,7 +41,7 @@ jobs:
         run: ./setup.sh
       - name: Run bloat on base
         working-directory: ./OpenSK_base
-        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
+        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no -C link-arg=-Tnrf52840_layout.ld" cargo bloat --release --target=thumbv7em-none-eabi --features=with_ctap1,vendor_hid --crates >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
 
       - name: Run output formatter to echo workflow command
         run: ./.github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt bloat_comment.md

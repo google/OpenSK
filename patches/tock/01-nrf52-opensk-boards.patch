@@ -1,8 +1,8 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 06acc26d2..bd1bbd58f 100644
+index 04cb39334..596cacda4 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -20,7 +20,13 @@ members = [
+@@ -23,7 +23,13 @@ members = [
      "boards/msp_exp432p401r",
      "boards/microbit_v2",
      "boards/nordic/nrf52840dk",

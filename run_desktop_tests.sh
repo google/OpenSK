@@ -37,9 +37,9 @@ cargo fmt -- --check
 cd ..
 
 echo "Running Clippy lints..."
-cargo clippy --all-targets --features std -- -D warnings
-cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -D warnings
-cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -D warnings
+cargo clippy --lib --tests --bins --benches --features std -- -D warnings
+cargo clippy --lib --tests --bins --benches --features std,with_ctap1,ed25519,vendor_hid -- -D warnings
+cargo clippy --lib --tests --bins --benches --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -D warnings
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -104,8 +104,8 @@ echo "Checking deployment of other boards..."
 if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."
-  cargo test --release --features std
-  cargo test --release --all-features
+  cargo test --lib --tests --bins --benches --release --features std
+  cargo test --lib --tests --bins --benches --release --all-features
   cd libraries/cbor
   cargo test --release
   cd ../..
@@ -114,8 +114,8 @@ then
   cd ../..
 
   echo "Running unit tests on the desktop (debug mode)..."
-  cargo test --features std
-  cargo test --release --all-features
+  cargo test --lib --tests --bins --benches --features std
+  cargo test --lib --tests --bins --benches --all-features
   cd libraries/cbor
   cargo test
   cd ../..

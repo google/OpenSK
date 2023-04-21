@@ -1,15 +1,17 @@
 use crate::result::TockResult;
-use libtock_core::syscalls;
+use libtock_platform as platform;
+use libtock_platform::{DefaultConfig, Syscalls};
+use platform::ErrorCode;
 
-const DRIVER_NUMBER: usize = 0x00008;
+const DRIVER_NUMBER: u32 = 0x00008;
 
 mod command_nr {
-    pub const AVAILABLE: usize = 0;
-    pub const GET_PROTECTION: usize = 1;
-    pub const SET_PROTECTION: usize = 2;
+    pub const AVAILABLE: u32 = 0;
+    pub const GET_PROTECTION: u32 = 1;
+    pub const SET_PROTECTION: u32 = 2;
 }
 
-#[derive(PartialOrd, PartialEq)]
+#[derive(PartialOrd, PartialEq, Eq)]
 pub enum ProtectionLevel {
     /// Unsupported feature
     Unknown = 0,
@@ -25,8 +27,10 @@ pub enum ProtectionLevel {
     FullyLocked = 0xff,
 }
 
-impl From<usize> for ProtectionLevel {
-    fn from(value: usize) -> Self {
+pub struct Crp<S: Syscalls, C: platform::subscribe::Config = DefaultConfig>(S, C);
+
+impl From<u32> for ProtectionLevel {
+    fn from(value: u32) -> Self {
         match value {
             1 => ProtectionLevel::NoProtection,
             2 => ProtectionLevel::JtagDisabled,
@@ -36,17 +40,24 @@ impl From<usize> for ProtectionLevel {
     }
 }
 
-pub fn is_available() -> TockResult<()> {
-    syscalls::command(DRIVER_NUMBER, command_nr::AVAILABLE, 0, 0)?;
-    Ok(())
-}
+impl<S: Syscalls, C: platform::subscribe::Config> Crp<S, C> {
+    pub fn is_available() -> TockResult<()> {
+        S::command(DRIVER_NUMBER, command_nr::AVAILABLE, 0, 0).to_result::<(), ErrorCode>()?;
 
-pub fn get_protection() -> TockResult<ProtectionLevel> {
-    let current_level = syscalls::command(DRIVER_NUMBER, command_nr::GET_PROTECTION, 0, 0)?;
-    Ok(current_level.into())
-}
+        Ok(())
+    }
 
-pub fn set_protection(level: ProtectionLevel) -> TockResult<()> {
-    syscalls::command(DRIVER_NUMBER, command_nr::SET_PROTECTION, level as usize, 0)?;
-    Ok(())
+    pub fn get_protection() -> TockResult<ProtectionLevel> {
+        let protection_level = S::command(DRIVER_NUMBER, command_nr::GET_PROTECTION, 0, 0)
+            .to_result::<u32, ErrorCode>()?;
+
+        Ok(protection_level.into())
+    }
+
+    pub fn set_protection(level: ProtectionLevel) -> TockResult<()> {
+        S::command(DRIVER_NUMBER, command_nr::SET_PROTECTION, level as u32, 0)
+            .to_result::<(), ErrorCode>()?;
+
+        Ok(())
+    }
 }

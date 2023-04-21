@@ -21,6 +21,8 @@ use crate::env::tock::buffer_upgrade_storage::BufferUpgradeStorage;
 use crate::env::tock::storage::TockUpgradeStorage;
 use arrayref::array_ref;
 use byteorder::{ByteOrder, LittleEndian};
+use libtock_platform as platform;
+use libtock_platform::Syscalls;
 use opensk::api::crypto::ecdsa::{PublicKey as _, Signature as _};
 use opensk::env::{EcdsaPk, EcdsaSignature, Env};
 use persistent_store::{StorageError, StorageResult};
@@ -39,9 +41,13 @@ pub const METADATA_SIGN_OFFSET: usize = 0x800;
 ///
 /// Checks signature correctness against the hash, and whether the partition offset matches.
 /// Whether the hash matches the partition content is not tested here!
-pub fn check_metadata<E: Env>(
-    #[cfg(not(feature = "std"))] upgrade_locations: &TockUpgradeStorage,
-    #[cfg(feature = "std")] upgrade_locations: &BufferUpgradeStorage,
+pub fn check_metadata<
+    E: Env,
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+>(
+    #[cfg(not(feature = "std"))] upgrade_locations: &TockUpgradeStorage<S, C>,
+    #[cfg(feature = "std")] upgrade_locations: &BufferUpgradeStorage<S, C>,
     public_key_bytes: &[u8],
     metadata: &[u8],
 ) -> StorageResult<()> {
@@ -104,11 +110,13 @@ fn verify_signature<E: Env>(
 mod test {
     use super::*;
     use arrayref::mut_array_refs;
+    use libtock_unittest::fake::Syscalls;
     use opensk::api::crypto::ecdsa::SecretKey as _;
     use opensk::api::crypto::sha256::Sha256;
     use opensk::api::crypto::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
     use opensk::env::test::TestEnv;
     use opensk::env::{EcdsaSk, Sha};
+    use platform::DefaultConfig;
 
     fn to_uncompressed(public_key: &EcdsaPk<TestEnv>) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
         // Formatting according to:
@@ -147,20 +155,28 @@ mod test {
         let public_key_bytes = to_uncompressed(&public_key);
 
         assert_eq!(
-            check_metadata::<TestEnv>(&upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+                &upgrade_locations,
+                &public_key_bytes,
+                &metadata
+            ),
             Ok(())
         );
 
         // Manipulating the partition address fails.
         metadata[METADATA_SIGN_OFFSET + 8] = 0x88;
         assert_eq!(
-            check_metadata::<TestEnv>(&upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+                &upgrade_locations,
+                &public_key_bytes,
+                &metadata
+            ),
             Err(StorageError::CustomError)
         );
         metadata[METADATA_SIGN_OFFSET + 8] = 0x00;
         // Wrong metadata length fails.
         assert_eq!(
-            check_metadata::<TestEnv>(
+            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata[..METADATA_LEN - 1]
@@ -170,14 +186,22 @@ mod test {
         // Manipulating the hash fails.
         metadata[0] ^= 0x01;
         assert_eq!(
-            check_metadata::<TestEnv>(&upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+                &upgrade_locations,
+                &public_key_bytes,
+                &metadata
+            ),
             Err(StorageError::CustomError)
         );
         metadata[0] ^= 0x01;
         // Manipulating the signature fails.
         metadata[32] ^= 0x01;
         assert_eq!(
-            check_metadata::<TestEnv>(&upgrade_locations, &public_key_bytes, &metadata),
+            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+                &upgrade_locations,
+                &public_key_bytes,
+                &metadata
+            ),
             Err(StorageError::CustomError)
         );
     }

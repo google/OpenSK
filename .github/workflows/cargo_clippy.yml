@@ -25,10 +25,10 @@ jobs:
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-targets --features std
+          args: --features std
       - name: Deny Clippy warnings (std)
-        run: cargo clippy --all-targets --features std -- -A clippy::new_without_default -D warnings
+        run: cargo clippy --features std -- -D warnings
       - name: Deny Clippy warnings (all)
-        run: cargo clippy --all-targets --features std,with_ctap1,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
+        run: cargo clippy --features std,with_ctap1,ed25519,vendor_hid -- -D warnings
       - name: Deny Clippy warnings (all, nfc)
-        run: cargo clippy --all-targets --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -A clippy::new_without_default -D warnings
+        run: cargo clippy --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -D warnings

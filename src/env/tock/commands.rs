@@ -44,7 +44,7 @@ pub fn process_vendor_command(
     channel: Channel,
 ) -> Option<Vec<u8>> {
     #[cfg(feature = "vendor_hid")]
-    if matches!(channel, Channel::VendorHid(_)) {
+    if matches!(channel, Channel::MainHid(_)) {
         return None;
     }
     process_cbor(env, bytes, channel).unwrap_or_else(|e| Some(vec![e as u8]))

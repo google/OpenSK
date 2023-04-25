@@ -18,12 +18,12 @@
 # Generates the binary and upgrades OpenSK.
 # To be run from the OpenSK base path.
 
-set -e
+set -ex
 
 BOARD="$1"
 
 ./deploy.py --board="${BOARD}" --opensk --programmer=none $2
-python3 -m tools.deploy_partition --board="${BOARD}" $2
+python3 -m tools.deploy_partition --board="$@"
 if nrfjprog --reset --family NRF52 ; then
   echo "Upgrade finished!"
 else

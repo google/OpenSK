@@ -327,8 +327,7 @@ mod test {
         assert!(process_cbor(&mut env, &cbor_bytes, VENDOR_CHANNEL)
             .unwrap()
             .is_some());
-        assert!(process_vendor_command(&mut env, &cbor_bytes, VENDOR_CHANNEL)
-            .is_some());
+        assert!(process_vendor_command(&mut env, &cbor_bytes, VENDOR_CHANNEL).is_some());
     }
 
     #[test]

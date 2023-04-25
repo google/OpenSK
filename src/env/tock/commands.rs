@@ -290,6 +290,8 @@ mod test {
     use cbor::cbor_map;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
+    #[cfg(feature = "vendor_hid")]
+    const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
     #[test]
     fn test_process_cbor_unrelated_input() {
@@ -314,6 +316,18 @@ mod test {
         let cbor_bytes = vec![VENDOR_COMMAND_UPGRADE_INFO];
         assert!(process_cbor(&mut env, &cbor_bytes, DUMMY_CHANNEL)
             .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "vendor_hid")]
+    fn test_process_command_valid_vendor_hid() {
+        let mut env = TockEnv::default();
+        let cbor_bytes = vec![VENDOR_COMMAND_UPGRADE_INFO];
+        assert!(process_cbor(&mut env, &cbor_bytes, VENDOR_CHANNEL)
+            .unwrap()
+            .is_some());
+        assert!(process_vendor_command(&mut env, &cbor_bytes, VENDOR_CHANNEL)
             .is_some());
     }
 

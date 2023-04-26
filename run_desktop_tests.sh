@@ -105,23 +105,23 @@ if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
 then
   echo "Running unit tests on the desktop (release mode)..."
   cargo test --release --features std
+  cargo test --release --all-features
   cd libraries/cbor
   cargo test --release
   cd ../..
   cd libraries/persistent_store
   cargo test --release --features std
   cd ../..
-  cargo test --release --features std
 
   echo "Running unit tests on the desktop (debug mode)..."
   cargo test --features std
+  cargo test --release --all-features
   cd libraries/cbor
   cargo test
   cd ../..
   cd libraries/persistent_store
   cargo test --features std
   cd ../..
-  cargo test --features std
 
   cd libraries/opensk
   echo "Running CTAP library unit tests (release mode)..."

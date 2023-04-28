@@ -33,7 +33,7 @@ const DRIVER_NUMBER: u32 = 0x20009;
 mod command_nr {
     pub const CHECK: u32 = 0;
     pub const CONNECT: u32 = 1;
-    pub const _TRANSMIT: u32 = 2;
+    pub const TRANSMIT: u32 = 2;
     pub const RECEIVE: u32 = 3;
     pub const TRANSMIT_OR_RECEIVE: u32 = 4;
     pub const CANCEL: u32 = 5;
@@ -41,18 +41,12 @@ mod command_nr {
 
 /// Ids for subscribe numbers
 mod subscribe_nr {
-    pub const _TRANSMIT: u32 = 0;
+    pub const TRANSMIT: u32 = 0;
     pub const RECEIVE: u32 = 1;
-    pub const TRANSMIT_OR_RECEIVE: u32 = 2;
-    pub mod callback_status {
-        pub const TRANSMITTED: u32 = super::_TRANSMIT;
-        pub const RECEIVED: u32 = super::RECEIVE;
-    }
 }
 
 mod ro_allow_nr {
-    pub const _TRANSMIT: u32 = 0;
-    pub const TRANSMIT_OR_RECEIVE: u32 = 1;
+    pub const TRANSMIT: u32 = 0;
 }
 
 mod rw_allow_nr {
@@ -133,7 +127,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         #[cfg(feature = "verbose_usb")]
         writeln!(
             Console::<S>::writer(),
-            "Receiving packet with timeout of {}ms",
+            "Receiving packet with timeout of {} ms",
             timeout_delay.ms(),
         )
         .unwrap();
@@ -152,6 +146,27 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         }
 
         result
+    }
+
+    /// Sends a packet to a give endpoint.
+    ///
+    /// Returns the transmission status.
+    pub fn send(
+        buf: &[u8; 64],
+        timeout_delay: Duration<isize>,
+        endpoint: u32,
+    ) -> TockResult<SendOrRecvStatus> {
+        #[cfg(feature = "verbose_usb")]
+        writeln!(
+            Console::<S>::writer(),
+            "Sending packet on endpoint {} with timeout of {} ms = {:02x?}",
+            endpoint,
+            timeout_delay.ms(),
+            buf as &[u8],
+        )
+        .unwrap();
+
+        Self::send_detail(buf, timeout_delay, endpoint)
     }
 
     /// Either sends or receives a packet within a given time.
@@ -175,7 +190,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         #[cfg(feature = "verbose_usb")]
         writeln!(
             Console::<S>::writer(),
-            "Sending packet with timeout of {}ms = {:02x?}",
+            "Sending packet with timeout of {} ms = {:02x?}",
             timeout_delay.ms(),
             buf as &[u8]
         )
@@ -204,14 +219,11 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         let status: Cell<Option<SendOrRecvStatus>> = Cell::new(None);
 
         let alarm = UsbCtapHidListener(|direction, endpoint| match direction {
-            subscribe_nr::callback_status::RECEIVED => {
-                status.set(Some(SendOrRecvStatus::Received(endpoint)))
-            }
+            subscribe_nr::RECEIVE => status.set(Some(SendOrRecvStatus::Received(endpoint))),
             // Unknown direction or "transmitted" sent by the kernel
             _ => status.set(None),
         });
 
-        // init the time-out callback but don't enable it yet
         let mut timeout_callback =
             timer::with_callback::<S, C, _>(|_| status.set(Some(SendOrRecvStatus::Timeout)));
         let status = share::scope::<
@@ -223,13 +235,10 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
             _,
             _,
         >(|handle| {
-            let (allow, subscribe_ctap, subscribe_timer) = handle.split();
-            // we need to share a *read-write* buffer with the kernel because it needs
-            // to copy the packet into the buffer
+            let (allow, subscribe_recv, subscribe_timer) = handle.split();
             S::allow_rw::<C, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>(allow, buf)?;
 
-            // register the usb endpoint listener
-            Self::register_listener::<{ subscribe_nr::RECEIVE }, _>(&alarm, subscribe_ctap)?;
+            Self::register_listener::<{ subscribe_nr::RECEIVE }, _>(&alarm, subscribe_recv)?;
 
             let mut timeout = timeout_callback.init()?;
             timeout_callback.enable(subscribe_timer)?;
@@ -237,13 +246,11 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                 .set_alarm(timeout_delay)
                 .map_err(|_| ErrorCode::Fail)?;
 
-            // Trigger USB reception.
             S::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0).to_result::<(), ErrorCode>()?;
 
             Util::<S>::yieldk_for(|| status.get().is_some());
             Self::unregister_listener(subscribe_nr::RECEIVE);
 
-            // do proper error handling
             let status = match status.get() {
                 Some(status) => Ok::<SendOrRecvStatus, TockError>(status),
                 None => Err(OutOfRangeError.into()),
@@ -255,11 +262,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                 Err(TockError::Command(ErrorCode::Already)) => {
                     if matches!(status, SendOrRecvStatus::Timeout) {
                         #[cfg(feature = "debug_ctap")]
-                        writeln!(
-                        Console::<S>::writer(),
-                        "The receive timeout already expired, but the callback wasn't executed."
-                    )
-                        .unwrap();
+                        write!(Console::<S>::writer(), ".").unwrap();
                     }
                 }
                 Err(_e) => {
@@ -300,6 +303,105 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         status
     }
 
+    fn send_detail(
+        buf: &[u8; 64],
+        timeout_delay: Duration<isize>,
+        endpoint: u32,
+    ) -> TockResult<SendOrRecvStatus> {
+        let status: Cell<Option<SendOrRecvStatus>> = Cell::new(None);
+        let alarm = UsbCtapHidListener(|direction, _| {
+            let option = match direction {
+                subscribe_nr::TRANSMIT => Some(SendOrRecvStatus::Sent),
+                _ => None,
+            };
+            status.set(option);
+        });
+
+        let mut timeout_callback =
+            timer::with_callback::<S, C, _>(|_| status.set(Some(SendOrRecvStatus::Timeout)));
+        let status = share::scope::<
+            (
+                AllowRo<_, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>,
+                Subscribe<_, DRIVER_NUMBER, { subscribe_nr::TRANSMIT }>,
+                Subscribe<S, { timer::DRIVER_NUM }, { timer::subscribe::CALLBACK }>,
+            ),
+            _,
+            _,
+        >(|handle| {
+            let (allow, subscribe_send, subscribe_timer) = handle.split();
+
+            S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>(allow, buf)?;
+
+            Self::register_listener::<{ subscribe_nr::TRANSMIT }, _>(&alarm, subscribe_send)?;
+
+            let mut timeout = timeout_callback.init()?;
+            timeout_callback.enable(subscribe_timer)?;
+            timeout
+                .set_alarm(timeout_delay)
+                .map_err(|_| ErrorCode::Fail)?;
+
+            S::command(DRIVER_NUMBER, command_nr::TRANSMIT, endpoint as u32, 0)
+                .to_result::<(), ErrorCode>()?;
+
+            util::Util::<S>::yieldk_for(|| status.get().is_some());
+            Self::unregister_listener(subscribe_nr::TRANSMIT);
+
+            let status = match status.get() {
+                Some(status) => Ok::<SendOrRecvStatus, TockError>(status),
+                None => Err(OutOfRangeError.into()),
+            }?;
+
+            // Cleanup alarm callback.
+            match timeout.stop_alarm() {
+                Ok(()) => (),
+                Err(TockError::Command(ErrorCode::Already)) => {
+                    if matches!(status, SendOrRecvStatus::Timeout) {
+                        #[cfg(feature = "debug_ctap")]
+                        writeln!(
+                            Console::<S>::writer(),
+                            "The send timeout already expired, but the callback wasn't executed."
+                        )
+                        .unwrap();
+                    }
+                }
+                Err(_e) => {
+                    #[cfg(feature = "debug_ctap")]
+                    panic!("Unexpected error when stopping alarm: {:?}", _e);
+                    #[cfg(not(feature = "debug_ctap"))]
+                    panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
+                }
+            }
+            Ok::<SendOrRecvStatus, TockError>(status)
+        });
+
+        // Cancel USB transaction if necessary.
+        if matches!(status, Ok(SendOrRecvStatus::Timeout)) {
+            #[cfg(feature = "verbose_usb")]
+            writeln!(
+                Console::<S>::writer(),
+                "Cancelling USB transmit due to timeout"
+            )
+            .unwrap();
+            let result = S::command(DRIVER_NUMBER, command_nr::CANCEL, endpoint as u32, 0)
+                .to_result::<(), ErrorCode>();
+            match result {
+                // - SUCCESS means that we successfully cancelled the transaction.
+                // - EALREADY means that the transaction was already completed.
+                Ok(_) | Err(ErrorCode::Already) => (),
+                // - EBUSY means that the transaction is in progress.
+                Err(ErrorCode::Busy) => {
+                    // The app should wait for it, but it may never happen if the remote app crashes.
+                    // We just return to avoid a deadlock.
+                    #[cfg(feature = "debug_ctap")]
+                    writeln!(Console::<S>::writer(), "Couldn't cancel the USB receive").unwrap();
+                }
+                Err(e) => panic!("Unexpected error when cancelling USB receive: {:?}", e),
+            }
+        }
+
+        status
+    }
+
     fn send_or_recv_with_timeout_detail(
         buf: &mut [u8; 64],
         timeout_delay: Duration<isize>,
@@ -308,14 +410,13 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         let status: Cell<Option<SendOrRecvStatus>> = Cell::new(None);
         let alarm = UsbCtapHidListener(|direction, endpoint| {
             let option = match direction {
-                subscribe_nr::callback_status::TRANSMITTED => Some(SendOrRecvStatus::Sent),
-                subscribe_nr::callback_status::RECEIVED => {
-                    Some(SendOrRecvStatus::Received(endpoint))
-                }
+                subscribe_nr::TRANSMIT => Some(SendOrRecvStatus::Sent),
+                subscribe_nr::RECEIVE => Some(SendOrRecvStatus::Received(endpoint)),
                 _ => None,
             };
             status.set(option);
         });
+        let mut recv_buf = [0; 64];
 
         // init the time-out callback but don't enable it yet
         let mut timeout_callback = timer::with_callback::<S, C, _>(|_| {
@@ -323,19 +424,22 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         });
         let status = share::scope::<
             (
-                AllowRo<_, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT_OR_RECEIVE }>,
-                Subscribe<_, DRIVER_NUMBER, { subscribe_nr::_TRANSMIT }>,
+                AllowRo<_, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>,
+                AllowRw<_, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>,
+                Subscribe<_, DRIVER_NUMBER, { subscribe_nr::TRANSMIT }>,
+                Subscribe<_, DRIVER_NUMBER, { subscribe_nr::RECEIVE }>,
                 Subscribe<_, { timer::DRIVER_NUM }, { timer::subscribe::CALLBACK }>,
             ),
             _,
             _,
         >(|handle| {
-            let (allow, sub_ctap, sub_timer) = handle.split();
+            let (allow_ro, allow_rw, sub_send, sub_recv, sub_timer) = handle.split();
 
-            // receiving a packet alone does *not* require sharing a rw-buffer with the kernel
-            S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT_OR_RECEIVE }>(allow, buf)?;
+            S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>(allow_ro, buf)?;
+            S::allow_rw::<C, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>(allow_rw, &mut recv_buf)?;
 
-            Self::register_listener::<{ subscribe_nr::_TRANSMIT }, _>(&alarm, sub_ctap)?;
+            Self::register_listener::<{ subscribe_nr::TRANSMIT }, _>(&alarm, sub_send)?;
+            Self::register_listener::<{ subscribe_nr::RECEIVE }, _>(&alarm, sub_recv)?;
 
             let mut timeout = timeout_callback.init()?;
             timeout_callback.enable(sub_timer)?;
@@ -351,9 +455,9 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
             .to_result::<(), ErrorCode>()?;
 
             util::Util::<S>::yieldk_for(|| status.get().is_some());
-            Self::unregister_listener(subscribe_nr::TRANSMIT_OR_RECEIVE);
+            Self::unregister_listener(subscribe_nr::TRANSMIT);
+            Self::unregister_listener(subscribe_nr::RECEIVE);
 
-            // do proper error handling
             let status = match status.get() {
                 Some(status) => Ok::<SendOrRecvStatus, TockError>(status),
                 None => Err(OutOfRangeError.into()),
@@ -366,9 +470,9 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                     if matches!(status, SendOrRecvStatus::Timeout) {
                         #[cfg(feature = "debug_ctap")]
                         writeln!(
-                    Console::<S>::writer(),
-                    "The send/receive timeout already expired, but the callback wasn't executed."
-                )
+                            Console::<S>::writer(),
+                            "The send/receive timeout already expired, but the callback wasn't executed."
+                        )
                         .unwrap();
                     }
                 }
@@ -390,7 +494,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                 "Cancelling USB transaction due to timeout"
             )
             .unwrap();
-            let result = S::command(DRIVER_NUMBER, command_nr::CANCEL, endpoint as u32, 0)
+            let result = S::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0)
                 .to_result::<(), ErrorCode>();
             match result {
                 // - SUCCESS means that we successfully cancelled the transaction.
@@ -409,6 +513,9 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
             writeln!(Console::<S>::writer(), "Cancelled USB transaction!").unwrap();
         }
 
+        if matches!(status, Ok(SendOrRecvStatus::Received(_))) {
+            buf.copy_from_slice(&recv_buf);
+        }
         status
     }
 }

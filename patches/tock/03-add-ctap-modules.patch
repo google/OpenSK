@@ -195,10 +195,10 @@ index 767f5de83..cb5e0af97 100644
 +pub mod usbc_ctap_hid;
 diff --git a/capsules/src/usb/usb_ctap.rs b/capsules/src/usb/usb_ctap.rs
 new file mode 100644
-index 000000000..0fd4407c4
+index 000000000..30cac1323
 --- /dev/null
 +++ b/capsules/src/usb/usb_ctap.rs
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,343 @@
 +use super::app::{App, Side};
 +use super::usbc_ctap_hid::ClientCtapHID;
 +use kernel::errorcode::ErrorCode;
@@ -223,8 +223,7 @@ index 000000000..0fd4407c4
 +/// Ids for read-only allow buffers
 +mod ro_allow {
 +    pub const TRANSMIT: usize = 0;
-+    pub const TRANSMIT_OR_RECEIVE: usize = 1;
-+    pub const COUNT: u8 = 2;
++    pub const COUNT: u8 = 1;
 +}
 +
 +/// Ids for read-write allow buffers
@@ -288,7 +287,13 @@ index 000000000..0fd4407c4
 +        if app.connected && app.waiting && app.side.map_or(false, |side| side.can_receive()) {
 +            let _ = kernel
 +                .get_readwrite_processbuffer(rw_allow::RECEIVE)
-+                .and_then(|recv| recv.mut_enter(|dest| dest.copy_from_slice(packet)));
++                .and_then(|buf| buf.mut_enter(|dest| {
++                    if dest.len() >= 64 {
++                        dest.copy_from_slice(packet);
++                    } else {
++                        panic!();
++                    }
++                }));
 +            app.waiting = false;
 +            // reset the client state
 +            app.check_side();
@@ -470,7 +475,6 @@ index 000000000..0fd4407c4
 +                    if !app.connected {
 +                        CommandReturn::failure(ErrorCode::RESERVE)
 +                    } else {
-+                        // set the client state
 +                        if !app.set_side(Side::TransmitOrReceive) {
 +                            return CommandReturn::failure(ErrorCode::INVAL);
 +                        }
@@ -479,9 +483,15 @@ index 000000000..0fd4407c4
 +                            if app.waiting {
 +                                CommandReturn::failure(ErrorCode::ALREADY)
 +                            } else {
-+                                // send a packet before receiving one
++                                // Indicates to the driver that we can receive any pending packet.
++                                app.waiting = true;
++                                self.usb_client.receive_packet(app, kernel_grant);
++                                if !app.waiting {
++                                    return CommandReturn::success();
++                                }
++
 +                                let r = kernel_grant
-+                                    .get_readonly_processbuffer(ro_allow::TRANSMIT_OR_RECEIVE)
++                                    .get_readonly_processbuffer(ro_allow::TRANSMIT)
 +                                    .and_then(|process_buffer| {
 +                                        process_buffer.enter(|buf| {
 +                                            let mut packet: [u8; 64] = [0; 64];
@@ -495,10 +505,6 @@ index 000000000..0fd4407c4
 +                                if !r.is_success() {
 +                                    return r;
 +                                }
-+
-+                                // Indicates to the driver that we can receive any pending packet.
-+                                app.waiting = true;
-+                                self.usb_client.receive_packet(app, kernel_grant);
 +
 +                                CommandReturn::success()
 +                            }
@@ -518,6 +524,7 @@ index 000000000..0fd4407c4
 +                            // FIXME: if cancellation failed, the app should still wait. But that
 +                            // doesn't work yet.
 +                            app.waiting = false;
++                            app.check_side();
 +                            if self.usb_client.cancel_transaction(endpoint) {
 +                                CommandReturn::success()
 +                            } else {

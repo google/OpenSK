@@ -148,7 +148,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         result
     }
 
-    /// Sends a packet to a give endpoint.
+    /// Sends a packet to a given endpoint.
     ///
     /// Returns the transmission status.
     pub fn send(

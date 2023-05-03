@@ -503,7 +503,7 @@ class OpenSKInstaller:
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
     if elf2tab_ver != "elf2tab 0.10.2":
-      error(("Detected unsupported elf2tab version {elf2tab_ver}! The "
+      error(("Detected unsupported elf2tab version {elf2tab_ver!a}! The "
              "following commands may fail. Please use 0.10.2 instead."))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder, f"{self.args.application}.tab")

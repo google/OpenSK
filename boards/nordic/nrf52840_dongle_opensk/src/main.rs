@@ -450,7 +450,7 @@ pub unsafe fn main() {
             &memory_allocation_capability,
         ),
         scheduler,
-        systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
+        systick: cortexm4::systick::SysTick::new_with_calibration(6400_0000),
     };
 
     let _ = platform.pconsole.start();

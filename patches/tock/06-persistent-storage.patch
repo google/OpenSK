@@ -128,7 +128,7 @@ index 61e94260e..b7c3be3f6 100644
 +    buffer: TakeCell<'static, [u8]>,
 +}
 +
-+pub const DRIVER_NUM: usize = 0x50_003;
++pub const DRIVER_NUM: usize = 0x50003;
 +
 +#[derive(Default)]
 +pub struct App {}
@@ -402,7 +402,7 @@ index 51d89f37c..45ab3856b 100644
  
 +        // 12 - 15 are required for the custom persistent store driver
 +        // currently only implemented in the nvmc module of nrf52 series
-+        // driver number: 0x50_003
++        // driver number: 0x50003
 +
 +        // Op Type 12: Number of storage locations
 +        12 => SyscallReturn::SuccessU32(process.number_storage_locations() as u32),

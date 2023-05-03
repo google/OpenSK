@@ -16,9 +16,8 @@ pub mod apdu;
 mod client_pin;
 pub mod command;
 mod config_command;
-mod credential_id;
 mod credential_management;
-mod crypto_wrapper;
+pub mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 pub mod data_formats;
@@ -41,9 +40,6 @@ use self::command::{
     AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
 };
 use self::config_command::process_config;
-use self::credential_id::{
-    decrypt_credential_id, encrypt_to_credential_id, MAX_CREDENTIAL_ID_SIZE,
-};
 use self::credential_management::process_credential_management;
 use self::crypto_wrapper::PrivateKey;
 use self::data_formats::{
@@ -70,7 +66,7 @@ use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::customization::Customization;
-use crate::api::key_store::KeyStore;
+use crate::api::key_store::{CredentialSource, KeyStore, MAX_CREDENTIAL_ID_SIZE};
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::env::{EcdsaSk, Env, Hkdf, Sha};
@@ -186,6 +182,30 @@ pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
 pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
     cbor::writer::write_nested(value, encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+}
+
+fn decrypt_credential_id<E: Env>(
+    env: &mut E,
+    credential_id: Vec<u8>,
+    rp_id_hash: &[u8],
+) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+    let credential_source = env
+        .key_store()
+        .unwrap_credential(&credential_id, rp_id_hash)?;
+    Ok(credential_source.map(|c| PublicKeyCredentialSource {
+        key_type: PublicKeyCredentialType::PublicKey,
+        credential_id,
+        private_key: c.private_key,
+        rp_id: String::new(),
+        user_handle: Vec::new(),
+        user_display_name: None,
+        cred_protect_policy: c.cred_protect_policy,
+        creation_order: 0,
+        user_name: None,
+        user_icon: None,
+        cred_blob: c.cred_blob,
+        large_blob_key: None,
+    }))
 }
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
@@ -862,13 +882,15 @@ impl<E: Env> CtapState<E> {
             storage::store_credential(env, credential_source)?;
             random_id
         } else {
-            encrypt_to_credential_id(
-                env,
-                &private_key,
-                &rp_id_hash,
+            let credential_source = CredentialSource {
+                private_key: private_key.clone(),
+                rp_id_hash,
                 cred_protect_policy,
                 cred_blob,
-            )?
+            };
+            env.key_store()
+                .wrap_credential(credential_source)
+                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
@@ -1361,7 +1383,6 @@ mod test {
     use super::command::{
         AuthenticatorClientPinParameters, AuthenticatorCredentialManagementParameters,
     };
-    use super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::data_formats::{
         ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionHmacSecretInput,
         GetAssertionOptions, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
@@ -1371,6 +1392,7 @@ mod test {
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization;
+    use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
     use crate::api::user_presence::UserPresenceResult;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;

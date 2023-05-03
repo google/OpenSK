@@ -199,7 +199,8 @@ fn ecdsa_key_from_seed<E: Env>(
 
 impl From<&PrivateKey> for cbor::Value {
     /// Writes a private key into CBOR format. This exposes the cryptographic secret.
-    // TODO called in encrypt_to_credential_id and PublicKeyCredentialSource, needs zeroization
+    // TODO needs zeroization if seed is secret
+    // called in wrap_credential and PublicKeyCredentialSource
     fn from(private_key: &PrivateKey) -> Self {
         cbor_array![
             cbor_int!(private_key.signature_algorithm() as i64),

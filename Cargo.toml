@@ -42,6 +42,7 @@ with_ctap1 = ["crypto/with_ctap1", "opensk/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
 vendor_hid = ["opensk/vendor_hid"]
 ed25519 = ["ed25519-compact", "opensk/ed25519"]
+rust_crypto = ["opensk/rust_crypto"]
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

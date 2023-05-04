@@ -394,7 +394,7 @@ where
         let write_range = ModRange::new(address, data.len());
         if self.contains_metadata(&write_range)? {
             let new_metadata = &data[self.metadata.start() - address..][..self.metadata.length()];
-            check_metadata::<TockEnv<S>, S, C>(self, UPGRADE_PUBLIC_KEY, new_metadata)?;
+            check_metadata::<TockEnv<S, C>, S, C>(self, UPGRADE_PUBLIC_KEY, new_metadata)?;
         }
 
         // Erases all pages that have their first byte in the write range.

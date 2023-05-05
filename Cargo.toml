@@ -61,3 +61,8 @@ panic = "abort"
 lto = true # Link Time Optimization usually reduces size of binaries and static libraries
 opt-level = "z"
 codegen-units = 1
+
+[profile.release.package]
+aes = { opt-level = 3 }
+sha2 = { opt-level = 3 }
+p256 = { opt-level = 3 }

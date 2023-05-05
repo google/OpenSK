@@ -598,8 +598,8 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 mod test {
     use super::*;
     use crate::api::attestation_store::{self, Attestation, AttestationStore};
+    use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
-    use crate::ctap::crypto_wrapper::PrivateKey;
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };

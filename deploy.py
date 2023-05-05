@@ -1092,6 +1092,13 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
+      "--rust-crypto",
+      action="append_const",
+      const="rust_crypto",
+      dest="features",
+      help=("Compiles the OpenSK application with RustCrypto implementations."),
+  )
+  main_parser.add_argument(
       "--nfc",
       action="append_const",
       const="with_nfc",

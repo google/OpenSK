@@ -33,6 +33,7 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{
     BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, KeyInit, KeyIvInit,
 };
+use alloc::vec::Vec;
 use core::convert::TryFrom;
 use hmac::digest::FixedOutput;
 use hmac::Mac;

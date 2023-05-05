@@ -21,13 +21,17 @@ extern crate lang_items;
 use alloc::format;
 use alloc::vec::Vec;
 use core::fmt::Write;
-use crypto::{aes256, cbc, ecdsa, sha256, Hash256};
-use ctap2::env::tock::TockRng;
+use core::hint::black_box;
+use ctap2::env::tock::{TockEnv, TockRng};
 use libtock_console::{Console, ConsoleWriter};
 use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
+use opensk::api::crypto::aes256::Aes256;
+use opensk::api::crypto::ecdsa::SecretKey as _;
+use opensk::api::crypto::sha256::Sha256;
+use opensk::env::{AesKey, EcdsaSk, Sha};
 
 stack_size! {0x2000}
 set_main! {main}
@@ -47,56 +51,42 @@ fn main() {
     writeln!(console, "Clock frequency: {:?} Hz", timer.clock_frequency()).unwrap();
 
     // AES
-    bench(&mut console, &timer, "aes256::EncryptionKey::new", || {
-        aes256::EncryptionKey::new(&[0; 32]);
+    bench(&mut console, &timer, "Aes256::new", || {
+        black_box(AesKey::<TockEnv<Syscalls>>::new(&[0; 32]));
     });
-    let ek = aes256::EncryptionKey::new(&[0; 32]);
-    bench(&mut console, &timer, "aes256::DecryptionKey::new", || {
-        aes256::DecryptionKey::new(&ek);
-    });
-    let dk = aes256::DecryptionKey::new(&ek);
+    let aes_key = AesKey::<TockEnv<Syscalls>>::new(&[0; 32]);
 
-    bench(
-        &mut console,
-        &timer,
-        "aes256::EncryptionKey::encrypt_block",
-        || {
-            ek.encrypt_block(&mut [0; 16]);
-        },
-    );
-    bench(
-        &mut console,
-        &timer,
-        "aes256::DecryptionKey::decrypt_block",
-        || {
-            dk.decrypt_block(&mut [0; 16]);
-        },
-    );
+    bench(&mut console, &timer, "Aes256::encrypt_block", || {
+        aes_key.encrypt_block(&mut [0; 16]);
+    });
+    bench(&mut console, &timer, "Aes256::decrypt_block", || {
+        aes_key.decrypt_block(&mut [0; 16]);
+    });
 
     // CBC
     let mut blocks = Vec::new();
-    for i in 0..8 {
+    for i in 0..6 {
         blocks.resize(1 << (i + 4), 0);
         bench(
             &mut console,
             &timer,
-            &format!("cbc::cbc_encrypt({} bytes)", blocks.len()),
+            &format!("Aes256::encrypt_cbc({} bytes)", blocks.len()),
             || {
-                cbc::cbc_encrypt(&ek, [0; 16], &mut blocks);
+                aes_key.encrypt_cbc(&[0; 16], &mut blocks);
             },
         );
     }
     drop(blocks);
 
     let mut blocks = Vec::new();
-    for i in 0..8 {
+    for i in 0..6 {
         blocks.resize(1 << (i + 4), 0);
         bench(
             &mut console,
             &timer,
-            &format!("cbc::cbc_decrypt({} bytes)", blocks.len()),
+            &format!("Aes256::decrypt_cbc({} bytes)", blocks.len()),
             || {
-                cbc::cbc_decrypt(&dk, [0; 16], &mut blocks);
+                aes_key.decrypt_cbc(&[0; 16], &mut blocks);
             },
         );
     }
@@ -104,46 +94,30 @@ fn main() {
 
     // SHA-256
     let mut contents = Vec::new();
-    for i in 0..8 {
+    for i in 0..6 {
         contents.resize(16 << i, 0);
         bench(
             &mut console,
             &timer,
-            &format!("sha256::Sha256::update({} bytes)", contents.len()),
+            &format!("Sha256::digest({} bytes)", contents.len()),
             || {
-                let mut sha = sha256::Sha256::new();
-                sha.update(&contents);
-                let mut dummy_hash = [0; 32];
-                sha.finalize(&mut dummy_hash);
+                Sha::<TockEnv<Syscalls>>::digest(&contents);
             },
         );
     }
     drop(contents);
 
     // ECDSA
-    bench(&mut console, &timer, "ecdsa::SecKey::gensk", || {
-        ecdsa::SecKey::gensk(&mut rng);
+    bench(&mut console, &timer, "Ecdsa::SecretKey::random", || {
+        EcdsaSk::<TockEnv<Syscalls>>::random(&mut rng);
     });
-    let k = ecdsa::SecKey::gensk(&mut rng);
-    bench(&mut console, &timer, "ecdsa::SecKey::genpk", || {
-        k.genpk();
+    let sk = EcdsaSk::<TockEnv<Syscalls>>::random(&mut rng);
+    bench(&mut console, &timer, "Ecdsa::SecretKey::public_key", || {
+        black_box(sk.public_key());
     });
-    bench(
-        &mut console,
-        &timer,
-        "ecdsa::SecKey::sign_rng::<sha256::Sha256, _>",
-        || {
-            k.sign_rng::<sha256::Sha256, _>(&[], &mut rng);
-        },
-    );
-    bench(
-        &mut console,
-        &timer,
-        "ecdsa::SecKey::sign_rfc6979::<sha256::Sha256>",
-        || {
-            k.sign_rfc6979::<sha256::Sha256>(&[]);
-        },
-    );
+    bench(&mut console, &timer, "Ecdsa::SecretKey::sign", || {
+        sk.sign(&[]);
+    });
 
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "All the benchmarks are done.\nHave a nice day!").unwrap();

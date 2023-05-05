@@ -20,19 +20,24 @@ arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
-p256 = { version = "0.13.0", features = ["ecdh"], optional = true }
 rand_core = "0.6.4"
-rand = { version = "0.8.5", optional = true }
-sha2 = { version = "0.10.6", optional = true }
-hmac = { version = "0.12.1", optional = true }
-hkdf = { version = "0.12.3", optional = true }
-aes = { version = "0.8.2", optional = true }
-cbc = { version = "0.1.2", optional = true }
+rand = { version = "0.8.5", default-features = false, optional = true }
+sha2 = { version = "0.10.6", default-features = false, optional = true }
+hmac = { version = "0.12.1", default-features = false, optional = true }
+hkdf = { version = "0.12.3", default-features = false, optional = true }
+aes = { version = "0.8.2", default-features = false, optional = true }
+cbc = { version = "0.1.2", default-features = false, optional = true }
 zeroize = { version = "1.5.7", features = ["derive"] }
+
+[dependencies.p256]
+version = "0.13.0"
+default-features = false
+features = ["alloc", "ecdh", "ecdsa"]
+optional = true
 
 [features]
 debug_ctap = []
-std = ["crypto/std", "persistent_store/std", "rand"]
+std = ["crypto/std", "persistent_store/std", "rand/std_rng"]
 with_ctap1 = ["crypto/with_ctap1"]
 vendor_hid = []
 fuzz = ["arbitrary", "std"]

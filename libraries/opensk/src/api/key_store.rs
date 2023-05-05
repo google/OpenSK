@@ -29,19 +29,18 @@ use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
 
-pub const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
+const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
 // CBOR credential IDs consist of
 // - 1   byte : version number
 // - 16  bytes: initialization vector for AES-256,
 // - 192 bytes: encrypted block of the key handle cbor,
 // - 32  bytes: HMAC-SHA256 over everything else.
 pub const CBOR_CREDENTIAL_ID_SIZE: usize = 241;
-pub const MIN_CREDENTIAL_ID_SIZE: usize = LEGACY_CREDENTIAL_ID_SIZE;
+const MIN_CREDENTIAL_ID_SIZE: usize = LEGACY_CREDENTIAL_ID_SIZE;
 pub const MAX_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
 
-pub const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
-
-pub const MAX_PADDING_LENGTH: u8 = 0xBF;
+const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
+const MAX_PADDING_LENGTH: u8 = 0xBF;
 
 /// Stored data for credentials.
 #[derive(Clone, Debug)]

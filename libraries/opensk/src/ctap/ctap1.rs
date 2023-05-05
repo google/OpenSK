@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use super::apdu::{Apdu, ApduStatusCode};
-use super::credential_id::{decrypt_credential_id, encrypt_to_credential_id};
-use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_SIZE;
+use crate::api::key_store::{CredentialSource, KeyStore};
+use crate::api::private_key::PrivateKey;
 use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
@@ -259,7 +259,15 @@ impl Ctap1Command {
             .ecdsa_key(env)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = sk.public_key();
-        let key_handle = encrypt_to_credential_id(env, &private_key, &application, None, None)
+        let credential_source = CredentialSource {
+            private_key,
+            rp_id_hash: application,
+            cred_protect_policy: None,
+            cred_blob: None,
+        };
+        let key_handle = env
+            .key_store()
+            .wrap_credential(credential_source)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         if key_handle.len() > 0xFF {
             // This is just being defensive with unreachable code.
@@ -319,7 +327,9 @@ impl Ctap1Command {
         flags: Ctap1Flags,
         ctap_state: &mut CtapState<E>,
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let credential_source = decrypt_credential_id(env, key_handle, &application)
+        let credential_source = env
+            .key_store()
+            .unwrap_credential(&key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if let Some(credential_source) = credential_source {
             let ecdsa_key = credential_source
@@ -353,12 +363,12 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::credential_id::CBOR_CREDENTIAL_ID_SIZE;
     use super::super::data_formats::SignatureAlgorithm;
     use super::super::TOUCH_TIMEOUT_MS;
     use super::*;
     use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
+    use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::secret::Secret;
     use crate::ctap::storage;
     use crate::env::test::TestEnv;
@@ -399,6 +409,20 @@ mod test {
         message.push(CBOR_CREDENTIAL_ID_SIZE as u8);
         message.extend(key_handle);
         message
+    }
+
+    /// Creates an example wrapped credential and RP ID hash.
+    fn create_wrapped_credential(env: &mut TestEnv) -> (Vec<u8>, [u8; 32]) {
+        let private_key = PrivateKey::new(env, SignatureAlgorithm::Es256);
+        let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
+        let credential_source = CredentialSource {
+            private_key,
+            rp_id_hash,
+            cred_protect_policy: None,
+            cred_blob: None,
+        };
+        let key_handle = env.key_store().wrap_credential(credential_source).unwrap();
+        (key_handle, rp_id_hash)
     }
 
     #[test]
@@ -444,13 +468,11 @@ mod test {
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], Ctap1Command::LEGACY_BYTE);
         assert_eq!(response[66], CBOR_CREDENTIAL_ID_SIZE as u8);
-        assert!(decrypt_credential_id(
-            &mut env,
-            response[67..67 + CBOR_CREDENTIAL_ID_SIZE].to_vec(),
-            &application,
-        )
-        .unwrap()
-        .is_some());
+        let credential_source = env
+            .key_store()
+            .unwrap_credential(&response[67..67 + CBOR_CREDENTIAL_ID_SIZE], &application)
+            .unwrap();
+        assert!(credential_source.is_some());
         const CERT_START: usize = 67 + CBOR_CREDENTIAL_ID_SIZE;
         assert_eq!(
             &response[CERT_START..][..attestation.certificate.len()],
@@ -495,12 +517,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
@@ -512,13 +531,10 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
-        let application = [0x55; 32];
+        let (key_handle, mut application) = create_wrapped_credential(&mut env);
+        application[0] ^= 0x01;
         let message = create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
 
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
@@ -530,12 +546,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let mut message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,
@@ -564,12 +577,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[0] = 0xEE;
@@ -583,12 +593,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[1] = 0xEE;
@@ -602,12 +609,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let mut message =
             create_authenticate_message(&application, Ctap1Flags::CheckOnly, &key_handle);
         message[2] = 0xEE;
@@ -629,12 +633,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let message =
             create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
@@ -655,12 +656,9 @@ mod test {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
-        let sk = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
         let mut ctap_state = CtapState::new(&mut env);
 
-        let rp_id = "example.com";
-        let application = Sha::<TestEnv>::digest(rp_id.as_bytes());
-        let key_handle = encrypt_to_credential_id(&mut env, &sk, &application, None, None).unwrap();
+        let (key_handle, application) = create_wrapped_credential(&mut env);
         let message = create_authenticate_message(
             &application,
             Ctap1Flags::DontEnforceUpAndSign,

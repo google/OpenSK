@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::crypto_wrapper::PrivateKey;
 use super::status_code::Ctap2StatusCode;
 use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_SIZE};
+use crate::api::private_key::PrivateKey;
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]

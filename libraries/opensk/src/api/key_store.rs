@@ -16,7 +16,8 @@ use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::ecdsa::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::HASH_SIZE;
-use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt, PrivateKey};
+use crate::api::private_key::PrivateKey;
+use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
 use crate::ctap::{cbor_read, cbor_write};
@@ -37,7 +38,7 @@ const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
 // - 32  bytes: HMAC-SHA256 over everything else.
 pub const CBOR_CREDENTIAL_ID_SIZE: usize = 241;
 const MIN_CREDENTIAL_ID_SIZE: usize = LEGACY_CREDENTIAL_ID_SIZE;
-pub const MAX_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
+pub(crate) const MAX_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
 
 const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
 const MAX_PADDING_LENGTH: u8 = 0xBF;
@@ -80,6 +81,14 @@ pub trait KeyStore {
     /// The output is encrypted and authenticated. Since the wrapped credentials are passed to the
     /// relying party, the choice for credential wrapping impacts privacy. Looking at their size and
     /// structure, a relying party can guess the authenticator model that produced it.
+    ///
+    /// A credential ID that imitates the default needs the following structure:
+    /// - The length is `CBOR_CREDENTIAL_ID_SIZE`.
+    /// - The first byte is the version. The latest version is `CBOR_CREDENTIAL_ID_VERSION`.
+    /// - All other bytes appear to be drawn from a uniform random distribution.
+    ///
+    /// Without attestation, a relying party can't distinguish such credentials from other OpenSK
+    /// implementations.
     fn wrap_credential(&mut self, credential: CredentialSource) -> Result<Vec<u8>, Error>;
 
     /// Decodes the credential.

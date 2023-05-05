@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use super::apdu::{Apdu, ApduStatusCode};
-use super::crypto_wrapper::PrivateKey;
 use super::CtapState;
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_SIZE;
 use crate::api::key_store::{CredentialSource, KeyStore};
+use crate::api::private_key::PrivateKey;
 use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};

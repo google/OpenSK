@@ -41,7 +41,6 @@ use self::command::{
 };
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
-use self::crypto_wrapper::PrivateKey;
 use self::data_formats::{
     AuthenticatorTransport, CredentialProtectionPolicy, EnterpriseAttestationMode,
     GetAssertionExtensions, PackedAttestationStatement, PinUvAuthProtocol,
@@ -67,6 +66,7 @@ use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::customization::Customization;
 use crate::api::key_store::{CredentialSource, KeyStore, MAX_CREDENTIAL_ID_SIZE};
+use crate::api::private_key::PrivateKey;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
 use crate::env::{EcdsaSk, Env, Hkdf, Sha};

@@ -109,7 +109,7 @@ impl PrivateKey {
     }
 
     /// Returns the encoded signature for a given message.
-    pub fn sign_and_encode(
+    pub(crate) fn sign_and_encode(
         &self,
         env: &mut impl Env,
         message: &[u8],

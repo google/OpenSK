@@ -40,7 +40,7 @@ pub const CBOR_CREDENTIAL_ID_SIZE: usize = 241;
 const MIN_CREDENTIAL_ID_SIZE: usize = LEGACY_CREDENTIAL_ID_SIZE;
 pub(crate) const MAX_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
 
-const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
+pub const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
 const MAX_PADDING_LENGTH: u8 = 0xBF;
 
 /// Stored data for credentials.
@@ -83,8 +83,8 @@ pub trait KeyStore {
     /// structure, a relying party can guess the authenticator model that produced it.
     ///
     /// A credential ID that imitates the default needs the following structure:
-    /// - The length is `CBOR_CREDENTIAL_ID_SIZE`.
-    /// - The first byte is the version. The latest version is `CBOR_CREDENTIAL_ID_VERSION`.
+    /// - The length is [`CBOR_CREDENTIAL_ID_SIZE`].
+    /// - The first byte is the version. The latest version is [`CBOR_CREDENTIAL_ID_VERSION`].
     /// - All other bytes appear to be drawn from a uniform random distribution.
     ///
     /// Without attestation, a relying party can't distinguish such credentials from other OpenSK

@@ -45,4 +45,4 @@ pip3 install --upgrade -r requirements.txt
 # Install dependency to create applications.
 mkdir -p elf2tab
 rustup install stable
-cargo +stable install elf2tab --version 0.7.0 --root elf2tab/
+cargo +stable install elf2tab --version 0.10.2 --root elf2tab/

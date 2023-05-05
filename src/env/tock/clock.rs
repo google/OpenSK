@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::marker::PhantomData;
 use libtock_drivers::timer::{get_clock_frequency, get_ticks};
+use libtock_platform::Syscalls;
 use opensk::api::clock::Clock;
 
 /// 56-bits timestamp (valid for 70k+ years)
 #[derive(Clone, Copy, Debug, Default, PartialOrd, Ord, PartialEq, Eq)]
 struct Timestamp {
-    epoch: usize, // 32-bits
-    tick: usize,  // 24-bits (32kHz)
+    epoch: u32,
+    tick: u32, // 24-bits (32kHz)
 }
 
 impl Timestamp {
     /// Adds (potentially more than 24 bit of) ticks to this timestamp.
-    pub fn add_ticks(&mut self, ticks: usize) {
+    pub fn add_ticks(&mut self, ticks: u32) {
         // Saturating should never happen, but it fails gracefully.
         let sum = self.tick.saturating_add(ticks);
         self.epoch += sum >> 24;
@@ -42,17 +44,26 @@ pub struct TockTimer {
 /// To guarantee correctness, you have to call any of its functions at least once per full tick
 /// counter wrap. In our case, 24 bit ticks with a 32 kHz frequency wrap after 512 seconds. If you
 /// can't guarantee to regularly create or check timers, call tickle at least every 8 minutes.
-#[derive(Default)]
-pub struct TockClock {
+pub struct TockClock<S: Syscalls> {
     now: Timestamp,
+    s: PhantomData<S>,
 }
 
-impl TockClock {
+impl<S: Syscalls> Default for TockClock<S> {
+    fn default() -> Self {
+        TockClock {
+            now: Timestamp::default(),
+            s: PhantomData,
+        }
+    }
+}
+
+impl<S: Syscalls> TockClock<S> {
     /// Elapses timers before the clock wraps.
     ///
     /// Call this regularly to timeout reliably despite wrapping clock ticks.
     pub fn tickle(&mut self) {
-        let cur_tick = get_ticks().ok().unwrap();
+        let cur_tick = get_ticks::<S>().ok().unwrap();
         if cur_tick < self.now.tick {
             self.now.epoch += 1;
         }
@@ -60,12 +71,13 @@ impl TockClock {
     }
 }
 
-impl Clock for TockClock {
+impl<S: Syscalls> Clock for TockClock<S> {
     type Timer = TockTimer;
 
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
+        let milliseconds = milliseconds as u32;
         self.tickle();
-        let clock_frequency = get_clock_frequency().ok().unwrap();
+        let clock_frequency = get_clock_frequency::<S>().ok().unwrap();
         let delta_tick = match milliseconds.checked_mul(clock_frequency) {
             Some(x) => x / 1000,
             // All CTAP timeouts are multiples of 100 so far. Worst case we timeout too early.
@@ -83,7 +95,7 @@ impl Clock for TockClock {
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
-        let clock_frequency = get_clock_frequency().ok().unwrap();
+        let clock_frequency = get_clock_frequency::<S>().ok().unwrap();
         let total_ticks = 0x100_0000u64 * self.now.epoch as u64 + self.now.tick as u64;
         (total_ticks.wrapping_mul(1_000_000u64) / clock_frequency as u64) as usize
     }

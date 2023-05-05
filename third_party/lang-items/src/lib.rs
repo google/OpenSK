@@ -10,7 +10,7 @@ mod util;
 
 #[cfg(feature = "std")]
 #[no_mangle]
-unsafe fn libtock_alloc_init(_app_heap_start: usize, _app_heap_size: usize) {
+unsafe fn libtock_alloc_init(_app_heap_bottom: *mut u8, _app_heap_size: usize) {
     // Stub so that the symbol is present.
     unimplemented!()
 }

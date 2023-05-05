@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![no_main]
 #![no_std]
 
 extern crate lang_items;
 
-libtock_core::stack_size! {0x800}
+use libtock_runtime::{set_main, stack_size};
+
+stack_size! {0x800}
+set_main! {main}
 
 fn main() {
     panic!("Bye world!")

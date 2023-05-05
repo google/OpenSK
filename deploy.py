@@ -158,7 +158,7 @@ SUPPORTED_BOARDS = {
 
 # The following value must match the one used in the file
 # `src/entry_point.rs`
-APP_HEAP_SIZE = 90000
+APP_HEAP_SIZE = 90_000
 
 CARGO_TARGET_DIR = os.environ.get("CARGO_TARGET_DIR", "target")
 
@@ -502,14 +502,16 @@ class OpenSKInstaller:
     elf2tab_ver = self.checked_command_output(
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.7.0":
-      error(("Detected unsupported elf2tab version {elf2tab_ver!a}. The "
-             "following commands may fail. Please use 0.7.0 instead."))
+    if elf2tab_ver != "elf2tab 0.10.2":
+      error(("Detected unsupported elf2tab version {elf2tab_ver!a}! The "
+             "following commands may fail. Please use 0.10.2 instead."))
     os.makedirs(self.tab_folder, exist_ok=True)
     tab_filename = os.path.join(self.tab_folder, f"{self.args.application}.tab")
+    supported_kernel = (2, 1)
     elf2tab_args = [
         "elf2tab/bin/elf2tab", "--deterministic", "--package-name",
-        self.args.application, "-o", tab_filename
+        self.args.application, f"--kernel-major={supported_kernel[0]}",
+        f"--kernel-minor={supported_kernel[1]}", "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
@@ -527,10 +529,11 @@ class OpenSKInstaller:
           stack_sizes.add(required_stack_size)
     if len(stack_sizes) != 1:
       error("Detected different stack sizes across tab files.")
-
+    # `protected-region-size` must match the `TBF_HEADER_SIZE`
+    # (currently 0x60 = 96 bytes)
     elf2tab_args.extend([
         f"--stack={stack_sizes.pop()}", f"--app-heap={APP_HEAP_SIZE}",
-        "--kernel-heap=1024", "--protected-region-size=64"
+        "--kernel-heap=1024", "--protected-region-size=96"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
@@ -712,10 +715,11 @@ class OpenSKInstaller:
         fatal(("It seems that the TAB file was not produced for the "
                "architecture {board_props.arch}"))
       app_hex = intelhex.IntelHex()
-      app_hex.frombytes(
-          app_tab.extract_app(board_props.arch).get_binary(
-              board_props.app_address),
-          offset=board_props.app_address)
+      tab_bytes = app_tab.extract_app(board_props.arch).get_binary(
+          board_props.app_address)
+      if tab_bytes is None:
+        fatal("The extracted bytes from the TAB file are none")
+      app_hex.frombytes(tab_bytes, offset=board_props.app_address)
       final_hex.merge(app_hex)
     info(f"Generating all-merged HEX file: {dest_file}")
     final_hex.tofile(dest_file, format="hex")
@@ -990,7 +994,8 @@ if __name__ == "__main__":
       dest="lock_device",
       help=("Try to disable JTAG at the end of the operations. This "
             "operation may fail if the device is already locked or if "
-            "the certificate/private key are not programmed."),
+            "the certificate/private key are not programmed."
+            "Currently not implemented on nrf52840 and always fails."),
   )
   main_parser.add_argument(
       "--inject-certificate",

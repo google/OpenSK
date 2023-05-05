@@ -220,7 +220,7 @@ fn send_keepalive_up_needed<E: Env>(
         match ctap_hid_connection.send_and_maybe_recv(&mut pkt, timeout_ms) {
             Ok(SendOrRecvStatus::Timeout) => {
                 debug_ctap!(env, "Sending a KEEPALIVE packet timed out");
-                // TODO: abort user presence test?
+                // The client is likely unresponsive, but let's retry.
             }
             Err(_) => panic!("Error sending KEEPALIVE packet"),
             Ok(SendOrRecvStatus::Sent) => {

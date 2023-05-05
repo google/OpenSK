@@ -36,6 +36,8 @@ features = ["alloc", "ecdh", "ecdsa"]
 optional = true
 
 [features]
+default = ["config_command", "with_ctap1"]
+config_command = []
 debug_ctap = []
 std = ["crypto/std", "persistent_store/std", "rand/std_rng"]
 with_ctap1 = ["crypto/with_ctap1"]

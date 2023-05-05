@@ -22,7 +22,7 @@ libtock_drivers = { path = "third_party/libtock-drivers" }
 libtock_console = { path = "third_party/libtock-rs/apis/console" }
 libtock_leds = { path = "third_party/libtock-rs/apis/leds" }
 lang_items = { path = "third_party/lang-items" }
-opensk = { path = "libraries/opensk" }
+opensk = { path = "libraries/opensk", default-features = false }
 sk-cbor = { path = "libraries/cbor" }
 crypto = { path = "libraries/crypto" }
 persistent_store = { path = "libraries/persistent_store" }
@@ -33,6 +33,7 @@ rand_core = "0.6.4"
 ed25519-compact = { version = "1", default-features = false, optional = true }
 
 [features]
+config_command = ["opensk/config_command"]
 debug_allocations = ["lang_items/debug_allocations"]
 debug_ctap = ["libtock_drivers/debug_ctap", "opensk/debug_ctap"]
 panic_console = ["lang_items/panic_console"]

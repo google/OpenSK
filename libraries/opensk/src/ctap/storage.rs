@@ -14,7 +14,7 @@
 
 mod key;
 
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
@@ -32,7 +32,7 @@ use arrayref::array_ref;
 use core::cmp;
 use core::convert::TryInto;
 use persistent_store::{fragment, StoreUpdate};
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 use sk_cbor::cbor_array_vec;
 
 /// Wrapper for PIN properties.
@@ -42,7 +42,7 @@ struct PinProperties {
 
     /// Length of the current PIN in code points.
     // This field is unused when compiled without config_command.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "config_command"), allow(dead_code))]
     code_point_length: u8,
 }
 
@@ -272,7 +272,7 @@ pub fn pin_hash(env: &mut impl Env) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Cta
 }
 
 /// Returns the length of the currently set PIN if defined.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn pin_code_point_length(env: &mut impl Env) -> Result<Option<u8>, Ctap2StatusCode> {
     Ok(pin_properties(env)?.map(|p| p.code_point_length))
 }
@@ -333,7 +333,7 @@ pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
 }
 
 /// Sets the minimum PIN length.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
     Ok(env.store().insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
 }
@@ -350,7 +350,7 @@ pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2Sta
 }
 
 /// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn set_min_pin_length_rp_ids(
     env: &mut impl Env,
     min_pin_length_rp_ids: Vec<String>,
@@ -435,7 +435,7 @@ pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode>
 }
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn force_pin_change(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     Ok(env.store().insert(key::FORCE_PIN_CHANGE, &[])?)
 }
@@ -450,7 +450,7 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 }
 
 /// Marks enterprise attestation as enabled.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     if env
         .attestation_store()
@@ -478,7 +478,7 @@ pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
 }
 
 /// Enables alwaysUv, when disabled, and vice versa.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     if env.customization().enforce_always_uv() {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
@@ -598,7 +598,7 @@ fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
 }
 
 /// Serializes a list of RP IDs to storage representation.
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
     super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;

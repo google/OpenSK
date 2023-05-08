@@ -21,7 +21,7 @@ use super::data_formats::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
     PublicKeyCredentialUserEntity,
 };
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::status_code::Ctap2StatusCode;
 use alloc::string::String;
@@ -48,7 +48,7 @@ pub enum Command {
     AuthenticatorCredentialManagement(AuthenticatorCredentialManagementParameters),
     AuthenticatorSelection,
     AuthenticatorLargeBlobs(AuthenticatorLargeBlobsParameters),
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     AuthenticatorConfig(AuthenticatorConfigParameters),
 }
 
@@ -64,7 +64,7 @@ impl Command {
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0x0A;
     const AUTHENTICATOR_SELECTION: u8 = 0x0B;
     const AUTHENTICATOR_LARGE_BLOBS: u8 = 0x0C;
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     const AUTHENTICATOR_CONFIG: u8 = 0x0D;
     const _AUTHENTICATOR_VENDOR_FIRST: u8 = 0x40;
     // This commands is the same as AUTHENTICATOR_CREDENTIAL_MANAGEMENT but is duplicated as a
@@ -128,7 +128,7 @@ impl Command {
                     AuthenticatorLargeBlobsParameters::try_from(decoded_cbor)?,
                 ))
             }
-            #[cfg(any(feature = "config_command", feature = "std"))]
+            #[cfg(feature = "config_command")]
             Command::AUTHENTICATOR_CONFIG => {
                 let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorConfig(
@@ -434,7 +434,7 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
     }
 }
 
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorConfigParameters {
     pub sub_command: ConfigSubCommand,
@@ -443,7 +443,7 @@ pub struct AuthenticatorConfigParameters {
     pub pin_uv_auth_param: Option<Vec<u8>>,
 }
 
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
     type Error = Ctap2StatusCode;
 
@@ -691,7 +691,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     fn test_from_cbor_config_parameters() {
         let cbor_value = cbor_map! {
             0x01 => ConfigSubCommand::SetMinPinLength as u64,

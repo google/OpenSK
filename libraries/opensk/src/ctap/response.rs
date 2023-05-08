@@ -36,7 +36,7 @@ pub enum ResponseData {
     AuthenticatorCredentialManagement(Option<AuthenticatorCredentialManagementResponse>),
     AuthenticatorSelection,
     AuthenticatorLargeBlobs(Option<AuthenticatorLargeBlobsResponse>),
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     AuthenticatorConfig,
 }
 
@@ -52,7 +52,7 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorCredentialManagement(data) => data.map(|d| d.into()),
             ResponseData::AuthenticatorSelection => None,
             ResponseData::AuthenticatorLargeBlobs(data) => data.map(|d| d.into()),
-            #[cfg(any(feature = "config_command", feature = "std"))]
+            #[cfg(feature = "config_command")]
             ResponseData::AuthenticatorConfig => None,
         }
     }
@@ -588,7 +588,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     fn test_config_into_cbor() {
         let response_cbor: Option<cbor::Value> = ResponseData::AuthenticatorConfig.into();
         assert_eq!(response_cbor, None);

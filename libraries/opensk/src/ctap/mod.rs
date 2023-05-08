@@ -15,7 +15,7 @@
 pub mod apdu;
 mod client_pin;
 pub mod command;
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 mod config_command;
 mod credential_management;
 pub mod crypto_wrapper;
@@ -40,7 +40,7 @@ use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
     AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
 };
-#[cfg(any(feature = "config_command", feature = "std"))]
+#[cfg(feature = "config_command")]
 use self::config_command::process_config;
 use self::credential_management::process_credential_management;
 use self::data_formats::{
@@ -657,7 +657,7 @@ impl<E: Env> CtapState<E> {
                 self.large_blobs
                     .process_command(env, &mut self.client_pin, params)
             }
-            #[cfg(any(feature = "config_command", feature = "std"))]
+            #[cfg(feature = "config_command")]
             Command::AuthenticatorConfig(params) => {
                 process_config(env, &mut self.client_pin, params)
             }

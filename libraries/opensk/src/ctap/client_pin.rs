@@ -119,7 +119,7 @@ pub enum PinPermission {
     CredentialManagement = 0x04,
     _BioEnrollment = 0x08,
     LargeBlobWrite = 0x10,
-    #[cfg(any(feature = "config_command", feature = "std"))]
+    #[cfg(feature = "config_command")]
     AuthenticatorConfiguration = 0x20,
 }
 

@@ -41,7 +41,6 @@ struct PinProperties {
     hash: [u8; PIN_AUTH_LENGTH],
 
     /// Length of the current PIN in code points.
-    // This field is unused when compiled without config_command.
     #[cfg_attr(not(feature = "config_command"), allow(dead_code))]
     code_point_length: u8,
 }

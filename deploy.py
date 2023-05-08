@@ -1092,6 +1092,13 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
+      "--no-config-command",
+      action=RemoveConstAction,
+      const="config_command",
+      dest="features",
+      help=("Removes the AuthenticatorConfig command."),
+  )
+  main_parser.add_argument(
       "--rust-crypto",
       action="append_const",
       const="rust_crypto",
@@ -1174,7 +1181,7 @@ if __name__ == "__main__":
       help=("Firmware version that is built."),
   )
 
-  main_parser.set_defaults(features=["with_ctap1"])
+  main_parser.set_defaults(features=["with_ctap1", "config_command"])
 
   # Start parsing to know if we're going to list things or not.
   partial_args, _ = main_parser.parse_known_args()

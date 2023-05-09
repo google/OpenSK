@@ -186,28 +186,53 @@ pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), 
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
-fn decrypt_credential_id<E: Env>(
-    env: &mut E,
+/// Filters the credential from the option if credProtect criteria are not met.
+pub fn filter_listed_credential(
+    credential: Option<CredentialSource>,
+    has_uv: bool,
+) -> Option<CredentialSource> {
+    credential.filter(|c| {
+        has_uv
+            || !matches!(
+                c.cred_protect_policy,
+                Some(CredentialProtectionPolicy::UserVerificationRequired)
+            )
+    })
+}
+
+/// Filters the resident key from the option if credProtect criteria are not met.
+fn filter_listed_resident_credential(
+    credential: Option<PublicKeyCredentialSource>,
+    has_uv: bool,
+) -> Option<PublicKeyCredentialSource> {
+    credential.filter(|c| {
+        has_uv
+            || !matches!(
+                c.cred_protect_policy,
+                Some(CredentialProtectionPolicy::UserVerificationRequired)
+            )
+    })
+}
+
+/// Populates all matching fields in a `PublicKeyCredentialSource`.
+fn to_public_source(
     credential_id: Vec<u8>,
-    rp_id_hash: &[u8],
-) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
-    let credential_source = env
-        .key_store()
-        .unwrap_credential(&credential_id, rp_id_hash)?;
-    Ok(credential_source.map(|c| PublicKeyCredentialSource {
+    credential_source: CredentialSource,
+) -> PublicKeyCredentialSource {
+    PublicKeyCredentialSource {
         key_type: PublicKeyCredentialType::PublicKey,
         credential_id,
-        private_key: c.private_key,
+        private_key: credential_source.private_key,
         rp_id: String::new(),
         user_handle: Vec::new(),
         user_display_name: None,
-        cred_protect_policy: c.cred_protect_policy,
+        cred_protect_policy: credential_source.cred_protect_policy,
         creation_order: 0,
         user_name: None,
         user_icon: None,
-        cred_blob: c.cred_blob,
+        cred_blob: credential_source.cred_blob,
         large_blob_key: None,
-    }))
+    }
 }
 
 // This function is adapted from https://doc.rust-lang.org/nightly/src/core/str/mod.rs.html#2110
@@ -698,22 +723,6 @@ impl<E: Env> CtapState<E> {
         Ok(())
     }
 
-    fn check_cred_protect_for_listed_credential(
-        &mut self,
-        credential: &Option<PublicKeyCredentialSource>,
-        has_uv: bool,
-    ) -> bool {
-        if let Some(credential) = credential {
-            has_uv
-                || !matches!(
-                    credential.cred_protect_policy,
-                    Some(CredentialProtectionPolicy::UserVerificationRequired),
-                )
-        } else {
-            false
-        }
-    }
-
     fn process_make_credential(
         &mut self,
         env: &mut E,
@@ -806,13 +815,18 @@ impl<E: Env> CtapState<E> {
         let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
-                if self.check_cred_protect_for_listed_credential(
-                    &storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
+                if filter_listed_resident_credential(
+                    storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
                     has_uv,
-                ) || self.check_cred_protect_for_listed_credential(
-                    &decrypt_credential_id(env, cred_desc.key_id, &rp_id_hash)?,
-                    has_uv,
-                ) {
+                )
+                .is_some()
+                    || filter_listed_credential(
+                        env.key_store()
+                            .unwrap_credential(&cred_desc.key_id, &rp_id_hash)?,
+                        has_uv,
+                    )
+                    .is_some()
+                {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
                     let _ = check_user_presence(env, channel);
@@ -1087,13 +1101,20 @@ impl<E: Env> CtapState<E> {
         has_uv: bool,
     ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
         for allowed_credential in allow_list {
-            let credential = storage::find_credential(env, rp_id, &allowed_credential.key_id)?;
-            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
+            let credential = filter_listed_resident_credential(
+                storage::find_credential(env, rp_id, &allowed_credential.key_id)?,
+                has_uv,
+            );
+            if credential.is_some() {
                 return Ok(credential);
             }
-            let credential = decrypt_credential_id(env, allowed_credential.key_id, rp_id_hash)?;
-            if self.check_cred_protect_for_listed_credential(&credential, has_uv) {
-                return Ok(credential);
+            let credential = filter_listed_credential(
+                env.key_store()
+                    .unwrap_credential(&allowed_credential.key_id, &rp_id_hash)?,
+                has_uv,
+            );
+            if credential.is_some() {
+                return Ok(credential.map(|c| to_public_source(allowed_credential.key_id, c)));
             }
         }
         Ok(None)

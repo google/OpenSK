@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::apdu::{Apdu, ApduStatusCode};
-use super::CtapState;
+use super::{filter_listed_credential, CtapState};
 use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_SIZE;
@@ -331,39 +331,37 @@ impl Ctap1Command {
             .key_store()
             .unwrap_credential(&key_handle, &application)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
-        if let Some(credential_source) = credential_source {
-            let ecdsa_key = credential_source
-                .private_key
-                .ecdsa_key(env)
-                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
-            if flags == Ctap1Flags::CheckOnly {
-                return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
-            }
-            ctap_state
-                .increment_global_signature_counter(env)
-                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
-            let mut signature_data = ctap_state
-                .generate_auth_data(
-                    env,
-                    &application,
-                    Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
-                )
-                .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
-            signature_data.extend(&challenge);
-            let signature = ecdsa_key.sign(&signature_data);
-
-            let mut response = signature_data[application.len()..application.len() + 5].to_vec();
-            response.extend(signature.to_der());
-            Ok(response)
-        } else {
-            Err(Ctap1StatusCode::SW_WRONG_DATA)
+        let credential_source = filter_listed_credential(credential_source, false)
+            .ok_or(Ctap1StatusCode::SW_WRONG_DATA)?;
+        let ecdsa_key = credential_source
+            .private_key
+            .ecdsa_key(env)
+            .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
+        if flags == Ctap1Flags::CheckOnly {
+            return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
         }
+        ctap_state
+            .increment_global_signature_counter(env)
+            .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
+        let mut signature_data = ctap_state
+            .generate_auth_data(
+                env,
+                &application,
+                Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
+            )
+            .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
+        signature_data.extend(&challenge);
+        let signature = ecdsa_key.sign(&signature_data);
+
+        let mut response = signature_data[application.len()..application.len() + 5].to_vec();
+        response.extend(signature.to_der());
+        Ok(response)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::SignatureAlgorithm;
+    use super::super::data_formats::{CredentialProtectionPolicy, SignatureAlgorithm};
     use super::super::TOUCH_TIMEOUT_MS;
     use super::*;
     use crate::api::crypto::sha256::Sha256;
@@ -711,5 +709,28 @@ mod test {
         env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED));
+    }
+
+    #[test]
+    fn test_process_authenticate_cred_protect() {
+        let mut env = TestEnv::default();
+        env.user_presence()
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let mut ctap_state = CtapState::new(&mut env);
+
+        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
+        let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
+        let credential_source = CredentialSource {
+            private_key,
+            rp_id_hash,
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationRequired),
+            cred_blob: None,
+        };
+        let key_handle = env.key_store().wrap_credential(credential_source).unwrap();
+        let message =
+            create_authenticate_message(&rp_id_hash, Ctap1Flags::DontEnforceUpAndSign, &key_handle);
+
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
+        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
     }
 }

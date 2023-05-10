@@ -95,6 +95,7 @@ make_partition! {
     ALWAYS_UV = 2038;
 
     /// If this entry exists and is empty, enterprise attestation is enabled.
+    #[cfg(feature = "config_command")]
     ENTERPRISE_ATTESTATION = 2039;
 
     /// If this entry exists and is empty, the PIN needs to be changed.

@@ -440,6 +440,17 @@ pub fn force_pin_change(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 }
 
 /// Returns whether enterprise attestation is enabled.
+///
+/// Without the AuthenticatorConfig command, customization determines the result.
+#[cfg(not(feature = "config_command"))]
+pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+    Ok(env.customization().enterprise_attestation_mode().is_some())
+}
+
+/// Returns whether enterprise attestation is enabled.
+///
+/// Use the AuthenticatorConfig command to turn it on.
+#[cfg(feature = "config_command")]
 pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
     match env.store().find(key::ENTERPRISE_ATTESTATION)? {
         None => Ok(false),

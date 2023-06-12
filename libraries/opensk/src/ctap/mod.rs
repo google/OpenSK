@@ -1110,7 +1110,7 @@ impl<E: Env> CtapState<E> {
             }
             let credential = filter_listed_credential(
                 env.key_store()
-                    .unwrap_credential(&allowed_credential.key_id, &rp_id_hash)?,
+                    .unwrap_credential(&allowed_credential.key_id, rp_id_hash)?,
                 has_uv,
             );
             if credential.is_some() {

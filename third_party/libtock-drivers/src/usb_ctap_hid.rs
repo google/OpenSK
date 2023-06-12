@@ -494,8 +494,8 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                 "Cancelling USB transaction due to timeout"
             )
             .unwrap();
-            let result = S::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0)
-                .to_result::<(), ErrorCode>();
+            let result =
+                S::command(DRIVER_NUMBER, command_nr::CANCEL, 0, 0).to_result::<(), ErrorCode>();
             match result {
                 // - SUCCESS means that we successfully cancelled the transaction.
                 // - EALREADY means that the transaction was already completed.

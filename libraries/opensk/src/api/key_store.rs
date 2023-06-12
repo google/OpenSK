@@ -205,10 +205,7 @@ impl<T: Helper> KeyStore for T {
         }
 
         let credential_source = if bytes.len() == LEGACY_CREDENTIAL_ID_SIZE {
-            decrypt_legacy_credential_id::<T>(
-                &*master_keys.encryption,
-                &bytes[..hmac_message_size],
-            )?
+            decrypt_legacy_credential_id::<T>(&master_keys.encryption, &bytes[..hmac_message_size])?
         } else {
             match bytes[0] {
                 CBOR_CREDENTIAL_ID_VERSION => {
@@ -216,7 +213,7 @@ impl<T: Helper> KeyStore for T {
                         return Ok(None);
                     }
                     decrypt_cbor_credential_id::<T>(
-                        &*master_keys.encryption,
+                        &master_keys.encryption,
                         &bytes[1..hmac_message_size],
                     )?
                 }
@@ -595,7 +592,7 @@ mod test {
         application: &[u8; 32],
     ) -> Result<Vec<u8>, Error> {
         let master_keys = get_master_keys(env).unwrap();
-        let aes_key = AesKey::<TestEnv>::new(&*master_keys.encryption);
+        let aes_key = AesKey::<TestEnv>::new(&master_keys.encryption);
         let hmac_key = master_keys.authentication;
         let mut plaintext = [0; 64];
         private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
@@ -604,7 +601,7 @@ mod test {
         let mut encrypted_id =
             aes256_cbc_encrypt(env, &aes_key, &plaintext, true).map_err(|_| Error)?;
         let mut id_hmac = [0; HASH_SIZE];
-        Hmac::<TestEnv>::mac(&*hmac_key, &encrypted_id[..], &mut id_hmac);
+        Hmac::<TestEnv>::mac(&hmac_key, &encrypted_id[..], &mut id_hmac);
         encrypted_id.extend(&id_hmac);
         Ok(encrypted_id)
     }
@@ -641,10 +638,7 @@ mod test {
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             cred_blob: Some(vec![0xAA; 32]),
         };
-        let credential_id = env
-            .key_store()
-            .wrap_credential(credential_source.clone())
-            .unwrap();
+        let credential_id = env.key_store().wrap_credential(credential_source).unwrap();
         assert_eq!(credential_id.len(), CBOR_CREDENTIAL_ID_SIZE);
     }
 
@@ -660,7 +654,7 @@ mod test {
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             cred_blob: Some(vec![0xAA; env.customization().max_cred_blob_length()]),
         };
-        let credential_id = env.key_store().wrap_credential(credential_source.clone());
+        let credential_id = env.key_store().wrap_credential(credential_source);
         assert!(credential_id.is_ok());
     }
 }

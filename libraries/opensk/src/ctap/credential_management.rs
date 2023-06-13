@@ -138,16 +138,14 @@ fn process_enumerate_rps_begin<E: Env>(
     stateful_command_permission: &mut StatefulPermission<E>,
     channel: Channel,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
-    let rp_set = get_stored_rp_ids(env)?;
+    let mut rp_set = get_stored_rp_ids(env)?;
     let total_rps = rp_set.len();
 
     if total_rps > 1 {
         stateful_command_permission.set_command(env, StatefulCommand::EnumerateRps(1), channel);
     }
-    // TODO https://github.com/rust-lang/rust/issues/62924 replace with pop_first()
     let rp_id = rp_set
-        .into_iter()
-        .next()
+        .pop_first()
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
     enumerate_rps_response::<E>(rp_id, Some(total_rps as u64))
 }

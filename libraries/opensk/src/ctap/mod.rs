@@ -97,7 +97,6 @@ const MAX_CBOR_NESTING_DEPTH: i8 = 4;
 
 pub const KEEPALIVE_DELAY_MS: usize = 100;
 pub const TOUCH_TIMEOUT_MS: usize = 30000;
-// TODO(kaczmarczyck) 2.1 allows Reset after Reset and 15 seconds?
 const RESET_TIMEOUT_DURATION_MS: usize = 10000;
 const STATEFUL_COMMAND_TIMEOUT_DURATION_MS: usize = 30000;
 

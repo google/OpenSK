@@ -19,6 +19,7 @@ features = ["no_auto_layout", "no_debug_memop"]
 libtock_buttons = { path = "third_party/libtock-rs/apis/buttons" }
 libtock_platform = { path = "third_party/libtock-rs/platform" }
 libtock_drivers = { path = "third_party/libtock-drivers" }
+libtock_alarm = { path = "third_party/libtock-rs/apis/alarm" }
 libtock_console = { path = "third_party/libtock-rs/apis/console" }
 libtock_leds = { path = "third_party/libtock-rs/apis/leds" }
 lang_items = { path = "third_party/lang-items" }

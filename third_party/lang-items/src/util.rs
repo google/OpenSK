@@ -1,4 +1,4 @@
-use libtock_drivers::timer;
+use libtock_alarm::{Alarm, Milliseconds};
 use libtock_leds::Leds;
 use libtock_low_level_debug::{AlertCode, LowLevelDebug};
 use libtock_platform as platform;
@@ -28,13 +28,13 @@ impl<S: Syscalls, C: platform::subscribe::Config> Util<S, C> {
                     let _ = Leds::<S>::on(led);
                 }
             }
-            let _ = timer::Alarm::<S, C>::sleep_for(timer::Milliseconds(100));
+            let _ = Alarm::<S, C>::sleep_for(Milliseconds(100));
             if let Ok(led_count) = Leds::<S>::count() {
                 for led in 0..led_count {
                     let _ = Leds::<S>::off(led);
                 }
             }
-            let _ = timer::Alarm::<S, C>::sleep_for(timer::Milliseconds(100));
+            let _ = Alarm::<S, C>::sleep_for(Milliseconds(100));
         }
     }
 
@@ -47,7 +47,7 @@ impl<S: Syscalls, C: platform::subscribe::Config> Util<S, C> {
             if let Ok(leds) = Leds::<S>::count() {
                 for led in 0..leds {
                     let _ = Leds::<S>::on(led);
-                    let _ = timer::Alarm::<S, C>::sleep_for(timer::Milliseconds(100));
+                    let _ = Alarm::<S, C>::sleep_for(Milliseconds(100));
                     let _ = Leds::<S>::off(led);
                 }
             }

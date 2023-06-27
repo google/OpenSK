@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use core::marker::PhantomData;
-use libtock_drivers::timer::{get_clock_frequency, get_ticks};
+use libtock_alarm::Alarm;
+use libtock_drivers::result::FlexUnwrap;
+use libtock_drivers::timer::Timer;
 use libtock_platform::Syscalls;
 use opensk::api::clock::Clock;
 
@@ -63,7 +65,7 @@ impl<S: Syscalls> TockClock<S> {
     ///
     /// Call this regularly to timeout reliably despite wrapping clock ticks.
     pub fn tickle(&mut self) {
-        let cur_tick = get_ticks::<S>().ok().unwrap();
+        let cur_tick = Timer::<S>::get_ticks().flex_unwrap();
         if cur_tick < self.now.tick {
             self.now.epoch += 1;
         }
@@ -77,7 +79,7 @@ impl<S: Syscalls> Clock for TockClock<S> {
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
         let milliseconds = milliseconds as u32;
         self.tickle();
-        let clock_frequency = get_clock_frequency::<S>().ok().unwrap();
+        let clock_frequency = Alarm::<S>::get_frequency().ok().unwrap().0;
         let delta_tick = match milliseconds.checked_mul(clock_frequency) {
             Some(x) => x / 1000,
             // All CTAP timeouts are multiples of 100 so far. Worst case we timeout too early.
@@ -95,7 +97,7 @@ impl<S: Syscalls> Clock for TockClock<S> {
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
-        let clock_frequency = get_clock_frequency::<S>().ok().unwrap();
+        let clock_frequency = Alarm::<S>::get_frequency().ok().unwrap().0;
         let total_ticks = 0x100_0000u64 * self.now.epoch as u64 + self.now.tick as u64;
         (total_ticks.wrapping_mul(1_000_000u64) / clock_frequency as u64) as usize
     }

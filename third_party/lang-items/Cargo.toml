@@ -18,6 +18,7 @@ libtock_drivers = { path = "../libtock-drivers" }
 libtock_platform = { path = "../../third_party/libtock-rs/platform" }
 libtock_low_level_debug = { path = "../../third_party/libtock-rs/apis/low_level_debug" }
 libtock_leds = { path = "../../third_party/libtock-rs/apis/leds" }
+libtock_alarm = { path = "../../third_party/libtock-rs/apis/alarm" }
 libtock_console = { path = "../../third_party/libtock-rs/apis/console" }
 
 [dependencies.linked_list_allocator]

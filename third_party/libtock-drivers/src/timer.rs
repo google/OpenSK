@@ -8,104 +8,15 @@
 //!
 //! Adapted from the [libtock-rs](https://github.com/tock/libtock-rs/blob/master/apis/alarm/src/lib.rs) alarm driver interface
 
-use crate::result::{FlexUnwrap, OtherError, TockError, TockResult};
-use crate::util::Util;
-use core::cell::Cell;
+use crate::result::{OtherError, TockResult};
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Sub};
+use libtock_alarm::{Hz, Alarm, Milliseconds, Convert};
 use libtock_platform as platform;
-use libtock_platform::{share, DefaultConfig, ErrorCode, Syscalls};
+use libtock_platform::{DefaultConfig, ErrorCode, Syscalls};
 use platform::share::Handle;
 use platform::subscribe::OneId;
 use platform::{Subscribe, Upcall};
-
-pub struct Alarm<S: Syscalls, C: platform::subscribe::Config = DefaultConfig>(S, C);
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct Hz(pub u32);
-
-pub trait Convert {
-    /// Converts a time unit by rounding up.
-    fn to_ticks(self, freq: Hz) -> Ticks;
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Ticks(pub u32);
-
-impl Convert for Ticks {
-    fn to_ticks(self, _freq: Hz) -> Ticks {
-        self
-    }
-}
-
-pub fn get_ticks<S: Syscalls>() -> TockResult<u32> {
-    Ok(S::command(DRIVER_NUM, command::TIME, 0, 0).to_result::<u32, ErrorCode>()?)
-}
-
-pub fn get_clock_frequency<S: Syscalls>() -> TockResult<u32> {
-    Ok(S::command(DRIVER_NUM, command::FREQUENCY, 0, 0).to_result::<u32, ErrorCode>()?)
-}
-
-#[derive(Copy, Clone)]
-pub struct Milliseconds(pub u32);
-
-impl Convert for Milliseconds {
-    fn to_ticks(self, freq: Hz) -> Ticks {
-        // Saturating multiplication will top out at about 1 hour at 1MHz.
-        // It's large enough for an alarm, and much simpler than failing
-        // or losing precision for short sleeps.
-
-        /// u32::div_ceil is still unstable.
-        fn div_ceil(a: u32, other: u32) -> u32 {
-            let d = a / other;
-            let m = a % other;
-            if m == 0 {
-                d
-            } else {
-                d + 1
-            }
-        }
-        Ticks(div_ceil(self.0.saturating_mul(freq.0), 1000))
-    }
-}
-
-impl<S: Syscalls, C: platform::subscribe::Config> Alarm<S, C> {
-    /// Run a check against the console capsule to ensure it is present.
-    ///
-    /// Returns number of concurrent notifications supported,
-    /// 0 if unbounded.
-    #[inline(always)]
-    pub fn driver_check() -> Result<u32, ErrorCode> {
-        S::command(DRIVER_NUM, command::DRIVER_CHECK, 0, 0).to_result()
-    }
-
-    pub fn get_frequency() -> Result<Hz, ErrorCode> {
-        S::command(DRIVER_NUM, command::FREQUENCY, 0, 0)
-            .to_result()
-            .map(Hz)
-    }
-
-    pub fn sleep_for<T: Convert>(time: T) -> Result<(), ErrorCode> {
-        let freq = Self::get_frequency()?;
-        let ticks = time.to_ticks(freq);
-
-        let called: Cell<Option<(u32, u32)>> = Cell::new(None);
-        share::scope(|subscribe| {
-            S::subscribe::<_, _, C, DRIVER_NUM, { subscribe::CALLBACK }>(subscribe, &called)?;
-
-            S::command(DRIVER_NUM, command::SET_RELATIVE, ticks.0, 0)
-                .to_result()
-                .map(|_when: u32| ())?;
-
-            loop {
-                S::yield_wait();
-                if let Some((_when, _ref)) = called.get() {
-                    return Ok(());
-                }
-            }
-        })
-    }
-}
 
 pub struct Timer<S: Syscalls, C: platform::subscribe::Config = DefaultConfig> {
     clock_frequency: Hz,
@@ -157,15 +68,12 @@ impl<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)>
         S::command(DRIVER_NUM, command::DRIVER_CHECK, 0, 0).to_result::<(), ErrorCode>()?;
         // Alarm driver only returns success as only a single concurrent timer is supported.
 
-        let clock_frequency =
-            S::command(DRIVER_NUM, command::FREQUENCY, 0, 0).to_result::<u32, ErrorCode>()?;
+        let clock_frequency = Alarm::<S>::get_frequency()?;
 
-        if clock_frequency < 1_000 {
+        if clock_frequency.0 < 1_000 {
             // The alarm's frequency must be at least 1 kHz.
             return Err(OtherError::TimerDriverErroneousClockFrequency.into());
         }
-
-        let clock_frequency = Hz(clock_frequency);
 
         Ok(Timer {
             clock_frequency,
@@ -202,19 +110,8 @@ impl<S: Syscalls, C: platform::subscribe::Config> Timer<S, C> {
         }
     }
 
-    pub fn sleep(duration: Duration<isize>) -> TockResult<()> {
-        let expired = Cell::new(false);
-        let mut with_callback = with_callback::<S, C, _>(|_| expired.set(true));
-
-        let mut timer = with_callback.init().flex_unwrap();
-        timer.set_alarm(duration).flex_unwrap();
-
-        Util::<S>::yieldk_for(|| expired.get());
-
-        match timer.stop_alarm() {
-            Ok(_) | Err(TockError::Command(ErrorCode::Already)) => Ok(()),
-            Err(e) => Err(e),
-        }
+    pub fn get_ticks() -> TockResult<u32> {
+        Ok(S::command(DRIVER_NUM, command::TIME, 0, 0).to_result::<u32, ErrorCode>()?)
     }
 
     /// Returns the clock frequency of the timer.
@@ -224,10 +121,8 @@ impl<S: Syscalls, C: platform::subscribe::Config> Timer<S, C> {
 
     /// Returns the current counter tick value.
     pub fn get_current_counter_ticks(&self) -> TockResult<ClockValue> {
-        let ticks = S::command(DRIVER_NUM, command::TIME, 0, 0).to_result::<u32, ErrorCode>()?;
-
         Ok(ClockValue {
-            num_ticks: ticks as isize,
+            num_ticks: Self::get_ticks()? as isize,
             clock_frequency: self.clock_frequency(),
         })
     }

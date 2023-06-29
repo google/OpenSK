@@ -147,12 +147,12 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> S
         Ok(Self::memop(memop_nr::STORAGE_CNT, 0)? as usize)
     }
 
-    pub fn storage_ptr() -> TockResult<usize> {
-        Ok(Self::memop(memop_nr::STORAGE_PTR, 0)? as usize)
+    pub fn storage_ptr(index: usize) -> TockResult<usize> {
+        Ok(Self::memop(memop_nr::STORAGE_PTR, index as u32)? as usize)
     }
 
-    pub fn storage_len() -> TockResult<usize> {
-        Ok(Self::memop(memop_nr::STORAGE_LEN, 0)? as usize)
+    pub fn storage_len(index: usize) -> TockResult<usize> {
+        Ok(Self::memop(memop_nr::STORAGE_LEN, index as u32)? as usize)
     }
 
     pub fn storage_type(index: usize) -> TockResult<StorageType> {

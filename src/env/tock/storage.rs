@@ -87,8 +87,8 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> T
             if !matches!(storage_type, StorageType::Store) {
                 continue;
             }
-            let storage_ptr = to_storage_result(LibtockStorage::<S, C>::storage_ptr())?;
-            let storage_len = to_storage_result(LibtockStorage::<S, C>::storage_len())?;
+            let storage_ptr = to_storage_result(LibtockStorage::<S, C>::storage_ptr(i))?;
+            let storage_len = to_storage_result(LibtockStorage::<S, C>::storage_len(i))?;
             if !syscall.is_page_aligned(storage_ptr) || !syscall.is_page_aligned(storage_len) {
                 return Err(StorageError::CustomError);
             }
@@ -210,8 +210,8 @@ where
             if !matches!(storage_type, StorageType::Partition) {
                 continue;
             };
-            let storage_ptr = to_storage_result(LibtockStorage::<S, C>::storage_ptr())?;
-            let storage_len = to_storage_result(LibtockStorage::<S, C>::storage_len())?;
+            let storage_ptr = to_storage_result(LibtockStorage::<S, C>::storage_ptr(i))?;
+            let storage_len = to_storage_result(LibtockStorage::<S, C>::storage_len(i))?;
             if !locations.is_page_aligned(storage_ptr) || !locations.is_page_aligned(storage_len) {
                 return Err(StorageError::CustomError);
             }

@@ -168,6 +168,7 @@ dependencies = [
  "ed25519-compact",
  "enum-iterator",
  "lang_items",
+ "libtock_alarm",
  "libtock_buttons",
  "libtock_console",
  "libtock_drivers",
@@ -374,6 +375,7 @@ dependencies = [
 name = "lang_items"
 version = "0.1.0"
 dependencies = [
+ "libtock_alarm",
  "libtock_console",
  "libtock_drivers",
  "libtock_leds",
@@ -388,6 +390,13 @@ name = "libc"
 version = "0.2.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
+
+[[package]]
+name = "libtock_alarm"
+version = "0.1.0"
+dependencies = [
+ "libtock_platform",
+]
 
 [[package]]
 name = "libtock_buttons"
@@ -407,6 +416,7 @@ dependencies = [
 name = "libtock_drivers"
 version = "0.1.0"
 dependencies = [
+ "libtock_alarm",
  "libtock_console",
  "libtock_platform",
 ]

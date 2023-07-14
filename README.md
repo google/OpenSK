@@ -72,6 +72,13 @@ Please check our [Troubleshooting and Debugging](docs/debugging.md) section if y
 have problems with the installation process or during development. To find out what
 else you can do with your OpenSK, see [Customization](docs/customization.md).
 
+## Research
+
+We implemented post-quantum cryptography on OpenSK. The code is released under
+the [hybrid-pqc tag](https://github.com/google/OpenSK/releases/tag/hybrid-pqc).
+Our [paper](https://research.google/pubs/pub51659/) was published in the ACNS
+Secure Cryptographic Implementation workshop 2023.
+
 ## Contributing
 
 See [Contributing.md](docs/contributing.md).

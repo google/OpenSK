@@ -75,6 +75,11 @@ impl Constants {
 }
 
 impl Value {
+    /// Creates a CBOR unsigned value.
+    pub fn unsigned(int: u64) -> Value {
+        Value(ValueImpl::Unsigned(int))
+    }
+
     /// Create an appropriate CBOR integer value (uint/nint).
     /// For simplicity, this only takes i64. Construct directly for the last bit.
     pub fn integer(int: i64) -> Value {
@@ -85,13 +90,35 @@ impl Value {
         }
     }
 
+    /// Creates a CBOR byte string value.
+    pub fn byte_string(bytes: Vec<u8>) -> Value {
+        Value(ValueImpl::ByteString(bytes))
+    }
+
+    /// Creates a CBOR text string value.
+    pub fn text_string(text: String) -> Value {
+        Value(ValueImpl::TextString(text))
+    }
+
     /// Create a CBOR array value.
     pub fn array(a: Vec<Value>) -> Value {
         Value(ValueImpl::Array(a))
     }
 
     /// Create a CBOR map value.
-    pub fn map(m: Vec<(Value, Value)>) -> Value {
+    ///
+    /// Keys do not have to be sorted.
+    ///
+    /// # Panics
+    ///
+    /// You may not call this function with identical keys in its argument.
+    pub fn map(mut m: Vec<(Value, Value)>) -> Value {
+        m.sort_by(|a, b| a.0.cmp(&b.0));
+        let map_len = m.len();
+        m.dedup_by(|a, b| a.0.eq(&b.0));
+        if map_len != m.len() {
+            panic!();
+        }
         Value(ValueImpl::Map(m))
     }
 
@@ -293,8 +320,26 @@ impl SimpleValue {
 }
 
 impl From<u64> for Value {
-    fn from(unsigned: u64) -> Self {
-        Value(ValueImpl::Unsigned(unsigned))
+    fn from(u: u64) -> Self {
+        Value::unsigned(u)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(u: u32) -> Self {
+        Value::unsigned(u as u64)
+    }
+}
+
+impl From<u16> for Value {
+    fn from(u: u16) -> Self {
+        Value::unsigned(u as u64)
+    }
+}
+
+impl From<u8> for Value {
+    fn from(u: u8) -> Self {
+        Value::unsigned(u as u64)
     }
 }
 
@@ -306,6 +351,18 @@ impl From<i64> for Value {
 
 impl From<i32> for Value {
     fn from(i: i32) -> Self {
+        Value::integer(i as i64)
+    }
+}
+
+impl From<i16> for Value {
+    fn from(i: i16) -> Self {
+        Value::integer(i as i64)
+    }
+}
+
+impl From<i8> for Value {
+    fn from(i: i8) -> Self {
         Value::integer(i as i64)
     }
 }
@@ -348,7 +405,7 @@ impl From<Vec<Value>> for Value {
 
 impl From<Vec<(Value, Value)>> for Value {
     fn from(map: Vec<(Value, Value)>) -> Self {
-        Value(ValueImpl::Map(map))
+        Value::map(map)
     }
 }
 
@@ -407,10 +464,22 @@ mod test {
     use alloc::vec;
 
     #[test]
+    #[should_panic]
+    fn test_duplicate_map_key() {
+        let _map = cbor_map! {
+            0 => "a",
+            -1 => "c",
+            b"a" => "e",
+            "c" => "g",
+            0 => "b",
+        };
+    }
+
+    #[test]
     fn test_extract_unsigned() {
         assert_eq!(cbor_int!(1).extract_unsigned(), Some(1));
         assert_eq!(cbor_int!(-1).extract_unsigned(), None);
-        assert_eq!(cbor_bytes!(b"").extract_unsigned(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_unsigned(), None);
         assert_eq!(cbor_text!("").extract_unsigned(), None);
         assert_eq!(cbor_array![].extract_unsigned(), None);
         assert_eq!(cbor_map! {}.extract_unsigned(), None);
@@ -442,7 +511,7 @@ mod test {
     fn test_extract_integer() {
         assert_eq!(cbor_int!(1).extract_integer(), Some(1));
         assert_eq!(cbor_int!(-1).extract_integer(), Some(-1));
-        assert_eq!(cbor_bytes!(b"").extract_integer(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_integer(), None);
         assert_eq!(cbor_text!("").extract_integer(), None);
         assert_eq!(cbor_array![].extract_integer(), None);
         assert_eq!(cbor_map! {}.extract_integer(), None);
@@ -474,7 +543,7 @@ mod test {
     fn test_extract_byte_string() {
         assert_eq!(cbor_int!(1).extract_byte_string(), None);
         assert_eq!(cbor_int!(-1).extract_byte_string(), None);
-        assert_eq!(cbor_bytes!(b"").extract_byte_string(), Some(Vec::new()));
+        assert_eq!(cbor_bytes!(vec![]).extract_byte_string(), Some(Vec::new()));
         assert_eq!(
             cbor_bytes_lit!(b"bar").extract_byte_string(),
             Some(b"bar".to_vec())
@@ -490,7 +559,7 @@ mod test {
     fn test_extract_text_string() {
         assert_eq!(cbor_int!(1).extract_text_string(), None);
         assert_eq!(cbor_int!(-1).extract_text_string(), None);
-        assert_eq!(cbor_bytes!(b"").extract_text_string(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_text_string(), None);
         assert_eq!(cbor_text!("").extract_text_string(), Some(String::new()));
         assert_eq!(cbor_text!("s").extract_text_string(), Some("s".to_string()));
         assert_eq!(cbor_array![].extract_text_string(), None);
@@ -503,7 +572,7 @@ mod test {
     fn test_extract_array() {
         assert_eq!(cbor_int!(1).extract_array(), None);
         assert_eq!(cbor_int!(-1).extract_array(), None);
-        assert_eq!(cbor_bytes!(b"").extract_array(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_array(), None);
         assert_eq!(cbor_text!("").extract_array(), None);
         assert_eq!(cbor_array![].extract_array(), Some(Vec::new()));
         assert_eq!(
@@ -519,7 +588,7 @@ mod test {
     fn test_extract_map() {
         assert_eq!(cbor_int!(1).extract_map(), None);
         assert_eq!(cbor_int!(-1).extract_map(), None);
-        assert_eq!(cbor_bytes!(b"").extract_map(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_map(), None);
         assert_eq!(cbor_text!("").extract_map(), None);
         assert_eq!(cbor_array![].extract_map(), None);
         assert_eq!(cbor_map! {}.extract_map(), Some(Vec::new()));
@@ -535,7 +604,7 @@ mod test {
     fn test_extract_tag() {
         assert_eq!(cbor_int!(1).extract_tag(), None);
         assert_eq!(cbor_int!(-1).extract_tag(), None);
-        assert_eq!(cbor_bytes!(b"").extract_tag(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_tag(), None);
         assert_eq!(cbor_text!("").extract_tag(), None);
         assert_eq!(cbor_array![].extract_tag(), None);
         assert_eq!(cbor_map! {}.extract_tag(), None);
@@ -550,7 +619,7 @@ mod test {
     fn test_extract_bool() {
         assert_eq!(cbor_int!(1).extract_bool(), None);
         assert_eq!(cbor_int!(-1).extract_bool(), None);
-        assert_eq!(cbor_bytes!(b"").extract_bool(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_bool(), None);
         assert_eq!(cbor_text!("").extract_bool(), None);
         assert_eq!(cbor_array![].extract_bool(), None);
         assert_eq!(cbor_map! {}.extract_bool(), None);
@@ -565,7 +634,7 @@ mod test {
     fn test_extract_null() {
         assert_eq!(cbor_int!(1).extract_null(), None);
         assert_eq!(cbor_int!(-1).extract_null(), None);
-        assert_eq!(cbor_bytes!(b"").extract_null(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_null(), None);
         assert_eq!(cbor_text!("").extract_null(), None);
         assert_eq!(cbor_array![].extract_null(), None);
         assert_eq!(cbor_map! {}.extract_null(), None);
@@ -580,7 +649,7 @@ mod test {
     fn test_extract_undefined() {
         assert_eq!(cbor_int!(1).extract_undefined(), None);
         assert_eq!(cbor_int!(-1).extract_undefined(), None);
-        assert_eq!(cbor_bytes!(b"").extract_undefined(), None);
+        assert_eq!(cbor_bytes!(vec![]).extract_undefined(), None);
         assert_eq!(cbor_text!("").extract_undefined(), None);
         assert_eq!(cbor_array![].extract_undefined(), None);
         assert_eq!(cbor_map! {}.extract_undefined(), None);
@@ -604,8 +673,8 @@ mod test {
         assert!(cbor_int!(-24) < cbor_int!(-1000));
         assert!(cbor_int!(-1000) < cbor_int!(-1000000));
         assert!(cbor_int!(-1000000) < cbor_int!(core::i64::MIN));
-        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(b""));
-        assert!(cbor_bytes!(b"") < cbor_bytes!(vec![0x00]));
+        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(vec![]));
+        assert!(cbor_bytes!(vec![]) < cbor_bytes!(vec![0x00]));
         assert!(cbor_bytes!(vec![0x00]) < cbor_bytes!(vec![0x01]));
         assert!(cbor_bytes!(vec![0x01]) < cbor_bytes!(vec![0xFF]));
         assert!(cbor_bytes!(vec![0xFF]) < cbor_bytes!(vec![0x00, 0x00]));
@@ -632,9 +701,9 @@ mod test {
         assert!(cbor_map! {"" => 0} < cbor_map! {cbor_array![] => 0});
         assert!(cbor_map! {cbor_array![] => 0} < cbor_map! {cbor_map!{} => 0});
         assert!(cbor_map! {cbor_map!{} => 0} < cbor_map! {false => 0});
-        assert!(cbor_map! {false => 0} < cbor_map! {0 => 0, 0 => 0});
+        assert!(cbor_map! {false => 0} < cbor_map! {0 => 0, 1 => 0});
         assert!(cbor_map! {0 => 0} < cbor_tagged!(2, cbor_int!(0)));
-        assert!(cbor_map! {0 => 0, 0 => 0} < cbor_bool!(false));
+        assert!(cbor_map! {0 => 0, 1 => 0} < cbor_bool!(false));
         assert!(cbor_bool!(false) < cbor_bool!(true));
         assert!(cbor_bool!(true) < cbor_null!());
         assert!(cbor_null!() < cbor_undefined!());

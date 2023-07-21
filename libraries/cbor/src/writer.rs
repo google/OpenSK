@@ -78,14 +78,8 @@ impl<'a> Writer<'a> {
                     self.encode_cbor(el, remaining_depth.map(|d| d - 1))?;
                 }
             }
-            ValueImpl::Map(mut map) => {
-                map.sort_by(|a, b| a.0.cmp(&b.0));
-                let map_len = map.len();
-                map.dedup_by(|a, b| a.0.eq(&b.0));
-                if map_len != map.len() {
-                    return Err(EncoderError::DuplicateMapKey);
-                }
-                self.start_item(type_label, map_len as u64);
+            ValueImpl::Map(map) => {
+                self.start_item(type_label, map.len() as u64);
                 for (k, v) in map {
                     self.encode_cbor(k, remaining_depth.map(|d| d - 1))?;
                     self.encode_cbor(v, remaining_depth.map(|d| d - 1))?;
@@ -340,42 +334,6 @@ mod test {
             0 => "a",
         };
         assert_eq!(write_return(sorted_map), write_return(unsorted_map));
-    }
-
-    #[test]
-    fn test_write_map_duplicates() {
-        let duplicate0 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            0 => "b",
-        };
-        assert_eq!(write_return(duplicate0), None);
-        let duplicate1 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            -1 => "d",
-        };
-        assert_eq!(write_return(duplicate1), None);
-        let duplicate2 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            b"a" => "f",
-        };
-        assert_eq!(write_return(duplicate2), None);
-        let duplicate3 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            "c" => "h",
-        };
-        assert_eq!(write_return(duplicate3), None);
     }
 
     #[test]

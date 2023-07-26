@@ -180,6 +180,21 @@ index 000000000..f2e248bc9
 +        self.side == Some(side)
 +    }
 +}
+diff --git a/capsules/src/usb/descriptors.rs b/capsules/src/usb/descriptors.rs
+index 67f708239..9c5bc9cd1 100644
+--- a/capsules/src/usb/descriptors.rs
++++ b/capsules/src/usb/descriptors.rs
+@@ -568,8 +568,8 @@ impl Default for ConfigurationDescriptor {
+             num_interfaces: 1,
+             configuration_value: 1,
+             string_index: 0,
+-            attributes: ConfigurationAttributes::new(true, false),
+-            max_power: 0, // in 2mA units
++            attributes: ConfigurationAttributes::new(false, false),
++            max_power: 50, // in 2mA units
+             related_descriptor_length: 0,
+         }
+     }
 diff --git a/capsules/src/usb/mod.rs b/capsules/src/usb/mod.rs
 index 767f5de83..cb5e0af97 100644
 --- a/capsules/src/usb/mod.rs
@@ -544,10 +559,10 @@ index 000000000..30cac1323
 +}
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
 new file mode 100644
-index 000000000..e074eb7a6
+index 000000000..5ad2c44b3
 --- /dev/null
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
-@@ -0,0 +1,552 @@
+@@ -0,0 +1,554 @@
 +//! A USB HID client of the USB hardware interface
 +
 +use super::app::App;
@@ -652,14 +667,14 @@ index 000000000..e074eb7a6
 +    }];
 +
 +static HID: HIDDescriptor<'static> = HIDDescriptor {
-+    hid_class: 0x0110,
++    hid_class: 0x0111,
 +    country_code: HIDCountryCode::NotSupported,
 +    sub_descriptors: HID_SUB_DESCRIPTORS,
 +};
 +
 +#[cfg(feature = "vendor_hid")]
 +static VENDOR_HID: HIDDescriptor<'static> = HIDDescriptor {
-+    hid_class: 0x0110,
++    hid_class: 0x0111,
 +    country_code: HIDCountryCode::NotSupported,
 +    sub_descriptors: VENDOR_HID_SUB_DESCRIPTORS,
 +};
@@ -719,6 +734,7 @@ index 000000000..e074eb7a6
 +                interface_class: 0x03,    // HID
 +                interface_subclass: 0x00, // no subcall
 +                interface_protocol: 0x00, // no protocol
++                string_index: 4,
 +                ..InterfaceDescriptor::default()
 +            },
 +            // Vendor HID interface.
@@ -728,6 +744,7 @@ index 000000000..e074eb7a6
 +                interface_class: 0x03, // HID
 +                interface_subclass: 0x00,
 +                interface_protocol: 0x00,
++                string_index: 5,
 +                ..InterfaceDescriptor::default()
 +            },
 +        ];
@@ -786,7 +803,7 @@ index 000000000..e074eb7a6
 +                    manufacturer_string: 1,
 +                    product_string: 2,
 +                    serial_number_string: 3,
-+                    class: 0x03, // HID class for all interfaces
++                    class: 0x00, // Class is specified at the interface level
 +                    max_packet_size_ep0: max_ctrl_packet_size,
 +                    ..descriptors::DeviceDescriptor::default()
 +                },

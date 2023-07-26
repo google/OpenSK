@@ -119,6 +119,10 @@ static STRINGS: &'static [&'static str] = &[
     "OpenSK",
     // Serial number
     "v1.0",
+    // Interface description + main HID string
+    "FIDO2",
+    // vendor HID string
+    "Vendor HID",
 ];
 
 // State for loading and holding applications.

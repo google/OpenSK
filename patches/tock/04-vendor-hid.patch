@@ -10,7 +10,7 @@ index 65301bcf1..dc70e98b1 100644
 +[features]
 +vendor_hid = []
 diff --git a/capsules/src/usb/descriptors.rs b/capsules/src/usb/descriptors.rs
-index 67f708239..c2556d3a2 100644
+index 9c5bc9cd1..c3ed71c44 100644
 --- a/capsules/src/usb/descriptors.rs
 +++ b/capsules/src/usb/descriptors.rs
 @@ -415,13 +415,14 @@ impl DescriptorBuffer {

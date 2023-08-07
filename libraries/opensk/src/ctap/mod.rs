@@ -917,7 +917,7 @@ impl<E: Env> CtapState<E> {
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        let public_cose_key = private_key.get_pub_key(env)?;
+        let public_cose_key = private_key.get_pub_key::<E>()?;
         cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
@@ -965,7 +965,7 @@ impl<E: Env> CtapState<E> {
                     Some(vec![certificate]),
                 )
             }
-            None => (private_key.sign_and_encode(env, &signature_data)?, None),
+            None => (private_key.sign_and_encode::<E>(&signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::Es256 as i64,
@@ -1051,7 +1051,7 @@ impl<E: Env> CtapState<E> {
         signature_data.extend(client_data_hash);
         let signature = credential
             .private_key
-            .sign_and_encode(env, &signature_data)?;
+            .sign_and_encode::<E>(&signature_data)?;
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,

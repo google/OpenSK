@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::api::crypto::aes256::Aes256;
-use crate::api::crypto::ecdsa::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::private_key::PrivateKey;
@@ -21,7 +20,7 @@ use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
 use crate::ctap::{cbor_read, cbor_write};
-use crate::env::{AesKey, EcdsaSk, Env, Hmac};
+use crate::env::{AesKey, Env, Hmac};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
@@ -76,6 +75,14 @@ pub trait KeyStore {
     /// This function should be a no-op if the key store is already initialized.
     fn init(&mut self) -> Result<(), Error>;
 
+    /// Key to wrap (secret) data.
+    ///
+    /// Useful for encrypting data before
+    /// - writing it to persistent storage,
+    /// - CBOR encoding it,
+    /// - doing anything that does not support [`Secret`].
+    fn wrap_key<E: Env>(&mut self) -> Result<AesKey<E>, Error>;
+
     /// Encodes a credential as a binary strings.
     ///
     /// The output is encrypted and authenticated. Since the wrapped credentials are passed to the
@@ -109,14 +116,6 @@ pub trait KeyStore {
     /// Decrypts a PIN hash.
     fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error>;
 
-    /// Derives an ECDSA private key from a seed.
-    ///
-    /// The result is big-endian.
-    fn derive_ecdsa(&mut self, seed: &[u8; 32]) -> Result<Secret<[u8; 32]>, Error>;
-
-    /// Generates a seed to derive an ECDSA private key.
-    fn generate_ecdsa_seed(&mut self) -> Result<Secret<[u8; 32]>, Error>;
-
     /// Resets the key store.
     fn reset(&mut self) -> Result<(), Error>;
 }
@@ -138,14 +137,23 @@ impl<T: Helper> KeyStore for T {
         Ok(())
     }
 
+    fn wrap_key<E: Env>(&mut self) -> Result<AesKey<E>, Error> {
+        Ok(AesKey::<E>::new(&get_master_keys(self)?.encryption))
+    }
+
     /// Encrypts the given credential source data into a credential ID.
     ///
     /// Other information, such as a user name, are not stored. Since encrypted credential IDs are
     /// stored server-side, this information is already available (unencrypted).
     fn wrap_credential(&mut self, credential: CredentialSource) -> Result<Vec<u8>, Error> {
         let mut payload = Vec::new();
+        let wrap_key = self.wrap_key::<T>()?;
+        let private_key_cbor = credential
+            .private_key
+            .to_cbor::<T>(self.rng(), &wrap_key)
+            .map_err(|_| Error)?;
         let cbor = cbor_map_options! {
-          CredentialSourceField::PrivateKey => credential.private_key,
+          CredentialSourceField::PrivateKey => private_key_cbor,
           CredentialSourceField::RpIdHash => credential.rp_id_hash,
           CredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
           CredentialSourceField::CredBlob => credential.cred_blob,
@@ -155,7 +163,7 @@ impl<T: Helper> KeyStore for T {
         let master_keys = get_master_keys(self)?;
         let aes_key = AesKey::<T>::new(&master_keys.encryption);
         let encrypted_payload =
-            aes256_cbc_encrypt(self, &aes_key, &payload, true).map_err(|_| Error)?;
+            aes256_cbc_encrypt::<T>(self.rng(), &aes_key, &payload, true).map_err(|_| Error)?;
         let mut credential_id = encrypted_payload;
         credential_id.insert(0, CBOR_CREDENTIAL_ID_VERSION);
 
@@ -213,6 +221,7 @@ impl<T: Helper> KeyStore for T {
                         return Ok(None);
                     }
                     decrypt_cbor_credential_id::<T>(
+                        self,
                         &master_keys.encryption,
                         &bytes[1..hmac_message_size],
                     )?
@@ -241,24 +250,8 @@ impl<T: Helper> KeyStore for T {
         Ok(Secret::from_exposed_secret(*cipher))
     }
 
-    fn derive_ecdsa(&mut self, seed: &[u8; 32]) -> Result<Secret<[u8; 32]>, Error> {
-        match EcdsaSk::<T>::from_slice(seed) {
-            None => Err(Error),
-            Some(_) => {
-                let mut derived: Secret<[u8; 32]> = Secret::default();
-                derived.copy_from_slice(seed);
-                Ok(derived)
-            }
-        }
-    }
-
-    fn generate_ecdsa_seed(&mut self) -> Result<Secret<[u8; 32]>, Error> {
-        let mut seed = Secret::default();
-        EcdsaSk::<T>::random(self.rng()).to_slice(&mut seed);
-        Ok(seed)
-    }
-
     fn reset(&mut self) -> Result<(), Error> {
+        // The storage also removes `STORAGE_KEY`, but this makes KeyStore more self-sufficient.
         Ok(self.store().remove(STORAGE_KEY)?)
     }
 }
@@ -358,6 +351,7 @@ fn decrypt_legacy_credential_id<E: Env>(
 }
 
 fn decrypt_cbor_credential_id<E: Env>(
+    env: &mut E,
     encryption_key_bytes: &[u8; 32],
     bytes: &[u8],
 ) -> Result<Option<CredentialSource>, Error> {
@@ -376,7 +370,9 @@ fn decrypt_cbor_credential_id<E: Env>(
     }
     Ok(match (private_key, rp_id_hash) {
         (Some(private_key), Some(rp_id_hash)) => {
-            let private_key = PrivateKey::try_from(private_key).map_err(|_| Error)?;
+            let wrap_key = env.key_store().wrap_key::<E>()?;
+            let private_key =
+                PrivateKey::from_cbor::<E>(&wrap_key, private_key).map_err(|_| Error)?;
             let rp_id_hash = extract_byte_string(rp_id_hash)?;
             if rp_id_hash.len() != 32 {
                 return Err(Error);
@@ -420,9 +416,11 @@ fn extract_map(cbor_value: cbor::Value) -> Result<Vec<(cbor::Value, cbor::Value)
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::api::crypto::ecdsa::SecretKey;
     use crate::api::customization::Customization;
     use crate::ctap::data_formats::SignatureAlgorithm;
     use crate::env::test::TestEnv;
+    use crate::env::EcdsaSk;
 
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 
@@ -437,16 +435,24 @@ mod test {
         assert_eq!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
         assert_eq!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
 
-        // ECDSA seeds are well-defined and stable.
-        let ecdsa_seed = key_store.generate_ecdsa_seed().unwrap();
-        let ecdsa_key = key_store.derive_ecdsa(&ecdsa_seed).unwrap();
-        assert_eq!(key_store.derive_ecdsa(&ecdsa_seed), Ok(ecdsa_key));
+        // Same for wrap key.
+        let wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        let mut test_block = [0x33; 16];
+        wrap_key.encrypt_block(&mut test_block);
+        let new_wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        let mut new_test_block = [0x33; 16];
+        new_wrap_key.encrypt_block(&mut new_test_block);
+        assert_eq!(&new_test_block, &test_block);
 
         // Master keys change after reset. We don't require this for ECDSA seeds because it's not
         // the case, but it might be better.
         key_store.reset().unwrap();
         assert_ne!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
         assert_ne!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
+        let new_wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        let mut new_test_block = [0x33; 16];
+        new_wrap_key.encrypt_block(&mut new_test_block);
+        assert_ne!(&new_test_block, &test_block);
     }
 
     #[test]
@@ -598,8 +604,8 @@ mod test {
         private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
         plaintext[32..64].copy_from_slice(application);
 
-        let mut encrypted_id =
-            aes256_cbc_encrypt(env, &aes_key, &plaintext, true).map_err(|_| Error)?;
+        let mut encrypted_id = aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true)
+            .map_err(|_| Error)?;
         let mut id_hmac = [0; HASH_SIZE];
         Hmac::<TestEnv>::mac(&hmac_key, &encrypted_id[..], &mut id_hmac);
         encrypted_id.extend(&id_hmac);
@@ -617,7 +623,10 @@ mod test {
             cred_protect_policy: None,
             cred_blob: None,
         };
-        let ecdsa_key = credential_source.private_key.ecdsa_key(&mut env).unwrap();
+        let ecdsa_key = credential_source
+            .private_key
+            .ecdsa_key::<TestEnv>()
+            .unwrap();
         let credential_id =
             legacy_encrypt_to_credential_id(&mut env, ecdsa_key, &rp_id_hash).unwrap();
         let unwrapped = env

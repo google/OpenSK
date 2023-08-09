@@ -78,6 +78,17 @@ impl SecKey {
         p.getx().to_int().to_bin(&mut x);
         x
     }
+
+    /// Creates a private key from the exponent's bytes, or None if checks fail.
+    pub fn from_bytes(bytes: &[u8; 32]) -> Option<SecKey> {
+        let a = NonZeroExponentP256::from_int_checked(Int256::from_bin(bytes));
+        // The branching here is fine because all this reveals is whether the key was invalid.
+        if bool::from(a.is_none()) {
+            return None;
+        }
+        let a = a.unwrap();
+        Some(SecKey { a })
+    }
 }
 
 impl PubKey {

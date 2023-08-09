@@ -69,9 +69,7 @@ impl PrivateKey {
     }
 
     /// Helper function that creates a private key of type ECDSA.
-    ///
-    /// This function is public for legacy credential source parsing only.
-    pub fn new_ecdsa_from_bytes(bytes: &[u8]) -> Option<Self> {
+    fn new_ecdsa_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
         }
@@ -80,8 +78,9 @@ impl PrivateKey {
         Some(PrivateKey::Ecdsa(seed))
     }
 
+    /// Helper function that creates a private key of type Ed25519.
     #[cfg(feature = "ed25519")]
-    pub fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
+    fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
         }

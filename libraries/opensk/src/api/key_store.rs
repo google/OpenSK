@@ -212,22 +212,18 @@ impl<T: Helper> KeyStore for T {
             return Ok(None);
         }
 
-        let credential_source = if bytes.len() == LEGACY_CREDENTIAL_ID_SIZE {
-            decrypt_legacy_credential_id::<T>(&master_keys.encryption, &bytes[..hmac_message_size])?
-        } else {
-            match bytes[0] {
-                CBOR_CREDENTIAL_ID_VERSION => {
-                    if bytes.len() != CBOR_CREDENTIAL_ID_SIZE {
-                        return Ok(None);
-                    }
-                    decrypt_cbor_credential_id::<T>(
-                        self,
-                        &master_keys.encryption,
-                        &bytes[1..hmac_message_size],
-                    )?
+        let credential_source = match bytes[0] {
+            CBOR_CREDENTIAL_ID_VERSION => {
+                if bytes.len() != CBOR_CREDENTIAL_ID_SIZE {
+                    return Ok(None);
                 }
-                _ => return Ok(None),
+                decrypt_cbor_credential_id::<T>(
+                    self,
+                    &master_keys.encryption,
+                    &bytes[1..hmac_message_size],
+                )?
             }
+            _ => return Ok(None),
         };
 
         if let Some(credential_source) = &credential_source {
@@ -324,30 +320,6 @@ fn remove_padding(data: &[u8]) -> Result<&[u8], Error> {
         return Err(Error);
     }
     Ok(&data[..data.len() - pad_length as usize])
-}
-
-fn decrypt_legacy_credential_id<E: Env>(
-    encryption_key_bytes: &[u8; 32],
-    bytes: &[u8],
-) -> Result<Option<CredentialSource>, Error> {
-    let aes_key = AesKey::<E>::new(encryption_key_bytes);
-    let plaintext = aes256_cbc_decrypt::<E>(&aes_key, bytes, true)
-        .map_err(|_| Error)?
-        .expose_secret_to_vec();
-    if plaintext.len() != 64 {
-        return Ok(None);
-    }
-    let private_key = if let Some(key) = PrivateKey::new_ecdsa_from_bytes(&plaintext[..32]) {
-        key
-    } else {
-        return Ok(None);
-    };
-    Ok(Some(CredentialSource {
-        private_key,
-        rp_id_hash: plaintext[32..64].try_into().unwrap(),
-        cred_protect_policy: None,
-        cred_blob: None,
-    }))
 }
 
 fn decrypt_cbor_credential_id<E: Env>(
@@ -589,52 +561,6 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_wrap_unwrap_credential_missing_blocks_ed25519() {
         test_wrap_unwrap_credential_missing_blocks(SignatureAlgorithm::Eddsa);
-    }
-
-    /// This is a copy of the function that genereated deprecated key handles.
-    fn legacy_encrypt_to_credential_id(
-        env: &mut TestEnv,
-        private_key: EcdsaSk<TestEnv>,
-        application: &[u8; 32],
-    ) -> Result<Vec<u8>, Error> {
-        let master_keys = get_master_keys(env).unwrap();
-        let aes_key = AesKey::<TestEnv>::new(&master_keys.encryption);
-        let hmac_key = master_keys.authentication;
-        let mut plaintext = [0; 64];
-        private_key.to_slice(array_mut_ref!(plaintext, 0, 32));
-        plaintext[32..64].copy_from_slice(application);
-
-        let mut encrypted_id = aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true)
-            .map_err(|_| Error)?;
-        let mut id_hmac = [0; HASH_SIZE];
-        Hmac::<TestEnv>::mac(&hmac_key, &encrypted_id[..], &mut id_hmac);
-        encrypted_id.extend(&id_hmac);
-        Ok(encrypted_id)
-    }
-
-    #[test]
-    fn test_encrypt_decrypt_credential_legacy() {
-        let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let rp_id_hash = [0x55; 32];
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash,
-            cred_protect_policy: None,
-            cred_blob: None,
-        };
-        let ecdsa_key = credential_source
-            .private_key
-            .ecdsa_key::<TestEnv>()
-            .unwrap();
-        let credential_id =
-            legacy_encrypt_to_credential_id(&mut env, ecdsa_key, &rp_id_hash).unwrap();
-        let unwrapped = env
-            .key_store()
-            .unwrap_credential(&credential_id, &rp_id_hash)
-            .unwrap()
-            .unwrap();
-        assert_eq!(credential_source, unwrapped);
     }
 
     #[test]

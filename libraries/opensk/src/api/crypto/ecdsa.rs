@@ -73,7 +73,6 @@ pub trait Signature: Sized {
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self>;
 
     /// Writes the signature bytes into the passed in parameter.
-    #[cfg(feature = "std")]
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]);
 
     /// Encodes the signatures as ASN1 DER.

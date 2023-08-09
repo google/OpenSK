@@ -169,7 +169,6 @@ impl ecdsa::Signature for SoftwareEcdsaSignature {
         crypto::ecdsa::Signature::from_bytes(bytes).map(|s| SoftwareEcdsaSignature { signature: s })
     }
 
-    #[cfg(feature = "std")]
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
         self.signature.to_bytes(bytes);
     }

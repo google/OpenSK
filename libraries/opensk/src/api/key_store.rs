@@ -29,14 +29,13 @@ use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
 
-const LEGACY_CREDENTIAL_ID_SIZE: usize = 112;
 // CBOR credential IDs consist of
 // - 1   byte : version number
 // - 16  bytes: initialization vector for AES-256,
 // - 192 bytes: encrypted block of the key handle cbor,
 // - 32  bytes: HMAC-SHA256 over everything else.
 pub const CBOR_CREDENTIAL_ID_SIZE: usize = 241;
-const MIN_CREDENTIAL_ID_SIZE: usize = LEGACY_CREDENTIAL_ID_SIZE;
+const MIN_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
 pub(crate) const MAX_CREDENTIAL_ID_SIZE: usize = CBOR_CREDENTIAL_ID_SIZE;
 
 pub const CBOR_CREDENTIAL_ID_VERSION: u8 = 0x01;
@@ -182,12 +181,6 @@ impl<T: Helper> KeyStore for T {
     /// Returns None if
     /// - the format does not match any known versions, or
     /// - the HMAC test fails.
-    ///
-    /// For v0 (legacy U2F) the credential ID consists of:
-    /// - 16 bytes: initialization vector for AES-256,
-    /// - 32 bytes: encrypted ECDSA private key for the credential,
-    /// - 32 bytes: encrypted relying party ID hashed with SHA256,
-    /// - 32 bytes: HMAC-SHA256 over everything else.
     ///
     /// For v1 (CBOR) the credential ID consists of:
     /// -   1 byte : version number,

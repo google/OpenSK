@@ -69,7 +69,7 @@ impl PrivateKey {
     }
 
     /// Helper function that creates a private key of type ECDSA.
-    fn new_ecdsa_from_bytes(bytes: &[u8]) -> Option<Self> {
+    pub fn new_ecdsa_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
         }
@@ -80,7 +80,7 @@ impl PrivateKey {
 
     /// Helper function that creates a private key of type Ed25519.
     #[cfg(feature = "ed25519")]
-    fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
+    pub fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
         }

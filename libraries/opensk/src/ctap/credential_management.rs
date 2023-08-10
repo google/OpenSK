@@ -61,8 +61,7 @@ fn enumerate_rps_response<E: Env>(
 }
 
 /// Generates the response for subcommands enumerating credentials.
-fn enumerate_credentials_response(
-    env: &mut impl Env,
+fn enumerate_credentials_response<E: Env>(
     credential: PublicKeyCredentialSource,
     total_credentials: Option<u64>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -91,7 +90,7 @@ fn enumerate_credentials_response(
         key_id: credential_id,
         transports: None, // You can set USB as a hint here.
     };
-    let public_key = private_key.get_pub_key(env)?;
+    let public_key = private_key.get_pub_key::<E>()?;
     Ok(AuthenticatorCredentialManagementResponse {
         user: Some(user),
         credential_id: Some(credential_id),
@@ -202,7 +201,7 @@ fn process_enumerate_credentials_begin<E: Env>(
             channel,
         );
     }
-    enumerate_credentials_response(env, credential, Some(total_credentials as u64))
+    enumerate_credentials_response::<E>(credential, Some(total_credentials as u64))
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
@@ -212,7 +211,7 @@ fn process_enumerate_credentials_get_next_credential<E: Env>(
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential(env)?;
     let credential = storage::get_credential(env, credential_key)?;
-    enumerate_credentials_response(env, credential, None)
+    enumerate_credentials_response::<E>(credential, None)
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.

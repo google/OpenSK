@@ -225,7 +225,7 @@ impl<E: Env> SharedSecretV1<E> {
     }
 
     fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(env, &self.aes_key, plaintext, false)
+        aes256_cbc_encrypt::<E>(env.rng(), &self.aes_key, plaintext, false)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
@@ -263,7 +263,7 @@ impl<E: Env> SharedSecretV2<E> {
     }
 
     fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
-        aes256_cbc_encrypt(env, &self.aes_key, plaintext, true)
+        aes256_cbc_encrypt::<E>(env.rng(), &self.aes_key, plaintext, true)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {

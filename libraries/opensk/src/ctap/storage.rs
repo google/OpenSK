@@ -24,13 +24,12 @@ use crate::ctap::data_formats::{
 };
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::INITIAL_SIGNATURE_COUNTER;
-use crate::env::Env;
+use crate::env::{AesKey, Env};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::cmp;
-use core::convert::TryInto;
 use persistent_store::{fragment, StoreUpdate};
 #[cfg(feature = "config_command")]
 use sk_cbor::cbor_array_vec;
@@ -56,8 +55,8 @@ pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 /// # Errors
 ///
 /// Returns `CTAP2_ERR_VENDOR_INTERNAL_ERROR` if the key does not hold a valid credential.
-pub fn get_credential(
-    env: &mut impl Env,
+pub fn get_credential<E: Env>(
+    env: &mut E,
     key: usize,
 ) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
     let min_key = key::CREDENTIALS.start;
@@ -68,7 +67,8 @@ pub fn get_credential(
         .store()
         .find(key)?
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-    deserialize_credential(&credential_entry)
+    let wrap_key = env.key_store().wrap_key::<E>()?;
+    deserialize_credential::<E>(&wrap_key, &credential_entry)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
@@ -118,8 +118,8 @@ pub fn find_credential(
 /// Stores or updates a credential.
 ///
 /// If a credential with the same RP id and user handle already exists, it is replaced.
-pub fn store_credential(
-    env: &mut impl Env,
+pub fn store_credential<E: Env>(
+    env: &mut E,
     new_credential: PublicKeyCredentialSource,
 ) -> Result<(), Ctap2StatusCode> {
     let max_supported_resident_keys = env.customization().max_supported_resident_keys();
@@ -158,7 +158,8 @@ pub fn store_credential(
         // This is an existing credential being updated, we reuse its key.
         Some(x) => x,
     };
-    let value = serialize_credential(new_credential)?;
+    let wrap_key = env.key_store().wrap_key::<E>()?;
+    let value = serialize_credential::<E>(env, &wrap_key, new_credential)?;
     env.store().insert(key, &value)?;
     Ok(())
 }
@@ -178,8 +179,8 @@ pub fn delete_credential(env: &mut impl Env, credential_id: &[u8]) -> Result<(),
 /// # Errors
 ///
 /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-pub fn update_credential(
-    env: &mut impl Env,
+pub fn update_credential<E: Env>(
+    env: &mut E,
     credential_id: &[u8],
     user: PublicKeyCredentialUserEntity,
 ) -> Result<(), Ctap2StatusCode> {
@@ -187,7 +188,8 @@ pub fn update_credential(
     credential.user_name = user.user_name;
     credential.user_display_name = user.user_display_name;
     credential.user_icon = user.user_icon;
-    let value = serialize_credential(credential)?;
+    let wrap_key = env.key_store().wrap_key::<E>()?;
+    let value = serialize_credential::<E>(env, &wrap_key, credential)?;
     Ok(env.store().insert(key, &value)?)
 }
 
@@ -215,7 +217,7 @@ pub fn iter_credentials<'a, E: Env>(
     env: &'a mut E,
     result: &'a mut Result<(), Ctap2StatusCode>,
 ) -> Result<IterCredentials<'a, E>, Ctap2StatusCode> {
-    IterCredentials::new(env.store(), result)
+    IterCredentials::new(env, result)
 }
 
 /// Returns the next creation order.
@@ -525,6 +527,9 @@ pub struct IterCredentials<'a, E: Env> {
     /// The store being iterated.
     store: &'a persistent_store::Store<E::Storage>,
 
+    /// The key store for credential unwrapping.
+    wrap_key: AesKey<E>,
+
     /// The store iterator.
     iter: persistent_store::StoreIter<'a>,
 
@@ -538,12 +543,15 @@ pub struct IterCredentials<'a, E: Env> {
 impl<'a, E: Env> IterCredentials<'a, E> {
     /// Creates a credential iterator.
     fn new(
-        store: &'a persistent_store::Store<E::Storage>,
+        env: &'a mut E,
         result: &'a mut Result<(), Ctap2StatusCode>,
     ) -> Result<Self, Ctap2StatusCode> {
+        let wrap_key = env.key_store().wrap_key::<E>()?;
+        let store = env.store();
         let iter = store.iter()?;
         Ok(IterCredentials {
             store,
+            wrap_key,
             iter,
             result,
         })
@@ -576,7 +584,8 @@ impl<'a, E: Env> Iterator for IterCredentials<'a, E> {
                 continue;
             }
             let value = self.unwrap(handle.get_value(self.store).ok())?;
-            let credential = self.unwrap(deserialize_credential(&value))?;
+            let deserialized = deserialize_credential::<E>(&self.wrap_key, &value);
+            let credential = self.unwrap(deserialized)?;
             return Some((key, credential));
         }
         None
@@ -584,15 +593,22 @@ impl<'a, E: Env> Iterator for IterCredentials<'a, E> {
 }
 
 /// Deserializes a credential from storage representation.
-fn deserialize_credential(data: &[u8]) -> Option<PublicKeyCredentialSource> {
+fn deserialize_credential<E: Env>(
+    wrap_key: &AesKey<E>,
+    data: &[u8],
+) -> Option<PublicKeyCredentialSource> {
     let cbor = super::cbor_read(data).ok()?;
-    cbor.try_into().ok()
+    PublicKeyCredentialSource::from_cbor::<E>(wrap_key, cbor).ok()
 }
 
 /// Serializes a credential to storage representation.
-fn serialize_credential(credential: PublicKeyCredentialSource) -> Result<Vec<u8>, Ctap2StatusCode> {
+fn serialize_credential<E: Env>(
+    env: &mut E,
+    wrap_key: &AesKey<E>,
+    credential: PublicKeyCredentialSource,
+) -> Result<Vec<u8>, Ctap2StatusCode> {
     let mut data = Vec::new();
-    super::cbor_write(credential.into(), &mut data)?;
+    super::cbor_write(credential.to_cbor::<E>(env.rng(), wrap_key)?, &mut data)?;
     Ok(data)
 }
 
@@ -1098,6 +1114,7 @@ mod test {
     #[test]
     fn test_serialize_deserialize_credential() {
         let mut env = TestEnv::default();
+        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -1113,8 +1130,9 @@ mod test {
             cred_blob: Some(vec![0xCB]),
             large_blob_key: Some(vec![0x1B]),
         };
-        let serialized = serialize_credential(credential.clone()).unwrap();
-        let reconstructed = deserialize_credential(&serialized).unwrap();
+        let serialized =
+            serialize_credential::<TestEnv>(&mut env, &wrap_key, credential.clone()).unwrap();
+        let reconstructed = deserialize_credential::<TestEnv>(&wrap_key, &serialized).unwrap();
         assert_eq!(credential, reconstructed);
     }
 

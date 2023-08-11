@@ -21,7 +21,7 @@ use rand_core::RngCore;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt<E: Env>(
-    env: &mut E,
+    rng: &mut E::Rng,
     aes_key: &AesKey<E>,
     plaintext: &[u8],
     embeds_iv: bool,
@@ -32,7 +32,7 @@ pub fn aes256_cbc_encrypt<E: Env>(
     let mut ciphertext = Vec::with_capacity(plaintext.len() + 16 * embeds_iv as usize);
     let iv = if embeds_iv {
         ciphertext.resize(16, 0);
-        env.rng().fill_bytes(&mut ciphertext[..16]);
+        rng.fill_bytes(&mut ciphertext[..16]);
         *array_ref!(ciphertext, 0, 16)
     } else {
         [0u8; 16]
@@ -74,7 +74,8 @@ mod test {
         let mut env = TestEnv::default();
         let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, true).unwrap();
+        let ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, true).unwrap();
         assert_eq!(*decrypted, plaintext);
     }
@@ -84,7 +85,8 @@ mod test {
         let mut env = TestEnv::default();
         let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, false).unwrap();
+        let ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, false).unwrap();
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext, false).unwrap();
         assert_eq!(*decrypted, plaintext);
     }
@@ -95,7 +97,7 @@ mod test {
         let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
         let mut ciphertext_no_iv =
-            aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, false).unwrap();
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, false).unwrap();
         let mut ciphertext_with_iv = vec![0u8; 16];
         ciphertext_with_iv.append(&mut ciphertext_no_iv);
         let decrypted = aes256_cbc_decrypt::<TestEnv>(&aes_key, &ciphertext_with_iv, true).unwrap();
@@ -107,7 +109,8 @@ mod test {
         let mut env = TestEnv::default();
         let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let mut ciphertext = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, true).unwrap();
+        let mut ciphertext =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
         let mut expected_plaintext = plaintext;
         for i in 0..16 {
             ciphertext[i] ^= 0xBB;
@@ -122,8 +125,10 @@ mod test {
         let mut env = TestEnv::default();
         let aes_key = AesKey::<TestEnv>::new(&[0xC2; 32]);
         let plaintext = vec![0xAA; 64];
-        let ciphertext1 = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, true).unwrap();
-        let ciphertext2 = aes256_cbc_encrypt(&mut env, &aes_key, &plaintext, true).unwrap();
+        let ciphertext1 =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
+        let ciphertext2 =
+            aes256_cbc_encrypt::<TestEnv>(env.rng(), &aes_key, &plaintext, true).unwrap();
         assert_eq!(ciphertext1.len(), 80);
         assert_eq!(ciphertext2.len(), 80);
         // The ciphertext should mutate in all blocks with a different IV.

@@ -256,7 +256,7 @@ impl Ctap1Command {
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
         let private_key = PrivateKey::new_ecdsa(env);
         let sk = private_key
-            .ecdsa_key(env)
+            .ecdsa_key::<E>()
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = sk.public_key();
         let credential_source = CredentialSource {
@@ -333,10 +333,6 @@ impl Ctap1Command {
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         let credential_source = filter_listed_credential(credential_source, false)
             .ok_or(Ctap1StatusCode::SW_WRONG_DATA)?;
-        let ecdsa_key = credential_source
-            .private_key
-            .ecdsa_key(env)
-            .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         if flags == Ctap1Flags::CheckOnly {
             return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
         }
@@ -351,10 +347,13 @@ impl Ctap1Command {
             )
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         signature_data.extend(&challenge);
-        let signature = ecdsa_key.sign(&signature_data);
+        let signature = credential_source
+            .private_key
+            .sign_and_encode::<E>(&signature_data)
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = signature_data[application.len()..application.len() + 5].to_vec();
-        response.extend(signature.to_der());
+        response.extend(&signature);
         Ok(response)
     }
 }

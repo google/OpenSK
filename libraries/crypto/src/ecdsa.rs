@@ -19,9 +19,7 @@ use super::ec::point::PointP256;
 use super::Hash256;
 use alloc::vec;
 use alloc::vec::Vec;
-#[cfg(feature = "std")]
-use arrayref::array_mut_ref;
-use arrayref::{array_ref, mut_array_refs};
+use arrayref::{array_mut_ref, array_ref, mut_array_refs};
 use core::marker::PhantomData;
 use rand_core::RngCore;
 use zeroize::Zeroize;
@@ -220,7 +218,6 @@ impl Signature {
         Some(Signature { r, s })
     }
 
-    #[cfg(feature = "std")]
     pub fn to_bytes(&self, bytes: &mut [u8; Signature::BYTES_LENGTH]) {
         self.r
             .to_int()

@@ -15,6 +15,7 @@
 use super::status_code::Ctap2StatusCode;
 use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_SIZE};
 use crate::api::private_key::PrivateKey;
+use crate::env::{AesKey, Env};
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -601,8 +602,6 @@ pub struct PublicKeyCredentialSource {
 // is associated with a unique tag, implemented with a CBOR unsigned key.
 enum PublicKeyCredentialSourceField {
     CredentialId = 0,
-    // Deprecated, we still read this field for backwards compatibility.
-    EcdsaPrivateKey = 1,
     RpId = 2,
     UserHandle = 3,
     UserDisplayName = 4,
@@ -616,6 +615,7 @@ enum PublicKeyCredentialSourceField {
     // When a field is removed, its tag should be reserved and not used for new fields. We document
     // those reserved tags below.
     // Reserved tags:
+    // - EcdsaPrivateKey = 1,
     // - CredRandom = 5,
 }
 
@@ -625,32 +625,41 @@ impl From<PublicKeyCredentialSourceField> for cbor::Value {
     }
 }
 
-impl From<PublicKeyCredentialSource> for cbor::Value {
-    fn from(credential: PublicKeyCredentialSource) -> cbor::Value {
-        cbor_map_options! {
-            PublicKeyCredentialSourceField::CredentialId => Some(credential.credential_id),
-            PublicKeyCredentialSourceField::RpId => Some(credential.rp_id),
-            PublicKeyCredentialSourceField::UserHandle => Some(credential.user_handle),
-            PublicKeyCredentialSourceField::UserDisplayName => credential.user_display_name,
-            PublicKeyCredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
-            PublicKeyCredentialSourceField::CreationOrder => credential.creation_order,
-            PublicKeyCredentialSourceField::UserName => credential.user_name,
-            PublicKeyCredentialSourceField::UserIcon => credential.user_icon,
-            PublicKeyCredentialSourceField::CredBlob => credential.cred_blob,
-            PublicKeyCredentialSourceField::LargeBlobKey => credential.large_blob_key,
-            PublicKeyCredentialSourceField::PrivateKey => credential.private_key,
-        }
+impl PublicKeyCredentialSource {
+    // Relying parties do not need to provide the credential ID in an allow_list if true.
+    pub fn is_discoverable(&self) -> bool {
+        self.cred_protect_policy.is_none()
+            || self.cred_protect_policy
+                == Some(CredentialProtectionPolicy::UserVerificationOptional)
     }
-}
 
-impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
-    type Error = Ctap2StatusCode;
+    pub fn to_cbor<E: Env>(
+        self,
+        rng: &mut E::Rng,
+        wrap_key: &AesKey<E>,
+    ) -> Result<cbor::Value, Ctap2StatusCode> {
+        Ok(cbor_map_options! {
+            PublicKeyCredentialSourceField::CredentialId => Some(self.credential_id),
+            PublicKeyCredentialSourceField::RpId => Some(self.rp_id),
+            PublicKeyCredentialSourceField::UserHandle => Some(self.user_handle),
+            PublicKeyCredentialSourceField::UserDisplayName => self.user_display_name,
+            PublicKeyCredentialSourceField::CredProtectPolicy => self.cred_protect_policy,
+            PublicKeyCredentialSourceField::CreationOrder => self.creation_order,
+            PublicKeyCredentialSourceField::UserName => self.user_name,
+            PublicKeyCredentialSourceField::UserIcon => self.user_icon,
+            PublicKeyCredentialSourceField::CredBlob => self.cred_blob,
+            PublicKeyCredentialSourceField::LargeBlobKey => self.large_blob_key,
+            PublicKeyCredentialSourceField::PrivateKey => self.private_key.to_cbor::<E>(rng, wrap_key)?,
+        })
+    }
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    pub fn from_cbor<E: Env>(
+        wrap_key: &AesKey<E>,
+        cbor_value: cbor::Value,
+    ) -> Result<Self, Ctap2StatusCode> {
         destructure_cbor_map! {
             let {
                 PublicKeyCredentialSourceField::CredentialId => credential_id,
-                PublicKeyCredentialSourceField::EcdsaPrivateKey => ecdsa_private_key,
                 PublicKeyCredentialSourceField::RpId => rp_id,
                 PublicKeyCredentialSourceField::UserHandle => user_handle,
                 PublicKeyCredentialSourceField::UserDisplayName => user_display_name,
@@ -676,17 +685,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
         let user_icon = user_icon.map(extract_text_string).transpose()?;
         let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
         let large_blob_key = large_blob_key.map(extract_byte_string).transpose()?;
-
-        // Parse the private key from the deprecated field if necessary.
-        let ecdsa_private_key = ecdsa_private_key.map(extract_byte_string).transpose()?;
-        let private_key = private_key.map(PrivateKey::try_from).transpose()?;
-        let private_key = match (ecdsa_private_key, private_key) {
-            (None, None) => return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-            (Some(_), Some(_)) => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-            (Some(k), None) => PrivateKey::new_ecdsa_from_bytes(&k)
-                .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
-            (None, Some(k)) => k,
-        };
+        let private_key = PrivateKey::from_cbor::<E>(wrap_key, ok_or_missing(private_key)?)?;
 
         // We don't return whether there were unknown fields in the CBOR value. This means that
         // deserialization is not injective. In particular deserialization is only an inverse of
@@ -712,15 +711,6 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialSource {
             cred_blob,
             large_blob_key,
         })
-    }
-}
-
-impl PublicKeyCredentialSource {
-    // Relying parties do not need to provide the credential ID in an allow_list if true.
-    pub fn is_discoverable(&self) -> bool {
-        self.cred_protect_policy.is_none()
-            || self.cred_protect_policy
-                == Some(CredentialProtectionPolicy::UserVerificationOptional)
     }
 }
 
@@ -1207,6 +1197,7 @@ mod test {
     use super::*;
     use crate::api::crypto::ecdh::PublicKey as _;
     use crate::api::crypto::ecdsa::PublicKey as _;
+    use crate::api::key_store::KeyStore;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
     use crate::env::{EcdhPk, EcdsaPk, Env};
@@ -2080,6 +2071,7 @@ mod test {
     #[test]
     fn test_credential_source_cbor_round_trip() {
         let mut env = TestEnv::default();
+        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let private_key = PrivateKey::new_ecdsa(&mut env);
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -2096,8 +2088,12 @@ mod test {
             large_blob_key: None,
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2106,8 +2102,12 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2116,8 +2116,12 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2126,8 +2130,12 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2136,8 +2144,12 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2146,8 +2158,12 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential.clone())
         );
 
@@ -2156,91 +2172,28 @@ mod test {
             ..credential
         };
 
+        let cbor_value = credential
+            .clone()
+            .to_cbor::<TestEnv>(env.rng(), &wrap_key)
+            .unwrap();
         assert_eq!(
-            PublicKeyCredentialSource::try_from(cbor::Value::from(credential.clone())),
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_value),
             Ok(credential)
-        );
-    }
-
-    #[test]
-    fn test_credential_source_cbor_read_legacy() {
-        let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
-        let key_bytes = private_key.to_bytes();
-        let credential = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
-            rp_id: "example.com".to_string(),
-            user_handle: b"foo".to_vec(),
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        };
-
-        let source_cbor = cbor_map! {
-            PublicKeyCredentialSourceField::CredentialId => credential.credential_id.clone(),
-            PublicKeyCredentialSourceField::EcdsaPrivateKey => key_bytes,
-            PublicKeyCredentialSourceField::RpId => credential.rp_id.clone(),
-            PublicKeyCredentialSourceField::UserHandle => credential.user_handle.clone(),
-        };
-        assert_eq!(
-            PublicKeyCredentialSource::try_from(source_cbor),
-            Ok(credential)
-        );
-    }
-
-    #[test]
-    fn test_credential_source_cbor_legacy_error() {
-        let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
-        let key_bytes = private_key.to_bytes();
-        let credential = PublicKeyCredentialSource {
-            key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key: private_key.clone(),
-            rp_id: "example.com".to_string(),
-            user_handle: b"foo".to_vec(),
-            user_display_name: None,
-            cred_protect_policy: None,
-            creation_order: 0,
-            user_name: None,
-            user_icon: None,
-            cred_blob: None,
-            large_blob_key: None,
-        };
-
-        let source_cbor = cbor_map! {
-            PublicKeyCredentialSourceField::CredentialId => credential.credential_id.clone(),
-            PublicKeyCredentialSourceField::RpId => credential.rp_id.clone(),
-            PublicKeyCredentialSourceField::UserHandle => credential.user_handle.clone(),
-        };
-        assert_eq!(
-            PublicKeyCredentialSource::try_from(source_cbor),
-            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-        );
-
-        let source_cbor = cbor_map! {
-            PublicKeyCredentialSourceField::CredentialId => credential.credential_id,
-            PublicKeyCredentialSourceField::EcdsaPrivateKey => key_bytes,
-            PublicKeyCredentialSourceField::RpId => credential.rp_id,
-            PublicKeyCredentialSourceField::UserHandle => credential.user_handle,
-            PublicKeyCredentialSourceField::PrivateKey => private_key,
-        };
-        assert_eq!(
-            PublicKeyCredentialSource::try_from(source_cbor),
-            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
     }
 
     #[test]
     fn test_credential_source_invalid_cbor() {
-        assert!(PublicKeyCredentialSource::try_from(cbor_false!()).is_err());
-        assert!(PublicKeyCredentialSource::try_from(cbor_array!(false)).is_err());
-        assert!(PublicKeyCredentialSource::try_from(cbor_array!(b"foo".to_vec())).is_err());
+        let mut env = TestEnv::default();
+        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
+        assert!(PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_false!()).is_err());
+        assert!(
+            PublicKeyCredentialSource::from_cbor::<TestEnv>(&wrap_key, cbor_array!(false)).is_err()
+        );
+        assert!(PublicKeyCredentialSource::from_cbor::<TestEnv>(
+            &wrap_key,
+            cbor_array!(b"foo".to_vec())
+        )
+        .is_err());
     }
 }

@@ -1,5 +1,5 @@
 diff --git a/chips/nrf52/src/nvmc.rs b/chips/nrf52/src/nvmc.rs
-index 61e94260e..b7c3be3f6 100644
+index 61e94260e..e115e1851 100644
 --- a/chips/nrf52/src/nvmc.rs
 +++ b/chips/nrf52/src/nvmc.rs
 @@ -5,7 +5,14 @@
@@ -393,7 +393,7 @@ index 028f30220..8880bc000 100644
  pub use crate::process::ProcessId;
  pub use crate::scheduler::Scheduler;
 diff --git a/kernel/src/memop.rs b/kernel/src/memop.rs
-index 51d89f37c..45ab3856b 100644
+index 51d89f37c..c4f7cef92 100644
 --- a/kernel/src/memop.rs
 +++ b/kernel/src/memop.rs
 @@ -107,6 +107,37 @@ pub(crate) fn memop(process: &dyn Process, op_type: usize, r1: usize) -> Syscall

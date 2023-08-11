@@ -14,7 +14,7 @@
 
 //! Functionality for serializing CBOR values into bytes.
 
-use super::values::{Constants, Value};
+use super::values::{Constants, Value, ValueImpl};
 use alloc::vec::Vec;
 
 /// Possible errors from a serialization operation.
@@ -60,42 +60,36 @@ impl<'a> Writer<'a> {
         if remaining_depth.map_or(false, |d| d < 0) {
             return Err(EncoderError::TooMuchNesting);
         }
-        let type_label = value.type_label();
-        match value {
-            Value::Unsigned(unsigned) => self.start_item(type_label, unsigned),
-            Value::Negative(negative) => self.start_item(type_label, -(negative + 1) as u64),
-            Value::ByteString(byte_string) => {
+        let type_label = value.0.type_label();
+        match value.0 {
+            ValueImpl::Unsigned(unsigned) => self.start_item(type_label, unsigned),
+            ValueImpl::Negative(negative) => self.start_item(type_label, -(negative + 1) as u64),
+            ValueImpl::ByteString(byte_string) => {
                 self.start_item(type_label, byte_string.len() as u64);
                 self.encoded_cbor.extend(byte_string);
             }
-            Value::TextString(text_string) => {
+            ValueImpl::TextString(text_string) => {
                 self.start_item(type_label, text_string.len() as u64);
                 self.encoded_cbor.extend(text_string.into_bytes());
             }
-            Value::Array(array) => {
+            ValueImpl::Array(array) => {
                 self.start_item(type_label, array.len() as u64);
                 for el in array {
                     self.encode_cbor(el, remaining_depth.map(|d| d - 1))?;
                 }
             }
-            Value::Map(mut map) => {
-                map.sort_by(|a, b| a.0.cmp(&b.0));
-                let map_len = map.len();
-                map.dedup_by(|a, b| a.0.eq(&b.0));
-                if map_len != map.len() {
-                    return Err(EncoderError::DuplicateMapKey);
-                }
-                self.start_item(type_label, map_len as u64);
+            ValueImpl::Map(map) => {
+                self.start_item(type_label, map.len() as u64);
                 for (k, v) in map {
                     self.encode_cbor(k, remaining_depth.map(|d| d - 1))?;
                     self.encode_cbor(v, remaining_depth.map(|d| d - 1))?;
                 }
             }
-            Value::Tag(tag, inner_value) => {
+            ValueImpl::Tag(tag, inner_value) => {
                 self.start_item(type_label, tag);
                 self.encode_cbor(*inner_value, remaining_depth.map(|d| d - 1))?;
             }
-            Value::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
+            ValueImpl::Simple(simple_value) => self.start_item(type_label, simple_value as u64),
         }
         Ok(())
     }
@@ -340,42 +334,6 @@ mod test {
             0 => "a",
         };
         assert_eq!(write_return(sorted_map), write_return(unsorted_map));
-    }
-
-    #[test]
-    fn test_write_map_duplicates() {
-        let duplicate0 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            0 => "b",
-        };
-        assert_eq!(write_return(duplicate0), None);
-        let duplicate1 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            -1 => "d",
-        };
-        assert_eq!(write_return(duplicate1), None);
-        let duplicate2 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            b"a" => "f",
-        };
-        assert_eq!(write_return(duplicate2), None);
-        let duplicate3 = cbor_map! {
-            0 => "a",
-            -1 => "c",
-            b"a" => "e",
-            "c" => "g",
-            "c" => "h",
-        };
-        assert_eq!(write_return(duplicate3), None);
     }
 
     #[test]

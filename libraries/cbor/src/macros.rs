@@ -139,8 +139,11 @@ macro_rules! assert_sorted_keys {
 ///
 /// Keys and values are expressions and converted into CBOR Keys and Values.
 /// The syntax for these pairs is `key_expression => value_expression,`.
-/// Duplicate keys will lead to invalid CBOR, i.e. writing these values fails.
 /// Keys do not have to be sorted.
+///
+/// # Panics
+///
+/// You may not call this function with identical keys in its argument.
 ///
 /// Example usage:
 ///
@@ -168,7 +171,7 @@ macro_rules! cbor_map {
             $(
                 _map.push(($key.into_cbor_value(), $value.into_cbor_value()));
             )*
-            $crate::values::Value::Map(_map)
+            $crate::values::Value::map(_map)
         }
     };
 }
@@ -214,7 +217,7 @@ macro_rules! cbor_map_options {
                 }
             }
             )*
-            $crate::values::Value::Map(_map)
+            $crate::values::Value::map(_map)
         }
     };
 }
@@ -223,7 +226,7 @@ macro_rules! cbor_map_options {
 #[macro_export]
 macro_rules! cbor_map_collection {
     ( $tree:expr ) => {{
-        $crate::values::Value::from($tree)
+        $crate::values::Value::map($tree)
     }};
 }
 
@@ -250,7 +253,7 @@ macro_rules! cbor_array {
             // The import is unused if the list is empty.
             #[allow(unused_imports)]
             use $crate::values::IntoCborValue;
-            $crate::values::Value::Array(vec![ $( $value.into_cbor_value(), )* ])
+            $crate::values::Value::array(vec![ $( $value.into_cbor_value(), )* ])
         }
     };
 }
@@ -260,7 +263,7 @@ macro_rules! cbor_array {
 macro_rules! cbor_array_vec {
     ( $vec:expr ) => {{
         use $crate::values::IntoCborValue;
-        $crate::values::Value::Array($vec.into_iter().map(|x| x.into_cbor_value()).collect())
+        $crate::values::Value::array($vec.into_iter().map(|x| x.into_cbor_value()).collect())
     }};
 }
 
@@ -268,7 +271,7 @@ macro_rules! cbor_array_vec {
 #[macro_export]
 macro_rules! cbor_true {
     ( ) => {
-        $crate::values::Value::Simple($crate::values::SimpleValue::TrueValue)
+        $crate::values::Value::bool_value(true)
     };
 }
 
@@ -276,7 +279,7 @@ macro_rules! cbor_true {
 #[macro_export]
 macro_rules! cbor_false {
     ( ) => {
-        $crate::values::Value::Simple($crate::values::SimpleValue::FalseValue)
+        $crate::values::Value::bool_value(false)
     };
 }
 
@@ -284,7 +287,7 @@ macro_rules! cbor_false {
 #[macro_export]
 macro_rules! cbor_null {
     ( ) => {
-        $crate::values::Value::Simple($crate::values::SimpleValue::NullValue)
+        $crate::values::Value::null_value()
     };
 }
 
@@ -292,7 +295,7 @@ macro_rules! cbor_null {
 #[macro_export]
 macro_rules! cbor_undefined {
     ( ) => {
-        $crate::values::Value::Simple($crate::values::SimpleValue::Undefined)
+        $crate::values::Value::undefined()
     };
 }
 
@@ -308,7 +311,7 @@ macro_rules! cbor_bool {
 #[macro_export]
 macro_rules! cbor_unsigned {
     ( $x:expr ) => {
-        $crate::values::Value::Unsigned($x)
+        $crate::values::Value::unsigned($x as u64)
     };
 }
 
@@ -316,7 +319,7 @@ macro_rules! cbor_unsigned {
 #[macro_export]
 macro_rules! cbor_int {
     ( $x:expr ) => {
-        $crate::values::Value::integer($x)
+        $crate::values::Value::integer($x as i64)
     };
 }
 
@@ -324,7 +327,7 @@ macro_rules! cbor_int {
 #[macro_export]
 macro_rules! cbor_text {
     ( $x:expr ) => {
-        $crate::values::Value::TextString($x.into())
+        $crate::values::Value::text_string($x.into())
     };
 }
 
@@ -332,7 +335,7 @@ macro_rules! cbor_text {
 #[macro_export]
 macro_rules! cbor_bytes {
     ( $x:expr ) => {
-        $crate::values::Value::ByteString($x)
+        $crate::values::Value::byte_string($x)
     };
 }
 
@@ -340,7 +343,7 @@ macro_rules! cbor_bytes {
 #[macro_export]
 macro_rules! cbor_tagged {
     ( $t:expr, $x: expr ) => {
-        $crate::values::Value::Tag($t, ::alloc::boxed::Box::new($x))
+        $crate::values::Value::tag($t, $x)
     };
 }
 
@@ -362,41 +365,41 @@ macro_rules! cbor_bytes_lit {
 
 #[cfg(test)]
 mod test {
-    use super::super::values::{SimpleValue, Value};
+    use super::super::values::Value;
     use alloc::string::String;
     use alloc::vec;
     use alloc::vec::Vec;
 
     #[test]
     fn test_cbor_simple_values() {
-        assert_eq!(cbor_true!(), Value::Simple(SimpleValue::TrueValue));
-        assert_eq!(cbor_false!(), Value::Simple(SimpleValue::FalseValue));
-        assert_eq!(cbor_null!(), Value::Simple(SimpleValue::NullValue));
-        assert_eq!(cbor_undefined!(), Value::Simple(SimpleValue::Undefined));
+        assert_eq!(cbor_true!(), Value::bool_value(true));
+        assert_eq!(cbor_false!(), Value::bool_value(false));
+        assert_eq!(cbor_null!(), Value::null_value());
+        assert_eq!(cbor_undefined!(), Value::undefined());
     }
 
     #[test]
     fn test_cbor_bool() {
-        assert_eq!(cbor_bool!(true), Value::Simple(SimpleValue::TrueValue));
-        assert_eq!(cbor_bool!(false), Value::Simple(SimpleValue::FalseValue));
+        assert_eq!(cbor_bool!(true), Value::bool_value(true));
+        assert_eq!(cbor_bool!(false), Value::bool_value(false));
     }
 
     #[test]
     fn test_cbor_int_unsigned() {
-        assert_eq!(cbor_int!(0), Value::Unsigned(0));
-        assert_eq!(cbor_int!(1), Value::Unsigned(1));
-        assert_eq!(cbor_int!(123456), Value::Unsigned(123456));
+        assert_eq!(cbor_int!(0), Value::from(0));
+        assert_eq!(cbor_int!(1), Value::from(1));
+        assert_eq!(cbor_int!(123456), Value::from(123456));
         assert_eq!(
             cbor_int!(core::i64::MAX),
-            Value::Unsigned(core::i64::MAX as u64)
+            Value::from(core::i64::MAX as u64)
         );
     }
 
     #[test]
     fn test_cbor_int_negative() {
-        assert_eq!(cbor_int!(-1), Value::Negative(-1));
-        assert_eq!(cbor_int!(-123456), Value::Negative(-123456));
-        assert_eq!(cbor_int!(core::i64::MIN), Value::Negative(core::i64::MIN));
+        assert_eq!(cbor_int!(-1), Value::from(-1));
+        assert_eq!(cbor_int!(-123456), Value::from(-123456));
+        assert_eq!(cbor_int!(core::i64::MIN), Value::from(core::i64::MIN));
     }
 
     #[test]
@@ -413,17 +416,17 @@ mod test {
             core::i64::MAX,
             core::u64::MAX,
         ];
-        let b = Value::Array(vec![
-            Value::Negative(core::i64::MIN),
-            Value::Negative(core::i32::MIN as i64),
-            Value::Negative(-123456),
-            Value::Negative(-1),
-            Value::Unsigned(0),
-            Value::Unsigned(1),
-            Value::Unsigned(123456),
-            Value::Unsigned(core::i32::MAX as u64),
-            Value::Unsigned(core::i64::MAX as u64),
-            Value::Unsigned(core::u64::MAX),
+        let b = Value::array(vec![
+            Value::from(core::i64::MIN),
+            Value::from(core::i32::MIN as i64),
+            Value::from(-123456),
+            Value::from(-1),
+            Value::from(0),
+            Value::from(1),
+            Value::from(123456),
+            Value::from(core::i32::MAX as u64),
+            Value::from(core::i64::MAX as u64),
+            Value::from(core::u64::MAX),
         ]);
         assert_eq!(a, b);
     }
@@ -442,22 +445,17 @@ mod test {
             cbor_map! {},
             cbor_map! {2 => 3},
         ];
-        let b = Value::Array(vec![
-            Value::Negative(-123),
-            Value::Unsigned(456),
-            Value::Simple(SimpleValue::TrueValue),
-            Value::Simple(SimpleValue::NullValue),
-            Value::TextString(String::from("foo")),
-            Value::ByteString(b"bar".to_vec()),
-            Value::Array(Vec::new()),
-            Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
-            Value::Map(Vec::new()),
-            Value::Map(
-                [(Value::Unsigned(2), Value::Unsigned(3))]
-                    .iter()
-                    .cloned()
-                    .collect(),
-            ),
+        let b = Value::array(vec![
+            Value::from(-123),
+            Value::from(456),
+            Value::bool_value(true),
+            Value::null_value(),
+            Value::from(String::from("foo")),
+            Value::from(b"bar".to_vec()),
+            Value::array(Vec::new()),
+            Value::array(vec![Value::from(0), Value::from(1)]),
+            Value::map(Vec::new()),
+            Value::map([(Value::from(2), Value::from(3))].iter().cloned().collect()),
         ]);
         assert_eq!(a, b);
     }
@@ -465,18 +463,18 @@ mod test {
     #[test]
     fn test_cbor_array_vec_empty() {
         let a = cbor_array_vec!(Vec::<bool>::new());
-        let b = Value::Array(Vec::new());
+        let b = Value::array(Vec::new());
         assert_eq!(a, b);
     }
 
     #[test]
     fn test_cbor_array_vec_int() {
         let a = cbor_array_vec!(vec![1, 2, 3, 4]);
-        let b = Value::Array(vec![
-            Value::Unsigned(1),
-            Value::Unsigned(2),
-            Value::Unsigned(3),
-            Value::Unsigned(4),
+        let b = Value::array(vec![
+            Value::from(1),
+            Value::from(2),
+            Value::from(3),
+            Value::from(4),
         ]);
         assert_eq!(a, b);
     }
@@ -484,10 +482,10 @@ mod test {
     #[test]
     fn test_cbor_array_vec_text() {
         let a = cbor_array_vec!(vec!["a", "b", "c"]);
-        let b = Value::Array(vec![
-            Value::TextString(String::from("a")),
-            Value::TextString(String::from("b")),
-            Value::TextString(String::from("c")),
+        let b = Value::array(vec![
+            Value::from(String::from("a")),
+            Value::from(String::from("b")),
+            Value::from(String::from("c")),
         ]);
         assert_eq!(a, b);
     }
@@ -495,10 +493,10 @@ mod test {
     #[test]
     fn test_cbor_array_vec_bytes() {
         let a = cbor_array_vec!(vec![b"a", b"b", b"c"]);
-        let b = Value::Array(vec![
-            Value::ByteString(b"a".to_vec()),
-            Value::ByteString(b"b".to_vec()),
-            Value::ByteString(b"c".to_vec()),
+        let b = Value::array(vec![
+            Value::from(b"a".to_vec()),
+            Value::from(b"b".to_vec()),
+            Value::from(b"c".to_vec()),
         ]);
         assert_eq!(a, b);
     }
@@ -506,46 +504,35 @@ mod test {
     #[test]
     fn test_cbor_map() {
         let a = cbor_map! {
-            -1 => -23,
             4 => 56,
-            "foo" => true,
-            b"bar" => cbor_null!(),
             5 => "foo",
             6 => b"bar",
             7 => cbor_array![],
             8 => cbor_array![0, 1],
             9 => cbor_map!{},
             10 => cbor_map!{2 => 3},
+            -1 => -23,
+            b"bar" => cbor_null!(),
+            "foo" => true,
         };
-        let b = Value::Map(
+        let b = Value::map(
             [
-                (Value::Negative(-1), Value::Negative(-23)),
-                (Value::Unsigned(4), Value::Unsigned(56)),
+                (Value::from(4), Value::from(56)),
+                (Value::from(5), Value::from(String::from("foo"))),
+                (Value::from(6), Value::from(b"bar".to_vec())),
+                (Value::from(7), Value::array(Vec::new())),
                 (
-                    Value::TextString(String::from("foo")),
-                    Value::Simple(SimpleValue::TrueValue),
+                    Value::from(8),
+                    Value::array(vec![Value::from(0), Value::from(1)]),
                 ),
+                (Value::from(9), Value::map(Vec::new())),
                 (
-                    Value::ByteString(b"bar".to_vec()),
-                    Value::Simple(SimpleValue::NullValue),
+                    Value::from(10),
+                    Value::map([(Value::from(2), Value::from(3))].iter().cloned().collect()),
                 ),
-                (Value::Unsigned(5), Value::TextString(String::from("foo"))),
-                (Value::Unsigned(6), Value::ByteString(b"bar".to_vec())),
-                (Value::Unsigned(7), Value::Array(Vec::new())),
-                (
-                    Value::Unsigned(8),
-                    Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
-                ),
-                (Value::Unsigned(9), Value::Map(Vec::new())),
-                (
-                    Value::Unsigned(10),
-                    Value::Map(
-                        [(Value::Unsigned(2), Value::Unsigned(3))]
-                            .iter()
-                            .cloned()
-                            .collect(),
-                    ),
-                ),
+                (Value::from(-1), Value::from(-23)),
+                (Value::from(b"bar".to_vec()), Value::null_value()),
+                (Value::from(String::from("foo")), Value::bool_value(true)),
             ]
             .iter()
             .cloned()
@@ -557,54 +544,43 @@ mod test {
     #[test]
     fn test_cbor_map_options() {
         let a = cbor_map_options! {
-            -1 => -23,
             4 => Some(56),
-            11 => None::<String>,
-            "foo" => true,
-            12 => None::<&str>,
-            b"bar" => Some(cbor_null!()),
-            13 => None::<Vec<u8>>,
             5 => "foo",
-            14 => None::<&[u8]>,
             6 => Some(b"bar" as &[u8]),
-            15 => None::<bool>,
             7 => cbor_array![],
-            16 => None::<i32>,
             8 => Some(cbor_array![0, 1]),
-            17 => None::<i64>,
             9 => cbor_map!{},
-            18 => None::<u64>,
             10 => Some(cbor_map!{2 => 3}),
+            11 => None::<String>,
+            12 => None::<&str>,
+            13 => None::<Vec<u8>>,
+            14 => None::<&[u8]>,
+            15 => None::<bool>,
+            16 => None::<i32>,
+            17 => None::<i64>,
+            18 => None::<u64>,
+            -1 => -23,
+            b"bar" => Some(cbor_null!()),
+            "foo" => true,
         };
-        let b = Value::Map(
+        let b = Value::map(
             [
-                (Value::Negative(-1), Value::Negative(-23)),
-                (Value::Unsigned(4), Value::Unsigned(56)),
+                (Value::from(4), Value::from(56)),
+                (Value::from(5), Value::from(String::from("foo"))),
+                (Value::from(6), Value::from(b"bar".to_vec())),
+                (Value::from(7), Value::array(Vec::new())),
                 (
-                    Value::TextString(String::from("foo")),
-                    Value::Simple(SimpleValue::TrueValue),
+                    Value::from(8),
+                    Value::array(vec![Value::from(0), Value::from(1)]),
                 ),
+                (Value::from(9), Value::map(Vec::new())),
                 (
-                    Value::ByteString(b"bar".to_vec()),
-                    Value::Simple(SimpleValue::NullValue),
+                    Value::from(10),
+                    Value::map([(Value::from(2), Value::from(3))].iter().cloned().collect()),
                 ),
-                (Value::Unsigned(5), Value::TextString(String::from("foo"))),
-                (Value::Unsigned(6), Value::ByteString(b"bar".to_vec())),
-                (Value::Unsigned(7), Value::Array(Vec::new())),
-                (
-                    Value::Unsigned(8),
-                    Value::Array(vec![Value::Unsigned(0), Value::Unsigned(1)]),
-                ),
-                (Value::Unsigned(9), Value::Map(Vec::new())),
-                (
-                    Value::Unsigned(10),
-                    Value::Map(
-                        [(Value::Unsigned(2), Value::Unsigned(3))]
-                            .iter()
-                            .cloned()
-                            .collect(),
-                    ),
-                ),
+                (Value::from(-1), Value::from(-23)),
+                (Value::from(b"bar".to_vec()), Value::null_value()),
+                (Value::from(String::from("foo")), Value::bool_value(true)),
             ]
             .iter()
             .cloned()
@@ -616,22 +592,19 @@ mod test {
     #[test]
     fn test_cbor_map_collection_empty() {
         let a = cbor_map_collection!(Vec::<(_, _)>::new());
-        let b = Value::Map(Vec::new());
+        let b = Value::map(Vec::new());
         assert_eq!(a, b);
     }
 
     #[test]
     fn test_cbor_map_collection_foo() {
-        let a = cbor_map_collection!(vec![(Value::Unsigned(2), Value::Unsigned(3))]);
-        let b = Value::Map(vec![(Value::Unsigned(2), Value::Unsigned(3))]);
+        let a = cbor_map_collection!(vec![(Value::from(2), Value::from(3))]);
+        let b = Value::map(vec![(Value::from(2), Value::from(3))]);
         assert_eq!(a, b);
     }
 
     fn extract_map(cbor_value: Value) -> Vec<(Value, Value)> {
-        match cbor_value {
-            Value::Map(map) => map,
-            _ => panic!("Expected CBOR map."),
-        }
+        cbor_value.extract_map().unwrap()
     }
 
     #[test]
@@ -720,5 +693,23 @@ mod test {
         assert_eq!(x3, Some(cbor_unsigned!(30)));
         assert_eq!(x4, Some(cbor_unsigned!(40)));
         assert_eq!(x5, None);
+    }
+
+    #[test]
+    fn test_destructure_unsorted_cbor_map() {
+        let map = cbor_map! {
+            2 => 20,
+            1 => 10,
+        };
+
+        destructure_cbor_map! {
+            let {
+                1 => x1,
+                2 => x2,
+            } = extract_map(map);
+        }
+
+        assert_eq!(x1, Some(cbor_unsigned!(10)));
+        assert_eq!(x2, Some(cbor_unsigned!(20)));
     }
 }

@@ -13,41 +13,26 @@ This crate implements Concise Binary Object Representation (CBOR) from [RFC
 
 ```rust
 fn main() {
-    // Build a CBOR object with various different types included. Note that this
+    // Build a CBOR object with the crate's convenience macros. Note that this
     // object is not built in canonical order.
-    let manual_object = Value::Map(vec![
-        (
-            Value::Unsigned(1),
-            Value::Array(vec![Value::Unsigned(2), Value::Unsigned(3)]),
-        ),
-        (
-            Value::TextString("tstr".to_owned()),
-            Value::ByteString(vec![1, 2, 3]),
-        ),
-        (Value::Negative(-2), Value::Simple(SimpleValue::NullValue)),
-        (Value::Unsigned(3), Value::Simple(SimpleValue::TrueValue)),
-    ]);
-
-    // Build the same object using the crate's convenience macros.
-    let macro_object = cbor_map! {
+    let map_object = cbor_map! {
         1 => cbor_array![2, 3],
         "tstr" => cbor_bytes!(vec![1, 2, 3]),
         -2 => cbor_null!(),
         3 => cbor_true!(),
     };
 
-    assert_eq!(manual_object, macro_object);
-    println!("Object {:?}", manual_object);
+    println!("Object {:?}", map_object);
 
     // Serialize to bytes.
-    let mut manual_data = vec![];
-    sk_cbor::writer::write(manual_object, &mut manual_data);
-    let hex_manual_data = hexify(&manual_data);
+    let mut map_data = vec![];
+    sk_cbor::writer::write(map_object, &mut map_data).unwrap();
+    let hex_map_data = hex::encode(&map_data);
 
     // Serialized version is in canonical order.
-    println!("Serializes to {}", hex_manual_data);
+    println!("Serializes to {}", hex_map_data);
     assert_eq!(
-        hex_manual_data,
+        hex_map_data,
         concat!(
             "a4",         // 4-map
             "01",         // int(1) =>
@@ -63,7 +48,7 @@ fn main() {
 
     // Convert back to an object.  This is different than the original object,
     // because the map is now in canonical order.
-    let recovered_object = sk_cbor::reader::read(&manual_data).unwrap();
+    let recovered_object = sk_cbor::reader::read(&map_data).unwrap();
     println!("Deserializes to {:?}", recovered_object);
 }
 ```

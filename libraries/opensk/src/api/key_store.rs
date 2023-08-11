@@ -365,17 +365,11 @@ impl From<StoreError> for Error {
 }
 
 fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Error> {
-    match cbor_value {
-        cbor::Value::ByteString(byte_string) => Ok(byte_string),
-        _ => Err(Error),
-    }
+    cbor_value.extract_byte_string().ok_or(Error)
 }
 
 fn extract_map(cbor_value: cbor::Value) -> Result<Vec<(cbor::Value, cbor::Value)>, Error> {
-    match cbor_value {
-        cbor::Value::Map(map) => Ok(map),
-        _ => Err(Error),
-    }
+    cbor_value.extract_map().ok_or(Error)
 }
 
 #[cfg(test)]

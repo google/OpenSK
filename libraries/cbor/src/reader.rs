@@ -14,7 +14,7 @@
 
 //! Functionality for deserializing CBOR data into values.
 
-use super::values::{Constants, SimpleValue, Value};
+use super::values::{Constants, SimpleValue, Value, ValueImpl};
 use crate::{
     cbor_array_vec, cbor_bytes_lit, cbor_map_collection, cbor_tagged, cbor_text, cbor_unsigned,
 };
@@ -144,7 +144,7 @@ impl<'a> Reader<'a> {
         if signed_size < 0 {
             Err(DecoderError::OutOfRangeIntegerValue)
         } else {
-            Ok(Value::Negative(-(size_value as i64) - 1))
+            Ok(Value(ValueImpl::Negative(-(size_value as i64) - 1)))
         }
     }
 
@@ -221,7 +221,7 @@ impl<'a> Reader<'a> {
             return Err(DecoderError::UnsupportedFloatingPointValue);
         }
         match SimpleValue::from_integer(size_value) {
-            Some(simple_value) => Ok(Value::Simple(simple_value)),
+            Some(simple_value) => Ok(Value(ValueImpl::Simple(simple_value))),
             None => Err(DecoderError::UnsupportedSimpleValue),
         }
     }

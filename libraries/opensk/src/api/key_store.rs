@@ -375,11 +375,9 @@ fn extract_map(cbor_value: cbor::Value) -> Result<Vec<(cbor::Value, cbor::Value)
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::crypto::ecdsa::SecretKey;
     use crate::api::customization::Customization;
     use crate::ctap::data_formats::SignatureAlgorithm;
     use crate::env::test::TestEnv;
-    use crate::env::EcdsaSk;
 
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
 

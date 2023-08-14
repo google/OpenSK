@@ -229,9 +229,6 @@ impl Signature {
 }
 
 impl PubKey {
-    #[cfg(feature = "with_ctap1")]
-    const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
-
     /// Creates a new PubKey from its coordinates on the elliptic curve.
     pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
         PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
@@ -245,20 +242,6 @@ impl PubKey {
     #[cfg(feature = "std")]
     pub fn to_bytes_uncompressed(&self, bytes: &mut [u8; 65]) {
         self.p.to_bytes_uncompressed(bytes);
-    }
-
-    #[cfg(feature = "with_ctap1")]
-    pub fn to_uncompressed(&self) -> [u8; PubKey::UNCOMPRESSED_LENGTH] {
-        // Formatting according to:
-        // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
-        const B0_BYTE_MARKER: u8 = 0x04;
-        let mut representation = [0; PubKey::UNCOMPRESSED_LENGTH];
-        let (marker, x, y) =
-            mut_array_refs![&mut representation, 1, int256::NBYTES, int256::NBYTES];
-        marker[0] = B0_BYTE_MARKER;
-        self.p.getx().to_int().to_bin(x);
-        self.p.gety().to_int().to_bin(y);
-        representation
     }
 
     /// Writes the coordinates into the passed in arrays.

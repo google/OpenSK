@@ -24,4 +24,3 @@ zeroize = { version = "1.5.7", features = ["derive"] }
 
 [features]
 std = ["hex", "ring", "untrusted", "serde", "serde_json", "regex", "rand_core/getrandom"]
-with_ctap1 = []

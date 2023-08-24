@@ -85,11 +85,12 @@ Secure Cryptographic Implementation workshop 2023 and won the best paper award.
 <summary>Bibtex reference</summary>
 
 ```
-@misc{51659,
-title  = {Hybrid Post-Quantum Signatures in Hardware Security Keys},
-author = {Diana Ghinea and Fabian Kaczmarczyck and Jennifer Pullman and Julien Cretin and Rafael Misoczki and Stefan Kölbl and Luca Invernizzi and Elie Bursztein and Jean-Michel Picod},
-year   = {2022},
-URL    = {https://eprint.iacr.org/2022/1225}
+@InProceedings{Ghinea2023hybrid,
+	author= {Diana Ghinea and Fabian Kaczmarczyck and Jennifer Pullman and Julien Cretin and Rafael Misoczki and Stefan Kölbl and Luca Invernizzi and Elie Bursztein and Jean-Michel Picod},
+	title=	{{Hybrid Post-Quantum Signatures in Hardware Security Keys}},
+	booktitle=	{{4th ACNS Workshop on Secure Cryptographic Implementation, Kyoto, Japan}},
+	month=	{June},
+	year=	{2023},
 }
 ```
 

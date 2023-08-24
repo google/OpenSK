@@ -6,6 +6,10 @@
 ![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=stable)
 [![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=stable)](https://coveralls.io/github/google/OpenSK?branch=stable)
 
+*News:*
+
+- 2023-08-24: [PQC paper reference](#Research)
+
 ## OpenSK
 
 This repository contains a Rust implementation of a
@@ -76,8 +80,23 @@ else you can do with your OpenSK, see [Customization](docs/customization.md).
 
 We implemented post-quantum cryptography on OpenSK. The code is released under
 the [hybrid-pqc tag](https://github.com/google/OpenSK/releases/tag/hybrid-pqc).
-Our [paper](https://research.google/pubs/pub51659/) was published in the ACNS
-Secure Cryptographic Implementation workshop 2023.
+Our [paper](https://eprint.iacr.org/2022/1225) was published in the ACNS
+Secure Cryptographic Implementation workshop 2023 and won the best paper award.
+
+<details>
+<summary>Bibtex reference</summary>
+
+```
+@InProceedings{Ghinea2023hybrid,
+	author= {Diana Ghinea and Fabian Kaczmarczyck and Jennifer Pullman and Julien Cretin and Rafael Misoczki and Stefan Kölbl and Luca Invernizzi and Elie Bursztein and Jean-Michel Picod},
+	title=	{{Hybrid Post-Quantum Signatures in Hardware Security Keys}},
+	booktitle=	{{4th ACNS Workshop on Secure Cryptographic Implementation, Kyoto, Japan}},
+	month=	{June},
+	year=	{2023},
+}
+```
+
+</details>
 
 ## Contributing
 

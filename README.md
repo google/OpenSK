@@ -6,7 +6,9 @@
 ![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=stable)
 [![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=stable)](https://coveralls.io/github/google/OpenSK?branch=stable)
 
-*News:* [PQC paper published!](#Research)
+*News:*
+
+- 2023-08-24: [PQC paper reference](#Research)
 
 ## OpenSK
 

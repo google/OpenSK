@@ -111,7 +111,7 @@ above. However, we support other programmers:
     left to the user.
 
 If your board is already flashed with Tock OS, you may skip installing it:
-`./deploy.py --board=nrf52840dk --opensk --no-tockos`
+`./deploy.py --board=nrf52840dk_opensk --opensk --no-tockos`
 
 For more options, we invite you to read the help of our `deploy.py` script by
 running `./deploy.py --help`.

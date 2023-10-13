@@ -21,5 +21,5 @@ preferred-citation:
     given-names: "Jean-Michel"
   title: "Hybrid Post-Quantum Signatures in Hardware Security Keys"
   journal: "4th ACNS Workshop on Secure Cryptographic Implementation"
-  year: "2023"
-  month: "June"
+  year: 2023
+  month: 6

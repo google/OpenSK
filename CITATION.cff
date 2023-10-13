@@ -20,6 +20,6 @@ preferred-citation:
   - family-names: "Picod"
     given-names: "Jean-Michel"
   title: "Hybrid Post-Quantum Signatures in Hardware Security Keys"
-  booktitle: "4th ACNS Workshop on Secure Cryptographic Implementation"
+  journal: "4th ACNS Workshop on Secure Cryptographic Implementation"
   year: "2023"
   month: "June"

@@ -1,5 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
+repository-code: "https://github.com/google/OpenSK"
+license: "Apache-2.0"
 preferred-citation:
   type: article
   authors:

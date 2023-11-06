@@ -16,10 +16,6 @@
 # Ensure we are at the project root directory
 cd $(readlink -f $(dirname $0))/..
 
-if [ -f "py_virtual_env/bin/pylint" ]; then
-    PYLINT=py_virtual_env/bin/pylint
-else
-    PYLINT=pylint
-fi
+export PATH="py_virtual_env/bin:$PATH"
 
-"$PYLINT" --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`
+pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`

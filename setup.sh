@@ -16,6 +16,8 @@
 # Ensure the script doesn't fail on Github workflows
 export TERM=${TERM:-vt100}
 done_text="$(tput bold)DONE.$(tput sgr0)"
+PY_VENV_NAME=py_virtual_env
+PIP="$PY_VENV_NAME"/bin/pip
 
 set -e
 
@@ -31,7 +33,8 @@ check_command () {
   fi
 }
 check_command rustup " Follow the steps under https://rustup.rs/ to install it."
-check_command pip3
+python3 -m venv "$PY_VENV_NAME"
+check_command "$PIP"
 
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh
@@ -40,7 +43,7 @@ generate_crypto_materials N
 rustup show
 # Nightly is used for testing and fuzzing libraries
 rustup install nightly 
-pip3 install --upgrade -r requirements.txt
+"$PIP" install --upgrade -r requirements.txt
 
 # Install dependency to create applications.
 mkdir -p elf2tab

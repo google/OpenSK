@@ -19,7 +19,7 @@ After general setup, you still need these steps:
 1.  Run the script:
 
     ```shell
-    python3 uf2conv.py -c -f 0xada52840 -o target/opensk.uf2 target/nrf52840_mdk_dfu_merged.hex
+    py_virtual_env/bin/python3 uf2conv.py -c -f 0xada52840 -o target/opensk.uf2 target/nrf52840_mdk_dfu_merged.hex
     ```
 
 1.  Boot into DFU mode. Keep the user button pressed on your hardware while

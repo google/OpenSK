@@ -8,3 +8,7 @@ colorama
 tqdm
 cryptography
 fido2 >= 1.0.0
+
+# Tests
+pylint
+hid

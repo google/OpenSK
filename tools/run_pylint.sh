@@ -16,4 +16,6 @@
 # Ensure we are at the project root directory
 cd $(readlink -f $(dirname $0))/..
 
+export PATH="py_virtual_env/bin:$PATH"
+
 pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`

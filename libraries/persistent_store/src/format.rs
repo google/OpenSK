@@ -187,7 +187,7 @@ impl Format {
         word_size == WORD_SIZE
             && page_size % word_size == 0
             && (MIN_PAGE_SIZE * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
-            && (MIN_NUM_PAGES <= num_pages && num_pages <= MAX_PAGE_INDEX + 1)
+            && (MIN_NUM_PAGES..=MAX_PAGE_INDEX + 1).contains(&num_pages)
             && max_word_writes >= 2
             && max_page_erases <= MAX_ERASE_CYCLE
     }

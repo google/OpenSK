@@ -161,10 +161,10 @@ impl PrivateKey {
         let wrapped_bytes = extract_byte_string(array.pop().unwrap())?;
         let key_bytes = aes256_cbc_decrypt::<E>(wrap_key, &wrapped_bytes, true)?;
         match SignatureAlgorithm::try_from(array.pop().unwrap())? {
-            SignatureAlgorithm::Es256 => PrivateKey::new_ecdsa_from_bytes(&*key_bytes)
+            SignatureAlgorithm::Es256 => PrivateKey::new_ecdsa_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => PrivateKey::new_ed25519_from_bytes(&*key_bytes)
+            SignatureAlgorithm::Eddsa => PrivateKey::new_ed25519_from_bytes(&key_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         }

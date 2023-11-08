@@ -85,7 +85,7 @@ OpenSK is fuzzed with the [OSS-Fuzz](https://github.com/google/oss-fuzz)
 project. You can also run fuzzing locally. First install:
 
 ```shell
-cargo +stable install cargo-fuzz --version 0.10.2
+./fuzzing_setup.sh
 ```
 
 Then choose a fuzz target from `fuzz/fuzz_targets/`, e.g.:

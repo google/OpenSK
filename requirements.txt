@@ -11,4 +11,5 @@ fido2 >= 1.0.0
 
 # Tests
 pylint
+yapf
 hid

@@ -1,14 +1,9 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=stable)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=stable)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=stable)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=stable)
-[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=stable)](https://coveralls.io/github/google/OpenSK?branch=stable)
-
-*News:*
-
-- 2023-08-24: [PQC paper reference](#Research)
+This branch is unmaintained. It implements the FIDO 2.0 version of OpenSK.
+Please check out the latest versioned branch for maintained code.
+If you are a developer, go to the
+[develop branch](https://github.com/google/OpenSK/tree/develop).
 
 ## OpenSK
 
@@ -24,15 +19,10 @@ You can see OpenSK in action in this
 
 ### FIDO2
 
-The stable branch implements the
+This branch implements the
 [CTAP2.0 specification](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html)
 and is FIDO certified. OpenSK supports U2F, and non-discoverable credentials
 created with either protocol are compatible with the other.
-
-If you want to use features of the newer FIDO 2.1, you can try our
-[develop branch](https://github.com/google/OpenSK/tree/develop). This version is
-NOT certified and less thoroughly tested though. If you plan to add features to
-OpenSK, you should switch to develop.
 
 ### :warning: Disclaimer
 
@@ -75,28 +65,6 @@ To test whether the installation was successful, visit a
 Please check our [Troubleshooting and Debugging](docs/debugging.md) section if you
 have problems with the installation process or during development. To find out what
 else you can do with your OpenSK, see [Customization](docs/customization.md).
-
-## Research
-
-We implemented post-quantum cryptography on OpenSK. The code is released under
-the [hybrid-pqc tag](https://github.com/google/OpenSK/releases/tag/hybrid-pqc).
-Our [paper](https://eprint.iacr.org/2022/1225) was published in the ACNS
-Secure Cryptographic Implementation workshop 2023 and won the best paper award.
-
-<details>
-<summary>Bibtex reference</summary>
-
-```
-@InProceedings{Ghinea2023hybrid,
-	author= {Diana Ghinea and Fabian Kaczmarczyck and Jennifer Pullman and Julien Cretin and Rafael Misoczki and Stefan Kölbl and Luca Invernizzi and Elie Bursztein and Jean-Michel Picod},
-	title=	{{Hybrid Post-Quantum Signatures in Hardware Security Keys}},
-	booktitle=	{{4th ACNS Workshop on Secure Cryptographic Implementation, Kyoto, Japan}},
-	month=	{June},
-	year=	{2023},
-}
-```
-
-</details>
 
 ## Contributing
 

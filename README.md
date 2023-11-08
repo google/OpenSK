@@ -1,6 +1,6 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-This branch is unmaintained. It implements the FIDO 2.0 version of OpenSK.
+This branch is unmaintained. It implements the CTAP 2.0 version of OpenSK.
 Please check out the latest versioned branch for maintained code.
 If you are a developer, go to the
 [develop branch](https://github.com/google/OpenSK/tree/develop).

@@ -490,7 +490,7 @@ impl StoreDriverOn {
     /// Checks that the given entries are wiped from the storage.
     fn check_deleted(&self, deleted: &[StoreHandle]) -> Result<(), StoreInvariant> {
         for handle in deleted {
-            let value = self.store.inspect_value(&handle);
+            let value = self.store.inspect_value(handle);
             if !value.iter().all(|&x| x == 0x00) {
                 return Err(StoreInvariant::NotWiped {
                     key: handle.get_key(),

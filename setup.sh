@@ -17,6 +17,7 @@
 export TERM=${TERM:-vt100}
 done_text="$(tput bold)DONE.$(tput sgr0)"
 PY_VENV_NAME=py_virtual_env
+PYTHON="$PY_VENV_NAME"/bin/python
 PIP="$PY_VENV_NAME"/bin/pip
 
 set -e
@@ -34,6 +35,7 @@ check_command () {
 }
 check_command rustup " Follow the steps under https://rustup.rs/ to install it."
 python3 -m venv "$PY_VENV_NAME"
+"$PYTHON" -m pip install --upgrade pip setuptools wheel
 check_command "$PIP"
 
 # Ensure we have certificates, keys, etc. so that the tests can run

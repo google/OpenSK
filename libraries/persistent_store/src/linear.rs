@@ -148,7 +148,7 @@ impl<S: Storage> Linear<S> {
         value = &value[len..];
         index.byte += len;
         // Write the unaligned end if needed.
-        if value.len() > 0 {
+        if !value.is_empty() {
             let mut word = self.storage.read_slice(index, word_size)?.into_owned();
             word[..value.len()].copy_from_slice(value);
             self.storage.write_slice(index, &word)?;

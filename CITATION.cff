@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+repository-code: "https://github.com/google/OpenSK"
+license: "Apache-2.0"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Ghinea"
+    given-names: "Diana"
+  - family-names: "Kaczmarczyck"
+    given-names: "Fabian"
+  - family-names: "Pullman"
+    given-names: "Jennifer"
+  - family-names: "Cretin"
+    given-names: "Julien"
+  - family-names: "Kölbl"
+    given-names: "Stefan"
+  - family-names: "Invernizzi"
+    given-names: "Luca"
+  - family-names: "Bursztein"
+    given-names: "Elie"
+  - family-names: "Picod"
+    given-names: "Jean-Michel"
+  title: "Hybrid Post-Quantum Signatures in Hardware Security Keys"
+  journal: "4th ACNS Workshop on Secure Cryptographic Implementation"
+  year: 2023
+  month: 6

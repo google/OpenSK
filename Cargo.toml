@@ -52,7 +52,7 @@ enum-iterator = "0.6.0"
 [build-dependencies]
 sk-cbor = { path = "libraries/cbor" }
 uuid = { version = "0.8", features = ["v4"] }
-openssl = "0.10.36"
+openssl = "0.10.55"
 
 [profile.dev]
 panic = "abort"

@@ -13,9 +13,8 @@
 ## OpenSK
 
 This repository contains a Rust implementation of a
-[FIDO2](https://fidoalliance.org/fido2/) authenticator.
-Also called security keys, they are a external devices that can be used for
-signing in on websites.
+[FIDO2](https://fidoalliance.org/fido2/) security key.
+Security keys are external devices that can be used for signing in on websites.
 You can see OpenSK in action in this
 [video on YouTube](https://www.youtube.com/watch?v=klEozvpw0xg)!
 
@@ -29,7 +28,7 @@ You can run OpenSK as a [Tock OS](https://tockos.org) application, or use the
 library to bring OpenSK to your own hardware.
 
 You are viewing the branch for developers. New features are developed here.
-Go to the latest numbered branch for a more stable version of OpenSK.
+Go to the default branch for a more stable version of OpenSK.
 
 ### FIDO2
 

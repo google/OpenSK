@@ -205,7 +205,6 @@ impl ecdsa::Signature for SoftwareEcdsaSignature {
         Some(SoftwareEcdsaSignature { signature })
     }
 
-    #[cfg(feature = "std")]
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
         bytes.copy_from_slice(&self.signature.to_bytes());
     }

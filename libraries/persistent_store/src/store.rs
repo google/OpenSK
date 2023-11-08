@@ -19,12 +19,10 @@ use crate::format::{
     Word, WordState,
 };
 #[cfg(feature = "std")]
-pub use crate::model::{StoreModel, StoreOperation};
-use crate::{usize_to_nat, Nat, Storage, StorageError, StorageIndex};
+pub use crate::model::StoreOperation;
 #[cfg(feature = "std")]
-pub use crate::{
-    BufferStorage, StoreDriver, StoreDriverOff, StoreDriverOn, StoreInterruption, StoreInvariant,
-};
+pub use crate::BufferStorage;
+use crate::{usize_to_nat, Nat, Storage, StorageError, StorageIndex};
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -245,7 +243,7 @@ impl<S: Storage> Store<S> {
     }
 
     /// Iterates over the entries.
-    pub fn iter<'a>(&'a self) -> StoreResult<StoreIter<'a>> {
+    pub fn iter(&self) -> StoreResult<StoreIter<'_>> {
         let head = or_invalid(self.head)?;
         Ok(Box::new(or_invalid(self.entries.as_ref())?.iter().map(
             move |&offset| {
@@ -794,7 +792,7 @@ impl<S: Storage> Store<S> {
 
     /// Continues a transaction after it has been written.
     fn transaction_apply(&mut self, sorted_keys: &[Nat], marker: Position) -> StoreResult<()> {
-        self.delete_keys(&sorted_keys, marker)?;
+        self.delete_keys(sorted_keys, marker)?;
         self.set_padding(marker)?;
         let end = or_invalid(self.head)? + self.format.window_size();
         let mut pos = marker + 1;

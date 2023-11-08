@@ -15,124 +15,101 @@
 
 set -ex
 
-echo "Checking formatting..."
+./fuzzing_setup.sh
+# Excludes std
+MOST_FEATURES=config_command,debug_allocations,debug_ctap,panic_console,verbose,with_ctap1,vendor_hid,ed25519
+
+echo "Checking that OpenSK builds properly..."
+cargo check --release --target=thumbv7em-none-eabi
+cargo check --release --target=thumbv7em-none-eabi --features config_command
+cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
+cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
+cargo check --release --target=thumbv7em-none-eabi --features panic_console
+cargo check --release --target=thumbv7em-none-eabi --features verbose
+cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
+cargo check --release --target=thumbv7em-none-eabi --features with_nfc
+cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
+cargo check --release --target=thumbv7em-none-eabi --features ed25519
+cargo check --release --target=thumbv7em-none-eabi --features rust_crypto
+cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
+cargo check --release --target=thumbv7em-none-eabi --examples
+cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
+cargo check --release --target=thumbv7em-none-eabi --manifest-path bootloader/Cargo.toml
+cargo check --release --manifest-path tools/heapviz/Cargo.toml
+
+echo "Checking Rust formatting..."
 cargo fmt -- --check
-cd libraries/opensk
-cargo +nightly fmt -- --check
-cd ../..
-cd libraries/cbor
-cargo fmt -- --check
-cd ../..
-cd libraries/crypto
-cargo fmt -- --check
-cd ../..
-cd libraries/persistent_store
-cargo fmt -- --check
-cd ../..
-cd tools/heapviz
-cargo fmt -- --check
-cd ../..
-cd bootloader
-cargo fmt -- --check
-cd ..
+cargo +nightly fmt --manifest-path libraries/opensk/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/cbor/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path libraries/crypto/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path tools/heapviz/Cargo.toml -- --check
+cargo +nightly fmt --manifest-path bootloader/Cargo.toml -- --check
+
+echo "Checking Python formatting..."
+py_virtual_env/bin/pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`
+py_virtual_env/bin/yapf --style=yapf --recursive --exclude py_virtual_env --exclude third_party --diff .
 
 echo "Running Clippy lints..."
 cargo clippy --lib --tests --bins --benches --features std -- -D warnings
-cargo clippy --lib --tests --bins --benches --features std,with_ctap1,ed25519,vendor_hid -- -D warnings
-cargo clippy --lib --tests --bins --benches --features std,with_ctap1,with_nfc,ed25519,vendor_hid -- -D warnings
+cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -D warnings
+(cd libraries/opensk && cargo +nightly clippy --features std -- -D warnings)
+(cd libraries/opensk && cargo +nightly clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto  -- -D warnings)
+(cd libraries/cbor && cargo +nightly clippy -- -D warnings)
+# Uncomment when persistent store is fixed:
+# (cd libraries/persistent_store && cargo +nightly clippy --features std -- -D warnings)
+# Probably not worth fixing:
+# (cd libraries/crypto && cargo +nightly clippy --features std -- -D warnings)
+
+echo "Checking that fuzz targets..."
+(cd libraries/opensk && cargo +nightly fuzz check)
+(cd libraries/cbor && cargo +nightly fuzz check)
+(cd libraries/persistent_store && cargo +nightly fuzz check)
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
-echo "Checking that heapviz tool builds properly..."
-cargo build --manifest-path tools/heapviz/Cargo.toml
-echo "Testing heapviz tool..."
-cargo test --manifest-path tools/heapviz/Cargo.toml
-
-echo "Checking that CTAP2 builds properly..."
-cargo check --release --target=thumbv7em-none-eabi
-cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
-cargo check --release --target=thumbv7em-none-eabi --features ed25519
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
-cargo check --release --target=thumbv7em-none-eabi --features panic_console
-cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
-cargo check --release --target=thumbv7em-none-eabi --features verbose
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap,with_ctap1,vendor_hid,ed25519,panic_console,debug_allocations,verbose
-
-echo "Checking that examples build properly..."
-cargo check --release --target=thumbv7em-none-eabi --examples
-cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
-
-echo "Checking that bootloader builds properly..."
-cd bootloader
-cargo check --release --target=thumbv7em-none-eabi
-cd ..
-
-echo "Checking that fuzz targets build properly..."
-# Uses nightly since our old toolchain causes problems.
-cd libraries/opensk
-cargo +nightly fuzz build
-cd ../..
-cd libraries/cbor
-cargo +nightly fuzz build
-cd ../..
-cd libraries/persistent_store
-cargo +nightly fuzz build
-cd ../..
 
 echo "Checking that CTAP2 builds and links properly (1 set of features)..."
-cargo build --release --target=thumbv7em-none-eabi --features with_ctap1
+cargo build --release --target=thumbv7em-none-eabi --features config_command,with_ctap1
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2
 
-echo "Checking that supported boards build properly..."
+echo "Running OpenSK library unit tests..."
+cd libraries/opensk
+cargo +nightly test --features std
+cargo +nightly test --features std,config_command,with_ctap1
+cargo +nightly test --all-features
+cd ../..
+
+echo "Running other unit tests..."
+cargo test --lib --tests --bins --benches --features std
+cargo test --lib --tests --bins --benches --all-features
+cargo +nightly test --manifest-path libraries/cbor/Cargo.toml
+cargo +nightly test --manifest-path libraries/persistent_store/Cargo.toml --features std
+# Running release mode to speed up. This library is legacy anyway.
+cargo +nightly test --manifest-path libraries/crypto/Cargo.toml --features std --release
+cargo +nightly test --manifest-path tools/heapviz/Cargo.toml
+
+echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk
 make -C third_party/tock/boards/nordic/nrf52840_dongle_opensk
-
-echo "Checking that other boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840_dongle_dfu
 make -C third_party/tock/boards/nordic/nrf52840_mdk_dfu
 
-echo "Checking deployment of supported boards..."
+echo "Checking deployment of boards..."
 ./deploy.py --board=nrf52840dk_opensk --no-app --programmer=none
 ./deploy.py --board=nrf52840_dongle_opensk --no-app --programmer=none
-
-echo "Checking deployment of other boards..."
 ./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
 ./deploy.py --board=nrf52840_mdk_dfu --no-app --programmer=none
 
-if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
-then
-  echo "Running unit tests on the desktop (release mode)..."
-  cargo test --lib --tests --bins --benches --release --features std
-  cargo test --lib --tests --bins --benches --release --all-features
-  cd libraries/cbor
-  cargo test --release
-  cd ../..
-  cd libraries/persistent_store
-  cargo test --release --features std
-  cd ../..
-
-  echo "Running unit tests on the desktop (debug mode)..."
-  cargo test --lib --tests --bins --benches --features std
-  cargo test --lib --tests --bins --benches --all-features
-  cd libraries/cbor
-  cargo test
-  cd ../..
-  cd libraries/persistent_store
-  cargo test --features std
-  cd ../..
-
-  cd libraries/opensk
-  echo "Running CTAP library unit tests (release mode)..."
-  cargo +nightly test --release --features std
-  echo "Running CTAP library unit tests (release mode + all features)..."
-  cargo +nightly test --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
-  echo "Running CTAP library unit tests (release mode + experimental rust crypto)..."
-  cargo +nightly test --release --features std,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto
-
-  echo "Running CTAP library unit tests (debug mode)..."
-  cargo +nightly test --features std
-  echo "Running CTAP library unit tests (debug mode + all features)..."
-  cargo +nightly test --features std,debug_ctap,with_ctap1,vendor_hid,ed25519
-fi
+echo "Check app deployment"
+./deploy.py --board=nrf52840dk_opensk --programmer=none --opensk
+./deploy.py --board=nrf52840dk_opensk --programmer=none --crypto_bench
+./deploy.py --board=nrf52840dk_opensk --programmer=none --store_latency
+./deploy.py --board=nrf52840dk_opensk --programmer=none --erase_storage
+./deploy.py --board=nrf52840dk_opensk --programmer=none --panic_test
+./deploy.py --board=nrf52840dk_opensk --programmer=none --oom_test
+./deploy.py --board=nrf52840dk_opensk --programmer=none --console_test
+./deploy.py --board=nrf52840dk_opensk --programmer=none --nfct_test --nfc

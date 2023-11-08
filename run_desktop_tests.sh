@@ -76,24 +76,21 @@ echo "Checking that CTAP2 builds and links properly (1 set of features)..."
 cargo build --release --target=thumbv7em-none-eabi --features config_command,with_ctap1
 ./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2
 
-if [ -z "${TRAVIS_OS_NAME}" -o "${TRAVIS_OS_NAME}" = "linux" ]
-then
-  echo "Running OpenSK library unit tests..."
-  cd libraries/opensk
-  cargo +nightly test --features std
-  cargo +nightly test --features std,config_command,with_ctap1
-  cargo +nightly test --all-features
-  cd ../..
+echo "Running OpenSK library unit tests..."
+cd libraries/opensk
+cargo +nightly test --features std
+cargo +nightly test --features std,config_command,with_ctap1
+cargo +nightly test --all-features
+cd ../..
 
-  echo "Running other unit tests..."
-  cargo test --lib --tests --bins --benches --features std
-  cargo test --lib --tests --bins --benches --all-features
-  cargo +nightly test --manifest-path libraries/cbor/Cargo.toml
-  cargo +nightly test --manifest-path libraries/persistent_store/Cargo.toml --features std
-  # Running release mode to speed up. This library is legacy anyway.
-  cargo +nightly test --manifest-path libraries/crypto/Cargo.toml --features std --release
-  cargo +nightly test --manifest-path tools/heapviz/Cargo.toml
-fi
+echo "Running other unit tests..."
+cargo test --lib --tests --bins --benches --features std
+cargo test --lib --tests --bins --benches --all-features
+cargo +nightly test --manifest-path libraries/cbor/Cargo.toml
+cargo +nightly test --manifest-path libraries/persistent_store/Cargo.toml --features std
+# Running release mode to speed up. This library is legacy anyway.
+cargo +nightly test --manifest-path libraries/crypto/Cargo.toml --features std --release
+cargo +nightly test --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk

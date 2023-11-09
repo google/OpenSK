@@ -48,4 +48,5 @@ rustup show
 # Install dependency to create applications.
 mkdir -p elf2tab
 rustup install stable
+cargo +stable install cargo-audit
 cargo +stable install elf2tab --version 0.10.2 --root elf2tab/

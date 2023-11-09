@@ -1,6 +1,5 @@
 use crate::util;
-use core::alloc::GlobalAlloc;
-use core::alloc::Layout;
+use core::alloc::{GlobalAlloc, Layout};
 #[cfg(any(feature = "debug_allocations", feature = "panic_console"))]
 use core::fmt::Write;
 use core::ptr;
@@ -10,14 +9,17 @@ use core::sync::atomic;
 #[cfg(feature = "debug_allocations")]
 use core::sync::atomic::AtomicUsize;
 #[cfg(any(feature = "debug_allocations", feature = "panic_console"))]
-use libtock_drivers::console::Console;
+use libtock_console::Console;
+#[cfg(feature = "panic_console")]
+use libtock_platform::{ErrorCode, Syscalls};
+use libtock_runtime::TockSyscalls;
 use linked_list_allocator::Heap;
 
 static mut HEAP: Heap = Heap::empty();
 
 #[no_mangle]
-unsafe fn libtock_alloc_init(app_heap_start: usize, app_heap_size: usize) {
-    HEAP.init(app_heap_start, app_heap_size);
+unsafe fn libtock_alloc_init(app_heap_bottom: *mut u8, app_heap_size: usize) {
+    HEAP.init(app_heap_bottom, app_heap_size);
 }
 
 // With the "debug_allocations" feature, we use `AtomicUsize` to store the
@@ -55,7 +57,7 @@ unsafe impl GlobalAlloc for TockAllocator {
             self.count.fetch_add(1, atomic::Ordering::SeqCst);
             self.size.fetch_add(layout.size(), atomic::Ordering::SeqCst);
             writeln!(
-                Console::new(),
+                Console::<TockSyscalls>::writer(),
                 "alloc[{}, {}] = {:?} ({} ptrs, {} bytes)",
                 layout.size(),
                 layout.align(),
@@ -74,7 +76,7 @@ unsafe impl GlobalAlloc for TockAllocator {
             self.count.fetch_sub(1, atomic::Ordering::SeqCst);
             self.size.fetch_sub(layout.size(), atomic::Ordering::SeqCst);
             writeln!(
-                Console::new(),
+                Console::<TockSyscalls>::writer(),
                 "dealloc[{}, {}] = {:?} ({} ptrs, {} bytes)",
                 layout.size(),
                 layout.align(),
@@ -94,17 +96,20 @@ static ALLOCATOR: TockAllocator = TockAllocator::new();
 
 #[alloc_error_handler]
 unsafe fn alloc_error_handler(_layout: Layout) -> ! {
-    util::signal_oom();
-    util::signal_panic();
+    util::Util::<TockSyscalls>::signal_oom();
+    util::Util::<TockSyscalls>::signal_panic();
 
     #[cfg(feature = "panic_console")]
     {
-        writeln!(Console::new(), "Couldn't allocate: {:?}", _layout).ok();
-        // Force the kernel to report the panic cause, by reading an invalid address.
-        // The memory protection unit should be setup by the Tock kernel to prevent apps from accessing
-        // address zero.
-        core::ptr::read_volatile(0 as *const usize);
+        writeln!(
+            Console::<TockSyscalls>::writer(),
+            "Couldn't allocate: {:?}",
+            _layout
+        )
+        .ok();
+        TockSyscalls::exit_terminate(ErrorCode::Fail as u32);
     }
 
-    util::cycle_leds()
+    #[cfg(not(feature = "panic_console"))]
+    util::Util::<TockSyscalls>::cycle_leds()
 }

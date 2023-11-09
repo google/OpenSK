@@ -1,0 +1,71 @@
+[package]
+name = "opensk-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.3" }
+fuzz_helper = { path = "fuzz_helper" }
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_process_ctap_command"
+path = "fuzz_targets/fuzz_target_process_ctap_command.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap1"
+path = "fuzz_targets/fuzz_target_process_ctap1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_client_pin"
+path = "fuzz_targets/fuzz_target_process_ctap2_client_pin.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_client_pin_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_client_pin_structured.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_get_assertion"
+path = "fuzz_targets/fuzz_target_process_ctap2_get_assertion.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_get_assertion_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_get_assertion_structured.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_make_credential"
+path = "fuzz_targets/fuzz_target_process_ctap2_make_credential.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_process_ctap2_make_credential_structured"
+path = "fuzz_targets/fuzz_target_process_ctap2_make_credential_structured.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_split_assemble"
+path = "fuzz_targets/fuzz_target_split_assemble.rs"
+test = false
+doc = false

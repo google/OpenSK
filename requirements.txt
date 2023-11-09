@@ -1,0 +1,15 @@
+# General setup
+tockloader == 1.5
+six
+intelhex
+
+# Configure OpenSK (crypto, JTAG lockdown)
+colorama
+tqdm
+cryptography
+fido2 >= 1.0.0
+
+# Tests
+pylint
+yapf
+hid

@@ -24,35 +24,42 @@ pub mod ecdh;
 pub mod ecdsa;
 pub mod hkdf;
 pub mod hmac;
-pub mod rng256;
 pub mod sha256;
 pub mod util;
 
-// Trait for hash functions that returns a 256-bit hash.
-// The type must be Sized (size known at compile time) so that we can instanciate one on the stack
-// in the hash() method.
+/// Trait for hash functions that returns a 256-bit hash.
+///
+/// When you implement this trait, make sure to implement `hash_mut` and `hmac_mut` first, because
+/// the default implementations of `hash` and `hmac` rely on it.
 pub trait Hash256: Sized {
     fn new() -> Self;
     fn update(&mut self, contents: &[u8]);
-    fn finalize(self) -> [u8; 32];
+    fn finalize(self, output: &mut [u8; 32]);
 
     fn hash(contents: &[u8]) -> [u8; 32] {
+        let mut output = [0; 32];
+        Self::hash_mut(contents, &mut output);
+        output
+    }
+
+    fn hash_mut(contents: &[u8], output: &mut [u8; 32]) {
         let mut h = Self::new();
         h.update(contents);
-        h.finalize()
+        h.finalize(output)
+    }
+
+    fn hmac(key: &[u8; 32], contents: &[u8]) -> [u8; 32] {
+        let mut output = [0; 32];
+        Self::hmac_mut(key, contents, &mut output);
+        output
+    }
+
+    fn hmac_mut(key: &[u8; 32], contents: &[u8], output: &mut [u8; 32]) {
+        hmac::software_hmac_256::<Self>(key, contents, output);
     }
 }
 
-// Traits for block ciphers that operate on 16-byte blocks.
-pub trait Encrypt16BytesBlock {
-    fn encrypt_block(&self, block: &mut [u8; 16]);
-}
-
-pub trait Decrypt16BytesBlock {
-    fn decrypt_block(&self, block: &mut [u8; 16]);
-}
-
-// Trait for hash functions that operate on 64-byte input blocks.
+/// Trait for hash functions that operate on 64-byte input blocks.
 pub trait HashBlockSize64Bytes {
     type State;
 

@@ -1,185 +1,164 @@
-use crate::result::{FlexUnwrap, OtherError, TockError, TockResult};
-use crate::util;
-use core::cell::Cell;
-use core::isize;
+//! The alarm driver
+//!
+//! # Example
+//! ```
+//! // Wait for timeout
+//! Alarm::sleep(Alarm::Milliseconds(2500));
+//! ```
+//!
+//! Adapted from the [libtock-rs](https://github.com/tock/libtock-rs/blob/master/apis/alarm/src/lib.rs) alarm driver interface
+
+use crate::result::{OtherError, TockResult};
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Sub};
-use libtock_core::callback::{CallbackSubscription, Consumer};
-use libtock_core::result::{CommandError, EALREADY};
-use libtock_core::syscalls;
+use libtock_alarm::{Hz, Alarm, Milliseconds, Convert};
+use libtock_platform as platform;
+use libtock_platform::{DefaultConfig, ErrorCode, Syscalls};
+use platform::share::Handle;
+use platform::subscribe::OneId;
+use platform::{Subscribe, Upcall};
 
-const DRIVER_NUMBER: usize = 0x00000;
-
-mod command_nr {
-    pub const IS_DRIVER_AVAILABLE: usize = 0;
-    pub const GET_CLOCK_FREQUENCY: usize = 1;
-    pub const GET_CLOCK_VALUE: usize = 2;
-    pub const STOP_ALARM: usize = 3;
-    pub const SET_ALARM: usize = 4;
+pub struct Timer<S: Syscalls, C: platform::subscribe::Config = DefaultConfig> {
+    clock_frequency: Hz,
+    s: PhantomData<S>,
+    c: PhantomData<C>,
 }
 
-mod subscribe_nr {
-    pub const SUBSCRIBE_CALLBACK: usize = 0;
-}
-
-pub fn sleep(duration: Duration<isize>) -> TockResult<()> {
-    let expired = Cell::new(false);
-    let mut with_callback = with_callback(|_, _| expired.set(true));
-
-    let mut timer = with_callback.init().flex_unwrap();
-    let timer_alarm = timer.set_alarm(duration).flex_unwrap();
-
-    util::yieldk_for(|| expired.get());
-
-    match timer.stop_alarm(timer_alarm) {
-        Ok(())
-        | Err(TockError::Command(CommandError {
-            return_code: EALREADY,
-            ..
-        })) => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
-pub fn with_callback<CB>(callback: CB) -> WithCallback<'static, CB> {
-    WithCallback {
-        callback,
-        clock_frequency: ClockFrequency { hz: 0 },
-        phantom: PhantomData,
-    }
-}
-
-pub struct WithCallback<'a, CB> {
+pub struct WithCallback<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)> {
     callback: CB,
-    clock_frequency: ClockFrequency,
-    phantom: PhantomData<&'a mut ()>,
+    clock_frequency: Hz,
+    s: PhantomData<S>,
+    c: PhantomData<C>,
 }
 
-struct TimerEventConsumer;
-
-impl<CB: FnMut(ClockValue, Alarm)> Consumer<WithCallback<'_, CB>> for TimerEventConsumer {
-    fn consume(data: &mut WithCallback<CB>, clock_value: usize, alarm_id: usize, _: usize) {
-        (data.callback)(
-            ClockValue {
-                num_ticks: clock_value as isize,
-                clock_frequency: data.clock_frequency,
-            },
-            Alarm { alarm_id },
-        );
+pub fn with_callback<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)>(
+    callback: CB,
+) -> TimerUpcallConsumer<S, C, CB> {
+    TimerUpcallConsumer {
+        data: WithCallback {
+            callback,
+            clock_frequency: Hz(0),
+            s: PhantomData,
+            c: PhantomData,
+        },
     }
 }
 
-impl<'a, CB: FnMut(ClockValue, Alarm)> WithCallback<'a, CB> {
-    pub fn init(&'a mut self) -> TockResult<Timer<'a>> {
-        let num_notifications =
-            syscalls::command(DRIVER_NUMBER, command_nr::IS_DRIVER_AVAILABLE, 0, 0)?;
+pub struct TimerUpcallConsumer<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)> {
+    data: WithCallback<S, C, CB>,
+}
 
-        let clock_frequency =
-            syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_FREQUENCY, 0, 0)?;
+impl<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)>
+    Upcall<OneId<DRIVER_NUM, { subscribe::CALLBACK }>> for TimerUpcallConsumer<S, C, CB>
+{
+    fn upcall(&self, expired_tick_val: u32, _ref_tick: u32, _: u32) {
+        (self.data.callback)(ClockValue::new(
+            expired_tick_val as isize,
+            self.data.clock_frequency,
+        ))
+    }
+}
 
-        if clock_frequency == 0 {
+impl<S: Syscalls, C: platform::subscribe::Config, CB: Fn(ClockValue)>
+    TimerUpcallConsumer<S, C, CB>
+{
+    /// Initializes the data of the containing [WithCallback], i.e. number of notifications, clock frequency.
+    pub fn init(&mut self) -> TockResult<Timer<S, C>> {
+        // Check if the alarm driver works.
+        S::command(DRIVER_NUM, command::DRIVER_CHECK, 0, 0).to_result::<(), ErrorCode>()?;
+        // Alarm driver only returns success as only a single concurrent timer is supported.
+
+        let clock_frequency = Alarm::<S>::get_frequency()?;
+
+        if clock_frequency.0 < 1_000 {
+            // The alarm's frequency must be at least 1 kHz.
             return Err(OtherError::TimerDriverErroneousClockFrequency.into());
         }
 
-        let clock_frequency = ClockFrequency {
-            hz: clock_frequency,
-        };
-
-        let subscription = syscalls::subscribe::<TimerEventConsumer, _>(
-            DRIVER_NUMBER,
-            subscribe_nr::SUBSCRIBE_CALLBACK,
-            self,
-        )?;
-
         Ok(Timer {
-            num_notifications,
             clock_frequency,
-            subscription,
+            c: PhantomData,
+            s: PhantomData,
         })
     }
+
+    /// Enables the timer by subscribing for the countdown.
+    /// This needs to be a separate method as it needs to be called in the same `share::scope`
+    pub fn enable<'share, 'a: 'share>(
+        &'a self,
+        handle: Handle<Subscribe<'share, S, DRIVER_NUM, { subscribe::CALLBACK }>>,
+    ) -> Result<(), ErrorCode> {
+        // Register the upcall for the timer.
+        S::subscribe::<_, _, C, DRIVER_NUM, { subscribe::CALLBACK }>(handle, self)
+    }
 }
 
-pub struct Timer<'a> {
-    num_notifications: usize,
-    clock_frequency: ClockFrequency,
-    #[allow(dead_code)] // Used in drop
-    subscription: CallbackSubscription<'a>,
+impl<S: Syscalls, C: platform::subscribe::Config> Default for Timer<S, C> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-impl<'a> Timer<'a> {
-    pub fn num_notifications(&self) -> usize {
-        self.num_notifications
+impl<S: Syscalls, C: platform::subscribe::Config> Timer<S, C> {
+    pub fn new() -> Self {
+        let clock_frequency = Alarm::<S, C>::get_frequency().unwrap();
+
+        Self {
+            clock_frequency,
+            s: PhantomData,
+            c: PhantomData,
+        }
     }
 
-    pub fn clock_frequency(&self) -> ClockFrequency {
+    pub fn get_ticks() -> TockResult<u32> {
+        Ok(S::command(DRIVER_NUM, command::TIME, 0, 0).to_result::<u32, ErrorCode>()?)
+    }
+
+    /// Returns the clock frequency of the timer.
+    pub fn clock_frequency(&self) -> Hz {
         self.clock_frequency
     }
 
-    pub fn get_current_clock(&self) -> TockResult<ClockValue> {
+    /// Returns the current counter tick value.
+    pub fn get_current_counter_ticks(&self) -> TockResult<ClockValue> {
         Ok(ClockValue {
-            num_ticks: syscalls::command(DRIVER_NUMBER, command_nr::GET_CLOCK_VALUE, 0, 0)?
-                as isize,
-            clock_frequency: self.clock_frequency,
+            num_ticks: Self::get_ticks()? as isize,
+            clock_frequency: self.clock_frequency(),
         })
     }
 
-    pub fn stop_alarm(&mut self, alarm: Alarm) -> TockResult<()> {
-        syscalls::command(DRIVER_NUMBER, command_nr::STOP_ALARM, alarm.alarm_id, 0)?;
+    /// Stops the currently active alarm.
+    pub fn stop_alarm(&mut self) -> TockResult<()> {
+        S::unsubscribe(DRIVER_NUM, subscribe::CALLBACK);
+        S::command(DRIVER_NUM, command::STOP, 0, 0).to_result::<(), ErrorCode>()?;
+
         Ok(())
     }
 
-    pub fn set_alarm(&mut self, duration: Duration<isize>) -> TockResult<Alarm> {
-        let now = self.get_current_clock()?;
-        let freq = self.clock_frequency.hz();
-        let duration_ms = duration.ms() as usize;
-        let ticks = match duration_ms.checked_mul(freq) {
-            Some(x) => x / 1000,
-            None => {
-                // Divide the largest of the two operands by 1000, to improve precision of the
-                // result.
-                if duration_ms > freq {
-                    match (duration_ms / 1000).checked_mul(freq) {
-                        Some(y) => y,
-                        None => return Err(OtherError::TimerDriverDurationOutOfRange.into()),
-                    }
-                } else {
-                    match (freq / 1000).checked_mul(duration_ms) {
-                        Some(y) => y,
-                        None => return Err(OtherError::TimerDriverDurationOutOfRange.into()),
-                    }
-                }
-            }
-        };
-        let alarm_instant = now.num_ticks() as usize + ticks;
+    pub fn set_alarm(&mut self, duration: Duration<isize>) -> TockResult<()> {
+        let freq = self.clock_frequency;
+        let duration_ms = duration.ms() as u32;
+        let ticks = Milliseconds(duration_ms).to_ticks(freq);
 
-        let alarm_id = syscalls::command(DRIVER_NUMBER, command_nr::SET_ALARM, alarm_instant, 0)?;
+        S::command(DRIVER_NUM, command::SET_RELATIVE, ticks.0, 0)
+            .to_result::<u32, ErrorCode>()
+            .map(|_when| ())?;
 
-        Ok(Alarm { alarm_id })
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct ClockFrequency {
-    hz: usize,
-}
-
-impl ClockFrequency {
-    pub fn hz(&self) -> usize {
-        self.hz
+        Ok(())
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct ClockValue {
     num_ticks: isize,
-    clock_frequency: ClockFrequency,
+    clock_frequency: Hz,
 }
 
 impl ClockValue {
-    pub const fn new(num_ticks: isize, clock_hz: usize) -> ClockValue {
+    pub const fn new(num_ticks: isize, clock_hz: Hz) -> ClockValue {
         ClockValue {
             num_ticks,
-            clock_frequency: ClockFrequency { hz: clock_hz },
+            clock_frequency: clock_hz,
         }
     }
 
@@ -195,17 +174,17 @@ impl ClockValue {
     }
 
     pub fn ms(&self) -> isize {
-        ClockValue::scale_int(self.num_ticks, 1000, self.clock_frequency.hz() as isize)
+        ClockValue::scale_int(self.num_ticks, 1000, self.clock_frequency.0 as isize)
     }
 
     pub fn ms_f64(&self) -> f64 {
-        1000.0 * (self.num_ticks as f64) / (self.clock_frequency.hz() as f64)
+        1000.0 * (self.num_ticks as f64) / (self.clock_frequency.0 as f64)
     }
 
     pub fn wrapping_add(self, duration: Duration<isize>) -> ClockValue {
         // This is a precision preserving formula for scaling an isize.
         let duration_ticks =
-            ClockValue::scale_int(duration.ms, self.clock_frequency.hz() as isize, 1000);
+            ClockValue::scale_int(duration.ms, self.clock_frequency.0 as isize, 1000);
         ClockValue {
             num_ticks: self.num_ticks.wrapping_add(duration_ticks),
             clock_frequency: self.clock_frequency,
@@ -222,16 +201,6 @@ impl ClockValue {
         } else {
             None
         }
-    }
-}
-
-pub struct Alarm {
-    alarm_id: usize,
-}
-
-impl Alarm {
-    pub fn alarm_id(&self) -> usize {
-        self.alarm_id
     }
 }
 
@@ -331,4 +300,27 @@ where
     fn add_assign(&mut self, duration: Duration<T>) {
         self.ms += duration.ms();
     }
+}
+
+// -----------------------------------------------------------------------------
+// Driver number and command IDs
+// -----------------------------------------------------------------------------
+
+pub const DRIVER_NUM: u32 = 0;
+
+// Command IDs
+#[allow(unused)]
+mod command {
+    pub const DRIVER_CHECK: u32 = 0;
+    pub const FREQUENCY: u32 = 1;
+    pub const TIME: u32 = 2;
+    pub const STOP: u32 = 3;
+
+    pub const SET_RELATIVE: u32 = 5;
+    pub const SET_ABSOLUTE: u32 = 6;
+}
+
+#[allow(unused)]
+pub mod subscribe {
+    pub const CALLBACK: u32 = 0;
 }

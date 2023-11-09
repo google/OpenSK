@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![no_main]
 #![no_std]
 
 extern crate alloc;
@@ -21,39 +22,56 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use core::fmt::Write;
-use ctap2::embedded_flash::{new_storage, Storage};
-use libtock_drivers::console::Console;
+use ctap2::env::tock::{take_storage, Storage};
+use libtock_console::Console;
+use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
-use persistent_store::Store;
+use libtock_platform::DefaultConfig;
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
+use persistent_store::{Storage as _, Store};
 
-libtock_core::stack_size! {0x800}
+stack_size! {0x800}
+set_main! {main}
 
-fn timestamp(timer: &Timer) -> Timestamp<f64> {
-    Timestamp::<f64>::from_clock_value(timer.get_current_clock().ok().unwrap())
+type Syscalls = TockSyscalls;
+
+fn timestamp(timer: &Timer<Syscalls>) -> Timestamp<f64> {
+    Timestamp::<f64>::from_clock_value(timer.get_current_counter_ticks().ok().unwrap())
 }
 
-fn measure<T>(timer: &Timer, operation: impl FnOnce() -> T) -> (T, Duration<f64>) {
+fn measure<T>(timer: &Timer<Syscalls>, operation: impl FnOnce() -> T) -> (T, Duration<f64>) {
     let before = timestamp(timer);
     let result = operation();
     let after = timestamp(timer);
     (result, after - before)
 }
 
-// Only use one store at a time.
-unsafe fn boot_store(num_pages: usize, erase: bool) -> Store<Storage> {
-    let mut storage = new_storage(num_pages);
+fn boot_store(
+    mut storage: Storage<Syscalls, DefaultConfig>,
+    erase: bool,
+) -> Store<Storage<Syscalls, DefaultConfig>> {
+    let num_pages = storage.num_pages();
     if erase {
         for page in 0..num_pages {
-            use persistent_store::Storage;
             storage.erase_page(page).unwrap();
         }
     }
     Store::new(storage).ok().unwrap()
 }
 
+#[derive(Debug)]
+struct StorageConfig {
+    num_pages: usize,
+}
+
+fn storage_config(storage: &Storage<Syscalls, DefaultConfig>) -> StorageConfig {
+    StorageConfig {
+        num_pages: storage.num_pages(),
+    }
+}
+
 #[derive(Default)]
 struct Stat {
-    num_pages: usize,
     key_increment: usize,
     entry_length: usize, // words
     boot_ms: f64,
@@ -63,27 +81,27 @@ struct Stat {
 }
 
 fn compute_latency(
-    timer: &Timer,
+    storage: Storage<Syscalls, DefaultConfig>,
+    timer: &Timer<Syscalls>,
     num_pages: usize,
     key_increment: usize,
     word_length: usize,
-) -> Stat {
+) -> (Storage<Syscalls, DefaultConfig>, Stat) {
     let mut stat = Stat {
-        num_pages,
         key_increment,
         entry_length: word_length,
         ..Default::default()
     };
 
-    let mut console = Console::new();
+    let mut console = Console::<Syscalls>::writer();
     writeln!(
         console,
-        "\nLatency for num_pages={} key_increment={} word_length={}.",
-        num_pages, key_increment, word_length
+        "\nLatency for key_increment={} word_length={}.",
+        key_increment, word_length
     )
     .unwrap();
 
-    let mut store = unsafe { boot_store(num_pages, true) };
+    let mut store = boot_store(storage, true);
     let total_capacity = store.capacity().unwrap().total();
     assert_eq!(store.capacity().unwrap().used(), 0);
     assert_eq!(store.lifetime().unwrap().used(), 0);
@@ -99,18 +117,14 @@ fn compute_latency(
     let ((), time) = measure(timer, || {
         for i in 0..count {
             let key = 1 + key_increment * i;
-            // For some reason the kernel sometimes fails.
-            while store.insert(key, &vec![0; 4 * word_length]).is_err() {
-                // We never enter this loop in practice, but we still need it for the kernel.
-                writeln!(console, "Retry insert.").unwrap();
-            }
+            store.insert(key, &vec![0; 4 * word_length]).unwrap();
         }
     });
     writeln!(console, "Setup: {:.1}ms for {} entries.", time.ms(), count).unwrap();
 
     // Measure latency of insert.
     let key = 1 + key_increment * count;
-    let ((), time) = measure(&timer, || {
+    let ((), time) = measure(timer, || {
         store.insert(key, &vec![0; 4 * word_length]).unwrap()
     });
     writeln!(console, "Insert: {:.1}ms.", time.ms()).unwrap();
@@ -121,12 +135,13 @@ fn compute_latency(
     );
 
     // Measure latency of boot.
-    let (mut store, time) = measure(&timer, || unsafe { boot_store(num_pages, false) });
+    let storage = store.extract_storage();
+    let (mut store, time) = measure(timer, || boot_store(storage, false));
     writeln!(console, "Boot: {:.1}ms.", time.ms()).unwrap();
     stat.boot_ms = time.ms();
 
     // Measure latency of remove.
-    let ((), time) = measure(&timer, || store.remove(key).unwrap());
+    let ((), time) = measure(timer, || store.remove(key).unwrap());
     writeln!(console, "Remove: {:.1}ms.", time.ms()).unwrap();
     stat.remove_ms = time.ms();
 
@@ -144,25 +159,28 @@ fn compute_latency(
     stat.compaction_ms = time.ms();
     assert!(store.lifetime().unwrap().used() > total_capacity + num_pages);
 
-    stat
+    (store.extract_storage(), stat)
 }
 
 fn main() {
-    let mut with_callback = timer::with_callback(|_, _| {});
-    let timer = with_callback.init().ok().unwrap();
-    let mut stats = Vec::new();
+    let mut with_callback = timer::with_callback::<Syscalls, DefaultConfig, _>(|_| {});
 
-    writeln!(Console::new(), "\nRunning 4 tests...").unwrap();
-    // Those non-overwritten 50 words entries simulate credentials.
-    stats.push(compute_latency(&timer, 3, 1, 50));
-    stats.push(compute_latency(&timer, 20, 1, 50));
-    // Those overwritten 1 word entries simulate counters.
-    stats.push(compute_latency(&timer, 3, 0, 1));
-    stats.push(compute_latency(&timer, 20, 0, 1));
-    writeln!(Console::new(), "\nDone.\n").unwrap();
+    let timer = with_callback.init().flex_unwrap();
+    let storage = take_storage::<Syscalls, DefaultConfig>().unwrap();
+    let config = storage_config(&storage);
+    let mut stats = Vec::new();
+    let mut console = Console::<Syscalls>::writer();
+
+    writeln!(console, "\nRunning 2 tests...").unwrap();
+    // Simulate a store full of credentials (of 50 words).
+    let (storage, stat) = compute_latency(storage, &timer, config.num_pages, 1, 50);
+    stats.push(stat);
+    // Simulate a store full of increments of a single counter.
+    let (_storage, stat) = compute_latency(storage, &timer, config.num_pages, 0, 1);
+    stats.push(stat);
+    writeln!(console, "\nDone.\n").unwrap();
 
     const HEADERS: &[&str] = &[
-        "Pages",
         "Overwrite",
         "Length",
         "Boot",
@@ -173,7 +191,6 @@ fn main() {
     let mut matrix = vec![HEADERS.iter().map(|x| x.to_string()).collect()];
     for stat in stats {
         matrix.push(vec![
-            format!("{}", stat.num_pages),
             if stat.key_increment == 0 { "yes" } else { "no" }.to_string(),
             format!("{} words", stat.entry_length),
             format!("{:.1} ms", stat.boot_ms),
@@ -182,21 +199,23 @@ fn main() {
             format!("{:.1} ms", stat.remove_ms),
         ]);
     }
+    writeln!(console, "Copy to examples/store_latency.rs:\n").unwrap();
+    writeln!(console, "{:?}", config).unwrap();
     write_matrix(matrix);
 
-    // Results on nrf52840dk_opensk:
-    // Pages  Overwrite    Length      Boot  Compaction   Insert  Remove
-    //     3         no  50 words    5.3 ms    141.9 ms   8.0 ms  3.3 ms
-    //    20         no  50 words   18.7 ms    148.6 ms   21.0 ms 9.8 ms
-    //     3        yes   1 words   37.8 ms    100.2 ms   11.3 ms 5.5 ms
-    //    20        yes   1 words  336.5 ms    100.3 ms   11.5 ms 5.6 ms
+    // Results for nrf52840dk_opensk:
+    // StorageConfig { num_pages: 20 }
+    // Overwrite    Length      Boot  Compaction   Insert  Remove
+    //        no  50 words   18.6 ms    145.8 ms  21.0 ms  9.8 ms
+    //       yes   1 words  335.8 ms    100.6 ms  11.7 ms  5.7 ms
 }
 
 fn align(x: &str, n: usize) {
+    let mut console = Console::<Syscalls>::writer();
     for _ in 0..n.saturating_sub(x.len()) {
-        write!(Console::new(), " ").unwrap();
+        write!(console, " ").unwrap();
     }
-    write!(Console::new(), "{}", x).unwrap();
+    write!(console, "{}", x).unwrap();
 }
 
 fn write_matrix(mut m: Vec<Vec<String>>) {
@@ -215,6 +234,6 @@ fn write_matrix(mut m: Vec<Vec<String>>) {
         for col in 0..num_cols {
             align(&row[col], col_len[col] + 2 * (col > 0) as usize);
         }
-        writeln!(Console::new()).unwrap();
+        writeln!(Console::<Syscalls>::writer()).unwrap();
     }
 }

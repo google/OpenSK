@@ -1,15 +1,18 @@
 #!/bin/bash
 set -e
 
+shopt -s nullglob
+
 PROGRAM="$0"
+MODULES=(tock libtock-rs)
 
 success() {
-  echo -e "\e[1;32mDone:\e[m $1"
+  echo -e "\r\e[1;32mDone:\e[m $1"
   exit 0
 }
 
 fail() {
-  echo -e "\e[1;31mError:\e[m $1"
+  echo -e "\r\e[1;31mError:\e[m $1"
   exit 1
 }
 
@@ -20,7 +23,8 @@ commit() {
 }
 
 get_root() {
-  git ls-tree HEAD:third_party | sed -n 's/^.* \([^ ]\+\)\ttock$/\1/p'
+  local module="$1"
+  git ls-tree HEAD:third_party | sed -En 's/^.* ([^ ]+)\t'"${module}"'$/\1/p'
 }
 
 get_head() {
@@ -30,22 +34,27 @@ get_head() {
 help() {
   local root="$(get_root)"
   cat <<EOF
-Usage: ${PROGRAM} {apply|save}
+Usage: ${PROGRAM} {apply|save|restore|check}
 
-  apply       Applies the patches to the Tock submodule regardless of its state.
+  apply       Applies the patches to the submodules regardless of their state.
               As a consequence this can always be called to get to a clean state
               but may result in data loss if there are unsaved changes.
 
-  save        Saves the Tock submodule to the patches.
+  save        Saves the submodules to the patches.
               This should only be called after apply and when all changes have
               been added to a commit. After saving, you can run ./setup.sh to
-              return to normal state. Otherwise you can continue editing Tock
-              and calling save.
+              return to normal state. Otherwise you can continue editing the
+              submodules and calling save.
 
-  restore     Restores the Tock submodule to its normal state regardless of its
+  restore     Restores the submodules to its normal state regardless of their
               state. As a consequence this can always be called to get to a
               clean state but may result in data loss if there are unsaved
               changes.
+
+  check       Checks whether the submodules and the patches are in sync. This
+              may fail in two cases:
+              - when the patches were updated but not restored/applied, and
+              - when the submodules have been modified but not saved.
 
 Example:
 
@@ -53,19 +62,19 @@ Example:
 
     ${PROGRAM} apply
 
-  2. Edit files in the Tock submodule:
+  2. Edit files in the submodules:
 
-    cd third_party/tock
+    cd third_party/<submodule>
     edit <files>
 
-  3. Create a fix commit per affected patch by repeating the following commands
-  until there are no more files to add:
+  3. For each edited submodule, create a fix commit per affected patch by
+  repeating the following commands until there are no more files to add:
 
     git add -p
     git commit -m'fix <patch#>'
 
-  4. Merge the fixes into their patches by moving their line below their patch
-  and changing their "edit" into "fixup":
+  4. For each edited submodule, merge the fixes into their patches by moving
+  their line below their patch and changing their "edit" into "fixup":
 
     git rebase -i ${root}
 
@@ -81,44 +90,85 @@ EOF
   exit 0
 }
 
-apply() {
-  local root="$(get_root)"
-  ( set -e
-    cd third_party/tock
-    git reset -q --hard
-    git clean -qfxd
-    git checkout -q "${root}"
+apply_module() {
+  local root="$1" module="$2" file
+  git checkout -q "${root}"
+  if [[ "${module}" == tock ]]; then
     cp -a ../../boards .
     commit '00-boards'
-    for file in ../../patches/tock/*; do
-      git apply "${file}"
-      commit "$(basename "${file}" .patch)"
-    done
-  )
+  fi
+  for file in ../../patches/"${module}"/*; do
+    git apply "${file}"
+    commit "$(basename "${file}" .patch)"
+    echo -n .
+  done
+}
+
+apply() {
+  for module in "${MODULES[@]}"; do
+    local root="$(get_root "${module}")"
+    ( set -e
+      cd third_party/"${module}"
+      git reset -q --hard
+      git clean -qfxd
+      apply_module "${root}" "${module}"
+    )
+  done
 }
 
 save() {
-  local root="$(get_root)"
-  ( set -e
-    cd third_party/tock
-    [[ -z "$(git status -s)" ]] || fail 'The Tock submodule is not clean.'
-    rm ../../patches/tock/*.patch
-    for file in $(git format-patch "${root}"); do
-      sed -n '/^diff/,$p' "${file}" \
-        | head -n-3 > "../../patches/tock/${file#*-}"
-    done
-    git clean -qfxd
-    top="$(get_head)"
-    git checkout -q "${root}"
-    rm -r boards
-    git apply --whitespace=nowarn ../../patches/tock/00-boards.patch
-    rm ../../patches/tock/00-boards.patch
-    rm -r ../../boards
-    cp -a boards ../..
-    git reset -q --hard
-    git clean -qfxd
-    git checkout -q "${top}"
-  )
+  for module in "${MODULES[@]}"; do
+    local root="$(get_root "${module}")"
+    ( set -e
+      cd third_party/"${module}"
+      [[ -z "$(git status -s)" ]] \
+        || fail "The ${module} submodule is not clean."
+      rm -rf ../../patches/"${module}"
+      mkdir ../../patches/"${module}"
+      for file in $(git format-patch "${root}"); do
+        sed -n '/^diff/,$p' "${file}" \
+          | sed '/^-- $/,$d' > "../../patches/${module}/${file#*-}"
+      done
+      git clean -qfxd
+      local top="$(get_head)"
+      git checkout -q "${root}"
+      if [[ "${module}" == tock ]]; then
+        rm -r boards
+        git apply --whitespace=nowarn ../../patches/"${module}"/00-boards.patch
+        rm ../../patches/tock/00-boards.patch
+        rm -r ../../boards
+        cp -a boards ../..
+      fi
+      git reset -q --hard
+      git clean -qfxd
+      git checkout -q "${top}"
+    )
+  done
+}
+
+check() {
+  # Overwrite the commit function to do nothing.
+  commit() { true; }
+  for module in "${MODULES[@]}"; do
+    local root="$(get_root "${module}")"
+    ( set -e
+      cd third_party/"${module}"
+      git commit --allow-empty -qmi
+      git add .
+      git commit --allow-empty -qmx
+      local top="$(get_head)"
+      apply_module "${root}" "${module}"
+      git add .
+      git commit --allow-empty -qmy
+      # We need to cleanup (and not exit) regardless of a diff.
+      local r; if git diff "${top}" --quiet; then r=0; else r=1; fi
+      git checkout -q "${top}"
+      git reset -q HEAD~
+      git reset -q --soft HEAD~
+      [[ "${r}" -eq 0 ]] \
+        || fail "The ${module} submodule differs from its patches."
+    )
+  done
 }
 
 grep -q third_party/tock .gitmodules 2>/dev/null \
@@ -127,17 +177,21 @@ grep -q third_party/tock .gitmodules 2>/dev/null \
 case $1 in
   apply)
     apply
-    success 'Applied the patches to the Tock submodule.'
+    success 'Applied the patches to the submodules.'
     ;;
   save)
     save
-    success 'Saved the Tock submodule to the patches.'
+    success 'Saved the submodules to the patches.'
     ;;
   restore)
-    # Ovewrite the commit function to do nothing.
+    # Overwrite the commit function to do nothing.
     commit() { true; }
     apply
-    success 'Restored the Tock submodule.'
+    success 'Restored the submodules.'
+    ;;
+  check)
+    check
+    success 'The submodules and patches are in sync.'
     ;;
   *) fail 'Unexpected argument. Run without argument for help.' ;;
 esac

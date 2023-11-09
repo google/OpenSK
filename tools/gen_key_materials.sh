@@ -14,6 +14,8 @@
 # limitations under the License.
 
 generate_crypto_materials () {
+  # OpenSSL ext file location
+  local openssl_ext_file=tools/openssl.ext
   # OpenSK AAGUID
   local aaguid_file=crypto_data/aaguid.txt
 
@@ -25,6 +27,11 @@ generate_crypto_materials () {
   # firmware. The certificate will be signed by the Root CA.
   local opensk_key=crypto_data/opensk.key
   local opensk_cert_name=crypto_data/opensk_cert
+
+  # The upgrade private key is used for signing, the corresponding public key
+  # will be COSE encoded and embedded into the firmware.
+  local opensk_upgrade=crypto_data/opensk_upgrade.key
+  local opensk_upgrade_pub=crypto_data/opensk_upgrade_pub.pem
 
   # Allow invoker to override the command with a full path.
   local openssl=${OPENSSL:-$(which openssl)}
@@ -75,17 +82,29 @@ generate_crypto_materials () {
       -new \
       -key "${opensk_key}" \
       -out "${opensk_cert_name}.csr" \
-      -subj "/CN=OpenSK Hacker Edition"
+      -subj "/C=US/O=OpenSK/OU=Authenticator Attestation/CN=OpenSK Hacker Edition"
     "${openssl}" x509 \
       -req \
       -days 3652 \
       -in "${opensk_cert_name}.csr" \
       -CA "${ca_cert_name}.pem" \
+      -extfile "${openssl_ext_file}" \
       -CAkey "${ca_priv_key}" \
       -CAcreateserial \
       -outform pem \
       -out "${opensk_cert_name}.pem" \
       -sha256
+  fi
+
+  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade}" ]
+  then
+    "${openssl}" ecparam -genkey -name prime256v1 -out "${opensk_upgrade}"
+    rm -f "${opensk_upgrade_pub}"
+  fi
+
+  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade_pub}" ]
+  then
+    "${openssl}" ec -in "${opensk_upgrade}" -pubout -out "${opensk_upgrade_pub}"
   fi
 
   if [ "${force_generate}" = "Y" -o ! -f "${aaguid_file}" ]

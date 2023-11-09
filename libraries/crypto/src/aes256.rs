@@ -12,19 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::util::{xor_block_16, Block16};
-use super::{Decrypt16BytesBlock, Encrypt16BytesBlock};
-use arrayref::{array_mut_ref, array_ref};
+//! A portable and naive textbook implementation of AES-256
 
-/** A portable and naive textbook implementation of AES-256 **/
+use super::util::{xor_block_16, Block16};
+use arrayref::{array_mut_ref, array_ref};
+use zeroize::Zeroize;
+
 type Word = [u8; 4];
 
-/** This structure caches the round keys, to avoid re-computing the key schedule for each block. **/
+/// Encryption key for AES256.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Zeroize)]
 pub struct EncryptionKey {
+    // This structure caches the round keys, to avoid re-computing the key schedule for each block.
     enc_round_keys: [Block16; 15],
 }
 
+/// Decryption key for AES256.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Zeroize)]
 pub struct DecryptionKey {
+    // This structure caches the round keys, to avoid re-computing the key schedule for each block.
     dec_round_keys: [Block16; 15],
 }
 
@@ -54,11 +64,9 @@ impl EncryptionKey {
 
         EncryptionKey { enc_round_keys }
     }
-}
 
-impl Encrypt16BytesBlock for EncryptionKey {
     // Encrypt an AES block in place.
-    fn encrypt_block(&self, block: &mut Block16) {
+    pub fn encrypt_block(&self, block: &mut Block16) {
         add_round_key(block, &self.enc_round_keys[0]);
         for i in 1..14 {
             aes_enc(block, &self.enc_round_keys[i]);
@@ -81,11 +89,9 @@ impl DecryptionKey {
 
         DecryptionKey { dec_round_keys }
     }
-}
 
-impl Decrypt16BytesBlock for DecryptionKey {
     // Decrypt an AES block in place.
-    fn decrypt_block(&self, block: &mut Block16) {
+    pub fn decrypt_block(&self, block: &mut Block16) {
         add_round_key(block, &self.dec_round_keys[0]);
         for i in 1..14 {
             aes_dec(block, &self.dec_round_keys[i]);

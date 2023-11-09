@@ -16,15 +16,23 @@ use super::ec::exponent256::NonZeroExponentP256;
 use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
-use super::rng256::Rng256;
+use rand_core::RngCore;
+use zeroize::Zeroize;
 
 pub const NBYTES: usize = int256::NBYTES;
 
+/// A private key for ECDH.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Zeroize)]
 pub struct SecKey {
     a: NonZeroExponentP256,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A public key for ECDH.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Debug, PartialEq, Zeroize)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -32,7 +40,7 @@ pub struct PubKey {
 impl SecKey {
     pub fn gensk<R>(rng: &mut R) -> SecKey
     where
-        R: Rng256,
+        R: RngCore,
     {
         SecKey {
             a: NonZeroExponentP256::gen_uniform(rng),
@@ -70,6 +78,17 @@ impl SecKey {
         p.getx().to_int().to_bin(&mut x);
         x
     }
+
+    /// Creates a private key from the exponent's bytes, or None if checks fail.
+    pub fn from_bytes(bytes: &[u8; 32]) -> Option<SecKey> {
+        let a = NonZeroExponentP256::from_int_checked(Int256::from_bin(bytes));
+        // The branching here is fine because all this reveals is whether the key was invalid.
+        if bool::from(a.is_none()) {
+            return None;
+        }
+        let a = a.unwrap();
+        Some(SecKey { a })
+    }
 }
 
 impl PubKey {
@@ -98,8 +117,8 @@ impl PubKey {
 
 #[cfg(test)]
 mod test {
-    use super::super::rng256::ThreadRng256;
     use super::*;
+    use rand_core::OsRng;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]
@@ -110,7 +129,7 @@ mod test {
     /** Test that key generation creates valid keys **/
     #[test]
     fn test_gen_pub_is_valid_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -122,7 +141,7 @@ mod test {
     /** Test that the exchanged key is the same on both sides **/
     #[test]
     fn test_exchange_x_is_symmetric() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk_a = SecKey::gensk(&mut rng);
@@ -135,7 +154,7 @@ mod test {
 
     #[test]
     fn test_exchange_x_bytes_is_symmetric() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk_a = SecKey::gensk(&mut rng);

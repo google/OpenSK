@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!py_virtual_env/bin/python3
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
+"""Tools that implements vendor-specific CTAP2 commands to configure OpenSK."""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -22,6 +23,7 @@ import argparse
 import getpass
 import datetime
 import sys
+from unittest.mock import patch
 import uuid
 
 import colorama
@@ -40,25 +42,18 @@ OPENSK_VENDOR_CONFIGURE = 0x40
 
 
 def fatal(msg):
-  tqdm.write("{style_begin}fatal:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
+             f"{colorama.Style.RESET_ALL} {msg}")
   sys.exit(1)
 
 
 def error(msg):
-  tqdm.write("{style_begin}error:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
 
 
 def info(msg):
-  tqdm.write("{style_begin}info:{style_end} {message}".format(
-      style_begin=colorama.Fore.GREEN + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+  tqdm.write(f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
+             f"{colorama.Style.RESET_ALL} {msg}")
 
 
 def get_opensk_devices(batch_mode):
@@ -67,9 +62,9 @@ def get_opensk_devices(batch_mode):
     if (dev.descriptor.vid, dev.descriptor.pid) == OPENSK_VID_PID:
       if dev.capabilities & hid.CAPABILITY.CBOR:
         if batch_mode:
-          devices.append(ctap2.CTAP2(dev))
+          devices.append(ctap2.Ctap2(dev))
         else:
-          return [ctap2.CTAP2(dev)]
+          return [ctap2.Ctap2(dev)]
   return devices
 
 
@@ -128,25 +123,39 @@ def main(args):
             cert.public_bytes(serialization.Encoding.DER),
         2:
             priv_key.private_numbers().private_value.to_bytes(
-                length=32, byteorder='big', signed=False)
+                length=32, byteorder="big", signed=False)
     }
 
-  for authenticator in tqdm(get_opensk_devices(args.batch)):
+  patcher = None
+  if args.use_vendor_hid:
+    patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
+    patcher.start()
+    info("Using the Vendor HID interface")
+
+  devices = get_opensk_devices(args.batch)
+  if patcher:
+    patcher.stop()
+  responses = []
+  if not devices:
+    fatal("No devices found.")
+  for authenticator in tqdm(devices):
     # If the device supports it, wink to show which device
     # we're going to program.
     if authenticator.device.capabilities & hid.CAPABILITY.WINK:
       authenticator.device.wink()
     aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
-    info("Programming OpenSK device AAGUID {} ({}).".format(
-        aaguid, authenticator.device))
-    info("Please touch the device to confirm...")
+    info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
+    if args.lock or args.priv_key:
+      info("Please touch the device to confirm...")
     try:
       result = authenticator.send_cbor(
           OPENSK_VENDOR_CONFIGURE,
           data=cbor_data,
       )
-      info("Certificate: {}".format("Present" if result[1] else "Missing"))
-      info("Private Key: {}".format("Present" if result[2] else "Missing"))
+      status = {"cert": result[1], "pkey": result[2]}
+      responses.append(status)
+      info(f"Certificate: {'Present' if result[1] else 'Missing'}")
+      info(f"Private Key: {'Present' if result[2] else 'Missing'}")
       if args.lock:
         info("Device is now locked down!")
     except ctap.CtapError as ex:
@@ -160,7 +169,8 @@ def main(args):
             ("Failed to configure OpenSK (device is partially programmed but "
              "the given cert/key don't match the ones currently programmed)."))
       else:
-        error("Failed to configure OpenSK (unknown error: {}".format(ex))
+        error(f"Failed to configure OpenSK (unknown error: {ex})")
+  return responses
 
 
 if __name__ == "__main__":
@@ -200,5 +210,12 @@ if __name__ == "__main__":
       help=("Locks the device (i.e. bootloader and JTAG access). "
             "This command can fail if the certificate or the private key "
             "haven't been both programmed yet."),
+  )
+  parser.add_argument(
+      "--vendor-hid",
+      default=False,
+      action="store_true",
+      dest="use_vendor_hid",
+      help=("Whether to configure the device using the Vendor HID interface."),
   )
   main(parser.parse_args())

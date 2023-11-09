@@ -12,24 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![no_main]
 #![no_std]
 
 extern crate lang_items;
 
-use libtock_drivers::console::{Console, BUFFER_SIZE};
+use libtock_console::Console;
+use libtock_drivers::result::FlexUnwrap;
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
 
-libtock_core::stack_size! {0x800}
+stack_size! {0x800}
+set_main! {main}
+
+type Syscalls = TockSyscalls;
 
 fn main() {
     // Write messages of length up to the console driver's buffer size.
-    let mut buf = [0; BUFFER_SIZE];
+    let mut buf = [0; 1024];
     loop {
         for i in 1..buf.len() {
             for byte in buf.iter_mut().take(i) {
                 *byte = b'0' + ((i % 10) as u8);
             }
             buf[i] = b'\n';
-            Console::write_unbuffered(&mut buf[..(i + 1)]);
+            Console::<Syscalls>::write(&buf[..(i + 1)])
+                .map_err(|e| e.into())
+                .flex_unwrap();
         }
     }
 }

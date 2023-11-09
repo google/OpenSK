@@ -7,15 +7,18 @@
 // Disable this attribute when documenting, as a workaround for
 // https://github.com/rust-lang/rust/issues/62184.
 #![cfg_attr(not(doc), no_main)]
-#![feature(const_in_array_repeat_expressions)]
 #![deny(missing_docs)]
 
-use kernel::common::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
+use capsules::virtual_alarm::VirtualMuxAlarm;
 use kernel::component::Component;
+use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
+use kernel::platform::{KernelResources, SyscallDriverLookup, SyscallFilter};
+use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
 use kernel::{capabilities, create_capability, debug, debug_gpio, debug_verbose, static_init};
+use kernel::{StorageLocation, StorageType};
 use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel, UartPins};
@@ -52,26 +55,43 @@ static STRINGS: &'static [&'static str] = &[
     "OpenSK",
     // Serial number
     "v1.0",
+    // Interface description + main HID string
+    "FIDO2",
+    // vendor HID string
+    "Vendor HID",
 ];
 
 // State for loading and holding applications.
 // How should the kernel respond when a process faults.
-const FAULT_RESPONSE: kernel::procs::FaultResponse = kernel::procs::FaultResponse::Panic;
+const FAULT_RESPONSE: kernel::process::PanicFaultPolicy = kernel::process::PanicFaultPolicy {};
 
 // Number of concurrent processes this platform supports.
 const NUM_PROCS: usize = 8;
 
-static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
+static mut PROCESSES: [Option<&'static dyn kernel::process::Process>; NUM_PROCS] =
     [None; NUM_PROCS];
 
-static mut STORAGE_LOCATIONS: [kernel::StorageLocation; 1] = [kernel::StorageLocation {
-    address: 0xC0000,
-    size: 0x40000,
-    storage_type: kernel::StorageType::STORE,
-}];
+static mut STORAGE_LOCATIONS: [StorageLocation; 2] = [
+    // We implement NUM_PAGES = 20 as 16 + 4 to satisfy the MPU.
+    StorageLocation {
+        address: 0xC0000,
+        size: 0x10000, // 16 pages
+        storage_type: StorageType::Store,
+    },
+    StorageLocation {
+        address: 0xD0000,
+        size: 0x4000, // 4 pages
+        storage_type: StorageType::Store,
+    },
+];
 
 // Static reference to chip for panic dumps
 static mut CHIP: Option<&'static nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>> = None;
+// Static reference to process printer for panic dumps
+static mut PROCESS_PRINTER: Option<&'static kernel::process::ProcessPrinterText> = None;
+
+/// Flash buffer for the custom nvmc driver
+static mut APP_FLASH_BUFFER: [u8; 0x1000] = [0; 0x1000];
 
 /// Dummy buffer that causes the linker to reserve enough space for the stack.
 #[no_mangle]
@@ -83,6 +103,7 @@ pub struct Platform {
     button: &'static capsules::button::Button<'static, nrf52840::gpio::GPIOPin<'static>>,
     pconsole: &'static capsules::process_console::ProcessConsole<
         'static,
+        VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
         components::process_console::Capability,
     >,
     console: &'static capsules::console::Console<'static>,
@@ -90,9 +111,10 @@ pub struct Platform {
     led: &'static capsules::led::LedDriver<
         'static,
         LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
+        4,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
-    ipc: kernel::ipc::IPC<NUM_PROCS>,
+    ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
     analog_comparator: &'static capsules::analog_comparator::AnalogComparator<
         'static,
         nrf52840::acomp::Comparator<'static>,
@@ -101,19 +123,20 @@ pub struct Platform {
         'static,
         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
     >,
+    scheduler: &'static RoundRobinSched<'static>,
+    systick: cortexm4::systick::SysTick,
     nvmc: &'static nrf52840::nvmc::SyscallDriver,
     usb: &'static capsules::usb::usb_ctap::CtapUsbSyscallDriver<
         'static,
         'static,
         nrf52840::usbd::Usbd<'static>,
     >,
-    crp: &'static capsules::firmware_protection::FirmwareProtection<nrf52840::uicr::Uicr>,
 }
 
-impl kernel::Platform for Platform {
+impl SyscallDriverLookup for Platform {
     fn with_driver<F, R>(&self, driver_num: usize, f: F) -> R
     where
-        F: FnOnce(Option<&dyn kernel::Driver>) -> R,
+        F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
         match driver_num {
             capsules::console::DRIVER_NUM => f(Some(self.console)),
@@ -125,44 +148,87 @@ impl kernel::Platform for Platform {
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             nrf52840::nvmc::DRIVER_NUM => f(Some(self.nvmc)),
             capsules::usb::usb_ctap::DRIVER_NUM => f(Some(self.usb)),
-            capsules::firmware_protection::DRIVER_NUM => f(Some(self.crp)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
     }
+}
 
+impl SyscallFilter for Platform {
     fn filter_syscall(
         &self,
-        process: &dyn kernel::procs::ProcessType,
+        process: &dyn kernel::process::Process,
         syscall: &kernel::syscall::Syscall,
-    ) -> Result<(), kernel::ReturnCode> {
+    ) -> Result<(), kernel::errorcode::ErrorCode> {
         use kernel::syscall::Syscall;
         match *syscall {
-            Syscall::COMMAND {
+            Syscall::Command {
                 driver_number: nrf52840::nvmc::DRIVER_NUM,
                 subdriver_number: cmd,
                 arg0: ptr,
                 arg1: len,
             } if (cmd == 2 || cmd == 3) && !process.fits_in_storage_location(ptr, len) => {
-                Err(kernel::ReturnCode::EINVAL)
+                Err(kernel::ErrorCode::INVAL)
             }
             _ => Ok(()),
         }
     }
 }
 
-/// Entry point in the vector table called on hard reset.
-#[no_mangle]
-pub unsafe fn reset_handler() {
-    // Loads relocations and clears BSS
-    nrf52840::init();
+impl KernelResources<nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>>
+    for Platform
+{
+    type SyscallDriverLookup = Self;
+    type SyscallFilter = Self;
+    type ProcessFault = ();
+    type Scheduler = RoundRobinSched<'static>;
+    type SchedulerTimer = cortexm4::systick::SysTick;
+    type WatchDog = ();
+    type ContextSwitchCallback = ();
 
-    let ppi = static_init!(nrf52840::ppi::Ppi, nrf52840::ppi::Ppi::new());
+    fn syscall_driver_lookup(&self) -> &Self::SyscallDriverLookup {
+        &self
+    }
+    fn syscall_filter(&self) -> &Self::SyscallFilter {
+        &self
+    }
+    fn process_fault(&self) -> &Self::ProcessFault {
+        &()
+    }
+    fn scheduler(&self) -> &Self::Scheduler {
+        self.scheduler
+    }
+    fn scheduler_timer(&self) -> &Self::SchedulerTimer {
+        &self.systick
+    }
+    fn watchdog(&self) -> &Self::WatchDog {
+        &()
+    }
+    fn context_switch_callback(&self) -> &Self::ContextSwitchCallback {
+        &()
+    }
+}
+
+/// This is in a separate, inline(never) function so that its stack frame is
+/// removed when this function returns. Otherwise, the stack space used for
+/// these static_inits is wasted.
+#[inline(never)]
+unsafe fn get_peripherals() -> &'static mut Nrf52840DefaultPeripherals<'static> {
     // Initialize chip peripheral drivers
     let nrf52840_peripherals = static_init!(
         Nrf52840DefaultPeripherals,
-        Nrf52840DefaultPeripherals::new(ppi)
+        Nrf52840DefaultPeripherals::new()
     );
+
+    nrf52840_peripherals
+}
+
+/// Main function called after RAM initialized.
+#[no_mangle]
+pub unsafe fn main() {
+    nrf52840::init();
+
+    let nrf52840_peripherals = get_peripherals();
 
     // set up circular peripheral dependencies
     nrf52840_peripherals.init();
@@ -176,6 +242,7 @@ pub unsafe fn reset_handler() {
     // GPIOs
     let gpio = components::gpio::GpioComponent::new(
         board_kernel,
+        capsules::gpio::DRIVER_NUM,
         components::gpio_component_helper!(
             nrf52840::gpio::GPIOPin,
             // left side of the USB plug
@@ -211,6 +278,7 @@ pub unsafe fn reset_handler() {
 
     let button = components::button::ButtonComponent::new(
         board_kernel,
+        capsules::button::DRIVER_NUM,
         components::button_component_helper!(
             nrf52840::gpio::GPIOPin,
             (
@@ -222,15 +290,12 @@ pub unsafe fn reset_handler() {
     )
     .finalize(components::button_component_buf!(nrf52840::gpio::GPIOPin));
 
-    let led = components::led::LedsComponent::new(components::led_component_helper!(
+    let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedLow<'static, nrf52840::gpio::GPIOPin>,
         LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED2_R_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED2_G_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED2_B_PIN]),
-    ))
-    .finalize(components::led_component_buf!(
-        LedLow<'static, nrf52840::gpio::GPIOPin>
     ));
 
     let chip = static_init!(
@@ -264,11 +329,15 @@ pub unsafe fn reset_handler() {
     );
 
     let rtc = &base_peripherals.rtc;
-    rtc.start();
+    let _ = rtc.start();
     let mux_alarm = components::alarm::AlarmMuxComponent::new(rtc)
         .finalize(components::alarm_mux_component_helper!(nrf52840::rtc::Rtc));
-    let alarm = components::alarm::AlarmDriverComponent::new(board_kernel, mux_alarm)
-        .finalize(components::alarm_component_helper!(nrf52840::rtc::Rtc));
+    let alarm = components::alarm::AlarmDriverComponent::new(
+        board_kernel,
+        capsules::alarm::DRIVER_NUM,
+        mux_alarm,
+    )
+    .finalize(components::alarm_component_helper!(nrf52840::rtc::Rtc));
     let uart_channel = UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD));
     let channel = nrf52_components::UartChannelComponent::new(
         uart_channel,
@@ -285,21 +354,41 @@ pub unsafe fn reset_handler() {
     );
     DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
 
+    let process_printer =
+        components::process_printer::ProcessPrinterTextComponent::new().finalize(());
+    PROCESS_PRINTER = Some(process_printer);
+
     // Create a shared UART channel for the console and for kernel debug.
     let uart_mux =
         components::console::UartMuxComponent::new(channel, 115200, dynamic_deferred_caller)
             .finalize(());
 
-    let pconsole =
-        components::process_console::ProcessConsoleComponent::new(board_kernel, uart_mux)
-            .finalize(());
+    let pconsole = components::process_console::ProcessConsoleComponent::new(
+        board_kernel,
+        uart_mux,
+        mux_alarm,
+        process_printer,
+    )
+    .finalize(components::process_console_component_helper!(
+        nrf52840::rtc::Rtc<'static>
+    ));
 
     // Setup the console.
-    let console = components::console::ConsoleComponent::new(board_kernel, uart_mux).finalize(());
+    let console = components::console::ConsoleComponent::new(
+        board_kernel,
+        capsules::console::DRIVER_NUM,
+        uart_mux,
+    )
+    .finalize(components::console_component_helper!());
     // Create the debugger object that handles calls to `debug!()`.
     components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
-    let rng = components::rng::RngComponent::new(board_kernel, &base_peripherals.trng).finalize(());
+    let rng = components::rng::RngComponent::new(
+        board_kernel,
+        capsules::rng::DRIVER_NUM,
+        &base_peripherals.trng,
+    )
+    .finalize(());
 
     // Initialize AC using AIN5 (P0.29) as VIN+ and VIN- as AIN0 (P0.02)
     // These are hardcoded pin assignments specified in the driver
@@ -309,6 +398,8 @@ pub unsafe fn reset_handler() {
             nrf52840::acomp::Channel,
             &nrf52840::acomp::CHANNEL_AC0
         ),
+        board_kernel,
+        capsules::analog_comparator::DRIVER_NUM,
     )
     .finalize(components::acomp_component_buf!(
         nrf52840::acomp::Comparator
@@ -318,8 +409,9 @@ pub unsafe fn reset_handler() {
         nrf52840::nvmc::SyscallDriver,
         nrf52840::nvmc::SyscallDriver::new(
             &base_peripherals.nvmc,
-            board_kernel.create_grant(&memory_allocation_capability),
+            board_kernel.create_grant(nrf52840::nvmc::DRIVER_NUM, &memory_allocation_capability),
             dynamic_deferred_caller,
+            &mut APP_FLASH_BUFFER,
         )
     );
     nvmc.set_deferred_handle(
@@ -331,23 +423,19 @@ pub unsafe fn reset_handler() {
     // Configure USB controller
     let usb = components::usb_ctap::UsbCtapComponent::new(
         board_kernel,
+        capsules::usb::usb_ctap::DRIVER_NUM,
         &nrf52840_peripherals.usbd,
         capsules::usb::usbc_client::MAX_CTRL_PACKET_SIZE_NRF52840,
         VENDOR_ID,
         PRODUCT_ID,
         STRINGS,
     )
-    .finalize(components::usb_ctap_component_buf!(nrf52840::usbd::Usbd));
-
-    let crp = components::firmware_protection::FirmwareProtectionComponent::new(
-        board_kernel,
-        nrf52840::uicr::Uicr::new(),
-    )
-    .finalize(components::firmware_protection_component_helper!(
-        nrf52840::uicr::Uicr
-    ));
+    .finalize(components::usb_ctap_component_helper!(nrf52840::usbd::Usbd));
 
     nrf52_components::NrfClockComponent::new(&base_peripherals.clock).finalize(());
+
+    let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
+        .finalize(components::rr_component_helper!(NUM_PROCS));
 
     let platform = Platform {
         button,
@@ -360,15 +448,20 @@ pub unsafe fn reset_handler() {
         analog_comparator,
         nvmc,
         usb,
-        crp,
-        ipc: kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability),
+        ipc: kernel::ipc::IPC::new(
+            board_kernel,
+            kernel::ipc::DRIVER_NUM,
+            &memory_allocation_capability,
+        ),
+        scheduler,
+        systick: cortexm4::systick::SysTick::new_with_calibration(6400_0000),
     };
 
-    platform.pconsole.start();
+    let _ = platform.pconsole.start();
     debug!("Initialization complete. Entering main loop\r");
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
 
-    /// These symbols are defined in the linker script.
+    // These symbols are defined in the linker script.
     extern "C" {
         /// Beginning of the ROM region containing app images.
         static _sapps: u8;
@@ -380,7 +473,7 @@ pub unsafe fn reset_handler() {
         static _eappmem: u8;
     }
 
-    kernel::procs::load_processes(
+    kernel::process::load_processes(
         board_kernel,
         chip,
         core::slice::from_raw_parts(
@@ -392,7 +485,7 @@ pub unsafe fn reset_handler() {
             &_eappmem as *const u8 as usize - &_sappmem as *const u8 as usize,
         ),
         &mut PROCESSES,
-        FAULT_RESPONSE,
+        &FAULT_RESPONSE,
         &process_management_capability,
     )
     .unwrap_or_else(|err| {
@@ -400,13 +493,5 @@ pub unsafe fn reset_handler() {
         debug!("{:?}", err);
     });
 
-    let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
-        .finalize(components::rr_component_helper!(NUM_PROCS));
-    board_kernel.kernel_loop(
-        &platform,
-        chip,
-        Some(&platform.ipc),
-        scheduler,
-        &main_loop_capability,
-    );
+    board_kernel.kernel_loop(&platform, chip, Some(&platform.ipc), &main_loop_capability);
 }

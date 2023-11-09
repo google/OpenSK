@@ -1,0 +1,55 @@
+[package]
+name = "opensk"
+version = "1.0.0"
+authors = [
+  "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
+  "Guillaume Endignoux <guillaumee@google.com>",
+  "Jean-Michel Picod <jmichel@google.com>",
+  "Julien Cretin <cretin@google.com>",
+]
+license = "Apache-2.0"
+edition = "2018"
+rust-version = "1.47"
+
+[dependencies]
+sk-cbor = { path = "../cbor" }
+crypto = { path = "../crypto" }
+persistent_store = { path = "../persistent_store" }
+byteorder = { version = "1", default-features = false }
+arrayref = "0.3.6"
+subtle = { version = "2.2", default-features = false, features = ["nightly"] }
+arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
+ed25519-compact = { version = "1", default-features = false, optional = true }
+rand_core = "0.6.4"
+rand = { version = "0.8.5", default-features = false, optional = true }
+sha2 = { version = "0.10.6", default-features = false, optional = true }
+hmac = { version = "0.12.1", default-features = false, optional = true }
+hkdf = { version = "0.12.3", default-features = false, optional = true }
+aes = { version = "0.8.2", default-features = false, optional = true }
+cbc = { version = "0.1.2", default-features = false, optional = true }
+zeroize = { version = "1.5.7", features = ["derive"] }
+
+[dependencies.p256]
+version = "0.13.0"
+default-features = false
+features = ["alloc", "ecdh", "ecdsa"]
+optional = true
+
+[features]
+default = ["config_command", "with_ctap1"]
+config_command = []
+debug_ctap = []
+std = ["crypto/std", "persistent_store/std", "rand/std_rng", "config_command"]
+with_ctap1 = []
+vendor_hid = []
+fuzz = ["arbitrary", "std"]
+ed25519 = ["ed25519-compact"]
+rust_crypto = ["p256", "sha2", "hmac", "hkdf", "aes", "cbc"]
+
+[dev-dependencies]
+enum-iterator = "0.6.0"
+
+[build-dependencies]
+sk-cbor = { path = "../cbor" }
+uuid = { version = "0.8", features = ["v4"] }
+openssl = "0.10.36"

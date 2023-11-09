@@ -146,7 +146,7 @@ pub fn delete(store: &mut Store<impl Storage>, keys: &impl Keys) -> StoreResult<
 /// The handles are truncated to the keys that are present.
 fn get_handles(store: &Store<impl Storage>, keys: &impl Keys) -> StoreResult<Vec<StoreHandle>> {
     let keys_len = keys.len();
-    let mut handles: Vec<Option<StoreHandle>> = vec![None; keys_len as usize];
+    let mut handles: Vec<Option<StoreHandle>> = vec![None; keys_len];
     for handle in store.iter()? {
         let handle = handle?;
         let pos = match keys.pos(handle.get_key()) {

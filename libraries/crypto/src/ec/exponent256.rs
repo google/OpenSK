@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::rng256::Rng256;
 use super::int256::{Digit, Int256};
 use core::ops::Mul;
+use rand_core::RngCore;
 use subtle::{self, Choice, ConditionallySelectable, CtOption};
+use zeroize::Zeroize;
 
-// An exponent on the elliptic curve, that is an element modulo the curve order N.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An exponent on the elliptic curve, that is an element modulo the curve order N.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
@@ -90,8 +93,10 @@ impl Mul for &ExponentP256 {
     }
 }
 
-// A non-zero exponent on the elliptic curve.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A non-zero exponent on the elliptic curve.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
@@ -112,7 +117,7 @@ impl NonZeroExponentP256 {
     // Generates a uniformly distributed element 0 < k < N
     pub fn gen_uniform<R>(r: &mut R) -> NonZeroExponentP256
     where
-        R: Rng256,
+        R: RngCore,
     {
         loop {
             let x = Int256::gen_uniform_256(r);
@@ -292,53 +297,5 @@ pub mod test {
     fn test_well_known_inverses() {
         assert_eq!(ONE.inv(), ONE);
         assert_eq!(N_MIN_1.inv(), N_MIN_1);
-    }
-
-    /** RNG **/
-    // Mock rng that samples through a list of values, then panics.
-    struct StressTestingRng {
-        values: Vec<Int256>,
-        index: usize,
-    }
-
-    impl StressTestingRng {
-        pub fn new(values: Vec<Int256>) -> StressTestingRng {
-            StressTestingRng { values, index: 0 }
-        }
-    }
-
-    impl Rng256 for StressTestingRng {
-        // This function is unused, as we redefine gen_uniform_u32x8.
-        fn gen_uniform_u8x32(&mut self) -> [u8; 32] {
-            unreachable!()
-        }
-
-        fn gen_uniform_u32x8(&mut self) -> [u32; 8] {
-            let result = self.values[self.index].digits();
-            self.index += 1;
-            result
-        }
-    }
-
-    #[test]
-    fn test_uniform_non_zero_is_below_n() {
-        let mut rng = StressTestingRng::new(vec![
-            Int256::new([
-                0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
-                0xffffffff,
-            ]),
-            Int256::N,
-            N_MIN_1.to_int(),
-            Int256::N_MIN_2,
-        ]);
-
-        assert_eq!(NonZeroExponentP256::gen_uniform(&mut rng), N_MIN_1);
-    }
-
-    #[test]
-    fn test_uniform_n_is_above_zero() {
-        let mut rng = StressTestingRng::new(vec![Int256::ZERO]);
-
-        assert_eq!(NonZeroExponentP256::gen_uniform(&mut rng), ONE);
     }
 }

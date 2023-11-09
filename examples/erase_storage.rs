@@ -12,18 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![no_main]
 #![no_std]
 
 extern crate lang_items;
 
 use core::fmt::Write;
-use ctap2::embedded_flash::new_storage;
-use libtock_drivers::console::Console;
-use libtock_drivers::led;
+use ctap2::env::tock::take_storage;
+use libtock_console::Console;
 use libtock_drivers::result::FlexUnwrap;
+use libtock_leds::Leds;
+use libtock_platform as platform;
+use libtock_runtime::{set_main, stack_size, TockSyscalls};
 use persistent_store::{Storage, StorageIndex};
+use platform::DefaultConfig;
 
-libtock_core::stack_size! {0x800}
+stack_size! {0x800}
+set_main! {main}
+
+type Syscalls = TockSyscalls;
 
 fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
     let index = StorageIndex { page, byte: 0 };
@@ -36,20 +43,21 @@ fn is_page_erased(storage: &dyn Storage, page: usize) -> bool {
 }
 
 fn main() {
-    led::get(1).flex_unwrap().on().flex_unwrap(); // red on dongle
-    const NUM_PAGES: usize = 20; // should be at least ctap::storage::NUM_PAGES
-    let mut storage = new_storage(NUM_PAGES);
-    writeln!(Console::new(), "Erase {} pages of storage:", NUM_PAGES).unwrap();
-    for page in 0..NUM_PAGES {
-        write!(Console::new(), "- Page {} ", page).unwrap();
+    Leds::<Syscalls>::on(1).map_err(|e| e.into()).flex_unwrap(); // red on dongle
+    let mut storage = take_storage::<Syscalls, DefaultConfig>().unwrap();
+    let num_pages = storage.num_pages();
+    let mut console = Console::<Syscalls>::writer();
+    writeln!(console, "Erase {} pages of storage:", num_pages).unwrap();
+    for page in 0..num_pages {
+        write!(console, "- Page {} ", page).unwrap();
         if is_page_erased(&storage, page) {
-            writeln!(Console::new(), "skipped (was already erased).").unwrap();
+            writeln!(console, "skipped (was already erased).").unwrap();
         } else {
             storage.erase_page(page).unwrap();
-            writeln!(Console::new(), "erased.").unwrap();
+            writeln!(console, "erased.").unwrap();
         }
     }
-    writeln!(Console::new(), "Done.").unwrap();
-    led::get(1).flex_unwrap().off().flex_unwrap();
-    led::get(0).flex_unwrap().on().flex_unwrap(); // green on dongle
+    writeln!(console, "Done.").unwrap();
+    Leds::<Syscalls>::on(1).map_err(|e| e.into()).flex_unwrap();
+    Leds::<Syscalls>::off(0).map_err(|e| e.into()).flex_unwrap(); // green on dongle
 }

@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-# Copyright 2019 Google LLC
+#!py_virtual_env/bin/python3
+# Copyright 2019-2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from typing import Dict, List, Tuple
 
 import colorama
 from six.moves import input
@@ -34,6 +36,9 @@ from tockloader import tab
 from tockloader import tbfh
 from tockloader import tockloader as loader
 from tockloader.exceptions import TockLoaderException
+
+import tools.configure
+from tools.deploy_partition import create_metadata, load_priv_key, pad_to
 
 PROGRAMMERS = frozenset(("jlink", "openocd", "pyocd", "nordicdfu", "none"))
 
@@ -50,12 +55,19 @@ OpenSKBoard = collections.namedtuple(
         "page_size",
         # Flash address at which the kernel will be written
         "kernel_address",
-        # Set to None is padding is not required for the board.
+        # Set to None if padding is not required for the board.
         # This creates a fake Tock OS application that starts at the
         # address specified by this parameter (must match the `prog` value
         # specified on the board's `layout.ld` file) and will end at
         # `app_address`.
         "padding_address",
+        # If present, enforce that the firmware image equals this value,
+        # padding it with 0xFF bytes.
+        "firmware_size",
+        # Set to None if metadata is not required for the board.
+        # Writes the metadata that is checked by the custom bootloader for
+        # upgradable board.
+        "metadata_address",
         # Linker script to produce a working app for this board
         "app_ldscript",
         # Flash address at which the app should be written
@@ -83,91 +95,76 @@ OpenSKBoard = collections.namedtuple(
         "nordic_dfu",
     ])
 
+nrf52840dk_opensk_board = OpenSKBoard(
+    path="third_party/tock/boards/nordic/nrf52840dk_opensk",
+    arch="thumbv7em-none-eabi",
+    page_size=4096,
+    kernel_address=0,
+    padding_address=0x30000,
+    firmware_size=None,
+    metadata_address=None,
+    app_ldscript="nrf52840_layout.ld",
+    app_address=0x40000,
+    storage_address=0xC0000,
+    storage_size=0x14000,
+    pyocd_target="nrf52840",
+    openocd_board="nordic_nrf52840_dongle.cfg",
+    openocd_options=[],
+    openocd_commands={},
+    jlink_if="swd",
+    jlink_device="nrf52840_xxaa",
+    nordic_dfu=False,
+)
+
 SUPPORTED_BOARDS = {
     "nrf52840dk_opensk":
-        OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840dk_opensk",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
-            kernel_address=0,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
+        nrf52840dk_opensk_board,
+    "nrf52840dk_opensk_a":
+        nrf52840dk_opensk_board._replace(
+            path=nrf52840dk_opensk_board.path + "_a",
+            kernel_address=0x20000,
+            padding_address=None,
+            firmware_size=0x40000,
+            metadata_address=0x4000,
+            app_ldscript="nrf52840_layout_a.ld",
             app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x40000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
-            nordic_dfu=False,
+        ),
+    "nrf52840dk_opensk_b":
+        nrf52840dk_opensk_board._replace(
+            path=nrf52840dk_opensk_board.path + "_b",
+            kernel_address=0x60000,
+            padding_address=None,
+            firmware_size=0x40000,
+            metadata_address=0x5000,
+            app_ldscript="nrf52840_layout_b.ld",
+            app_address=0x80000,
         ),
     "nrf52840_dongle_opensk":
-        OpenSKBoard(
-            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
-            kernel_address=0,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x40000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
-            nordic_dfu=False,
-        ),
+        nrf52840dk_opensk_board._replace(
+            path="third_party/tock/boards/nordic/nrf52840_dongle_opensk",),
     "nrf52840_dongle_dfu":
-        OpenSKBoard(
+        nrf52840dk_opensk_board._replace(
             path="third_party/tock/boards/nordic/nrf52840_dongle_dfu",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
             kernel_address=0x1000,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x40000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
             nordic_dfu=True,
         ),
     "nrf52840_mdk_dfu":
-        OpenSKBoard(
+        nrf52840dk_opensk_board._replace(
             path="third_party/tock/boards/nordic/nrf52840_mdk_dfu",
-            arch="thumbv7em-none-eabi",
-            page_size=4096,
             kernel_address=0x1000,
-            padding_address=0x30000,
-            app_ldscript="nrf52840_layout.ld",
-            app_address=0x40000,
-            storage_address=0xC0000,
-            storage_size=0x40000,
-            pyocd_target="nrf52840",
-            openocd_board="nordic_nrf52840_dongle.cfg",
-            openocd_options=[],
-            openocd_commands={},
-            jlink_if="swd",
-            jlink_device="nrf52840_xxaa",
             nordic_dfu=True,
         ),
 }
 
 # The following value must match the one used in the file
 # `src/entry_point.rs`
-APP_HEAP_SIZE = 90000
+APP_HEAP_SIZE = 90_000
+
+CARGO_TARGET_DIR = os.environ.get("CARGO_TARGET_DIR", "target")
 
 
-def get_supported_boards():
+def get_supported_boards() -> Tuple[str]:
+  """Returns a tuple all valid supported boards."""
   boards = []
   for name, props in SUPPORTED_BOARDS.items():
     if all((os.path.exists(os.path.join(props.path, "Cargo.toml")),
@@ -176,40 +173,33 @@ def get_supported_boards():
   return tuple(set(boards))
 
 
-def fatal(msg):
-  print("{style_begin}fatal:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+def fatal(msg: str):
+  print(f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
+        f"{colorama.Style.RESET_ALL} {msg}")
   sys.exit(1)
 
 
-def error(msg):
-  print("{style_begin}error:{style_end} {message}".format(
-      style_begin=colorama.Fore.RED,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+def error(msg: str):
+  print(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
 
 
-def info(msg):
-  print("{style_begin}info:{style_end} {message}".format(
-      style_begin=colorama.Fore.GREEN + colorama.Style.BRIGHT,
-      style_end=colorama.Style.RESET_ALL,
-      message=msg))
+def info(msg: str):
+  print(f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
+        f"{colorama.Style.RESET_ALL} {msg}")
 
 
-def assert_mandatory_binary(binary):
-  if not shutil.which(binary):
-    fatal(("Couldn't find {} binary. Make sure it is installed and "
-           "that your PATH is set correctly.").format(binary))
+def assert_mandatory_binary(binary_name: str):
+  if not shutil.which(binary_name):
+    fatal((f"Couldn't find {binary_name} binary. Make sure it is installed and "
+           "that your PATH is set correctly."))
 
 
-def assert_python_library(module):
+def assert_python_library(module: str):
   try:
     __import__(module)
   except ModuleNotFoundError:
-    fatal(("Couldn't load python3 module {name}. "
-           "Try to run: pip3 install {name}").format(name=module))
+    fatal((f"Couldn't load python3 module {module}. "
+           f"Try to run: pip3 install {module}"))
 
 
 class RemoveConstAction(argparse.Action):
@@ -250,13 +240,26 @@ class RemoveConstAction(argparse.Action):
 
 
 class OpenSKInstaller:
+  """Checks, builds and installs various parts of OpenSK.
+
+  This module can perform the following tasks:
+    - build and install Tock OS
+    - check, build and install the main ctap2 application
+    - build and install example applications
+    - write padding
+    - erase apps and persistent storage
+    - write metadata entries for upgradable boards
+
+    OpenSKInstaller(args).run()
+  """
 
   def __init__(self, args):
     self.args = args
     # Where all the TAB files should go
-    self.tab_folder = os.path.join("target", "tab")
+    self.tab_folder = os.path.join(CARGO_TARGET_DIR, "tab")
     board = SUPPORTED_BOARDS[self.args.board]
     self.tockloader_default_args = argparse.Namespace(
+        app_address=board.app_address,
         arch=board.arch,
         board=self.args.board,
         bundle_apps=False,
@@ -269,7 +272,7 @@ class OpenSKInstaller:
         jlink_speed=1200,
         openocd=self.args.programmer == "openocd",
         openocd_board=board.openocd_board,
-        openocd_cmd="openocd",
+        openocd_cmd=self.args.openocd_cmd,
         openocd_commands=copy.copy(board.openocd_commands),
         openocd_options=copy.copy(board.openocd_options),
         jtag=False,
@@ -278,15 +281,33 @@ class OpenSKInstaller:
         port=None,
     )
 
-  def checked_command(self, cmd, env=None, cwd=None):
+  def checked_command(self,
+                      cmd: List[str],
+                      env: Dict[str, str] = None,
+                      cwd: str = None):
+    """Executes the given command.
+
+    Outside of debug mode, the command's output is muted. Exits if the called
+    process returns an error.
+
+    Args:
+      cmd: A list of strings. The first string is the command, the other list
+      elements are parameters to that command."
+      env: The dictionary of environment variables.
+      cwd: The directory to execute from.
+    """
     stdout = None if self.args.verbose_build else subprocess.DEVNULL
     try:
       subprocess.run(
           cmd, stdout=stdout, timeout=None, check=True, env=env, cwd=cwd)
     except subprocess.CalledProcessError as e:
-      fatal("Failed to execute {}: {}".format(cmd[0], str(e)))
+      fatal(f"Failed to execute {cmd[0]}: {str(e)}")
 
-  def checked_command_output(self, cmd, env=None, cwd=None):
+  def checked_command_output(self,
+                             cmd: List[str],
+                             env: Dict[str, str] = None,
+                             cwd: str = None) -> str:
+    """Executes cmd like checked_command, but returns the output."""
     cmd_output = ""
     try:
       cmd_output = subprocess.run(
@@ -297,51 +318,13 @@ class OpenSKInstaller:
           env=env,
           cwd=cwd).stdout
     except subprocess.CalledProcessError as e:
-      fatal("Failed to execute {}: {}".format(cmd[0], str(e)))
+      fatal(f"Failed to execute {cmd[0]}: {str(e)}")
       # Unreachable because fatal() will exit
     return cmd_output.decode()
 
-  def update_rustc_if_needed(self):
-    target_toolchain_fullstring = "stable"
-    with open("rust-toolchain", "r", encoding="utf-8") as f:
-      content = f.readlines()
-      if len(content) == 1:
-        # Old format, only the build is stored
-        target_toolchain_fullstring = content[0].strip()
-      else:
-        # New format
-        for line in content:
-          if line.startswith("channel"):
-            channel = line.strip().split("=", maxsplit=1)[1].strip()
-            target_toolchain_fullstring = channel.strip('"')
-    target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
-    if len(target_toolchain) == 1:
-      # If we target the stable version of rust, we won't have a date
-      # associated to the version and split will only return 1 item.
-      # To avoid failing later when accessing the date, we insert an
-      # empty value.
-      target_toolchain.append("")
-    current_version = self.checked_command_output(["rustc", "--version"])
-    if not (target_toolchain[0] in current_version and
-            target_toolchain[1] in current_version):
-      info("Updating rust toolchain to {}".format("-".join(target_toolchain)))
-      # Need to update
-      rustup_install = ["rustup"]
-      if self.args.verbose_build:
-        rustup_install.append("--verbose")
-      rustup_install.extend(["install", target_toolchain_fullstring])
-      self.checked_command(rustup_install)
-
-    rustup_target = ["rustup"]
-    if self.args.verbose_build:
-      rustup_target.append("--verbose")
-    rustup_target.extend(
-        ["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
-    self.checked_command(rustup_target)
-    info("Rust toolchain up-to-date")
-
   def build_tockos(self):
-    info("Building Tock OS for board {}".format(self.args.board))
+    """Buids Tock OS with the parameters specified in args."""
+    info(f"Building Tock OS for board {self.args.board}")
     props = SUPPORTED_BOARDS[self.args.board]
     out_directory = os.path.join("third_party", "tock", "target", props.arch,
                                  "release")
@@ -350,18 +333,67 @@ class OpenSKInstaller:
     env = os.environ.copy()
     if self.args.verbose_build:
       env["V"] = "1"
+    if "vendor_hid" in self.args.features:
+      env["CARGO_FLAGS"] = "--features=vendor_hid"
     self.checked_command(["make"], cwd=props.path, env=env)
 
   def build_example(self):
-    info("Building example {}".format(self.args.application))
+    """Builds an example with the name from args."""
+    info(f"Building example {self.args.application}")
     self._build_app_or_example(is_example=True)
 
   def build_opensk(self):
+    """Runs essential tests in OpenSK, then builds it if successful."""
     info("Building OpenSK application")
     self._check_invariants()
     self._build_app_or_example(is_example=False)
 
-  def _build_app_or_example(self, is_example):
+  def build_bootloader(self):
+    """Builds the upgrade bootloader."""
+    props = SUPPORTED_BOARDS[self.args.board]
+    info("Building bootloader")
+    rust_flags = [
+        f"--remap-path-prefix={os.getcwd()}=",
+        "-C",
+        "link-arg=-Wl,-Tlink.x",
+        "-C",
+        "link-arg=-nostartfiles",
+    ]
+    env = os.environ.copy()
+    env["RUSTFLAGS"] = " ".join(rust_flags)
+    cargo_command = ["cargo", "build", "--release", f"--target={props.arch}"]
+    self.checked_command(cargo_command, cwd="bootloader", env=env)
+    binary_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release",
+                               "bootloader")
+    objcopy_command = [
+        "llvm-objcopy", "-O", "binary", binary_path, f"{binary_path}.bin"
+    ]
+    self.checked_command(objcopy_command, cwd="bootloader")
+
+  def flash_bootloader(self):
+    """Flashes the upgrade bootloader."""
+    props = SUPPORTED_BOARDS[self.args.board]
+    info("Flashing bootloader")
+    bin_file = os.path.join("bootloader", "target", props.arch, "release",
+                            "bootloader.bin")
+    if not os.path.exists(bin_file):
+      fatal(f"File not found: {bin_file}")
+    with open(bin_file, "rb") as bootloader_bin:
+      bootloader = bootloader_bin.read()
+    self.write_binary(bootloader, 0)
+
+  def _build_app_or_example(self, is_example: bool):
+    """Builds the application specified through args.
+
+    This function specifies the used compile time flags, specifying the linker
+    script and reducing the binary size. It compiles the application and calls
+    elf2tab to create a TAB file out of the produced binary.
+
+    The settings in self.args have to match is_example.
+
+    Args:
+      is_example: Whether args.application is an example or the main ctap2 app.
+    """
     assert self.args.application
     # Ideally we would build a TAB file for all boards at once but depending on
     # the chip on the board, the link script could be totally different.
@@ -370,12 +402,12 @@ class OpenSKInstaller:
     props = SUPPORTED_BOARDS[self.args.board]
     rust_flags = [
         "-C",
-        "link-arg=-T{}".format(props.app_ldscript),
+        f"link-arg=-T{props.app_ldscript}",
         "-C",
         "relocation-model=static",
         "-D",
         "warnings",
-        "--remap-path-prefix={}=".format(os.getcwd()),
+        f"--remap-path-prefix={os.getcwd()}=",
         "-C",
         "link-arg=-icf=all",
         "-C",
@@ -386,15 +418,15 @@ class OpenSKInstaller:
     env["APP_HEAP_SIZE"] = str(APP_HEAP_SIZE)
 
     command = [
-        "cargo", "build", "--release", "--target={}".format(props.arch),
-        "--features={}".format(",".join(self.args.features))
+        "cargo", "build", "--release", f"--target={props.arch}",
+        f"--features={','.join(self.args.features)}"
     ]
     if is_example:
       command.extend(["--example", self.args.application])
     if self.args.verbose_build:
       command.append("--verbose")
     self.checked_command(command, env=env)
-    app_path = os.path.join("target", props.arch, "release")
+    app_path = os.path.join(CARGO_TARGET_DIR, props.arch, "release")
     if is_example:
       app_path = os.path.join(app_path, "examples")
     app_path = os.path.join(app_path, self.args.application)
@@ -402,11 +434,17 @@ class OpenSKInstaller:
     self.create_tab_file({props.arch: app_path})
 
   def _check_invariants(self):
+    """Runs selected unit tests to check preconditions in the code."""
     print("Testing invariants in customization.rs...")
-    self.checked_command_output(
-        ["cargo", "test", "--features=std", "--lib", "customization"])
+    features = ["std"]
+    features.extend(self.args.features)
+    self.checked_command_output([
+        "cargo", "test", f"--features={','.join(features)}", "--lib",
+        "customization"
+    ])
 
-  def generate_crypto_materials(self, force_regenerate):
+  def generate_crypto_materials(self, force_regenerate: bool):
+    """Calls a shell script that generates cryptographic material."""
     has_error = subprocess.call([
         os.path.join("tools", "gen_key_materials.sh"),
         "Y" if force_regenerate else "N",
@@ -415,30 +453,31 @@ class OpenSKInstaller:
       error(("Something went wrong while trying to generate ECC "
              "key and/or certificate for OpenSK"))
 
-  def create_tab_file(self, binaries):
-    assert binaries
+  def create_tab_file(self, binary_names: Dict[str, str]):
+    """Checks and uses elf2tab to generated an TAB file out of the binaries."""
+    assert binary_names
     assert self.args.application
-    info("Generating Tock TAB file for application/example {}".format(
-        self.args.application))
+    info("Generating Tock TAB file for application/example "
+         f"{self.args.application}")
     elf2tab_ver = self.checked_command_output(
         ["elf2tab/bin/elf2tab", "--version"]).split(
             "\n", maxsplit=1)[0]
-    if elf2tab_ver != "elf2tab 0.7.0":
-      error(
-          ("Detected unsupported elf2tab version {!a}. The following "
-           "commands may fail. Please use 0.7.0 instead.").format(elf2tab_ver))
+    if elf2tab_ver != "elf2tab 0.10.2":
+      error(("Detected unsupported elf2tab version {elf2tab_ver!a}! The "
+             "following commands may fail. Please use 0.10.2 instead."))
     os.makedirs(self.tab_folder, exist_ok=True)
-    tab_filename = os.path.join(self.tab_folder,
-                                "{}.tab".format(self.args.application))
+    tab_filename = os.path.join(self.tab_folder, f"{self.args.application}.tab")
+    supported_kernel = (2, 1)
     elf2tab_args = [
         "elf2tab/bin/elf2tab", "--deterministic", "--package-name",
-        self.args.application, "-o", tab_filename
+        self.args.application, f"--kernel-major={supported_kernel[0]}",
+        f"--kernel-minor={supported_kernel[1]}", "-o", tab_filename
     ]
     if self.args.verbose_build:
       elf2tab_args.append("--verbose")
     stack_sizes = set()
-    for arch, app_file in binaries.items():
-      dest_file = os.path.join(self.tab_folder, "{}.elf".format(arch))
+    for arch, app_file in binary_names.items():
+      dest_file = os.path.join(self.tab_folder, f"{arch}.elf")
       shutil.copyfile(app_file, dest_file)
       elf2tab_args.append(dest_file)
       # extract required stack size directly from binary
@@ -450,11 +489,11 @@ class OpenSKInstaller:
           stack_sizes.add(required_stack_size)
     if len(stack_sizes) != 1:
       error("Detected different stack sizes across tab files.")
-
+    # `protected-region-size` must match the `TBF_HEADER_SIZE`
+    # (currently 0x60 = 96 bytes)
     elf2tab_args.extend([
-        "--stack={}".format(stack_sizes.pop()),
-        "--app-heap={}".format(APP_HEAP_SIZE), "--kernel-heap=1024",
-        "--protected-region-size=64"
+        f"--stack={stack_sizes.pop()}", f"--app-heap={APP_HEAP_SIZE}",
+        "--kernel-heap=1024", "--protected-region-size=96"
     ])
     if self.args.elf2tab_output:
       output = self.checked_command_output(elf2tab_args)
@@ -462,12 +501,11 @@ class OpenSKInstaller:
     else:
       self.checked_command(elf2tab_args)
 
-  def install_tab_file(self, tab_filename):
+  def install_tab_file(self, tab_filename: str):
+    """Calls Tockloader to install a TAB file."""
     assert self.args.application
-    info("Installing Tock application {}".format(self.args.application))
-    board_props = SUPPORTED_BOARDS[self.args.board]
+    info(f"Installing Tock application {self.args.application}")
     args = copy.copy(self.tockloader_default_args)
-    setattr(args, "app_address", board_props.app_address)
     setattr(args, "erase", self.args.clear_apps)
     setattr(args, "make", False)
     setattr(args, "no_replace", False)
@@ -477,49 +515,91 @@ class OpenSKInstaller:
     try:
       tock.install(tabs, replace="yes", erase=args.erase)
     except TockLoaderException as e:
-      fatal("Couldn't install Tock application {}: {}".format(
-          self.args.application, str(e)))
+      fatal("Couldn't install Tock application "
+            f"{self.args.application}: {str(e)}")
 
-  def get_padding(self):
+  def get_padding(self) -> bytes:
+    """Creates a padding application binary."""
     padding = tbfh.TBFHeaderPadding(
         SUPPORTED_BOARDS[self.args.board].app_address -
         SUPPORTED_BOARDS[self.args.board].padding_address)
     return padding.get_binary()
 
-  def install_tock_os(self):
+  def write_binary(self, binary: bytes, address: int):
+    """Writes a binary to the device's flash at the given address."""
+    tock = loader.TockLoader(self.tockloader_default_args)
+    tock.open()
+    try:
+      tock.flash_binary(binary, address)
+    except TockLoaderException as e:
+      fatal(f"Couldn't write binary: {str(e)}")
+
+  def read_kernel(self) -> bytes:
+    """Reads the kernel file from disk and returns it as a byte array."""
     board_props = SUPPORTED_BOARDS[self.args.board]
     kernel_file = os.path.join("third_party", "tock", "target",
                                board_props.arch, "release",
-                               "{}.bin".format(self.args.board))
-    info("Flashing file {}.".format(kernel_file))
-    with open(kernel_file, "rb") as f:
-      kernel = f.read()
-    args = copy.copy(self.tockloader_default_args)
-    setattr(args, "address", board_props.app_address)
-    tock = loader.TockLoader(args)
-    tock.open()
-    try:
-      tock.flash_binary(kernel, board_props.kernel_address)
-    except TockLoaderException as e:
-      fatal("Couldn't install Tock OS: {}".format(str(e)))
+                               f"{self.args.board}.bin")
+    if not os.path.exists(kernel_file):
+      fatal(f"File not found: {kernel_file}")
+    with open(kernel_file, "rb") as firmware:
+      kernel = firmware.read()
+
+    # Pads the kernel to the expected length.
+    if board_props.padding_address is None:
+      end_address = board_props.app_address
+    else:
+      end_address = board_props.padding_address
+    kernel_size = end_address - board_props.kernel_address
+    return pad_to(kernel, kernel_size)
+
+  def install_tock_os(self):
+    """Reads the kernel from disk and writes it to the device's flash."""
+    kernel = self.read_kernel()
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    self.write_binary(kernel, board_props.kernel_address)
 
   def install_padding(self):
-    padding = self.get_padding()
+    """Generates a padding application and writes it to the address in args."""
     board_props = SUPPORTED_BOARDS[self.args.board]
+    if board_props.padding_address is None:
+      return
     info("Flashing padding application")
-    args = copy.copy(self.tockloader_default_args)
-    setattr(args, "address", board_props.padding_address)
-    tock = loader.TockLoader(args)
-    tock.open()
-    try:
-      tock.flash_binary(padding, args.address)
-    except TockLoaderException as e:
-      fatal("Couldn't install padding: {}".format(str(e)))
+    self.write_binary(self.get_padding(), board_props.padding_address)
+
+  def install_metadata(self):
+    """Generates and writes firmware metadata at the metadata address."""
+    board_props = SUPPORTED_BOARDS[self.args.board]
+    if board_props.metadata_address is None:
+      return
+
+    kernel = self.read_kernel()
+    app_tab_path = f"{CARGO_TARGET_DIR}/tab/ctap2.tab"
+    if not os.path.exists(app_tab_path):
+      fatal(f"File not found: {app_tab_path}")
+    app_tab = tab.TAB(app_tab_path)
+    arch = board_props.arch
+    if arch not in app_tab.get_supported_architectures():
+      fatal(f"Architecture not found: {arch}")
+    app = app_tab.extract_app(arch).get_binary(board_props.app_address)
+
+    kernel_size = board_props.app_address - board_props.kernel_address
+    app_size = board_props.firmware_size - kernel_size
+    # The kernel is already padded when read.
+    firmware_image = kernel + pad_to(app, app_size)
+
+    priv_key = load_priv_key(self.args.upgrade_priv_key)
+    metadata = create_metadata(firmware_image, board_props.kernel_address,
+                               self.args.version, priv_key)
+    if self.args.verbose_build:
+      info(f"Metadata bytes: {metadata}")
+
+    info("Flashing metadata application")
+    self.write_binary(metadata, board_props.metadata_address)
 
   def clear_apps(self):
+    """Uses Tockloader to erase all applications on the device."""
     args = copy.copy(self.tockloader_default_args)
-    board_props = SUPPORTED_BOARDS[self.args.board]
-    setattr(args, "app_address", board_props.app_address)
     # Ensure we don't force erase all apps but only the apps starting
     # at `board.app_address`. This makes sure we don't erase the padding.
     setattr(args, "force", False)
@@ -530,10 +610,10 @@ class OpenSKInstaller:
       tock.erase_apps()
     except TockLoaderException as e:
       # Erasing apps is not critical
-      info(("A non-critical error occurred while erasing "
-            "apps: {}".format(str(e))))
+      info(f"A non-critical error occurred while erasing apps: {str(e)}")
 
   def clear_storage(self):
+    """Overwrites the storage's flash with 0xFF bytes."""
     if self.args.programmer == "none":
       return 0
     info("Erasing the persistent storage")
@@ -541,28 +621,22 @@ class OpenSKInstaller:
     # Use tockloader if possible
     if self.args.programmer in ("jlink", "openocd"):
       storage = bytes([0xFF] * board_props.storage_size)
-      tock = loader.TockLoader(self.tockloader_default_args)
-      tock.open()
-      try:
-        tock.flash_binary(storage, board_props.storage_address)
-      except TockLoaderException as e:
-        fatal("Couldn't erase the persistent storage: {}".format(str(e)))
+      self.write_binary(storage, board_props.storage_address)
       return 0
     if self.args.programmer == "pyocd":
       self.checked_command([
-          "pyocd", "erase", "--target={}".format(board_props.pyocd_target),
-          "--sector", "{}+{}".format(board_props.storage_address,
-                                     board_props.storage_size)
+          "pyocd", "erase", f"--target={board_props.pyocd_target}", "--sector",
+          f"{board_props.storage_address}+{board_props.storage_size}"
       ])
       return 0
-    fatal("Programmer {} is not supported.".format(self.args.programmer))
+    fatal(f"Programmer {self.args.programmer} is not supported.")
 
   # pylint: disable=protected-access
-  def verify_flashed_app(self, expected_app):
+  def verify_flashed_app(self, expected_app: str) -> bool:
+    """Uses Tockloader to check if an app of the expected name was written."""
     if self.args.programmer not in ("jlink", "openocd"):
       return False
-    args = copy.copy(self.tockloader_default_args)
-    tock = loader.TockLoader(args)
+    tock = loader.TockLoader(self.tockloader_default_args)
     tock.open()
     app_found = False
     with tock._start_communication_with_board():
@@ -570,7 +644,8 @@ class OpenSKInstaller:
       app_found = expected_app in apps
     return app_found
 
-  def create_hex_file(self, dest_file):
+  def create_hex_file(self, dest_file: str):
+    """Creates an intelhex file from the kernel and app binaries on disk."""
     # We produce an intelhex file with everything in it
     # https://en.wikipedia.org/wiki/Intel_HEX
     # pylint: disable=g-import-not-at-top,import-outside-toplevel
@@ -580,13 +655,9 @@ class OpenSKInstaller:
 
     if self.args.tockos:
       # Process kernel
-      kernel_path = os.path.join("third_party", "tock", "target",
-                                 board_props.arch, "release",
-                                 "{}.bin".format(self.args.board))
-      with open(kernel_path, "rb") as kernel:
-        kern_hex = intelhex.IntelHex()
-        kern_hex.frombytes(kernel.read(), offset=board_props.kernel_address)
-        final_hex.merge(kern_hex, overlap="error")
+      kern_hex = intelhex.IntelHex()
+      kern_hex.frombytes(self.read_kernel(), offset=board_props.kernel_address)
+      final_hex.merge(kern_hex, overlap="error")
 
     if self.args.application:
       # Add padding
@@ -597,25 +668,27 @@ class OpenSKInstaller:
         final_hex.merge(padding_hex, overlap="error")
 
       # Now we can add the application from the TAB file
-      app_tab_path = "target/tab/{}.tab".format(self.args.application)
+      app_tab_path = f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab"
       assert os.path.exists(app_tab_path)
       app_tab = tab.TAB(app_tab_path)
       if board_props.arch not in app_tab.get_supported_architectures():
         fatal(("It seems that the TAB file was not produced for the "
-               "architecture {}".format(board_props.arch)))
+               "architecture {board_props.arch}"))
       app_hex = intelhex.IntelHex()
-      app_hex.frombytes(
-          app_tab.extract_app(board_props.arch).get_binary(
-              board_props.app_address),
-          offset=board_props.app_address)
+      tab_bytes = app_tab.extract_app(board_props.arch).get_binary(
+          board_props.app_address)
+      if tab_bytes is None:
+        fatal("The extracted bytes from the TAB file are none")
+      app_hex.frombytes(tab_bytes, offset=board_props.app_address)
       final_hex.merge(app_hex)
-    info("Generating all-merged HEX file: {}".format(dest_file))
+    info(f"Generating all-merged HEX file: {dest_file}")
     final_hex.tofile(dest_file, format="hex")
 
   def check_prerequisites(self):
+    """Checks versions of the used tools, exits on version mismatch."""
     if not tockloader.__version__.startswith("1.5."):
-      fatal(("Your version of tockloader seems incompatible: found {}, "
-             "expected 1.5.x.".format(tockloader.__version__)))
+      fatal(("Your version of tockloader seems incompatible: found "
+             f"{tockloader.__version__}, expected 1.5.x."))
 
     if self.args.programmer == "jlink":
       assert_mandatory_binary("JLinkExe")
@@ -636,25 +709,47 @@ class OpenSKInstaller:
       nrfutil_version = __import__("nordicsemi.version").version.NRFUTIL_VERSION
       if not nrfutil_version.startswith("6."):
         fatal(("You need to install nrfutil python3 package v6.0 or above. "
-               "Found: {}".format(nrfutil_version)))
+               f"Found: v{nrfutil_version}. If you use Python >= 3.11, please "
+               "try version 3.10."))
       if not SUPPORTED_BOARDS[self.args.board].nordic_dfu:
         fatal("This board doesn't support flashing over DFU.")
 
     if self.args.programmer == "none":
       assert_python_library("intelhex")
 
-  def run(self):
+  def configure_device(self):
+    """Checks the device configuration, and sets it according to args."""
+    configure_response = tools.configure.main(
+        argparse.Namespace(
+            batch=False,
+            certificate=self.args.config_cert,
+            priv_key=self.args.config_pkey,
+            lock=self.args.lock_device,
+            use_vendor_hid="vendor_hid" in self.args.features,
+        ))
+    if not configure_response:
+      return None
+    return configure_response[0]
+
+  def run(self) -> int:
+    """Reads args to decide and run all required tasks."""
     self.check_prerequisites()
-    self.update_rustc_if_needed()
 
     if not (self.args.tockos or self.args.application or
-            self.args.clear_storage):
+            self.args.clear_storage or self.args.configure):
       info("Nothing to do.")
       return 0
 
+    if self.args.check_patches:
+      subprocess.run(["./maintainers/patches", "check"], check=False)
+
     # Compile what needs to be compiled
+    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.tockos:
       self.build_tockos()
+
+    if board_props.metadata_address is not None:
+      self.build_bootloader()
 
     if self.args.application == "ctap2":
       self.generate_crypto_materials(self.args.regenerate_keys)
@@ -663,13 +758,13 @@ class OpenSKInstaller:
       info("No application selected.")
     else:
       self.build_example()
+      self.args.configure = False
 
     # Erase persistent storage
     if self.args.clear_storage:
       self.clear_storage()
 
     # Flashing
-    board_props = SUPPORTED_BOARDS[self.args.board]
     if self.args.programmer in ("jlink", "openocd"):
       # We rely on Tockloader to do the job
       if self.args.clear_apps:
@@ -677,37 +772,38 @@ class OpenSKInstaller:
       if self.args.tockos:
         # Install Tock OS
         self.install_tock_os()
+      if board_props.metadata_address is not None:
+        # Install the bootloader
+        self.flash_bootloader()
       # Install padding and application if needed
       if self.args.application:
         self.install_padding()
-        self.install_tab_file("target/tab/{}.tab".format(self.args.application))
-        if self.verify_flashed_app(self.args.application):
-          info("You're all set!")
-          return 0
-        error(
-            ("It seems that something went wrong. App/example not found "
-             "on your board. Ensure the connections between the programmer and "
-             "the board are correct."))
-        return 1
-      return 0
+        self.install_tab_file(
+            f"{CARGO_TARGET_DIR}/tab/{self.args.application}.tab")
+        self.install_metadata()
+        if not self.verify_flashed_app(self.args.application):
+          error(("It seems that something went wrong. App/example not found "
+                 "on your board. Ensure the connections between the programmer "
+                 "and the board are correct."))
+          return 1
 
-    if self.args.programmer in ("pyocd", "nordicdfu", "none"):
-      dest_file = "target/{}_merged.hex".format(self.args.board)
-      os.makedirs("target", exist_ok=True)
+    elif self.args.programmer in ("pyocd", "nordicdfu", "none"):
+      dest_file = f"{CARGO_TARGET_DIR}/{self.args.board}_merged.hex"
+      os.makedirs(CARGO_TARGET_DIR, exist_ok=True)
       self.create_hex_file(dest_file)
 
       if self.args.programmer == "pyocd":
         info("Flashing HEX file")
         self.checked_command([
-            "pyocd", "flash", "--target={}".format(board_props.pyocd_target),
+            "pyocd", "flash", f"--target={board_props.pyocd_target}",
             "--format=hex", "--erase=auto", dest_file
         ])
       if self.args.programmer == "nordicdfu":
         info("Creating DFU package")
-        dfu_pkg_file = "target/{}_dfu.zip".format(self.args.board)
+        dfu_pkg_file = f"{CARGO_TARGET_DIR}/{self.args.board}_dfu.zip"
         self.checked_command([
             "nrfutil", "pkg", "generate", "--hw-version=52", "--sd-req=0",
-            "--application-version=1", "--application={}".format(dest_file),
+            "--application-version=1", f"--application={dest_file}",
             dfu_pkg_file
         ])
         info(
@@ -728,35 +824,72 @@ class OpenSKInstaller:
           fatal("Multiple DFU devices are detected. Please only connect one.")
         # Run the command without capturing stdout so that we show progress
         info("Flashing device using DFU...")
-        return subprocess.run(
+        dfu_return_code = subprocess.run(
             [
-                "nrfutil", "dfu", "usb-serial",
-                "--package={}".format(dfu_pkg_file),
-                "--serial-number={}".format(serial_number[0])
+                "nrfutil", "dfu", "usb-serial", f"--package={dfu_pkg_file}",
+                f"--serial-number={serial_number[0]}"
             ],
             check=False,
             timeout=None,
         ).returncode
+        if dfu_return_code != 0:
+          return dfu_return_code
 
     # Configure OpenSK through vendor specific command if needed
-    if any([
-        self.args.lock_device,
-        self.args.config_cert,
-        self.args.config_pkey,
-    ]):
-      # pylint: disable=g-import-not-at-top,import-outside-toplevel
-      import tools.configure
-      tools.configure.main(
-          argparse.Namespace(
-              batch=False,
-              certificate=self.args.config_cert,
-              priv_key=self.args.config_pkey,
-              lock=self.args.lock_device,
-          ))
+    if self.args.programmer == "none":
+      if any([
+          self.args.lock_device,
+          self.args.config_cert,
+          self.args.config_pkey,
+      ]):
+        fatal("Unexpected arguments to configure your device. Since you "
+              "selected the programmer \"none\", the device is not ready to be "
+              "configured yet.")
+      return 0
+
+    # Perform checks if OpenSK was flashed.
+    if self.args.application == "ctap2" or self.args.configure:
+      self.configure()
+    return 0
+
+  def print_configure_help(self):
+    vendor_hid = " --vendor-hid" if "vendor_hid" in self.args.features else ""
+    info("Your device is not yet configured, and lacks some functionality. "
+         "You can check its configuration status with:\n\n"
+         f"./tools/configure.py{vendor_hid}\n\n"
+         "If you run into issues, this command might help:\n\n"
+         f"./tools/configure.py{vendor_hid} \\\n"
+         "    --certificate=crypto_data/opensk_cert.pem \\\n"
+         "    --private-key=crypto_data/opensk.key\n\n"
+         "Please read the Certificate considerations in docs/customization.md"
+         " to understand the privacy trade-off.")
+
+  def configure(self):
+    info("Configuring device.")
+    # Trying to check or configure the device. Booting might take some time.
+    for i in range(5):
+      # Increasing wait time, total of 10 seconds.
+      time.sleep(i)
+      devices = tools.configure.get_opensk_devices(False)
+      if devices:
+        break
+
+    if not devices:
+      self.print_configure_help()
+      fatal("No device to configure found.")
+    status = self.configure_device()
+    if not status:
+      fatal("Could not read device configuration.")
+
+    if status["cert"] and status["pkey"]:
+      info("You're all set!")
+    else:
+      self.print_configure_help()
     return 0
 
 
 def main(args):
+  """Verifies some args, then runs a new OpenSKInstaller."""
   colorama.init()
 
   # Make sure the current working directory is the right one before running
@@ -772,7 +905,7 @@ def main(args):
 
   if args.listing:
     # Missing check?
-    fatal("Listing {} is not implemented.".format(args.listing))
+    fatal(f"Listing {args.listing} is not implemented.")
 
   OpenSKInstaller(args).run()
 
@@ -820,7 +953,8 @@ if __name__ == "__main__":
       dest="lock_device",
       help=("Try to disable JTAG at the end of the operations. This "
             "operation may fail if the device is already locked or if "
-            "the certificate/private key are not programmed."),
+            "the certificate/private key are not programmed."
+            "Currently not implemented on nrf52840 and always fails."),
   )
   main_parser.add_argument(
       "--inject-certificate",
@@ -848,6 +982,14 @@ if __name__ == "__main__":
       default="jlink",
       help=("Sets the method to be used to flash Tock OS or the application "
             "on the target board."),
+  )
+  main_parser.add_argument(
+      "--openocd_cmd",
+      dest="openocd_cmd",
+      metavar="CMD",
+      default="openocd",
+      help=("Specifies a custom command to use when calling openocd. Can be "
+            "used to pass arguments i.e. 'openocd -s /tmp/openocd_scripts'."),
   )
 
   main_parser.add_argument(
@@ -909,11 +1051,39 @@ if __name__ == "__main__":
             "support for U2F/CTAP1 protocol."),
   )
   main_parser.add_argument(
+      "--no-config-command",
+      action=RemoveConstAction,
+      const="config_command",
+      dest="features",
+      help=("Removes the AuthenticatorConfig command."),
+  )
+  main_parser.add_argument(
+      "--rust-crypto",
+      action="append_const",
+      const="rust_crypto",
+      dest="features",
+      help=("Compiles the OpenSK application with RustCrypto implementations."),
+  )
+  main_parser.add_argument(
       "--nfc",
       action="append_const",
       const="with_nfc",
       dest="features",
       help=("Compiles the OpenSK application with support for nfc."),
+  )
+  main_parser.add_argument(
+      "--configure",
+      action="store_true",
+      default=True,
+      dest="configure",
+      help="Configure.",
+  )
+  main_parser.add_argument(
+      "--vendor-hid",
+      action="append_const",
+      const="vendor_hid",
+      dest="features",
+      help=("Compiles the OpenSK application to support two HID usage pages."),
   )
   main_parser.add_argument(
       "--regen-keys",
@@ -935,14 +1105,49 @@ if __name__ == "__main__":
       help=("When set, the output of elf2tab is appended to this file."),
   )
 
-  main_parser.set_defaults(features=["with_ctap1"])
+  main_parser.add_argument(
+      "--ed25519",
+      action="append_const",
+      const="ed25519",
+      dest="features",
+      help=("Adds support for credentials that use EdDSA algorithm over "
+            "curve Ed25519. "
+            "Current implementation is not side-channel resilient due to use "
+            "of variable-time arithmetic for computations over secret key."),
+  )
+
+  main_parser.add_argument(
+      "--disable-check-patches",
+      action="store_false",
+      default=True,
+      dest="check_patches",
+      help=("Don't check that patches are in sync with their submodules."),
+  )
+
+  main_parser.add_argument(
+      "--private-key",
+      type=str,
+      default="crypto_data/opensk_upgrade.key",
+      dest="upgrade_priv_key",
+      help=("PEM file for signing the firmware."),
+  )
+
+  main_parser.add_argument(
+      "--version",
+      type=int,
+      default=-1,
+      dest="version",
+      help=("Firmware version that is built."),
+  )
+
+  main_parser.set_defaults(features=["with_ctap1", "config_command"])
 
   # Start parsing to know if we're going to list things or not.
   partial_args, _ = main_parser.parse_known_args()
 
   # We only need the apps_group if we have a board set
   apps_group = main_parser.add_mutually_exclusive_group(
-      required=(partial_args.board is not None))
+      required=partial_args.board is not None)
   apps_group.add_argument(
       "--no-app",
       dest="application",

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use fuzz_store::{fuzz, StatKey, Stats};
-use std::io::Write;
-use std::io::{stdout, Read};
+use std::io::{stdout, Read, Write};
 use std::path::Path;
 
 fn usage(program: &str) {

@@ -1,0 +1,144 @@
+diff --git a/boards/nordic/nrf52_components/src/startup.rs b/boards/nordic/nrf52_components/src/startup.rs
+index e6cf3ff56..7b3ea5a59 100644
+--- a/boards/nordic/nrf52_components/src/startup.rs
++++ b/boards/nordic/nrf52_components/src/startup.rs
+@@ -53,6 +53,9 @@ impl<'a> Component for NrfStartupComponent<'a> {
+             erase_uicr |= !uicr.is_nfc_pins_protection_enabled();
+         }
+ 
++        // Avoid killing the DFU bootloader if present
++        let (dfu_start_addr, dfu_settings_addr) = uicr.get_dfu_params();
++
+         if erase_uicr {
+             self.nvmc.erase_uicr();
+         }
+@@ -62,6 +65,11 @@ impl<'a> Component for NrfStartupComponent<'a> {
+ 
+         let mut needs_soft_reset: bool = false;
+ 
++        // Restore DFU bootloader settings if we erased
++        if erase_uicr {
++            uicr.set_dfu_params(dfu_start_addr, dfu_settings_addr);
++        }
++
+         // Configure reset pins
+         if uicr
+             .get_psel0_reset_pin()
+diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
+index 3b51717d0..3086394aa 100644
+--- a/chips/nrf52/src/uicr.rs
++++ b/chips/nrf52/src/uicr.rs
+@@ -1,39 +1,43 @@
+ //! User information configuration registers
+-//!
+-//! Minimal implementation to support activation of the reset button on
+-//! nRF52-DK.
+ 
+ use enum_primitive::cast::FromPrimitive;
+ use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
+-use kernel::utilities::registers::{register_bitfields, ReadWrite};
++use kernel::utilities::registers::{register_bitfields, register_structs, ReadWrite};
+ use kernel::utilities::StaticRef;
+ 
+ use crate::gpio::Pin;
+ 
+ const UICR_BASE: StaticRef<UicrRegisters> =
+-    unsafe { StaticRef::new(0x10001200 as *const UicrRegisters) };
+-
+-#[repr(C)]
+-struct UicrRegisters {
+-    /// Mapping of the nRESET function (see POWER chapter for details)
+-    /// - Address: 0x200 - 0x204
+-    pselreset0: ReadWrite<u32, Pselreset::Register>,
+-    /// Mapping of the nRESET function (see POWER chapter for details)
+-    /// - Address: 0x204 - 0x208
+-    pselreset1: ReadWrite<u32, Pselreset::Register>,
+-    /// Access Port protection
+-    /// - Address: 0x208 - 0x20c
+-    approtect: ReadWrite<u32, ApProtect::Register>,
+-    /// Setting of pins dedicated to NFC functionality: NFC antenna or GPIO
+-    /// - Address: 0x20c - 0x210
+-    nfcpins: ReadWrite<u32, NfcPins::Register>,
+-    _reserved1: [u32; 60],
+-    /// External circuitry to be supplied from VDD pin.
+-    /// - Address: 0x300 - 0x304
+-    extsupply: ReadWrite<u32, ExtSupply::Register>,
+-    /// GPIO reference voltage
+-    /// - Address: 0x304 - 0x308
+-    regout0: ReadWrite<u32, RegOut::Register>,
++    unsafe { StaticRef::new(0x10001000 as *const UicrRegisters) };
++
++register_structs! {
++   UicrRegisters {
++       (0x000 => _reserved1),
++       /// Reserved for Nordic firmware design
++       (0x014 => nrffw: [ReadWrite<u32>; 13]),
++       (0x048 => _reserved2),
++       /// Reserved for Nordic hardware design
++       (0x050 => nrfhw: [ReadWrite<u32>; 12]),
++       /// Reserved for customer
++       (0x080 => customer: [ReadWrite<u32>; 32]),
++       (0x100 => _reserved3),
++       /// Mapping of the nRESET function (see POWER chapter for details)
++       (0x200 => pselreset0: ReadWrite<u32, Pselreset::Register>),
++       /// Mapping of the nRESET function (see POWER chapter for details)
++       (0x204 => pselreset1: ReadWrite<u32, Pselreset::Register>),
++       /// Access Port protection
++       (0x208 => approtect: ReadWrite<u32, ApProtect::Register>),
++       /// Setting of pins dedicated to NFC functionality: NFC antenna or GPIO
++       /// - Address: 0x20c - 0x210
++       (0x20c => nfcpins: ReadWrite<u32, NfcPins::Register>),
++       (0x210 => debugctrl: ReadWrite<u32, DebugControl::Register>),
++       (0x214 => _reserved4),
++       /// External circuitry to be supplied from VDD pin.
++       (0x300 => extsupply: ReadWrite<u32, ExtSupply::Register>),
++       /// GPIO reference voltage
++       (0x304 => regout0: ReadWrite<u32, RegOut::Register>),
++       (0x308 => @END),
++   }
+ }
+ 
+ register_bitfields! [u32,
+@@ -59,6 +63,23 @@ register_bitfields! [u32,
+             DISABLED = 0xff
+         ]
+     ],
++
++    /// Processor debug control
++    DebugControl [
++        CPUNIDEN OFFSET(0) NUMBITS(8) [
++            /// Enable
++            ENABLED = 0xff,
++            /// Disable
++            DISABLED = 0x00
++        ],
++        CPUFPBEN OFFSET(8) NUMBITS(8) [
++            /// Enable
++            ENABLED = 0xff,
++            /// Disable
++            DISABLED = 0x00
++        ]
++    ],
++
+     /// Setting of pins dedicated to NFC functionality: NFC antenna or GPIO
+     NfcPins [
+         /// Setting pins dedicated to NFC functionality
+@@ -169,6 +190,18 @@ impl Uicr {
+         }
+     }
+ 
++    pub fn get_dfu_params(&self) -> (u32, u32) {
++        (
++            self.registers.nrffw[0].get(), // DFU start address
++            self.registers.nrffw[1].get(), // DFU settings address
++        )
++    }
++
++    pub fn set_dfu_params(&self, dfu_start_addr: u32, dfu_settings_addr: u32) {
++        self.registers.nrffw[0].set(dfu_start_addr);
++        self.registers.nrffw[1].set(dfu_settings_addr);
++    }
++
+     pub fn is_nfc_pins_protection_enabled(&self) -> bool {
+         self.registers.nfcpins.matches_all(NfcPins::PROTECT::NFC)
+     }

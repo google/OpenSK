@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::rng256::Rng256;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
+use rand_core::RngCore;
 use subtle::{self, Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroize;
 
 const BITS_PER_DIGIT: usize = 32;
 const BYTES_PER_DIGIT: usize = BITS_PER_DIGIT >> 3;
@@ -29,7 +30,10 @@ pub type Digit = u32;
 type DoubleDigit = u64;
 type SignedDoubleDigit = i64;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Big integer implementation with 256 bits.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 // TODO: remove this Default once https://github.com/dalek-cryptography/subtle/issues/63 is
 // resolved.
 #[derive(Default)]
@@ -119,11 +123,13 @@ impl Int256 {
     // Generates a uniformly distributed integer 0 <= x < 2^256
     pub fn gen_uniform_256<R>(r: &mut R) -> Int256
     where
-        R: Rng256,
+        R: RngCore,
     {
-        Int256 {
-            digits: r.gen_uniform_u32x8(),
+        let mut digits = [0; NDIGITS];
+        for i in 0..NDIGITS {
+            digits[i] = r.next_u32();
         }
+        Int256 { digits }
     }
 
     /** Serialization **/

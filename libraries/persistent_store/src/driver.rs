@@ -17,7 +17,7 @@
 //! [`StoreDriver`] wraps a [`Store`] and compares its behavior with its associated [`StoreModel`].
 
 use crate::format::{Format, Position};
-#[cfg(test)]
+#[cfg(feature = "std")]
 use crate::StoreUpdate;
 use crate::{
     BufferCorruptFunction, BufferOptions, BufferStorage, Nat, Store, StoreError, StoreHandle,
@@ -197,6 +197,14 @@ impl StoreDriver {
         match self {
             StoreDriver::On(x) => x.store().storage(),
             StoreDriver::Off(x) => x.storage(),
+        }
+    }
+
+    /// Provides read-only access to the model.
+    pub fn model(&self) -> &StoreModel {
+        match self {
+            StoreDriver::On(x) => x.model(),
+            StoreDriver::Off(x) => x.model(),
         }
     }
 
@@ -431,7 +439,7 @@ impl StoreDriverOn {
     }
 
     /// Applies an insertion to the store and model without interruption.
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn insert(&mut self, key: usize, value: &[u8]) -> Result<(), StoreInvariant> {
         let value = value.to_vec();
         let updates = vec![StoreUpdate::Insert { key, value }];
@@ -439,10 +447,16 @@ impl StoreDriverOn {
     }
 
     /// Applies a deletion to the store and model without interruption.
-    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn remove(&mut self, key: usize) -> Result<(), StoreInvariant> {
         let updates = vec![StoreUpdate::Remove { key }];
         self.apply(StoreOperation::Transaction { updates })
+    }
+
+    /// Applies a clear operation to the store and model without interruption.
+    #[cfg(feature = "std")]
+    pub fn clear(&mut self, min_key: usize) -> Result<(), StoreInvariant> {
+        self.apply(StoreOperation::Clear { min_key })
     }
 
     /// Checks that the store and model are in sync.
@@ -476,7 +490,7 @@ impl StoreDriverOn {
     /// Checks that the given entries are wiped from the storage.
     fn check_deleted(&self, deleted: &[StoreHandle]) -> Result<(), StoreInvariant> {
         for handle in deleted {
-            let value = self.store.inspect_value(&handle);
+            let value = self.store.inspect_value(handle);
             if !value.iter().all(|&x| x == 0x00) {
                 return Err(StoreInvariant::NotWiped {
                     key: handle.get_key(),
@@ -599,6 +613,14 @@ impl<'a> StoreInterruption<'a> {
     pub fn none() -> StoreInterruption<'a> {
         StoreInterruption {
             delay: usize::max_value(),
+            corrupt: Box::new(|_, _| {}),
+        }
+    }
+
+    /// Builds an interruption without corruption.
+    pub fn pure(delay: usize) -> StoreInterruption<'a> {
+        StoreInterruption {
+            delay,
             corrupt: Box::new(|_, _| {}),
         }
     }

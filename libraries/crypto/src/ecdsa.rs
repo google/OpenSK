@@ -16,29 +16,37 @@ use super::ec::exponent256::{ExponentP256, NonZeroExponentP256};
 use super::ec::int256;
 use super::ec::int256::Int256;
 use super::ec::point::PointP256;
-use super::hmac::hmac_256;
-use super::rng256::Rng256;
-use super::{Hash256, HashBlockSize64Bytes};
+use super::Hash256;
 use alloc::vec;
 use alloc::vec::Vec;
-#[cfg(feature = "std")]
-use arrayref::array_mut_ref;
-use arrayref::{array_ref, mut_array_refs};
+use arrayref::{array_mut_ref, array_ref, mut_array_refs};
 use core::marker::PhantomData;
+use rand_core::RngCore;
+use zeroize::Zeroize;
 
 pub const NBYTES: usize = int256::NBYTES;
 
-#[derive(Clone, Debug, PartialEq)]
+/// A private key for ECDSA.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize)]
 pub struct SecKey {
     k: NonZeroExponentP256,
 }
 
+/// An ECDSA signature.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Zeroize)]
 pub struct Signature {
     r: NonZeroExponentP256,
     s: NonZeroExponentP256,
 }
 
-#[derive(Clone)]
+/// A public key for ECDSA.
+///
+/// Never call zeroize explicitly, to not invalidate any invariants.
+#[derive(Clone, Zeroize)]
 pub struct PubKey {
     p: PointP256,
 }
@@ -46,7 +54,7 @@ pub struct PubKey {
 impl SecKey {
     pub fn gensk<R>(rng: &mut R) -> SecKey
     where
-        R: Rng256,
+        R: RngCore,
     {
         SecKey {
             k: NonZeroExponentP256::gen_uniform(rng),
@@ -67,7 +75,7 @@ impl SecKey {
     pub fn sign_rng<H, R>(&self, msg: &[u8], rng: &mut R) -> Signature
     where
         H: Hash256,
-        R: Rng256,
+        R: RngCore,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -82,7 +90,7 @@ impl SecKey {
     /// Creates a deterministic ECDSA signature based on RFC 6979.
     pub fn sign_rfc6979<H>(&self, msg: &[u8]) -> Signature
     where
-        H: Hash256 + HashBlockSize64Bytes,
+        H: Hash256,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -131,7 +139,7 @@ impl SecKey {
     #[cfg(test)]
     pub fn get_k_rfc6979<H>(&self, msg: &[u8]) -> NonZeroExponentP256
     where
-        H: Hash256 + HashBlockSize64Bytes,
+        H: Hash256,
     {
         let m = ExponentP256::modn(Int256::from_bin(&H::hash(msg)));
 
@@ -210,7 +218,6 @@ impl Signature {
         Some(Signature { r, s })
     }
 
-    #[cfg(feature = "std")]
     pub fn to_bytes(&self, bytes: &mut [u8; Signature::BYTES_LENGTH]) {
         self.r
             .to_int()
@@ -222,37 +229,19 @@ impl Signature {
 }
 
 impl PubKey {
-    #[cfg(feature = "with_ctap1")]
-    const UNCOMPRESSED_LENGTH: usize = 1 + 2 * int256::NBYTES;
-
     /// Creates a new PubKey from its coordinates on the elliptic curve.
     pub fn from_coordinates(x: &[u8; NBYTES], y: &[u8; NBYTES]) -> Option<PubKey> {
         PointP256::new_checked_vartime(Int256::from_bin(x), Int256::from_bin(y))
             .map(|p| PubKey { p })
     }
 
-    #[cfg(feature = "std")]
     pub fn from_bytes_uncompressed(bytes: &[u8]) -> Option<PubKey> {
         PointP256::from_bytes_uncompressed_vartime(bytes).map(|p| PubKey { p })
     }
 
-    #[cfg(test)]
-    fn to_bytes_uncompressed(&self, bytes: &mut [u8; 65]) {
+    #[cfg(feature = "std")]
+    pub fn to_bytes_uncompressed(&self, bytes: &mut [u8; 65]) {
         self.p.to_bytes_uncompressed(bytes);
-    }
-
-    #[cfg(feature = "with_ctap1")]
-    pub fn to_uncompressed(&self) -> [u8; PubKey::UNCOMPRESSED_LENGTH] {
-        // Formatting according to:
-        // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
-        const B0_BYTE_MARKER: u8 = 0x04;
-        let mut representation = [0; PubKey::UNCOMPRESSED_LENGTH];
-        let (marker, x, y) =
-            mut_array_refs![&mut representation, 1, int256::NBYTES, int256::NBYTES];
-        marker[0] = B0_BYTE_MARKER;
-        self.p.getx().to_int().to_bin(x);
-        self.p.gety().to_int().to_bin(y);
-        representation
     }
 
     /// Writes the coordinates into the passed in arrays.
@@ -277,7 +266,6 @@ impl PubKey {
         ExponentP256::modn(u.to_int()) == *sign.r.as_exponent()
     }
 
-    #[cfg(feature = "std")]
     pub fn verify_vartime<H>(&self, msg: &[u8], sign: &Signature) -> bool
     where
         H: Hash256,
@@ -288,7 +276,7 @@ impl PubKey {
 
 struct Rfc6979<H>
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     k: [u8; 32],
     v: [u8; 32],
@@ -297,7 +285,7 @@ where
 
 impl<H> Rfc6979<H>
 where
-    H: Hash256 + HashBlockSize64Bytes,
+    H: Hash256,
 {
     pub fn new(sk: &SecKey, msg: &[u8]) -> Rfc6979<H> {
         let h1 = H::hash(msg);
@@ -312,15 +300,15 @@ where
         Int256::to_bin(&sk.k.to_int(), contents_k);
         Int256::to_bin(&Int256::from_bin(&h1).modd(&Int256::N), contents_h1);
 
-        let k = hmac_256::<H>(&k, &contents);
-        let v = hmac_256::<H>(&k, &v);
+        let k = H::hmac(&k, &contents);
+        let v = H::hmac(&k, &v);
 
         let (contents_v, marker, _) = mut_array_refs![&mut contents, 32, 1, 64];
         contents_v.copy_from_slice(&v);
         marker[0] = 0x01;
 
-        let k = hmac_256::<H>(&k, &contents);
-        let v = hmac_256::<H>(&k, &v);
+        let k = H::hmac(&k, &contents);
+        let v = H::hmac(&k, &v);
 
         Rfc6979 {
             k,
@@ -332,14 +320,14 @@ where
     fn next(&mut self) -> Int256 {
         // Note: at this step, the logic from RFC 6979 is simplified, because the HMAC produces 256
         // bits and we need 256 bits.
-        let t = hmac_256::<H>(&self.k, &self.v);
+        let t = H::hmac(&self.k, &self.v);
         let result = Int256::from_bin(&t);
 
         let mut v1 = [0; 33];
         v1[..32].copy_from_slice(&self.v);
         v1[32] = 0x00;
-        self.k = hmac_256::<H>(&self.k, &v1);
-        self.v = hmac_256::<H>(&self.k, &self.v);
+        self.k = H::hmac(&self.k, &v1);
+        self.v = H::hmac(&self.k, &self.v);
 
         result
     }
@@ -347,9 +335,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::super::rng256::ThreadRng256;
     use super::super::sha256::Sha256;
     use super::*;
+    use rand_core::OsRng;
 
     // Run more test iterations in release mode, as the code should be faster.
     #[cfg(not(debug_assertions))]
@@ -357,10 +345,16 @@ mod test {
     #[cfg(debug_assertions)]
     const ITERATIONS: u32 = 500;
 
+    fn gen_random_message(rng: &mut impl RngCore) -> [u8; 32] {
+        let mut bytes = [0; 32];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
     /** Test that key generation creates valid keys **/
     #[test]
     fn test_genpk_is_valid_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -372,7 +366,7 @@ mod test {
     /** Serialization **/
     #[test]
     fn test_seckey_to_bytes_from_bytes() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
             let sk = SecKey::gensk(&mut rng);
@@ -463,10 +457,10 @@ mod test {
     // Test that signed message hashes are correctly verified.
     #[test]
     fn test_sign_rfc6979_verify_hash_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rfc6979::<Sha256>(&msg);
@@ -478,10 +472,10 @@ mod test {
     // Test that signed messages are correctly verified.
     #[test]
     fn test_sign_rfc6979_verify_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rfc6979::<Sha256>(&msg);
@@ -492,10 +486,10 @@ mod test {
     // Test that signed messages are correctly verified.
     #[test]
     fn test_sign_verify_random() {
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg = rng.gen_uniform_u8x32();
+            let msg = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rng::<Sha256, _>(&msg, &mut rng);
@@ -580,10 +574,10 @@ mod test {
     fn test_self_sign_ring_verify() {
         use ring::signature::VerificationAlgorithm;
 
-        let mut rng = ThreadRng256 {};
+        let mut rng = OsRng::default();
 
         for _ in 0..ITERATIONS {
-            let msg_bytes = rng.gen_uniform_u8x32();
+            let msg_bytes = gen_random_message(&mut rng);
             let sk = SecKey::gensk(&mut rng);
             let pk = sk.genpk();
             let sign = sk.sign_rng::<Sha256, _>(&msg_bytes, &mut rng);

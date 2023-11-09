@@ -16,7 +16,7 @@
 ///
 /// See also https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/aes/AESAVS.pdf
 use arrayref::array_ref;
-use crypto::{aes256, Decrypt16BytesBlock, Encrypt16BytesBlock};
+use crypto::aes256;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

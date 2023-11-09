@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2019-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,4 @@
 
 extern crate alloc;
 
-pub mod ctap;
-pub mod embedded_flash;
-
-#[macro_use]
-extern crate arrayref;
+pub mod env;

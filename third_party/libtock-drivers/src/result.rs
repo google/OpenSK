@@ -1,6 +1,6 @@
 use core::fmt;
 
-pub use libtock_core::result::*;
+use libtock_platform::ErrorCode;
 
 pub type TockResult<T> = Result<T, TockError>;
 
@@ -15,6 +15,7 @@ pub type TockResult<T> = Result<T, TockError>;
 // This trait allows to flexibly use `Result::unwrap` or `Option::unwrap` and is configured to do
 // so depending on the `debug_ctap` feature.
 pub trait FlexUnwrap<T> {
+    #[track_caller]
     fn flex_unwrap(self) -> T;
 }
 
@@ -32,9 +33,7 @@ impl<T> FlexUnwrap<T> for TockResult<T> {
 
 #[derive(Copy, Clone)]
 pub enum TockError {
-    Subscribe(SubscribeError),
-    Command(CommandError),
-    Allow(AllowError),
+    Command(ErrorCode),
     Format,
     Other(OtherError),
 }
@@ -43,61 +42,18 @@ pub enum TockError {
 impl core::fmt::Debug for TockError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            TockError::Subscribe(SubscribeError {
-                driver_number,
-                subscribe_number,
-                return_code,
-            }) => f
-                .debug_struct("SubscribeError")
-                .field("driver", driver_number)
-                .field("subscribe", subscribe_number)
-                .field("return_code", return_code)
-                .finish(),
-            TockError::Command(CommandError {
-                driver_number,
-                command_number,
-                arg1,
-                arg2,
-                return_code,
-            }) => f
-                .debug_struct("CommandError")
-                .field("driver", driver_number)
-                .field("command", command_number)
-                .field("arg1", arg1)
-                .field("arg2", arg2)
-                .field("return_code", return_code)
-                .finish(),
-            TockError::Allow(AllowError {
-                driver_number,
-                allow_number,
-                return_code,
-            }) => f
-                .debug_struct("AllowError")
-                .field("driver", driver_number)
-                .field("allow", allow_number)
-                .field("return_code", return_code)
-                .finish(),
+            TockError::Command(error_code) => {
+                f.write_fmt(format_args!("CommandError: {:?}", error_code))
+            }
             TockError::Format => f.write_str("TockError::Format"),
-            TockError::Other(e) => e.fmt(f),
+            TockError::Other(e) => f.write_fmt(format_args!("OtherError: {:?}", e)),
         }
     }
 }
 
-impl From<SubscribeError> for TockError {
-    fn from(subscribe_error: SubscribeError) -> Self {
-        TockError::Subscribe(subscribe_error)
-    }
-}
-
-impl From<CommandError> for TockError {
-    fn from(command_error: CommandError) -> Self {
+impl From<ErrorCode> for TockError {
+    fn from(command_error: ErrorCode) -> Self {
         TockError::Command(command_error)
-    }
-}
-
-impl From<AllowError> for TockError {
-    fn from(allow_error: AllowError) -> Self {
-        TockError::Allow(allow_error)
     }
 }
 

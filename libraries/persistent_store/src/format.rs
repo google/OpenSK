@@ -187,7 +187,7 @@ impl Format {
         word_size == WORD_SIZE
             && page_size % word_size == 0
             && (MIN_PAGE_SIZE * word_size <= page_size && page_size <= MAX_PAGE_SIZE)
-            && (MIN_NUM_PAGES <= num_pages && num_pages <= MAX_PAGE_INDEX + 1)
+            && (MIN_NUM_PAGES..=MAX_PAGE_INDEX + 1).contains(&num_pages)
             && max_word_writes >= 2
             && max_page_erases <= MAX_ERASE_CYCLE
     }
@@ -264,14 +264,23 @@ impl Format {
         self.bytes_to_words(self.max_value_len())
     }
 
+    /// The virtual window size in words, denoted by W.
+    ///
+    /// This is the span of virtual storage that is accessible. In particular, all store content
+    /// fits within this window.
+    ///
+    /// We have W = (N - 1) × Q - M.
+    pub fn window_size(&self) -> Nat {
+        (self.num_pages() - 1) * self.virt_page_size() - self.max_prefix_len()
+    }
+
     /// The total virtual capacity in words, denoted by V.
     ///
-    /// We have V = (N - 1) × (Q - 1) - M.
+    /// This is the span of virtual storage after which we trigger a compaction. This is smaller
+    /// than the virtual window because compaction may transiently overflow out of this virtual
+    /// capacity.
     ///
-    /// We can show V ≥ (N - 2) × (Q - 1) with the following steps:
-    /// - M ≤ Q - 1 from M < Q from [M](Format::max_prefix_len)'s definition
-    /// - -M ≥ -(Q - 1) from above
-    /// - V ≥ (N - 1) × (Q - 1) - (Q - 1) from V's definition
+    /// We have V = W - (N - 1) = (N - 1) × (Q - 1) - M.
     pub fn virt_size(&self) -> Nat {
         (self.num_pages() - 1) * (self.virt_page_size() - 1) - self.max_prefix_len()
     }
@@ -281,9 +290,9 @@ impl Format {
     /// We have C = V - N = (N - 1) × (Q - 2) - M - 1.
     ///
     /// We can show C ≥ (N - 2) × (Q - 2) - 2 with the following steps:
-    /// - V ≥ (N - 2) × (Q - 1) from [V](Format::virt_size)'s definition
-    /// - C ≥ (N - 2) × (Q - 1) - N from C's definition
-    /// - (N - 2) × (Q - 1) - N = (N - 2) × (Q - 2) - 2 by calculus
+    /// - M ≤ Q - 1 from M < Q from [M](Format::max_prefix_len)'s definition
+    /// - C ≥ (N - 1) × (Q - 2) - (Q - 1) - 1 from C's definition
+    /// - C ≥ (N - 2) × (Q - 2) - 2 by calculus
     pub fn total_capacity(&self) -> Nat {
         // From the virtual capacity, we reserve N - 1 words for `Erase` entries and 1 word for a
         // `Clear` entry.
@@ -353,7 +362,7 @@ impl Format {
             WordState::Partial
         } else {
             let tail = COMPACT_TAIL.get(word);
-            if tail > self.virt_size() + self.max_prefix_len() {
+            if tail > self.window_size() {
                 return Err(StoreError::InvalidStorage);
             }
             WordState::Valid(CompactInfo { tail })

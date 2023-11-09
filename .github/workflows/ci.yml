@@ -30,5 +30,5 @@ jobs:
       - run: ./setup.sh
       - run: rustup component add rustfmt --toolchain nightly
       - run: rustup component add clippy --toolchain nightly
-      - run: rustup component add audit --toolchain nightly
+      - run: cargo +stable install cargo-audit
       - run: ./run_desktop_tests.sh

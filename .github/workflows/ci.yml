@@ -28,6 +28,4 @@ jobs:
         with:
           python-version: "3.10"
       - run: ./setup.sh
-      - run: rustup component add rustfmt --toolchain nightly
-      - run: rustup component add clippy --toolchain nightly
       - run: ./run_desktop_tests.sh

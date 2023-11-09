@@ -39,15 +39,15 @@ cargo check --release --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking Rust formatting..."
 cargo fmt -- --check
-cargo +nightly fmt --manifest-path libraries/opensk/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/cbor/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path libraries/crypto/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path tools/heapviz/Cargo.toml -- --check
-cargo +nightly fmt --manifest-path bootloader/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/opensk/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/cbor/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
+cargo fmt --manifest-path libraries/crypto/Cargo.toml -- --check
+cargo fmt --manifest-path tools/heapviz/Cargo.toml -- --check
+cargo fmt --manifest-path bootloader/Cargo.toml -- --check
 
 echo "Checking Python formatting..."
 py_virtual_env/bin/pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`
@@ -56,18 +56,18 @@ py_virtual_env/bin/yapf --style=yapf --recursive --exclude py_virtual_env --excl
 echo "Running Clippy lints..."
 cargo clippy --lib --tests --bins --benches --features std -- -D warnings
 cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -D warnings
-(cd libraries/opensk && cargo +nightly clippy --features std -- -D warnings)
-(cd libraries/opensk && cargo +nightly clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto  -- -D warnings)
-(cd libraries/cbor && cargo +nightly clippy -- -D warnings)
+(cd libraries/opensk && cargo clippy --features std -- -D warnings)
+(cd libraries/opensk && cargo clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto  -- -D warnings)
+(cd libraries/cbor && cargo clippy -- -D warnings)
 # Uncomment when persistent store is fixed:
-# (cd libraries/persistent_store && cargo +nightly clippy --features std -- -D warnings)
+# (cd libraries/persistent_store && cargo clippy --features std -- -D warnings)
 # Probably not worth fixing:
-# (cd libraries/crypto && cargo +nightly clippy --features std -- -D warnings)
+# (cd libraries/crypto && cargo clippy --features std -- -D warnings)
 
 echo "Checking that fuzz targets..."
-(cd libraries/opensk && cargo +nightly fuzz check)
-(cd libraries/cbor && cargo +nightly fuzz check)
-(cd libraries/persistent_store && cargo +nightly fuzz check)
+(cd libraries/opensk && cargo fuzz check)
+(cd libraries/cbor && cargo fuzz check)
+(cd libraries/persistent_store && cargo fuzz check)
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -78,19 +78,19 @@ cargo build --release --target=thumbv7em-none-eabi --features config_command,wit
 
 echo "Running OpenSK library unit tests..."
 cd libraries/opensk
-cargo +nightly test --features std
-cargo +nightly test --features std,config_command,with_ctap1
-cargo +nightly test --all-features
+cargo test --features std
+cargo test --features std,config_command,with_ctap1
+cargo test --all-features
 cd ../..
 
 echo "Running other unit tests..."
 cargo test --lib --tests --bins --benches --features std
 cargo test --lib --tests --bins --benches --all-features
-cargo +nightly test --manifest-path libraries/cbor/Cargo.toml
-cargo +nightly test --manifest-path libraries/persistent_store/Cargo.toml --features std
+cargo test --manifest-path libraries/cbor/Cargo.toml
+cargo test --manifest-path libraries/persistent_store/Cargo.toml --features std
 # Running release mode to speed up. This library is legacy anyway.
-cargo +nightly test --manifest-path libraries/crypto/Cargo.toml --features std --release
-cargo +nightly test --manifest-path tools/heapviz/Cargo.toml
+cargo test --manifest-path libraries/crypto/Cargo.toml --features std --release
+cargo test --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk
@@ -113,3 +113,5 @@ echo "Check app deployment"
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --oom_test
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --console_test
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --nfct_test --nfc
+
+cargo audit

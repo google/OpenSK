@@ -1,10 +1,7 @@
 # <img alt="OpenSK logo" src="docs/img/OpenSK.svg" width="200px">
 
-![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=develop)
-![pylint](https://github.com/google/OpenSK/workflows/pylint/badge.svg?branch=develop)
-![Cargo check](https://github.com/google/OpenSK/workflows/Cargo%20check/badge.svg?branch=develop)
-![Cargo format](https://github.com/google/OpenSK/workflows/Cargo%20format/badge.svg?branch=develop)
-[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=develop)](https://coveralls.io/github/google/OpenSK?branch=develop)
+![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=2.1)
+[![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=2.1)](https://coveralls.io/github/google/OpenSK?branch=2.1)
 
 *News:*
 
@@ -27,15 +24,16 @@ enclosure!
 You can run OpenSK as a [Tock OS](https://tockos.org) application, or use the
 library to bring OpenSK to your own hardware.
 
-You are viewing the branch for developers. New features are developed here.
-Go to the default branch for a more stable version of OpenSK.
+You are viewing the CTAP 2.1 version. This branch fixes bugs, but doesn't
+implement new features. If you want to contribute, go to the
+[develop branch](https://github.com/google/OpenSK/tree/develop).
 
 ### FIDO2
 
 OpenSK's version that implemented CTAP 2.0 was certified by the FIDO Alliance.
 
-The develop branch tracks the latest release version of the
-[CTAP specification](https://fidoalliance.org/specs/fido-v2.2-rd-20230321/fido-client-to-authenticator-protocol-v2.2-rd-20230321.html).
+This branch implements version 2.1 of the
+[CTAP specification](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html).
 This branch is not FIDO certified.
 OpenSK supports U2F, and non-discoverable credentials created with either
 protocol are compatible with the other.

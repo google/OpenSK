@@ -322,46 +322,6 @@ class OpenSKInstaller:
       # Unreachable because fatal() will exit
     return cmd_output.decode()
 
-  def update_rustc_if_needed(self):
-    """Updates the Rust and installs the necessary target toolchain."""
-    target_toolchain_fullstring = "stable"
-    with open("rust-toolchain", "r", encoding="utf-8") as f:
-      content = f.readlines()
-      if len(content) == 1:
-        # Old format, only the build is stored
-        target_toolchain_fullstring = content[0].strip()
-      else:
-        # New format
-        for line in content:
-          if line.startswith("channel"):
-            channel = line.strip().split("=", maxsplit=1)[1].strip()
-            target_toolchain_fullstring = channel.strip('"')
-    target_toolchain = target_toolchain_fullstring.split("-", maxsplit=1)
-    if len(target_toolchain) == 1:
-      # If we target the stable version of rust, we won't have a date
-      # associated to the version and split will only return 1 item.
-      # To avoid failing later when accessing the date, we insert an
-      # empty value.
-      target_toolchain.append("")
-    current_version = self.checked_command_output(["rustc", "--version"])
-    if not (target_toolchain[0] in current_version and
-            target_toolchain[1] in current_version):
-      info(f"Updating rust toolchain to {'-'.join(target_toolchain)}")
-      # Need to update
-      rustup_install = ["rustup"]
-      if self.args.verbose_build:
-        rustup_install.append("--verbose")
-      rustup_install.extend(["install", target_toolchain_fullstring])
-      self.checked_command(rustup_install)
-
-    rustup_target = ["rustup"]
-    if self.args.verbose_build:
-      rustup_target.append("--verbose")
-    rustup_target.extend(
-        ["target", "add", SUPPORTED_BOARDS[self.args.board].arch])
-    self.checked_command(rustup_target)
-    info("Rust toolchain up-to-date")
-
   def build_tockos(self):
     """Buids Tock OS with the parameters specified in args."""
     info(f"Building Tock OS for board {self.args.board}")
@@ -774,7 +734,6 @@ class OpenSKInstaller:
   def run(self) -> int:
     """Reads args to decide and run all required tasks."""
     self.check_prerequisites()
-    self.update_rustc_if_needed()
 
     if not (self.args.tockos or self.args.application or
             self.args.clear_storage or self.args.configure):

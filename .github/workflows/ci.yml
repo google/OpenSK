@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.10"
       - run: ./setup.sh
-      - run: rustup component add rustfmt --toolchain nightly
-      - run: rustup component add clippy --toolchain nightly
+      - run: rustup component add rustfmt
+      - run: rustup component add clippy
       - run: cargo +stable install cargo-audit
       - run: ./run_desktop_tests.sh

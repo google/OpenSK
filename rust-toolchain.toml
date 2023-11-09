@@ -1,6 +1,4 @@
 [toolchain]
-# See https://rust-lang.github.io/rustup-components-history/ for a list of
-# recently nightlies and what components are available for them.
 channel = "nightly-2023-11-01"
 components = ["clippy", "miri", "rustfmt"]
 targets = ["thumbv7em-none-eabi",

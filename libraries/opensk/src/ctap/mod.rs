@@ -1282,15 +1282,19 @@ impl<E: Env> CtapState<E> {
         options.append(&mut vec![
             (String::from("rk"), true),
             (String::from("up"), true),
-            (String::from("alwaysUv"), has_always_uv),
             (String::from("credMgmt"), true),
+            #[cfg(feature = "config_command")]
             (String::from("authnrCfg"), true),
             (String::from("clientPin"), storage::pin_hash(env)?.is_some()),
             (String::from("largeBlobs"), true),
             (String::from("pinUvAuthToken"), true),
+            #[cfg(feature = "config_command")]
             (String::from("setMinPINLength"), true),
             (String::from("makeCredUvNotRqd"), !has_always_uv),
         ]);
+        if cfg!(feature = "config_command") || env.customization().enforce_always_uv() {
+            options.push((String::from("alwaysUv"), has_always_uv));
+        }
         let mut pin_protocols = vec![PinUvAuthProtocol::V2 as u64];
         if env.customization().allows_pin_protocol_v1() {
             pin_protocols.push(PinUvAuthProtocol::V1 as u64);
@@ -1499,12 +1503,15 @@ mod test {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
                 "up" => true,
+                #[cfg(feature = "config_command")]
                 "alwaysUv" => false,
                 "credMgmt" => true,
+                #[cfg(feature = "config_command")]
                 "authnrCfg" => true,
                 "clientPin" => false,
                 "largeBlobs" => true,
                 "pinUvAuthToken" => true,
+                #[cfg(feature = "config_command")]
                 "setMinPINLength" => true,
                 "makeCredUvNotRqd" => true,
             },

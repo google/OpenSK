@@ -23,6 +23,8 @@ use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use super::{Channel, StatefulCommand, StatefulPermission};
 use crate::api::crypto::sha256::Sha256;
+use crate::api::customization::Customization;
+use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::storage;
 use crate::env::{Env, Sha};
 use alloc::collections::BTreeSet;
@@ -62,6 +64,7 @@ fn enumerate_rps_response<E: Env>(
 
 /// Generates the response for subcommands enumerating credentials.
 fn enumerate_credentials_response<E: Env>(
+    env: &mut E,
     credential: PublicKeyCredentialSource,
     total_credentials: Option<u64>,
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
@@ -91,12 +94,15 @@ fn enumerate_credentials_response<E: Env>(
         transports: None, // You can set USB as a hint here.
     };
     let public_key = private_key.get_pub_key::<E>()?;
+    let cred_protect = cred_protect_policy
+        .or(env.customization().default_cred_protect())
+        .or(Some(CredentialProtectionPolicy::UserVerificationOptional));
     Ok(AuthenticatorCredentialManagementResponse {
         user: Some(user),
         credential_id: Some(credential_id),
         public_key: Some(public_key),
         total_credentials,
-        cred_protect: cred_protect_policy,
+        cred_protect,
         large_blob_key,
         ..Default::default()
     })
@@ -201,7 +207,7 @@ fn process_enumerate_credentials_begin<E: Env>(
             channel,
         );
     }
-    enumerate_credentials_response::<E>(credential, Some(total_credentials as u64))
+    enumerate_credentials_response(env, credential, Some(total_credentials as u64))
 }
 
 /// Processes the subcommand enumerateCredentialsGetNextCredential for CredentialManagement.
@@ -211,7 +217,7 @@ fn process_enumerate_credentials_get_next_credential<E: Env>(
 ) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
     let credential_key = stateful_command_permission.next_enumerate_credential(env)?;
     let credential = storage::get_credential(env, credential_key)?;
-    enumerate_credentials_response::<E>(credential, None)
+    enumerate_credentials_response(env, credential, None)
 }
 
 /// Processes the subcommand deleteCredential for CredentialManagement.

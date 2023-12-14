@@ -35,6 +35,9 @@ generate_pki () {
   # Allow invoker to override the command with a full path.
   local openssl=${OPENSSL:-$(which openssl)}
 
+  # Print version for debug purposes
+  ${openssl} version
+
   # We need openssl command to continue
   if [ ! -x "${openssl}" ]
   then
@@ -54,7 +57,7 @@ generate_pki () {
     rm -rf crypto_data/crl crypto_data/certs
   fi
 
-  openssl_keypwd="-noenc"
+  openssl_keypwd="-nodes"
   openssl_batch="-batch"
   if [ "${ask_for_password}" = "Y" ]
   then
@@ -114,6 +117,7 @@ generate_pki () {
       -out "${ca_cert_name}.csr" \
       -keyout "${ca_priv_key}" \
       "${openssl_keypwd}" \
+      "${openssl_batch}" \
       -newkey "ec:${ecparams_file}"
     
     # Make root CA certificate
@@ -135,6 +139,7 @@ generate_pki () {
       -out "${signing_ca_cert_name}.csr" \
       -keyout "${signing_ca_priv_key}" \
       "${openssl_keypwd}" \
+      "${openssl_batch}" \
       -newkey "ec:${ecparams_file}"
 
     # Make signing CA certificate
@@ -203,7 +208,7 @@ generate_new_batch () {
   export OPENSK_TRANSPORT="${OPENSK_TRANSPORT:-2}"  # comma separated values. 1=BLE, 2=USB, 3=NFC
 
   ask_for_password="$1"  
-  openssl_keypwd="-noenc"
+  openssl_keypwd="-nodes"
   openssl_batch="-batch"
   if [ "${ask_for_password}" = "Y" ]
   then
@@ -218,6 +223,7 @@ generate_new_batch () {
     -keyout "crypto_data/${opensk_key}" \
     -out "crypto_data/${opensk_cert_name}.csr" \
     "${openssl_keypwd}" \
+    "${openssl_batch}" \
     -newkey "ec:${ecparams_file}"
   # Sign it using signing-CA and injecting the AAGUID as an extension
   "${openssl}" ca \

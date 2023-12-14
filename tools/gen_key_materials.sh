@@ -234,8 +234,8 @@ generate_new_batch () {
     -extensions "fido_key_ext"
 
   # Force symlink to the latest batch
-  ln --symbolic --force "${opensk_cert_name}.pem" crypto_data/opensk_cert.pem
-  ln --symbolic --force "${opensk_key}" crypto_data/opensk.key
+  ln -s -f "${opensk_cert_name}.pem" crypto_data/opensk_cert.pem
+  ln -s -f "${opensk_key}" crypto_data/opensk.key
 }
 
 if [ "X${1}" != "X" ]

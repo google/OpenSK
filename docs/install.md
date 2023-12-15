@@ -25,8 +25,8 @@ following:
 *   python3 and pip (can be installed with the `python3-pip` package on Debian)
 *   the OpenSSL command line tool (can be installed and configured with the
     `libssl-dev` and `pkg-config` packages on Debian)
-*   `nrfutil` (can be installed using `pip3 install nrfutil`) if you want to flash
-    a device with DFU
+*   `nrfutil` (pip package of the same name), if you want to flash
+    a device with DFU. Read the disclaimer below.
 *   `uuid-runtime` if you are missing the `uuidgen` command.
 *   `llvm` and `gcc-arm-none-eabi` if you want to use the upgradability feature.
 
@@ -37,10 +37,11 @@ instructions to appropriate binaries for your system.
 The scripts provided in this project have been tested under Linux and OS X. We
 haven't tested them on Windows and other platforms.
 
-If you use Python newer than 3.10, then nrfutil for flashing over DFU is
-currently not supported. Please use Python 3.10, or play around with [Nordic's
-new tool](https://www.nordicsemi.com/Products/Development-tools/nrf-util)
-instead.
+You need `nrfutil` version 6, if you want to flash over DFU.
+The tool doesn't support Python newer than 3.10. Therefore, we don't officially
+support DFU for other versions. If you want to try regardless,
+[Nordic's new tool](https://www.nordicsemi.com/Products/Development-tools/nrf-util)
+might work for you.
 
 ### Compiling the firmware
 

@@ -23,6 +23,7 @@ import argparse
 import collections
 import copy
 import os
+from serial.tools import list_ports
 import shutil
 import subprocess
 import sys
@@ -200,6 +201,12 @@ def assert_python_library(module: str):
   except ModuleNotFoundError:
     fatal((f"Couldn't load python3 module {module}. "
            f"Try to run: pip3 install {module}"))
+
+
+def list_serials(vid: int, pid: int) -> List[str]:
+  ports = list_ports.comports()
+  ports = filter(lambda p: p.vid == vid and p.pid == pid, ports)
+  return list(map(lambda p: p.serial_number, ports))
 
 
 class RemoveConstAction(argparse.Action):
@@ -703,10 +710,10 @@ class OpenSKInstaller:
         fatal("This board doesn't seem to support flashing through pyocd.")
 
     if self.args.programmer == "nordicdfu":
-      assert_mandatory_binary("nrfutil")
       assert_python_library("intelhex")
-      assert_python_library("nordicsemi.lister")
-      nrfutil_version = __import__("nordicsemi.version").version.NRFUTIL_VERSION
+      assert_mandatory_binary("nrfutil")
+      nrfutil_version = self.checked_command_output(["nrfutil", "version"])
+      nrfutil_version = nrfutil_version.removeprefix("nrfutil version ")
       if not nrfutil_version.startswith("6."):
         fatal(("You need to install nrfutil python3 package v6.0 or above. "
                f"Found: v{nrfutil_version}. If you use Python >= 3.11, please "
@@ -812,22 +819,17 @@ class OpenSKInstaller:
         info("Press [ENTER] when ready.")
         _ = input()
         # Search for the DFU devices
-        serial_number = []
-        # pylint: disable=g-import-not-at-top,import-outside-toplevel
-        from nordicsemi.lister import device_lister
-        for device in device_lister.DeviceLister().enumerate():
-          if device.vendor_id == "1915" and device.product_id == "521F":
-            serial_number.append(device.serial_number)
-        if not serial_number:
+        serial_numbers = list_serials(0x1915, 0x521F)
+        if not serial_numbers:
           fatal("Couldn't find any DFU device on your system.")
-        if len(serial_number) > 1:
+        if len(serial_numbers) > 1:
           fatal("Multiple DFU devices are detected. Please only connect one.")
         # Run the command without capturing stdout so that we show progress
         info("Flashing device using DFU...")
         dfu_return_code = subprocess.run(
             [
                 "nrfutil", "dfu", "usb-serial", f"--package={dfu_pkg_file}",
-                f"--serial-number={serial_number[0]}"
+                f"--serial-number={serial_numbers[0]}"
             ],
             check=False,
             timeout=None,

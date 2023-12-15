@@ -19,6 +19,9 @@ customize it.
 
 ### Flashing using DFU (preferred method)
 
+You need `nrfutil` version 6. The [install manual](../install.md) has
+setup instructions.
+
 To flash the firmware, run:
 
 ```shell

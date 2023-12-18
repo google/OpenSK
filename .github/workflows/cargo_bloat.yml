@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Setup
-      - uses: actions/setup-python@v1
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
       - uses: actions-rs/cargo@v1
@@ -15,7 +15,7 @@ jobs:
           args: cargo-bloat
 
       # First run: PR
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Set up OpenSK
@@ -24,7 +24,7 @@ jobs:
         run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no -C link-arg=-Tnrf52840_layout.ld" cargo bloat --release --target=thumbv7em-none-eabi --features=config_command,with_ctap1 --crates >> .github/workflows/bloat_output_new.txt
 
       # Second run: PR
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: true
           ref: ${{ github.base_ref }}

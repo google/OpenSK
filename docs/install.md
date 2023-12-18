@@ -46,8 +46,8 @@ might work for you.
 ### Compiling the firmware
 
 If this is your first time installing OpenSK, please skip directly to
-[Initial setup](#Initial-setup). Else, see
-[Updating your setup](#Updating-your-setup) below.
+[Initial setup](#initial-setup). Else, see
+[Updating your setup](#updating-your-setup) below.
 
 #### Updating your setup
 
@@ -140,7 +140,7 @@ From here on, please follow the instructions for your hardware:
 ### Advanced installation
 
 We recommend that you flash your development board with JTAG and dongles with
-DFU, as described in the [board documentation](#Flashing-a-firmware) linked
+DFU, as described in the [board documentation](#flashing-a-firmware) linked
 above. However, we support other programmers:
 
 *   OpenOCD: `./deploy.py --board=nrf52840_dongle_opensk --opensk

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2019 Google LLC
+# Copyright 2019-2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,7 +40,11 @@ check_command "$PIP"
 
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh
-generate_crypto_materials N
+generate_pki N
+if [ ! -f "crypto_data/opensk.key" -o ! -f "crypto_data/opensk_cert.pem" ]
+then
+  generate_new_batch
+fi
 
 rustup show
 "$PIP" install --upgrade -r requirements.txt

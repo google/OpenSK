@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: "true"
       - name: Install Rust toolchain
@@ -30,7 +30,7 @@ jobs:
         run: ./maintainers/reproduce_hashes.sh
 
       - name: Upload reproduced binaries
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: reproduced-${{ matrix.os }}
           path: reproducible/reproduced.tar

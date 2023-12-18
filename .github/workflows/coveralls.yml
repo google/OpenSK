@@ -38,7 +38,7 @@ jobs:
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"
       - name: Run grcov
         run: RUSTUP_TOOLCHAIN=nightly grcov . --binary-path ./libraries/opensk/target/debug/ --source-dir libraries/opensk/ --output-type lcov --ignore-not-existing --output-path ./lcov.info --ignore "/*" --ignore "examples/*" --ignore "third_party/*"
-      - uses: coverallsapp/github-action@2
+      - uses: coverallsapp/github-action@2.2.3
         name: upload report to coveralls
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

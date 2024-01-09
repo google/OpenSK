@@ -457,4 +457,47 @@ mod test {
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
     }
+
+    #[test]
+    fn test_accessors() {
+        let customization = CustomizationImpl {
+            aaguid: &[0; AAGUID_LENGTH],
+            allows_pin_protocol_v1: true,
+            default_cred_protect: None,
+            default_min_pin_length: 4,
+            default_min_pin_length_rp_ids: &["example.com"],
+            enforce_always_uv: false,
+            enterprise_attestation_mode: None,
+            enterprise_rp_id_list: &[],
+            max_msg_size: 7609,
+            max_pin_retries: 8,
+            use_batch_attestation: true,
+            use_signature_counter: true,
+            max_cred_blob_length: 32,
+            max_credential_count_in_list: Some(3),
+            max_large_blob_array_size: 2048,
+            max_rp_ids_length: 8,
+            max_supported_resident_keys: 150,
+        };
+        assert_eq!(customization.aaguid(), &[0; AAGUID_LENGTH]);
+        assert!(customization.allows_pin_protocol_v1());
+        assert!(customization.default_cred_protect().is_none());
+        assert_eq!(customization.default_min_pin_length(), 4);
+        assert_eq!(
+            customization.default_min_pin_length_rp_ids(),
+            vec![String::from("example.com")]
+        );
+        assert!(!customization.enforce_always_uv());
+        assert!(customization.enterprise_attestation_mode().is_none());
+        assert!(customization.enterprise_rp_id_list().is_empty());
+        assert_eq!(customization.max_msg_size(), 7609);
+        assert_eq!(customization.max_pin_retries(), 8);
+        assert!(customization.use_batch_attestation());
+        assert!(customization.use_signature_counter());
+        assert_eq!(customization.max_cred_blob_length(), 32);
+        assert_eq!(customization.max_credential_count_in_list(), Some(3));
+        assert_eq!(customization.max_large_blob_array_size(), 2048);
+        assert_eq!(customization.max_rp_ids_length(), 8);
+        assert_eq!(customization.max_supported_resident_keys(), 150);
+    }
 }

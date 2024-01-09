@@ -413,7 +413,9 @@ pub struct StatefulPermission<E: Env> {
 impl<E: Env> StatefulPermission<E> {
     /// Creates the command state at device startup.
     ///
-    /// Resets are only possible after a power cycle. Therefore, initialization
+    /// Resets are only possible after a power cycle. Therefore, there is no way to grant the Reset
+    /// permission outside of this function. If you initialize the app without a power cycle
+    /// (potentially after waking up from sleep), `clear` the permissions.
     /// means allowing Reset, and Reset cannot be granted later.
     pub fn new_reset(env: &mut E) -> StatefulPermission<E> {
         StatefulPermission {
@@ -550,6 +552,13 @@ impl<E: Env> CtapState<E> {
             stateful_command_permission: StatefulPermission::new_reset(env),
             large_blobs: LargeBlobs::new(),
         }
+    }
+
+    /// Creates new CTAP state that doesn't assume a user intended power cycle.
+    pub fn new_soft_reset(env: &mut E) -> Self {
+        let mut ctap_state = CtapState::new(env);
+        ctap_state.stateful_command_permission.clear();
+        ctap_state
     }
 
     pub fn increment_global_signature_counter(

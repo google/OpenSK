@@ -14,7 +14,7 @@
 
 use core::convert::TryFrom;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UsbEndpoint {
     MainHid = 1,
     #[cfg(feature = "vendor_hid")]
@@ -40,10 +40,24 @@ pub enum SendOrRecvStatus {
     Received(UsbEndpoint),
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct SendOrRecvError;
 
 pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
 
 pub trait HidConnection {
     fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult;
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_endpoint_num() {
+        assert_eq!(UsbEndpoint::try_from(1), Ok(UsbEndpoint::MainHid));
+        #[cfg(feature = "vendor_hid")]
+        assert_eq!(UsbEndpoint::try_from(2), Ok(UsbEndpoint::VendorHid));
+        assert_eq!(UsbEndpoint::try_from(3), Err(SendOrRecvError));
+    }
 }

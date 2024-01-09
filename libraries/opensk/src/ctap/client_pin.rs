@@ -140,6 +140,12 @@ impl<E: Env> ClientPin<E> {
         }
     }
 
+    /// Checks if a PIN UV token is in use.
+    pub fn has_token(&mut self, env: &mut E) -> bool {
+        self.update_timeouts(env);
+        self.pin_uv_auth_token_state.is_in_use()
+    }
+
     /// Gets a reference to the PIN protocol of the given version.
     fn get_pin_protocol(&self, pin_uv_auth_protocol: PinUvAuthProtocol) -> &PinProtocol<E> {
         match pin_uv_auth_protocol {
@@ -1507,9 +1513,11 @@ mod test {
         let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         let message = [0xAA];
+        assert!(!client_pin.has_token(&mut env));
         client_pin
             .pin_uv_auth_token_state
             .begin_using_pin_uv_auth_token(&mut env);
+        assert!(client_pin.has_token(&mut env));
 
         let pin_uv_auth_token_v1 = client_pin
             .get_pin_protocol(PinUvAuthProtocol::V1)
@@ -1655,6 +1663,7 @@ mod test {
                 .has_permissions_rp_id("example.com"),
             Ok(())
         );
+        assert!(client_pin.has_token(&mut env));
 
         env.clock().advance(30001);
         client_pin.update_timeouts(&mut env);
@@ -1672,6 +1681,7 @@ mod test {
                 .has_permissions_rp_id("example.com"),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
+        assert!(!client_pin.has_token(&mut env));
     }
 
     #[test]

@@ -116,6 +116,10 @@ impl<E: Env> Ctap<E> {
         self.hid.should_wink(&mut self.env)
     }
 
+    pub fn can_sleep(&mut self) -> bool {
+        !self.should_wink() && self.state.can_sleep(&mut self.env)
+    }
+
     #[cfg(feature = "with_ctap1")]
     pub fn u2f_grant_user_presence(&mut self) {
         self.state.u2f_grant_user_presence(&mut self.env)
@@ -201,6 +205,7 @@ mod test {
     fn test_hard_reset() {
         let env = TestEnv::default();
         let mut ctap = Ctap::<TestEnv>::new(env);
+        assert!(!ctap.can_sleep());
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -223,6 +228,7 @@ mod test {
         let mut env = TestEnv::default();
         env.set_boots_after_soft_reset(true);
         let mut ctap = Ctap::<TestEnv>::new(env);
+        assert!(ctap.can_sleep());
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);

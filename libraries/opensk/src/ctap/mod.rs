@@ -602,6 +602,12 @@ impl<E: Env> CtapState<E> {
         self.stateful_command_permission.clear_old_channels(channel);
     }
 
+    /// Checks if the application has any timers running.
+    pub fn can_sleep(&mut self, env: &mut E) -> bool {
+        !self.client_pin.has_token(env)
+            && self.stateful_command_permission.get_command(env).is_err()
+    }
+
     pub fn process_command(
         &mut self,
         env: &mut E,

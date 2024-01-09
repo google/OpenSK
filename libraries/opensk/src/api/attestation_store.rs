@@ -113,3 +113,14 @@ impl From<StoreError> for Error {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_store_error() {
+        assert_eq!(Error::from(StoreError::StorageError), Error::Storage);
+        assert_eq!(Error::from(StoreError::InvalidStorage), Error::Internal);
+    }
+}

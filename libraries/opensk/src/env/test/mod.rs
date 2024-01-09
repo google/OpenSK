@@ -34,6 +34,7 @@ pub struct TestEnv {
     store: Store<BufferStorage>,
     customization: TestCustomization,
     clock: TestClock,
+    soft_reset: bool,
 }
 
 pub type TestRng = StdRng;
@@ -127,6 +128,7 @@ impl Default for TestEnv {
             store,
             customization,
             clock,
+            soft_reset: false,
         }
     }
 }
@@ -138,6 +140,10 @@ impl TestEnv {
 
     pub fn seed_rng_from_u64(&mut self, seed: u64) {
         self.rng = StdRng::seed_from_u64(seed);
+    }
+
+    pub fn set_boots_after_soft_reset(&mut self, value: bool) {
+        self.soft_reset = value;
     }
 }
 
@@ -227,6 +233,10 @@ impl Env for TestEnv {
         self
     }
 
+    fn boots_after_soft_reset(&self) -> bool {
+        self.soft_reset
+    }
+
     fn firmware_version(&self) -> Option<u64> {
         Some(0)
     }
@@ -246,5 +256,15 @@ mod test {
         assert!(!clock.is_elapsed(&timer));
         clock.advance(1);
         assert!(clock.is_elapsed(&timer));
+    }
+
+    #[test]
+    fn test_soft_reset() {
+        let mut env = TestEnv::default();
+        assert!(!env.boots_after_soft_reset());
+        env.set_boots_after_soft_reset(true);
+        assert!(env.boots_after_soft_reset());
+        env.set_boots_after_soft_reset(false);
+        assert!(!env.boots_after_soft_reset());
     }
 }

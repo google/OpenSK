@@ -81,10 +81,6 @@ impl<E: Env> Ctap<E> {
         &mut self.state
     }
 
-    pub fn hid(&mut self) -> &mut MainHid<E> {
-        &mut self.hid
-    }
-
     pub fn env(&mut self) -> &mut E {
         &mut self.env
     }
@@ -134,6 +130,7 @@ impl<E: Env> Ctap<E> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ctap::status_code::Ctap2StatusCode;
     use crate::env::test::TestEnv;
 
     /// Assembles a packet for a payload that fits into one packet.
@@ -201,6 +198,56 @@ mod test {
     }
 
     #[test]
+    fn test_hard_reset() {
+        let env = TestEnv::default();
+        let mut ctap = Ctap::<TestEnv>::new(env);
+
+        // Send Init, receive Init response.
+        let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
+        let response_packet = init_response.next().unwrap();
+        assert_eq!(response_packet[4], 0x86);
+        let cid = *array_ref!(response_packet, 15, 4);
+
+        // Send Reset, get Ok.
+        let reset_packet = assemble_packet(&cid, 0x10, &[0x07]);
+        let mut reset_response = ctap.process_hid_packet(&reset_packet, Transport::MainHid);
+        let response_packet = reset_response.next().unwrap();
+        let status_byte = Ctap2StatusCode::CTAP2_OK as u8;
+        let expected_data = [0x90, 0x00, 0x01, status_byte];
+        assert_eq!(response_packet[..4], cid);
+        assert_eq!(response_packet[4..8], expected_data);
+    }
+
+    #[test]
+    fn test_soft_reset() {
+        let mut env = TestEnv::default();
+        env.set_boots_after_soft_reset(true);
+        let mut ctap = Ctap::<TestEnv>::new(env);
+
+        // Send Init, receive Init response.
+        let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
+        let response_packet = init_response.next().unwrap();
+        assert_eq!(response_packet[4], 0x86);
+        let cid = *array_ref!(response_packet, 15, 4);
+
+        // Send Reset, get error.
+        let reset_packet = assemble_packet(&cid, 0x10, &[0x07]);
+        let mut reset_response = ctap.process_hid_packet(&reset_packet, Transport::MainHid);
+        let response_packet = reset_response.next().unwrap();
+        let status_byte = Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED as u8;
+        let expected_data = [0x90, 0x00, 0x01, status_byte];
+        assert_eq!(response_packet[..4], cid);
+        assert_eq!(response_packet[4..8], expected_data);
+    }
+
+    #[test]
+    fn test_env_api() {
+        let env = TestEnv::default();
+        let mut ctap = Ctap::<TestEnv>::new(env);
+        assert_eq!(ctap.env().firmware_version(), Some(0));
+    }
+
+    #[test]
     #[cfg(feature = "vendor_hid")]
     fn test_locked_transport() {
         let env = TestEnv::default();
@@ -221,5 +268,15 @@ mod test {
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::VendorHid);
         let response_packet = init_response.next().unwrap();
         assert_eq!(response_packet[4], 0xBF);
+    }
+
+    #[test]
+    #[cfg(feature = "with_ctap1")]
+    fn test_ctap1_initial_state() {
+        let env = TestEnv::default();
+        let mut ctap = Ctap::<TestEnv>::new(env);
+        // Granting doesn't work until a CTAP1 request was processed.
+        ctap.u2f_grant_user_presence();
+        assert!(!ctap.u2f_needs_user_presence());
     }
 }

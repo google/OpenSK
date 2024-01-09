@@ -410,11 +410,26 @@ pub struct StatefulPermission<E: Env> {
     channel: Option<Channel>,
 }
 
+impl<E: Env> Default for StatefulPermission<E> {
+    /// Creates the command state at device startup without user action.
+    ///
+    /// Reset is not granted after a forced reboot. The user replugging the device is a required
+    /// to avoid accidental data loss.
+    fn default() -> StatefulPermission<E> {
+        StatefulPermission {
+            permission: <E::Clock as Clock>::Timer::default(),
+            command_type: None,
+            channel: None,
+        }
+    }
+}
+
 impl<E: Env> StatefulPermission<E> {
     /// Creates the command state at device startup.
     ///
-    /// Resets are only possible after a power cycle. Therefore, initialization
-    /// means allowing Reset, and Reset cannot be granted later.
+    /// Resets are only possible after a power cycle. Therefore, there is no way to grant the Reset
+    /// permission outside of this function. If you initialize the app without a power cycle
+    /// (potentially after waking up from sleep), call `default` instead.
     pub fn new_reset(env: &mut E) -> StatefulPermission<E> {
         StatefulPermission {
             permission: env.clock().make_timer(RESET_TIMEOUT_DURATION_MS),
@@ -543,11 +558,16 @@ impl<E: Env> CtapState<E> {
     pub fn new(env: &mut E) -> Self {
         storage::init(env).ok().unwrap();
         let client_pin = ClientPin::new(env);
+        let stateful_command_permission = if env.boots_after_soft_reset() {
+            StatefulPermission::default()
+        } else {
+            StatefulPermission::new_reset(env)
+        };
         CtapState {
             client_pin,
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
-            stateful_command_permission: StatefulPermission::new_reset(env),
+            stateful_command_permission,
             large_blobs: LargeBlobs::new(),
         }
     }

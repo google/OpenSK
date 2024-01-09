@@ -76,6 +76,9 @@ pub trait Env {
     #[cfg(feature = "vendor_hid")]
     fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
 
+    /// Indicates that the last power cycle was not caused by user action.
+    fn boots_after_soft_reset(&self) -> bool;
+
     /// Option to return a firmware version that is shown as device info.
     fn firmware_version(&self) -> Option<u64> {
         None

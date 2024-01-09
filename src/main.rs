@@ -137,7 +137,7 @@ fn main() {
     }
 
     let env = TockEnv::<SyscallImplementation>::default();
-    let mut ctap = opensk::Ctap::new(env, false);
+    let mut ctap = opensk::Ctap::new(env);
 
     let mut led_counter = 0;
     let mut led_blink_timer =

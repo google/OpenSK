@@ -452,6 +452,10 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
         commands::process_vendor_command(self, bytes, channel)
     }
 
+    fn boots_after_soft_reset(&self) -> bool {
+        false
+    }
+
     fn firmware_version(&self) -> Option<u64> {
         self.upgrade_storage
             .as_ref()

@@ -63,12 +63,8 @@ impl<E: Env> Ctap<E> {
     /// Instantiates a CTAP implementation given its environment.
     // This should only take the environment, but it temporarily takes the boot time until the
     // clock is part of the environment.
-    pub fn new(mut env: E, is_soft_reset: bool) -> Self {
-        let state = if is_soft_reset {
-            CtapState::<E>::new_soft_reset(&mut env)
-        } else {
-            CtapState::<E>::new(&mut env)
-        };
+    pub fn new(mut env: E) -> Self {
+        let state = CtapState::<E>::new(&mut env);
         let hid = MainHid::default();
         #[cfg(feature = "vendor_hid")]
         let vendor_hid = VendorHid::default();
@@ -163,7 +159,7 @@ mod test {
     #[test]
     fn test_wink() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, false);
+        let mut ctap = Ctap::<TestEnv>::new(env);
 
         // Send Init, receive Init response and check wink if disabled.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -182,7 +178,7 @@ mod test {
     #[test]
     fn test_locked_channel_id() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, false);
+        let mut ctap = Ctap::<TestEnv>::new(env);
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -204,7 +200,7 @@ mod test {
     #[test]
     fn test_hard_reset() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, false);
+        let mut ctap = Ctap::<TestEnv>::new(env);
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -224,8 +220,9 @@ mod test {
 
     #[test]
     fn test_soft_reset() {
-        let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, true);
+        let mut env = TestEnv::default();
+        env.set_boots_after_soft_reset(true);
+        let mut ctap = Ctap::<TestEnv>::new(env);
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -246,7 +243,7 @@ mod test {
     #[test]
     fn test_env_api() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, true);
+        let mut ctap = Ctap::<TestEnv>::new(env);
         assert_eq!(ctap.env().firmware_version(), Some(0));
     }
 
@@ -254,7 +251,7 @@ mod test {
     #[cfg(feature = "vendor_hid")]
     fn test_locked_transport() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, false);
+        let mut ctap = Ctap::<TestEnv>::new(env);
 
         // Send Init, receive Init response.
         let mut init_response = ctap.process_hid_packet(&init_packet(), Transport::MainHid);
@@ -277,7 +274,7 @@ mod test {
     #[cfg(feature = "with_ctap1")]
     fn test_ctap1_initial_state() {
         let env = TestEnv::default();
-        let mut ctap = Ctap::<TestEnv>::new(env, false);
+        let mut ctap = Ctap::<TestEnv>::new(env);
         // Granting doesn't work until a CTAP1 request was processed.
         ctap.u2f_grant_user_presence();
         assert!(!ctap.u2f_needs_user_presence());

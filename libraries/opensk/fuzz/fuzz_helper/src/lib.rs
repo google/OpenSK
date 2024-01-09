@@ -141,7 +141,7 @@ pub fn process_ctap_any_type(data: &[u8]) -> arbitrary::Result<()> {
 
     let data = unstructured.take_rest();
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(env, false);
+    let mut ctap = Ctap::new(env);
     let cid = initialize(&mut ctap);
     // Wrap input as message with the allocated cid.
     let mut command = cid.to_vec();
@@ -191,7 +191,7 @@ pub fn process_ctap_specific_type(data: &[u8], input_type: InputType) -> arbitra
         return Ok(());
     }
     // Initialize ctap state and hid and get the allocated cid.
-    let mut ctap = Ctap::new(env, false);
+    let mut ctap = Ctap::new(env);
     let cid = initialize(&mut ctap);
     // Wrap input as message with allocated cid and command type.
     let mut command = cid.to_vec();

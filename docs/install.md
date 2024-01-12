@@ -62,7 +62,7 @@ following steps:
     ```
 
 *   Flash your board according to the
-    [flashing instructions below](#Flashing-a-firmware]. If you come from an
+    [flashing instructions below](#Flashing-a-firmware). If you come from an
     OpenSK version before the 2.0 certified one, your credential storage is not
     backwards compatible and you have to reset it. :warning: You will lose
     logins to all websites that you registered with OpenSK. To erase your

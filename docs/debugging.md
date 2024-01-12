@@ -59,15 +59,15 @@ JLinkRTTClient
 You can enhance the debug output by adding flags to the deploy command (see
 below for details):
 
-*   `--debug`: more debug messages
-*   `--panic-console`: add panic messages
-*   `--debug-allocations`: print information about the used heap
+* `--debug`: more debug messages
+* `--panic-console`: add panic messages
+* `--debug-allocations`: print information about the used heap
 
 Adding debugging to your firmware increases resource usage, including
 
-*   USB communication speed
-*   RAM usage
-*   binary size
+* USB communication speed
+* RAM usage
+* binary size
 
 Depending on your choice of board, you may have to increase the available stack
 for kernel or app, or disable features so that the binary fits the flash. Also

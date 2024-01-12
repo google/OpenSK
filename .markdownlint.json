@@ -1,35 +1,22 @@
 {
     "default": true,
-    "heading-style": {
+    "MD003": {
         "style": "atx"
     },
-    "no-trailing-spaces": {
+    "MD007": {
+        "indent": 4
+    },
+    "MD009": {
         "br_spaces": 0,
         "strict": true
     },
-    "ul-indent": {
-        "indent": 4
-    },
-    "line-length": {
+    "MD013": {
         "line_length": 80,
         "code_blocks": false
     },
-    "list-marker-space": {
-        "ol_single": 2,
-        "ol_multi": 2,
-        "ul_single": 3,
-        "ul_multi": 3
-    },
-    "no-inline-html": {
+    "MD033": {
         "allowed_elements": [
-            "img"
-        ]
-    },
-    "fenced-code-language": true,
-    "code-block-style": {
-        "style": "fenced"
-    },
-    "code-fence-style": {
-        "style": "backtick"
+        "img"
+	]
     }
 }

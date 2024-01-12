@@ -2,8 +2,8 @@
 
 This bootloader supports upgradability for OpenSK. Its functionality is to
 
--   check images on A/B partitions,
--   boot the most recent valid partition.
+- check images on A/B partitions,
+- boot the most recent valid partition.
 
 ## How to use
 

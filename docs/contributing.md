@@ -1,7 +1,8 @@
 # How to Contribute
 
-We'd love to accept your patches and contributions to this project. There are
-just a few small guidelines you need to follow.
+We'd love to accept your patches and contributions to this project.
+Please base your pull requests on the `develop` branch.
+There are just a few small guidelines you need to follow.
 
 ## Contributor License Agreement
 

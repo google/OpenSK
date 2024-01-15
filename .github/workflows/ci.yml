@@ -5,8 +5,7 @@ on:
     branches:
       - develop
   pull_request:
-    branches:
-      - develop
+    types: [opened, synchronize, reopened]
   schedule:
     - cron: 30 1 * * 2 # every Tuesday at 1:30 UTC
 

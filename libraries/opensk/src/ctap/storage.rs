@@ -12,40 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod key;
-
-#[cfg(feature = "config_command")]
-use crate::api::attestation_store::{self, AttestationStore};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
+use crate::api::persist::{Persist, PersistCredentialIter};
 use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
 use crate::ctap::status_code::Ctap2StatusCode;
-use crate::ctap::INITIAL_SIGNATURE_COUNTER;
 use crate::env::{AesKey, Env};
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
-use arrayref::array_ref;
 use core::cmp;
-use persistent_store::{fragment, StoreUpdate};
 #[cfg(feature = "config_command")]
 use sk_cbor::cbor_array_vec;
 
-/// Wrapper for PIN properties.
-struct PinProperties {
-    /// 16 byte prefix of SHA256 of the currently set PIN.
-    hash: [u8; PIN_AUTH_LENGTH],
-
-    /// Length of the current PIN in code points.
-    #[cfg_attr(not(feature = "config_command"), allow(dead_code))]
-    code_point_length: u8,
-}
-
 /// Initializes the store by creating missing objects.
 pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    env.persist().init()?;
     env.key_store().init()?;
     Ok(())
 }
@@ -59,14 +43,7 @@ pub fn get_credential<E: Env>(
     env: &mut E,
     key: usize,
 ) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
-    let min_key = key::CREDENTIALS.start;
-    if key < min_key || key >= min_key + env.customization().max_supported_resident_keys() {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    let credential_entry = env
-        .store()
-        .find(key)?
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+    let credential_entry = env.persist().credential_bytes(key)?;
     let wrap_key = env.key_store().wrap_key::<E>()?;
     deserialize_credential::<E>(&wrap_key, &credential_entry)
         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
@@ -122,45 +99,33 @@ pub fn store_credential<E: Env>(
     env: &mut E,
     new_credential: PublicKeyCredentialSource,
 ) -> Result<(), Ctap2StatusCode> {
-    let max_supported_resident_keys = env.customization().max_supported_resident_keys();
     // Holds the key of the existing credential if this is an update.
     let mut old_key = None;
-    let min_key = key::CREDENTIALS.start;
-    // Holds whether a key is used (indices are shifted by min_key).
-    let mut keys = vec![false; max_supported_resident_keys];
     let mut iter_result = Ok(());
     let iter = iter_credentials(env, &mut iter_result)?;
     for (key, credential) in iter {
-        if key < min_key || key - min_key >= max_supported_resident_keys || keys[key - min_key] {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        keys[key - min_key] = true;
         if credential.rp_id == new_credential.rp_id
             && credential.user_handle == new_credential.user_handle
         {
-            if old_key.is_some() {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
             old_key = Some(key);
+            break;
         }
     }
     iter_result?;
-    if old_key.is_none() && keys.iter().filter(|&&x| x).count() >= max_supported_resident_keys {
+    let max_supported_resident_keys = env.customization().max_supported_resident_keys();
+    if old_key.is_none() && count_credentials(env)? >= max_supported_resident_keys {
         return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
     }
     let key = match old_key {
         // This is a new credential being added, we need to allocate a free key. We choose the
         // first available key.
-        None => key::CREDENTIALS
-            .take(max_supported_resident_keys)
-            .find(|key| !keys[key - min_key])
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?,
+        None => env.persist().free_credential_key()?,
         // This is an existing credential being updated, we reuse its key.
         Some(x) => x,
     };
     let wrap_key = env.key_store().wrap_key::<E>()?;
     let value = serialize_credential::<E>(env, &wrap_key, new_credential)?;
-    env.store().insert(key, &value)?;
+    env.persist().write_credential_bytes(key, &value)?;
     Ok(())
 }
 
@@ -171,7 +136,7 @@ pub fn store_credential<E: Env>(
 /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
 pub fn delete_credential(env: &mut impl Env, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
     let (key, _) = find_credential_item(env, credential_id)?;
-    Ok(env.store().remove(key)?)
+    env.persist().remove_credential(key)
 }
 
 /// Updates a credential's user information.
@@ -190,16 +155,12 @@ pub fn update_credential<E: Env>(
     credential.user_icon = user.user_icon;
     let wrap_key = env.key_store().wrap_key::<E>()?;
     let value = serialize_credential::<E>(env, &wrap_key, credential)?;
-    Ok(env.store().insert(key, &value)?)
+    env.persist().write_credential_bytes(key, &value)
 }
 
 /// Returns the number of credentials.
 pub fn count_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCode> {
-    let mut count = 0;
-    for handle in env.store().iter()? {
-        count += key::CREDENTIALS.contains(&handle?.get_key()) as usize;
-    }
-    Ok(count)
+    Ok(env.persist().iter_credentials()?.count())
 }
 
 /// Returns the estimated number of credentials that can still be stored.
@@ -231,11 +192,7 @@ pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
 
 /// Returns the global signature counter.
 pub fn global_signature_counter(env: &mut impl Env) -> Result<u32, Ctap2StatusCode> {
-    match env.store().find(key::GLOBAL_SIGNATURE_COUNTER)? {
-        None => Ok(INITIAL_SIGNATURE_COUNTER),
-        Some(value) if value.len() == 4 => Ok(u32::from_ne_bytes(*array_ref!(&value, 0, 4))),
-        Some(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    env.persist().global_signature_counter()
 }
 
 /// Increments the global signature counter.
@@ -243,39 +200,18 @@ pub fn incr_global_signature_counter(
     env: &mut impl Env,
     increment: u32,
 ) -> Result<(), Ctap2StatusCode> {
-    let old_value = global_signature_counter(env)?;
-    // In hopes that servers handle the wrapping gracefully.
-    let new_value = old_value.wrapping_add(increment);
-    env.store()
-        .insert(key::GLOBAL_SIGNATURE_COUNTER, &new_value.to_ne_bytes())?;
-    Ok(())
-}
-
-/// Reads the PIN properties and wraps them into PinProperties.
-fn pin_properties(env: &mut impl Env) -> Result<Option<PinProperties>, Ctap2StatusCode> {
-    let pin_properties = match env.store().find(key::PIN_PROPERTIES)? {
-        None => return Ok(None),
-        Some(pin_properties) => pin_properties,
-    };
-    const PROPERTIES_LENGTH: usize = PIN_AUTH_LENGTH + 1;
-    match pin_properties.len() {
-        PROPERTIES_LENGTH => Ok(Some(PinProperties {
-            hash: *array_ref![pin_properties, 1, PIN_AUTH_LENGTH],
-            code_point_length: pin_properties[0],
-        })),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    env.persist().incr_global_signature_counter(increment)
 }
 
 /// Returns the PIN hash if defined.
 pub fn pin_hash(env: &mut impl Env) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
-    Ok(pin_properties(env)?.map(|p| p.hash))
+    env.persist().pin_hash()
 }
 
 /// Returns the length of the currently set PIN if defined.
 #[cfg(feature = "config_command")]
 pub fn pin_code_point_length(env: &mut impl Env) -> Result<Option<u8>, Ctap2StatusCode> {
-    Ok(pin_properties(env)?.map(|p| p.code_point_length))
+    env.persist().pin_code_point_length()
 }
 
 /// Sets the PIN hash and length.
@@ -286,66 +222,50 @@ pub fn set_pin(
     pin_hash: &[u8; PIN_AUTH_LENGTH],
     pin_code_point_length: u8,
 ) -> Result<(), Ctap2StatusCode> {
-    let mut pin_properties = [0; 1 + PIN_AUTH_LENGTH];
-    pin_properties[0] = pin_code_point_length;
-    pin_properties[1..].clone_from_slice(pin_hash);
-    Ok(env.store().transaction(&[
-        StoreUpdate::Insert {
-            key: key::PIN_PROPERTIES,
-            value: &pin_properties[..],
-        },
-        StoreUpdate::Remove {
-            key: key::FORCE_PIN_CHANGE,
-        },
-    ])?)
+    env.persist().set_pin(pin_hash, pin_code_point_length)
 }
 
 /// Returns the number of remaining PIN retries.
 pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
-    match env.store().find(key::PIN_RETRIES)? {
-        None => Ok(env.customization().max_pin_retries()),
-        Some(value) if value.len() == 1 => Ok(value[0]),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    Ok(env
+        .customization()
+        .max_pin_retries()
+        .saturating_sub(env.persist().pin_fails()?))
 }
 
 /// Decrements the number of remaining PIN retries.
 pub fn decr_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    let old_value = pin_retries(env)?;
-    let new_value = old_value.saturating_sub(1);
-    if new_value != old_value {
-        env.store().insert(key::PIN_RETRIES, &[new_value])?;
-    }
-    Ok(())
+    env.persist().incr_pin_fails()
 }
 
 /// Resets the number of remaining PIN retries.
 pub fn reset_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    Ok(env.store().remove(key::PIN_RETRIES)?)
+    env.persist().reset_pin_retries()
 }
 
 /// Returns the minimum PIN length.
 pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
-    match env.store().find(key::MIN_PIN_LENGTH)? {
-        None => Ok(env.customization().default_min_pin_length()),
-        Some(value) if value.len() == 1 => Ok(value[0]),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    Ok(env
+        .persist()
+        .min_pin_length()?
+        .unwrap_or(env.customization().default_min_pin_length()))
 }
 
 /// Sets the minimum PIN length.
 #[cfg(feature = "config_command")]
 pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
-    Ok(env.store().insert(key::MIN_PIN_LENGTH, &[min_pin_length])?)
+    env.persist().set_min_pin_length(min_pin_length)
 }
 
 /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
 /// allowed.
 pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2StatusCode> {
-    let rp_ids = env.store().find(key::MIN_PIN_LENGTH_RP_IDS)?.map_or_else(
-        || Some(env.customization().default_min_pin_length_rp_ids()),
-        |value| deserialize_min_pin_length_rp_ids(&value),
-    );
+    let rp_ids_bytes = env.persist().min_pin_length_rp_ids_bytes()?;
+    let rp_ids = if rp_ids_bytes.is_empty() {
+        Some(env.customization().default_min_pin_length_rp_ids())
+    } else {
+        deserialize_min_pin_length_rp_ids(&rp_ids_bytes)
+    };
     debug_assert!(rp_ids.is_some());
     Ok(rp_ids.unwrap_or_default())
 }
@@ -354,9 +274,8 @@ pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2Sta
 #[cfg(feature = "config_command")]
 pub fn set_min_pin_length_rp_ids(
     env: &mut impl Env,
-    min_pin_length_rp_ids: Vec<String>,
+    mut min_pin_length_rp_ids: Vec<String>,
 ) -> Result<(), Ctap2StatusCode> {
-    let mut min_pin_length_rp_ids = min_pin_length_rp_ids;
     for rp_id in env.customization().default_min_pin_length_rp_ids() {
         if !min_pin_length_rp_ids.contains(&rp_id) {
             min_pin_length_rp_ids.push(rp_id);
@@ -365,10 +284,8 @@ pub fn set_min_pin_length_rp_ids(
     if min_pin_length_rp_ids.len() > env.customization().max_rp_ids_length() {
         return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
     }
-    Ok(env.store().insert(
-        key::MIN_PIN_LENGTH_RP_IDS,
-        &serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?,
-    )?)
+    env.persist()
+        .set_min_pin_length_rp_ids(&serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?)
 }
 
 /// Reads the byte vector stored as the serialized large blobs array.
@@ -385,8 +302,7 @@ pub fn get_large_blob_array(
     offset: usize,
     byte_count: usize,
 ) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let byte_range = offset..offset + byte_count;
-    let output = fragment::read_range(env.store(), &key::LARGE_BLOB_SHARDS, byte_range)?;
+    let output = env.persist().get_large_blob_array(offset, byte_count)?;
     Ok(output.unwrap_or_else(|| {
         const EMPTY_LARGE_BLOB: [u8; 17] = [
             0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
@@ -409,18 +325,14 @@ pub fn commit_large_blob_array(
     if large_blob_array.len() > env.customization().max_large_blob_array_size() {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
-    Ok(fragment::write(
-        env.store(),
-        &key::LARGE_BLOB_SHARDS,
-        large_blob_array,
-    )?)
+    env.persist().commit_large_blob_array(large_blob_array)
 }
 
 /// Resets the store as for a CTAP reset.
 ///
 /// In particular persistent entries are not reset.
 pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    env.store().clear(key::NUM_PERSISTENT_KEYS)?;
+    env.persist().reset()?;
     env.key_store().reset()?;
     init(env)?;
     Ok(())
@@ -428,17 +340,14 @@ pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 
 /// Returns whether the PIN needs to be changed before its next usage.
 pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    match env.store().find(key::FORCE_PIN_CHANGE)? {
-        None => Ok(false),
-        Some(value) if value.is_empty() => Ok(true),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    // TODO inline some of the single line calls
+    env.persist().has_force_pin_change()
 }
 
 /// Marks the PIN as outdated with respect to the new PIN policy.
 #[cfg(feature = "config_command")]
 pub fn force_pin_change(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    Ok(env.store().insert(key::FORCE_PIN_CHANGE, &[])?)
+    env.persist().force_pin_change()
 }
 
 /// Returns whether enterprise attestation is enabled.
@@ -454,27 +363,13 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 /// Use the AuthenticatorConfig command to turn it on.
 #[cfg(feature = "config_command")]
 pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    match env.store().find(key::ENTERPRISE_ATTESTATION)? {
-        None => Ok(false),
-        Some(value) if value.is_empty() => Ok(true),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    env.persist().enterprise_attestation()
 }
 
 /// Marks enterprise attestation as enabled.
 #[cfg(feature = "config_command")]
 pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    if env
-        .attestation_store()
-        .get(&attestation_store::Id::Enterprise)?
-        .is_none()
-    {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    if !enterprise_attestation(env)? {
-        env.store().insert(key::ENTERPRISE_ATTESTATION, &[])?;
-    }
-    Ok(())
+    env.persist().enable_enterprise_attestation()
 }
 
 /// Returns whether alwaysUv is enabled.
@@ -482,11 +377,7 @@ pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
     if env.customization().enforce_always_uv() {
         return Ok(true);
     }
-    match env.store().find(key::ALWAYS_UV)? {
-        None => Ok(false),
-        Some(value) if value.is_empty() => Ok(true),
-        _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
-    }
+    env.persist().has_always_uv()
 }
 
 /// Enables alwaysUv, when disabled, and vice versa.
@@ -495,43 +386,16 @@ pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
     if env.customization().enforce_always_uv() {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
-    if has_always_uv(env)? {
-        Ok(env.store().remove(key::ALWAYS_UV)?)
-    } else {
-        Ok(env.store().insert(key::ALWAYS_UV, &[])?)
-    }
-}
-
-impl From<persistent_store::StoreError> for Ctap2StatusCode {
-    fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
-        use persistent_store::StoreError;
-        match error {
-            // This error is expected. The store is full.
-            StoreError::NoCapacity => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
-            // This error is expected. The flash is out of life.
-            StoreError::NoLifetime => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
-            // This error is expected if we don't satisfy the store preconditions. For example we
-            // try to store a credential which is too long.
-            StoreError::InvalidArgument => Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
-            // This error is not expected. The storage has been tempered with. We could erase the
-            // storage.
-            StoreError::InvalidStorage => Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
-            // This error is not expected. The kernel is failing our syscalls.
-            StoreError::StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
-        }
-    }
+    env.persist().toggle_always_uv()
 }
 
 /// Iterator for credentials.
 pub struct IterCredentials<'a, E: Env> {
-    /// The store being iterated.
-    store: &'a persistent_store::Store<E::Storage>,
-
     /// The key store for credential unwrapping.
     wrap_key: AesKey<E>,
 
     /// The store iterator.
-    iter: persistent_store::StoreIter<'a>,
+    iter: PersistCredentialIter<'a>,
 
     /// The iteration result.
     ///
@@ -547,10 +411,8 @@ impl<'a, E: Env> IterCredentials<'a, E> {
         result: &'a mut Result<(), Ctap2StatusCode>,
     ) -> Result<Self, Ctap2StatusCode> {
         let wrap_key = env.key_store().wrap_key::<E>()?;
-        let store = env.store();
-        let iter = store.iter()?;
+        let iter = env.persist().iter_credentials()?;
         Ok(IterCredentials {
-            store,
             wrap_key,
             iter,
             result,
@@ -577,18 +439,11 @@ impl<'a, E: Env> Iterator for IterCredentials<'a, E> {
         if self.result.is_err() {
             return None;
         }
-        while let Some(next) = self.iter.next() {
-            let handle = self.unwrap(next.ok())?;
-            let key = handle.get_key();
-            if !key::CREDENTIALS.contains(&key) {
-                continue;
-            }
-            let value = self.unwrap(handle.get_value(self.store).ok())?;
-            let deserialized = deserialize_credential::<E>(&self.wrap_key, &value);
-            let credential = self.unwrap(deserialized)?;
-            return Some((key, credential));
-        }
-        None
+        let next = self.iter.next()?;
+        let (key, value) = self.unwrap(next.ok())?;
+        let deserialized = deserialize_credential::<E>(&self.wrap_key, &value);
+        let credential = self.unwrap(deserialized)?;
+        Some((key, credential))
     }
 }
 
@@ -981,17 +836,6 @@ mod test {
             }
         }
         assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
-    }
-
-    #[test]
-    fn test_max_large_blob_array_size() {
-        let mut env = TestEnv::default();
-
-        assert!(
-            env.customization().max_large_blob_array_size()
-                <= env.store().max_value_length()
-                    * (key::LARGE_BLOB_SHARDS.end - key::LARGE_BLOB_SHARDS.start)
-        );
     }
 
     #[test]

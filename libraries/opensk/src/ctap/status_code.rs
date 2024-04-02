@@ -15,6 +15,8 @@
 use crate::api::user_presence::UserPresenceError;
 use crate::api::{attestation_store, key_store};
 
+pub type CtapResult<T> = Result<T, Ctap2StatusCode>;
+
 // CTAP specification (version 20190130) section 6.3
 // For now, only the CTAP2 codes are here, the CTAP1 are not included.
 #[allow(non_camel_case_types)]
@@ -109,6 +111,26 @@ impl From<attestation_store::Error> for Ctap2StatusCode {
             Error::Storage => Self::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
             Error::Internal => Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
             Error::NoSupport => Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+        }
+    }
+}
+
+impl From<persistent_store::StoreError> for Ctap2StatusCode {
+    fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
+        use persistent_store::StoreError;
+        match error {
+            // This error is expected. The store is full.
+            StoreError::NoCapacity => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            // This error is expected. The flash is out of life.
+            StoreError::NoLifetime => Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            // This error is expected if we don't satisfy the store preconditions. For example we
+            // try to store a credential which is too long.
+            StoreError::InvalidArgument => Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+            // This error is not expected. The storage has been tempered with. We could erase the
+            // storage.
+            StoreError::InvalidStorage => Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
+            // This error is not expected. The kernel is failing our syscalls.
+            StoreError::StorageError => Ctap2StatusCode::CTAP1_ERR_OTHER,
         }
     }
 }

@@ -20,6 +20,7 @@ use crate::api::crypto::ecdsa::Ecdsa;
 use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
+use crate::api::persist::Persist;
 use crate::api::rng::Rng;
 use crate::api::user_presence::UserPresence;
 use crate::ctap::Channel;
@@ -43,6 +44,7 @@ pub type Hkdf<E> = <<E as Env>::Crypto as Crypto>::Hkdf256;
 pub trait Env {
     type Rng: Rng;
     type UserPresence: UserPresence;
+    type Persist: Persist;
     type Storage: Storage;
     type KeyStore: KeyStore;
     type Write: core::fmt::Write;
@@ -54,6 +56,7 @@ pub trait Env {
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
+    fn persist(&mut self) -> &mut Self::Persist;
     fn store(&mut self) -> &mut Store<Self::Storage>;
     fn key_store(&mut self) -> &mut Self::KeyStore;
     fn attestation_store(&mut self) -> &mut Self::AttestationStore;

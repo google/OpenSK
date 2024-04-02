@@ -17,9 +17,11 @@ use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
+use crate::api::persist::{Persist, PersistIter};
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
 use crate::api::{attestation_store, key_store};
+use crate::ctap::status_code::CtapResult;
 use crate::env::Env;
 use customization::TestCustomization;
 use persistent_store::{BufferOptions, BufferStorage, Store};
@@ -105,6 +107,27 @@ fn new_storage() -> BufferStorage {
     BufferStorage::new(store, options)
 }
 
+impl Persist for TestEnv {
+    fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>> {
+        Ok(self.store.find(key)?)
+    }
+
+    fn insert(&mut self, key: usize, value: &[u8]) -> CtapResult<()> {
+        Ok(self.store.insert(key, value)?)
+    }
+
+    fn remove(&mut self, key: usize) -> CtapResult<()> {
+        Ok(self.store.remove(key)?)
+    }
+
+    fn iter(&self) -> CtapResult<PersistIter<'_>> {
+        Ok(Box::new(self.store.iter()?.map(|handle| match handle {
+            Ok(handle) => Ok(handle.get_key()),
+            Err(error) => Err(error.into()),
+        })))
+    }
+}
+
 impl HidConnection for TestEnv {
     fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout_ms: usize) -> SendOrRecvResult {
         // TODO: Implement I/O from canned requests/responses for integration testing.
@@ -183,6 +206,7 @@ impl AttestationStore for TestEnv {
 impl Env for TestEnv {
     type Rng = TestRng;
     type UserPresence = TestUserPresence;
+    type Persist = Self;
     type Storage = BufferStorage;
     type KeyStore = Self;
     type AttestationStore = Self;
@@ -198,6 +222,10 @@ impl Env for TestEnv {
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
         &mut self.user_presence
+    }
+
+    fn persist(&mut self) -> &mut Self {
+        self
     }
 
     fn store(&mut self) -> &mut Store<Self::Storage> {

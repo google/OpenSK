@@ -73,6 +73,9 @@ make_partition! {
     // - When adding a (non-persistent) key below this message, make sure its value is bigger or
     //   equal than NUM_PERSISTENT_KEYS.
 
+    /// Used to make sure that a Reset command completes once started.
+    RESET_COMPLETION = 20;
+
     /// Reserved for future credential-related objects.
     ///
     /// In particular, additional credentials could be added there by reducing the lower bound of

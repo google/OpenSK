@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use clock::TockClock;
 use core::cell::Cell;
@@ -34,9 +35,11 @@ use opensk::api::connection::{
 };
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
+use opensk::api::persist::{Persist, PersistIter};
 use opensk::api::rng::Rng;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
 use opensk::api::{attestation_store, key_store};
+use opensk::ctap::status_code::CtapResult;
 use opensk::ctap::Channel;
 use opensk::env::Env;
 #[cfg(feature = "std")]
@@ -260,6 +263,31 @@ pub fn take_storage<S: Syscalls, C: platform::subscribe::Config + platform::allo
     Storage::new()
 }
 
+impl<S, C> Persist for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
+    fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>> {
+        Ok(self.store.find(key)?)
+    }
+
+    fn insert(&mut self, key: usize, value: &[u8]) -> CtapResult<()> {
+        Ok(self.store.insert(key, value)?)
+    }
+
+    fn remove(&mut self, key: usize) -> CtapResult<()> {
+        Ok(self.store.remove(key)?)
+    }
+
+    fn iter(&self) -> CtapResult<PersistIter<'_>> {
+        Ok(Box::new(self.store.iter()?.map(|handle| match handle {
+            Ok(handle) => Ok(handle.get_key()),
+            Err(error) => Err(error.into()),
+        })))
+    }
+}
+
 impl<S, C> UserPresence for TockEnv<S, C>
 where
     S: Syscalls,
@@ -398,6 +426,7 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
 {
     type Rng = TockRng<S>;
     type UserPresence = Self;
+    type Persist = Self;
     type Storage = Storage<S, C>;
     type KeyStore = Self;
     type AttestationStore = Self;
@@ -412,6 +441,10 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     }
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
+        self
+    }
+
+    fn persist(&mut self) -> &mut Self {
         self
     }
 

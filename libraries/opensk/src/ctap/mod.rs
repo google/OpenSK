@@ -36,6 +36,7 @@ mod u2f_up;
 #[cfg(feature = "vendor_hid")]
 pub mod vendor_hid;
 
+pub use self::client_pin::PIN_AUTH_LENGTH;
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
     AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
@@ -82,7 +83,6 @@ use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 
-pub const INITIAL_SIGNATURE_COUNTER: u32 = 1;
 // Set this bit when checking user presence.
 const UP_FLAG: u8 = 0x01;
 // Set this bit when checking user verification.
@@ -1467,6 +1467,7 @@ mod test {
         expected_credential_id_size: u8,
         expected_extension_cbor: &[u8],
     ) {
+        const INITIAL_SIGNATURE_COUNTER: u32 = 1;
         match make_credential_response.as_ref().unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let AuthenticatorMakeCredentialResponse {

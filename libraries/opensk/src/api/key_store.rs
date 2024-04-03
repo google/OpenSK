@@ -15,16 +15,15 @@
 use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::HASH_SIZE;
+use crate::api::persist::Persist;
 use crate::api::private_key::PrivateKey;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
 use crate::ctap::{cbor_read, cbor_write};
 use crate::env::{AesKey, Env, Hmac};
-use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
-use persistent_store::StoreError;
 use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
@@ -66,8 +65,6 @@ impl From<CredentialSourceField> for cbor::Value {
 }
 
 /// Provides storage for secret keys.
-///
-/// Implementations may use the environment store: [`STORAGE_KEY`] is reserved for this usage.
 pub trait KeyStore {
     /// Initializes the key store (if needed).
     ///
@@ -82,7 +79,7 @@ pub trait KeyStore {
     /// - doing anything that does not support [`Secret`].
     fn wrap_key<E: Env>(&mut self) -> Result<AesKey<E>, Error>;
 
-    /// Encodes a credential as a binary strings.
+    /// Encodes a credential as a binary string.
     ///
     /// The output is encrypted and authenticated. Since the wrapped credentials are passed to the
     /// relying party, the choice for credential wrapping impacts privacy. Looking at their size and
@@ -124,9 +121,6 @@ pub trait KeyStore {
 /// They are deliberately indistinguishable to avoid leaking information.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Error;
-
-/// Key of the environment store reserved for the key store.
-pub const STORAGE_KEY: usize = 2046;
 
 /// Implements a default key store using the environment rng and store.
 pub trait Helper: Env {}
@@ -240,8 +234,7 @@ impl<T: Helper> KeyStore for T {
     }
 
     fn reset(&mut self) -> Result<(), Error> {
-        // The storage also removes `STORAGE_KEY`, but this makes KeyStore more self-sufficient.
-        Ok(self.store().remove(STORAGE_KEY)?)
+        Ok(())
     }
 }
 
@@ -258,13 +251,13 @@ struct MasterKeys {
 }
 
 fn get_master_keys(env: &mut impl Env) -> Result<MasterKeys, Error> {
-    let master_keys = match env.store().find(STORAGE_KEY)? {
+    let master_keys = match env.persist().key_store_bytes()? {
         Some(x) if x.len() == 128 => x,
         Some(_) => return Err(Error),
         None => {
-            let mut master_keys = vec![0; 128];
+            let mut master_keys = Secret::new(128);
             env.rng().fill_bytes(&mut master_keys);
-            env.store().insert(STORAGE_KEY, &master_keys)?;
+            env.persist().write_key_store_bytes(&master_keys)?;
             master_keys
         }
     };
@@ -358,12 +351,6 @@ fn decrypt_cbor_credential_id<E: Env>(
     })
 }
 
-impl From<StoreError> for Error {
-    fn from(_: StoreError) -> Self {
-        Error
-    }
-}
-
 fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Error> {
     cbor_value.extract_byte_string().ok_or(Error)
 }
@@ -384,29 +371,38 @@ mod test {
     #[test]
     fn test_key_store() {
         let mut env = TestEnv::default();
-        let key_store = env.key_store();
 
         // Master keys are well-defined and stable.
-        let cred_random_no_uv = key_store.cred_random(false).unwrap();
-        let cred_random_with_uv = key_store.cred_random(true).unwrap();
-        assert_eq!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
-        assert_eq!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
+        let cred_random_no_uv = env.key_store().cred_random(false).unwrap();
+        let cred_random_with_uv = env.key_store().cred_random(true).unwrap();
+        assert_eq!(
+            &env.key_store().cred_random(false).unwrap(),
+            &cred_random_no_uv
+        );
+        assert_eq!(
+            &env.key_store().cred_random(true).unwrap(),
+            &cred_random_with_uv
+        );
 
         // Same for wrap key.
-        let wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let mut test_block = [0x33; 16];
         wrap_key.encrypt_block(&mut test_block);
-        let new_wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        let new_wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let mut new_test_block = [0x33; 16];
         new_wrap_key.encrypt_block(&mut new_test_block);
         assert_eq!(&new_test_block, &test_block);
 
-        // Master keys change after reset. We don't require this for ECDSA seeds because it's not
-        // the case, but it might be better.
-        key_store.reset().unwrap();
-        assert_ne!(&key_store.cred_random(false).unwrap(), &cred_random_no_uv);
-        assert_ne!(&key_store.cred_random(true).unwrap(), &cred_random_with_uv);
-        let new_wrap_key = key_store.wrap_key::<TestEnv>().unwrap();
+        assert_eq!(crate::ctap::reset(&mut env), Ok(()));
+        assert_ne!(
+            &env.key_store().cred_random(false).unwrap(),
+            &cred_random_no_uv
+        );
+        assert_ne!(
+            &env.key_store().cred_random(true).unwrap(),
+            &cred_random_with_uv
+        );
+        let new_wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let mut new_test_block = [0x33; 16];
         new_wrap_key.encrypt_block(&mut new_test_block);
         assert_ne!(&new_test_block, &test_block);
@@ -416,7 +412,7 @@ mod test {
     fn test_pin_hash_encrypt_decrypt() {
         let mut env = TestEnv::default();
         let key_store = env.key_store();
-        assert_eq!(key_store.init(), Ok(()));
+        assert_eq!(KeyStore::init(key_store), Ok(()));
 
         let pin_hash = [0x55; 16];
         let encrypted = key_store.encrypt_pin_hash(&pin_hash).unwrap();

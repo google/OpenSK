@@ -60,7 +60,7 @@ pub trait Persist {
         if self.find(keys::RESET_COMPLETION)?.is_some() {
             self.reset()?;
         }
-        // TODO don't forget to call, add other init functionality, e.g. from KeyStore
+        // TODO don't forget to call, add other init functionality
         Ok(())
     }
 
@@ -397,6 +397,19 @@ pub trait Persist {
             }
         }
         Ok(())
+    }
+
+    fn key_store_bytes(&self) -> CtapResult<Option<Secret<[u8]>>> {
+        let bytes = self.find(keys::KEY_STORE)?;
+        Ok(bytes.map(|b| {
+            let mut secret = Secret::new(b.len());
+            secret.copy_from_slice(&b);
+            secret
+        }))
+    }
+
+    fn write_key_store_bytes(&mut self, bytes: &[u8]) -> CtapResult<()> {
+        self.insert(keys::KEY_STORE, bytes)
     }
 }
 

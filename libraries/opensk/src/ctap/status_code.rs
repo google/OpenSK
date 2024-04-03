@@ -104,6 +104,12 @@ impl From<key_store::Error> for Ctap2StatusCode {
     }
 }
 
+impl From<Ctap2StatusCode> for key_store::Error {
+    fn from(_: Ctap2StatusCode) -> Self {
+        Self
+    }
+}
+
 impl From<persistent_store::StoreError> for Ctap2StatusCode {
     fn from(error: persistent_store::StoreError) -> Ctap2StatusCode {
         use persistent_store::StoreError;

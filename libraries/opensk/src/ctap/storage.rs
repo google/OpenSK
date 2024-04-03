@@ -328,16 +328,6 @@ pub fn commit_large_blob_array(
     env.persist().commit_large_blob_array(large_blob_array)
 }
 
-/// Resets the store as for a CTAP reset.
-///
-/// In particular persistent entries are not reset.
-pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    env.persist().reset()?;
-    env.key_store().reset()?;
-    init(env)?;
-    Ok(())
-}
-
 /// Returns whether the PIN needs to be changed before its next usage.
 pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
     // TODO inline some of the single line calls
@@ -495,6 +485,7 @@ mod test {
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
+    use crate::ctap::reset;
     use crate::ctap::secret::Secret;
     use crate::env::test::TestEnv;
 

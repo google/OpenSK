@@ -13,6 +13,9 @@
 // limitations under the License.
 
 /// Number of keys that persist the CTAP reset command.
+///
+/// Note that persistent is overloaded: Here, we mean values that survive a Reset. Outside, of this
+/// file, we mean values that survive reboot.
 pub const NUM_PERSISTENT_KEYS: usize = 20;
 
 /// Defines a key given its name and value or range of values.
@@ -133,7 +136,7 @@ make_partition! {
     PIN_PROPERTIES = 2045;
 
     /// Reserved for the key store implementation of the environment.
-    _RESERVED_KEY_STORE = 2046;
+    KEY_STORE = 2046;
 
     /// The global signature counter.
     ///

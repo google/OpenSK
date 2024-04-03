@@ -185,6 +185,13 @@ pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), 
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
+/// Resets the all state for a CTAP Reset command.
+pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+    env.persist().reset()?;
+    env.key_store().reset()?;
+    storage::init(env)
+}
+
 /// Filters the credential from the option if credProtect criteria are not met.
 pub fn filter_listed_credential(
     credential: Option<CredentialSource>,
@@ -1379,7 +1386,7 @@ impl<E: Env> CtapState<E> {
         }
         check_user_presence(env, channel)?;
 
-        storage::reset(env)?;
+        reset(env)?;
         self.client_pin.reset(env);
         #[cfg(feature = "with_ctap1")]
         {

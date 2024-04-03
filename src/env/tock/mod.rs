@@ -29,16 +29,15 @@ use libtock_drivers::{rng, timer, usb_ctap_hid};
 use libtock_leds::Leds;
 use libtock_platform as platform;
 use libtock_platform::{ErrorCode, Syscalls};
-use opensk::api::attestation_store::AttestationStore;
 use opensk::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
+use opensk::api::key_store;
 use opensk::api::persist::{Persist, PersistIter};
 use opensk::api::rng::Rng;
 use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
-use opensk::api::{attestation_store, key_store};
 use opensk::ctap::status_code::CtapResult;
 use opensk::ctap::Channel;
 use opensk::env::Env;
@@ -394,33 +393,6 @@ where
 {
 }
 
-impl<S, C> AttestationStore for TockEnv<S, C>
-where
-    S: Syscalls,
-    C: platform::subscribe::Config + platform::allow_ro::Config,
-{
-    fn get(
-        &mut self,
-        id: &attestation_store::Id,
-    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
-        if !matches!(id, attestation_store::Id::Batch) {
-            return Err(attestation_store::Error::NoSupport);
-        }
-        attestation_store::helper_get(self)
-    }
-
-    fn set(
-        &mut self,
-        id: &attestation_store::Id,
-        attestation: Option<&attestation_store::Attestation>,
-    ) -> Result<(), attestation_store::Error> {
-        if !matches!(id, attestation_store::Id::Batch) {
-            return Err(attestation_store::Error::NoSupport);
-        }
-        attestation_store::helper_set(self, attestation)
-    }
-}
-
 impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> Env
     for TockEnv<S, C>
 {
@@ -429,7 +401,6 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     type Persist = Self;
     type Storage = Storage<S, C>;
     type KeyStore = Self;
-    type AttestationStore = Self;
     type Clock = TockClock<S>;
     type Write = ConsoleWriter<S>;
     type Customization = CustomizationImpl;
@@ -453,10 +424,6 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     }
 
     fn key_store(&mut self) -> &mut Self {
-        self
-    }
-
-    fn attestation_store(&mut self) -> &mut Self {
         self
     }
 

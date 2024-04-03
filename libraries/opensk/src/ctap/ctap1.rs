@@ -14,10 +14,10 @@
 
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{filter_listed_credential, CtapState};
-use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
 use crate::api::crypto::EC_FIELD_SIZE;
 use crate::api::key_store::{CredentialSource, KeyStore};
+use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
 use crate::env::{EcdsaSk, Env};
 use alloc::vec::Vec;
@@ -278,8 +278,9 @@ impl Ctap1Command {
             private_key,
             certificate,
         } = env
-            .attestation_store()
-            .get(&attestation_store::Id::Batch)?
+            .persist()
+            .get_attestation(AttestationId::Batch)
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
@@ -457,8 +458,8 @@ mod test {
             private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0x99; 100],
         };
-        env.attestation_store()
-            .set(&attestation_store::Id::Batch, Some(&attestation))
+        env.persist()
+            .set_attestation(AttestationId::Batch, Some(&attestation))
             .unwrap();
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);

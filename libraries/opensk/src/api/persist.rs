@@ -14,11 +14,16 @@
 
 mod keys;
 
+use crate::api::crypto::EC_FIELD_SIZE;
+use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::PIN_AUTH_LENGTH;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cmp;
+use core::convert::TryFrom;
+#[cfg(test)]
+use enum_iterator::IntoEnumIterator;
 
 pub type PersistIter<'a> = Box<dyn Iterator<Item = CtapResult<usize>> + 'a>;
 pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, Vec<u8>)>> + 'a>;
@@ -319,10 +324,9 @@ pub trait Persist {
     /// Marks enterprise attestation as enabled.
     #[cfg(feature = "config_command")]
     fn enable_enterprise_attestation(&mut self) -> CtapResult<()> {
-        // TODO
-        // if self.attestation_store_get(&attestation_store::Id::Enterprise)?.is_none() {
-        //     return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        // }
+        if self.get_attestation(AttestationId::Enterprise)?.is_none() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
         self.insert(keys::ENTERPRISE_ATTESTATION, &[])
     }
 
@@ -344,9 +348,86 @@ pub trait Persist {
             Ok(self.insert(keys::ALWAYS_UV, &[])?)
         }
     }
+
+    fn get_attestation(&self, id: AttestationId) -> CtapResult<Option<Attestation>> {
+        let stored_id_bytes = self.find(keys::ATTESTATION_ID)?;
+        if let Some(bytes) = stored_id_bytes {
+            if bytes.len() != 1 || id != AttestationId::try_from(bytes[0])? {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
+        }
+        let private_key = self.find(keys::ATTESTATION_PRIVATE_KEY)?;
+        let certificate = self.find(keys::ATTESTATION_CERTIFICATE)?;
+        let (private_key, certificate) = match (private_key, certificate) {
+            (Some(x), Some(y)) => (x, y),
+            (None, None) => return Ok(None),
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        };
+        if private_key.len() != EC_FIELD_SIZE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        Ok(Some(Attestation {
+            private_key: Secret::from_exposed_secret(*array_ref![private_key, 0, EC_FIELD_SIZE]),
+            certificate,
+        }))
+    }
+
+    fn set_attestation(
+        &mut self,
+        id: AttestationId,
+        attestation: Option<&Attestation>,
+    ) -> CtapResult<()> {
+        // To overwrite, first call with None, then call again, to avoid mistakes.
+        if self.find(keys::ATTESTATION_ID)?.is_some() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
+        // We set attestation storage in 3 transactions. If that gets interrupted halfway,
+        // Register and MakeCredential will error when being called. Needs to be redone then.
+        // ID is set last to allow idempotent rewrites.
+        match attestation {
+            None => {
+                self.remove(keys::ATTESTATION_PRIVATE_KEY)?;
+                self.remove(keys::ATTESTATION_CERTIFICATE)?;
+                self.remove(keys::ATTESTATION_ID)?;
+            }
+            Some(attestation) => {
+                self.insert(keys::ATTESTATION_PRIVATE_KEY, &attestation.private_key[..])?;
+                self.insert(keys::ATTESTATION_CERTIFICATE, &attestation.certificate[..])?;
+                self.insert(keys::ATTESTATION_ID, &[id as u8])?;
+            }
+        }
+        Ok(())
+    }
 }
 
 const VALUE_LENGTH: usize = 1023;
+
+/// Identifies an attestation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+pub enum AttestationId {
+    Batch = 0x01,
+    Enterprise = 0x02,
+}
+
+impl TryFrom<u8> for AttestationId {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(byte: u8) -> CtapResult<Self> {
+        match byte {
+            0x01 => Ok(Self::Batch),
+            0x02 => Ok(Self::Enterprise),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+}
+
+#[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
+pub struct Attestation {
+    /// ECDSA private key (big-endian).
+    pub private_key: Secret<[u8; EC_FIELD_SIZE]>,
+    pub certificate: Vec<u8>,
+}
 
 #[cfg(test)]
 mod test {
@@ -362,6 +443,17 @@ mod test {
         assert!(
             env.customization().max_large_blob_array_size()
                 <= VALUE_LENGTH * keys::LARGE_BLOB_SHARDS.len()
+        );
+    }
+
+    #[test]
+    fn test_from_into_attestation_id() {
+        for id in AttestationId::into_enum_iter() {
+            assert_eq!(id, AttestationId::try_from(id as u8).unwrap());
+        }
+        assert_eq!(
+            AttestationId::try_from(0x03),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
     }
 }

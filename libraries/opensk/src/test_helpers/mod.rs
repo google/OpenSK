@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::attestation_store::{self, AttestationStore};
+use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::ctap::command::{AuthenticatorConfigParameters, Command};
 use crate::ctap::data_formats::ConfigSubCommand;
 use crate::ctap::secret::Secret;
@@ -27,13 +27,13 @@ const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 pub fn enable_enterprise_attestation<E: Env>(
     state: &mut CtapState<E>,
     env: &mut E,
-) -> Result<attestation_store::Attestation, Ctap2StatusCode> {
-    let attestation = attestation_store::Attestation {
+) -> Result<Attestation, Ctap2StatusCode> {
+    let attestation = Attestation {
         private_key: Secret::from_exposed_secret([0x41; 32]),
         certificate: vec![0xdd; 20],
     };
-    env.attestation_store()
-        .set(&attestation_store::Id::Batch, Some(&attestation))?;
+    env.persist()
+        .set_attestation(AttestationId::Enterprise, Some(&attestation))?;
 
     let config_params = AuthenticatorConfigParameters {
         sub_command: ConfigSubCommand::EnableEnterpriseAttestation,

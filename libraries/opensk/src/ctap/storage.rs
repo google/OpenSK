@@ -489,7 +489,7 @@ fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::attestation_store::{self, Attestation, AttestationStore};
+    use crate::api::persist::{Attestation, AttestationId, Persist};
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::ctap::data_formats::{
@@ -780,7 +780,7 @@ mod test {
 
         // Make sure the attestation are absent. There is no batch attestation in tests.
         assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
+            env.persist().get_attestation(AttestationId::Batch),
             Ok(None)
         );
 
@@ -789,14 +789,14 @@ mod test {
             private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0xdd; 20],
         };
-        env.attestation_store()
-            .set(&attestation_store::Id::Batch, Some(&dummy_attestation))
+        env.persist()
+            .set_attestation(AttestationId::Batch, Some(&dummy_attestation))
             .unwrap();
 
         // The persistent keys stay initialized and preserve their value after a reset.
         reset(&mut env).unwrap();
         assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
+            env.persist().get_attestation(AttestationId::Batch),
             Ok(Some(dummy_attestation))
         );
     }
@@ -925,8 +925,8 @@ mod test {
             private_key: Secret::from_exposed_secret([0x41; 32]),
             certificate: vec![0xdd; 20],
         };
-        env.attestation_store()
-            .set(&attestation_store::Id::Enterprise, Some(&dummy_attestation))
+        env.persist()
+            .set_attestation(AttestationId::Enterprise, Some(&dummy_attestation))
             .unwrap();
 
         assert!(!enterprise_attestation(&mut env).unwrap());

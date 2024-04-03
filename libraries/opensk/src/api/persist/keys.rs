@@ -61,8 +61,14 @@ make_partition! {
 
     // WARNING: Keys should not be deleted but prefixed with `_` to avoid accidentally reusing them.
 
-    /// Reserved for the attestation store implementation of the environment.
-    _RESERVED_ATTESTATION_STORE = 1..3;
+    /// Private key used during attestation.
+    ATTESTATION_PRIVATE_KEY = 1;
+
+    /// Certificate used during attestation.
+    ATTESTATION_CERTIFICATE = 2;
+
+    /// Type of attestation used.
+    ATTESTATION_ID = 4;
 
     /// Used for the AAGUID before, but deprecated.
     _AAGUID = 3;

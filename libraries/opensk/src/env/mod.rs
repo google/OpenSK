@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
 use crate::api::connection::HidConnection;
 use crate::api::crypto::ecdh::Ecdh;
@@ -50,7 +49,6 @@ pub trait Env {
     type Write: core::fmt::Write;
     type Customization: Customization;
     type HidConnection: HidConnection;
-    type AttestationStore: AttestationStore;
     type Clock: Clock;
     type Crypto: Crypto;
 
@@ -59,7 +57,6 @@ pub trait Env {
     fn persist(&mut self) -> &mut Self::Persist;
     fn store(&mut self) -> &mut Store<Self::Storage>;
     fn key_store(&mut self) -> &mut Self::KeyStore;
-    fn attestation_store(&mut self) -> &mut Self::AttestationStore;
     fn clock(&mut self) -> &mut Self::Clock;
 
     /// Creates a write instance for debugging.

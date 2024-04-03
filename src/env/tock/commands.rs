@@ -18,11 +18,11 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 use core::convert::TryFrom;
 use libtock_platform::Syscalls;
-use opensk::api::attestation_store::{self, Attestation, AttestationStore};
 use opensk::api::crypto::sha256::Sha256;
 use opensk::api::crypto::EC_FIELD_SIZE;
 #[cfg(not(feature = "with_ctap1"))]
 use opensk::api::customization::Customization;
+use opensk::api::persist::{Attestation, AttestationId, Persist};
 #[cfg(not(feature = "std"))]
 use opensk::ctap::check_user_presence;
 use opensk::ctap::data_formats::{
@@ -104,10 +104,10 @@ fn process_vendor_configure<
         check_user_presence(env, _channel)?;
     }
     // This command is for U2F support and we use the batch attestation there.
-    let attestation_id = attestation_store::Id::Batch;
+    let attestation_id = AttestationId::Batch;
 
     // Sanity checks
-    let current_attestation = env.attestation_store().get(&attestation_id)?;
+    let current_attestation = env.persist().get_attestation(attestation_id)?;
     let response = match params.attestation_material {
         None => VendorConfigureResponse {
             cert_programmed: current_attestation.is_some(),
@@ -121,8 +121,8 @@ fn process_vendor_configure<
                     private_key: Secret::from_exposed_secret(data.private_key),
                     certificate: data.certificate,
                 };
-                env.attestation_store()
-                    .set(&attestation_id, Some(&attestation))?;
+                env.persist()
+                    .set_attestation(attestation_id, Some(&attestation))?;
             }
             VendorConfigureResponse {
                 cert_programmed: true,
@@ -517,7 +517,7 @@ mod test {
             })
         );
         assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
+            env.persist().get_attestation(AttestationId::Batch),
             Ok(Some(Attestation {
                 private_key: Secret::from_exposed_secret(dummy_key),
                 certificate: dummy_cert.to_vec(),
@@ -545,7 +545,7 @@ mod test {
             })
         );
         assert_eq!(
-            env.attestation_store().get(&attestation_store::Id::Batch),
+            env.persist().get_attestation(AttestationId::Batch),
             Ok(Some(Attestation {
                 private_key: Secret::from_exposed_secret(dummy_key),
                 certificate: dummy_cert.to_vec(),

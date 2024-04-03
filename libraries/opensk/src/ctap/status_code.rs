@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::key_store;
 use crate::api::user_presence::UserPresenceError;
-use crate::api::{attestation_store, key_store};
 
 pub type CtapResult<T> = Result<T, Ctap2StatusCode>;
 
@@ -101,17 +101,6 @@ impl From<UserPresenceError> for Ctap2StatusCode {
 impl From<key_store::Error> for Ctap2StatusCode {
     fn from(_: key_store::Error) -> Self {
         Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR
-    }
-}
-
-impl From<attestation_store::Error> for Ctap2StatusCode {
-    fn from(error: attestation_store::Error) -> Self {
-        use attestation_store::Error;
-        match error {
-            Error::Storage => Self::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
-            Error::Internal => Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
-            Error::NoSupport => Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
-        }
     }
 }
 

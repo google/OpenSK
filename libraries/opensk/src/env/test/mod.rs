@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::attestation_store::AttestationStore;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
+use crate::api::key_store;
 use crate::api::persist::{Persist, PersistIter};
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult};
-use crate::api::{attestation_store, key_store};
 use crate::ctap::status_code::CtapResult;
 use crate::env::Env;
 use customization::TestCustomization;
@@ -186,30 +185,12 @@ impl UserPresence for TestUserPresence {
 
 impl key_store::Helper for TestEnv {}
 
-impl AttestationStore for TestEnv {
-    fn get(
-        &mut self,
-        _id: &attestation_store::Id,
-    ) -> Result<Option<attestation_store::Attestation>, attestation_store::Error> {
-        attestation_store::helper_get(self)
-    }
-
-    fn set(
-        &mut self,
-        _id: &attestation_store::Id,
-        attestation: Option<&attestation_store::Attestation>,
-    ) -> Result<(), attestation_store::Error> {
-        attestation_store::helper_set(self, attestation)
-    }
-}
-
 impl Env for TestEnv {
     type Rng = TestRng;
     type UserPresence = TestUserPresence;
     type Persist = Self;
     type Storage = BufferStorage;
     type KeyStore = Self;
-    type AttestationStore = Self;
     type Clock = TestClock;
     type Write = TestWrite;
     type Customization = TestCustomization;
@@ -233,10 +214,6 @@ impl Env for TestEnv {
     }
 
     fn key_store(&mut self) -> &mut Self {
-        self
-    }
-
-    fn attestation_store(&mut self) -> &mut Self {
         self
     }
 

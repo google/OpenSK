@@ -60,7 +60,6 @@ use self::secret::Secret;
 use self::status_code::Ctap2StatusCode;
 #[cfg(feature = "with_ctap1")]
 use self::u2f_up::U2fUserPresenceState;
-use crate::api::attestation_store::{self, Attestation, AttestationStore};
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
@@ -69,6 +68,7 @@ use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::customization::Customization;
 use crate::api::key_store::{CredentialSource, KeyStore, MAX_CREDENTIAL_ID_SIZE};
+use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
@@ -970,9 +970,9 @@ impl<E: Env> CtapState<E> {
         signature_data.extend(client_data_hash);
 
         let attestation_id = if ep_att {
-            Some(attestation_store::Id::Enterprise)
+            Some(AttestationId::Enterprise)
         } else if env.customization().use_batch_attestation() {
-            Some(attestation_store::Id::Batch)
+            Some(AttestationId::Batch)
         } else {
             None
         };
@@ -982,8 +982,8 @@ impl<E: Env> CtapState<E> {
                     private_key,
                     certificate,
                 } = env
-                    .attestation_store()
-                    .get(&id)?
+                    .persist()
+                    .get_attestation(id)?
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 let attestation_key = EcdsaSk::<E>::from_slice(&private_key).unwrap();
                 (

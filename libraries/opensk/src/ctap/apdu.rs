@@ -16,8 +16,6 @@ use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
 
-use crate::api::attestation_store;
-
 const APDU_HEADER_LEN: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,17 +41,6 @@ pub enum ApduStatusCode {
 impl From<ApduStatusCode> for u16 {
     fn from(code: ApduStatusCode) -> Self {
         code as u16
-    }
-}
-
-impl From<attestation_store::Error> for ApduStatusCode {
-    fn from(error: attestation_store::Error) -> Self {
-        use attestation_store::Error;
-        match error {
-            Error::Storage => ApduStatusCode::SW_MEMERR,
-            Error::Internal => ApduStatusCode::SW_INTERNAL_EXCEPTION,
-            Error::NoSupport => ApduStatusCode::SW_INTERNAL_EXCEPTION,
-        }
     }
 }
 

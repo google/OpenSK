@@ -27,6 +27,7 @@ use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
+use crate::api::persist::Persist;
 use crate::ctap::storage;
 #[cfg(test)]
 use crate::env::EcdhSk;
@@ -103,11 +104,8 @@ fn check_and_store_new_pin<E: Env>(
         .key_store()
         .encrypt_pin_hash(array_ref![pin_hash, 0, PIN_AUTH_LENGTH])?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
-    storage::set_pin(
-        env,
-        array_ref!(pin_hash, 0, PIN_AUTH_LENGTH),
-        pin_length as u8,
-    )?;
+    env.persist()
+        .set_pin(array_ref!(pin_hash, 0, PIN_AUTH_LENGTH), pin_length as u8)?;
     Ok(())
 }
 
@@ -187,7 +185,7 @@ impl<E: Env> ClientPin<E> {
         shared_secret: &SharedSecret<E>,
         pin_hash_enc: Vec<u8>,
     ) -> Result<(), Ctap2StatusCode> {
-        match storage::pin_hash(env)? {
+        match env.persist().pin_hash()? {
             Some(pin_hash) => {
                 if self.consecutive_pin_mismatches >= 3 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
@@ -263,7 +261,7 @@ impl<E: Env> ClientPin<E> {
         let pin_uv_auth_param = ok_or_missing(pin_uv_auth_param)?;
         let new_pin_enc = ok_or_missing(new_pin_enc)?;
 
-        if storage::pin_hash(env)?.is_some() {
+        if env.persist().pin_hash()?.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
@@ -331,7 +329,7 @@ impl<E: Env> ClientPin<E> {
         }
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
         self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
-        if storage::has_force_pin_change(env)? {
+        if env.persist().has_force_pin_change()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
 
@@ -618,7 +616,7 @@ mod test {
         pin[..4].copy_from_slice(b"1234");
         let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(&pin[..])[..16]);
-        storage::set_pin(env, &pin_hash, 4).unwrap();
+        env.persist().set_pin(&pin_hash, 4).unwrap();
     }
 
     /// Fails on PINs bigger than 64 bytes.
@@ -752,7 +750,7 @@ mod test {
             0x01, 0xD9, 0x88, 0x40, 0x50, 0xBB, 0xD0, 0x7A, 0x23, 0x1A, 0xEB, 0x69, 0xD8, 0x36,
             0xC4, 0x12,
         ];
-        storage::set_pin(&mut env, &pin_hash, 4).unwrap();
+        env.persist().set_pin(&pin_hash, 4).unwrap();
 
         let pin_hash_enc = shared_secret.encrypt(&mut env, &pin_hash).unwrap();
         assert_eq!(
@@ -1047,7 +1045,7 @@ mod test {
         let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
-        assert_eq!(storage::force_pin_change(&mut env), Ok(()));
+        assert_eq!(env.persist().force_pin_change(), Ok(()));
         assert_eq!(
             client_pin.process_command(&mut env, params),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID),
@@ -1157,7 +1155,7 @@ mod test {
         let mut env = TestEnv::default();
         set_standard_pin(&mut env);
 
-        assert_eq!(storage::force_pin_change(&mut env), Ok(()));
+        assert_eq!(env.persist().force_pin_change(), Ok(()));
         assert_eq!(
             client_pin.process_command(&mut env, params),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
@@ -1249,7 +1247,7 @@ mod test {
             ),
         ];
         for (pin, result) in test_cases {
-            let old_pin_hash = storage::pin_hash(&mut env).unwrap();
+            let old_pin_hash = env.persist().pin_hash().unwrap();
             let new_pin_enc = encrypt_pin(&shared_secret, pin);
 
             assert_eq!(
@@ -1257,9 +1255,9 @@ mod test {
                 result
             );
             if result.is_ok() {
-                assert_ne!(old_pin_hash, storage::pin_hash(&mut env).unwrap());
+                assert_ne!(old_pin_hash, env.persist().pin_hash().unwrap());
             } else {
-                assert_eq!(old_pin_hash, storage::pin_hash(&mut env).unwrap());
+                assert_eq!(old_pin_hash, env.persist().pin_hash().unwrap());
             }
         }
     }

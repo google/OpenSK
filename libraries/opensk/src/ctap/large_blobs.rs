@@ -18,6 +18,7 @@ use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
+use crate::api::persist::Persist;
 use crate::ctap::storage;
 use crate::env::{Env, Sha};
 use alloc::vec;
@@ -86,7 +87,7 @@ impl LargeBlobs {
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
             }
-            if storage::pin_hash(env)?.is_some() || storage::has_always_uv(env)? {
+            if env.persist().pin_hash()?.is_some() || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =
@@ -425,7 +426,7 @@ mod test {
         large_blob
             .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let mut large_blob_data = vec![0xFF; 32];
         // Command constant and offset bytes.
         large_blob_data.extend(&[0x0C, 0x00, 0x00, 0x00, 0x00, 0x00]);

@@ -15,7 +15,6 @@
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::{Persist, PersistCredentialIter};
-use crate::ctap::client_pin::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
@@ -190,41 +189,6 @@ pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
     Ok(max.unwrap_or(0).wrapping_add(1))
 }
 
-/// Returns the global signature counter.
-pub fn global_signature_counter(env: &mut impl Env) -> Result<u32, Ctap2StatusCode> {
-    env.persist().global_signature_counter()
-}
-
-/// Increments the global signature counter.
-pub fn incr_global_signature_counter(
-    env: &mut impl Env,
-    increment: u32,
-) -> Result<(), Ctap2StatusCode> {
-    env.persist().incr_global_signature_counter(increment)
-}
-
-/// Returns the PIN hash if defined.
-pub fn pin_hash(env: &mut impl Env) -> Result<Option<[u8; PIN_AUTH_LENGTH]>, Ctap2StatusCode> {
-    env.persist().pin_hash()
-}
-
-/// Returns the length of the currently set PIN if defined.
-#[cfg(feature = "config_command")]
-pub fn pin_code_point_length(env: &mut impl Env) -> Result<Option<u8>, Ctap2StatusCode> {
-    env.persist().pin_code_point_length()
-}
-
-/// Sets the PIN hash and length.
-///
-/// If it was already defined, it is updated.
-pub fn set_pin(
-    env: &mut impl Env,
-    pin_hash: &[u8; PIN_AUTH_LENGTH],
-    pin_code_point_length: u8,
-) -> Result<(), Ctap2StatusCode> {
-    env.persist().set_pin(pin_hash, pin_code_point_length)
-}
-
 /// Returns the number of remaining PIN retries.
 pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
     Ok(env
@@ -326,18 +290,6 @@ pub fn commit_large_blob_array(
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
     env.persist().commit_large_blob_array(large_blob_array)
-}
-
-/// Returns whether the PIN needs to be changed before its next usage.
-pub fn has_force_pin_change(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
-    // TODO inline some of the single line calls
-    env.persist().has_force_pin_change()
-}
-
-/// Marks the PIN as outdated with respect to the new PIN policy.
-#[cfg(feature = "config_command")]
-pub fn force_pin_change(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
-    env.persist().force_pin_change()
 }
 
 /// Returns whether enterprise attestation is enabled.
@@ -709,34 +661,6 @@ mod test {
     }
 
     #[test]
-    fn test_pin_hash_and_length() {
-        let mut env = TestEnv::default();
-
-        // Pin hash is initially not set.
-        assert!(pin_hash(&mut env).unwrap().is_none());
-        assert!(pin_code_point_length(&mut env).unwrap().is_none());
-
-        // Setting the pin sets the pin hash.
-        let random_data = env.rng().gen_uniform_u8x32();
-        assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
-        let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
-        let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
-        let pin_length_1 = 4;
-        let pin_length_2 = 63;
-        set_pin(&mut env, &pin_hash_1, pin_length_1).unwrap();
-        assert_eq!(pin_hash(&mut env).unwrap(), Some(pin_hash_1));
-        assert_eq!(pin_code_point_length(&mut env).unwrap(), Some(pin_length_1));
-        set_pin(&mut env, &pin_hash_2, pin_length_2).unwrap();
-        assert_eq!(pin_hash(&mut env).unwrap(), Some(pin_hash_2));
-        assert_eq!(pin_code_point_length(&mut env).unwrap(), Some(pin_length_2));
-
-        // Resetting the storage resets the pin hash.
-        reset(&mut env).unwrap();
-        assert!(pin_hash(&mut env).unwrap().is_none());
-        assert!(pin_code_point_length(&mut env).unwrap().is_none());
-    }
-
-    #[test]
     fn test_pin_retries() {
         let mut env = TestEnv::default();
 
@@ -882,30 +806,6 @@ mod test {
         assert_eq!(vec![0x80], restored_large_blob_array);
         let restored_large_blob_array = get_large_blob_array(&mut env, 16, 1).unwrap();
         assert_eq!(vec![0x3C], restored_large_blob_array);
-    }
-
-    #[test]
-    fn test_global_signature_counter() {
-        let mut env = TestEnv::default();
-
-        let mut counter_value = 1;
-        assert_eq!(global_signature_counter(&mut env).unwrap(), counter_value);
-        for increment in 1..10 {
-            assert!(incr_global_signature_counter(&mut env, increment).is_ok());
-            counter_value += increment;
-            assert_eq!(global_signature_counter(&mut env).unwrap(), counter_value);
-        }
-    }
-
-    #[test]
-    fn test_force_pin_change() {
-        let mut env = TestEnv::default();
-
-        assert!(!has_force_pin_change(&mut env).unwrap());
-        assert_eq!(force_pin_change(&mut env), Ok(()));
-        assert!(has_force_pin_change(&mut env).unwrap());
-        assert_eq!(set_pin(&mut env, &[0x88; 16], 8), Ok(()));
-        assert!(!has_force_pin_change(&mut env).unwrap());
     }
 
     #[test]

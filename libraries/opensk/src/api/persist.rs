@@ -32,10 +32,16 @@ pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, 
 ///
 /// This trait might get appended to with new versions of CTAP.
 ///
+/// The default implementations using the key-value store have assumptions on the ranges for key
+/// and value, if you decide to use them:
+/// - Keys must be valid at least in [0, 4095[.
+/// - Values must be byte arrays of size at least 1023.
+///
 /// To implement this trait, you have 2 options:
 /// - Implement all high level functions with default implementations,
 ///   calling `unimplemented!` in the key-value accessors.
 ///   When we update this trait in a new version, OpenSK will panic when calling any new functions.
+///   If you need special implementation for new functions, you need to manually add them.
 /// - Implement the key-value accessors, and special case as many default implemented high level
 ///   functions as desired.
 ///   When the trait gets extended, new features will silently work.
@@ -45,8 +51,6 @@ pub trait Persist {
     fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>>;
 
     /// Inserts the value at the given key.
-    ///
-    /// Values up to a length of 1023 Byte must be supported.
     fn insert(&mut self, key: usize, value: &[u8]) -> CtapResult<()>;
 
     /// Removes a key, if present.
@@ -55,12 +59,13 @@ pub trait Persist {
     /// Iterator for all present keys.
     fn iter(&self) -> CtapResult<PersistIter<'_>>;
 
-    /// Checks consistency on boot, and if necessary fixes or initializes problems.
+    /// Checks consistency on boot, and if necessary fixes problems or initializes.
+    ///
+    /// Calling this function after successful init should be a NO-OP.
     fn init(&mut self) -> CtapResult<()> {
         if self.find(keys::RESET_COMPLETION)?.is_some() {
             self.reset()?;
         }
-        // TODO don't forget to call, add other init functionality
         Ok(())
     }
 
@@ -213,6 +218,8 @@ pub trait Persist {
     }
 
     /// Returns the list of RP IDs that may read the minimum PIN length.
+    ///
+    /// Defaults to an empty vector if not found.
     fn min_pin_length_rp_ids_bytes(&self) -> CtapResult<Vec<u8>> {
         Ok(self
             .find(keys::MIN_PIN_LENGTH_RP_IDS)?
@@ -225,6 +232,13 @@ pub trait Persist {
         self.insert(keys::MIN_PIN_LENGTH_RP_IDS, min_pin_length_rp_ids_bytes)
     }
 
+    // TODO rework LargeBlob
+    // Problem 1: Env should be allowed to choose whether to buffer in memory or persist
+    // Otherwise small RAM devices have limited large blog size.
+    // Problem 2: LargeBlob is a stateful command, but doesn't use the safeguard and infrastructure
+    // of Stateful command. It has to be migrated there.
+    // While doing that, check if PinUvAuthToken timers and StatefulCommand timeouts are working
+    // together correctly.
     /// Reads the byte vector stored as the serialized large blobs array.
     ///
     /// If too few bytes exist at that offset, return the maximum number
@@ -352,8 +366,16 @@ pub trait Persist {
     fn get_attestation(&self, id: AttestationId) -> CtapResult<Option<Attestation>> {
         let stored_id_bytes = self.find(keys::ATTESTATION_ID)?;
         if let Some(bytes) = stored_id_bytes {
-            if bytes.len() != 1 || id != AttestationId::try_from(bytes[0])? {
+            if bytes.len() != 1 {
                 return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
+            if id != AttestationId::try_from(bytes[0])? {
+                return Ok(None);
+            }
+        } else {
+            // This is for backwards compatibility. No ID stored implies batch.
+            if id != AttestationId::Batch {
+                return Ok(None);
             }
         }
         let private_key = self.find(keys::ATTESTATION_PRIVATE_KEY)?;
@@ -446,6 +468,7 @@ pub struct Attestation {
 mod test {
     use super::*;
     use crate::api::customization::Customization;
+    use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
     use crate::env::Env;
 
@@ -468,5 +491,60 @@ mod test {
             AttestationId::try_from(0x03),
             Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
+    }
+
+    #[test]
+    fn test_global_signature_counter() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        let mut counter_value = 1;
+        assert_eq!(persist.global_signature_counter().unwrap(), counter_value);
+        for increment in 1..10 {
+            assert!(persist.incr_global_signature_counter(increment).is_ok());
+            counter_value += increment;
+            assert_eq!(persist.global_signature_counter().unwrap(), counter_value);
+        }
+    }
+
+    #[test]
+    fn test_force_pin_change() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        assert!(!persist.has_force_pin_change().unwrap());
+        assert_eq!(persist.force_pin_change(), Ok(()));
+        assert!(persist.has_force_pin_change().unwrap());
+        assert_eq!(persist.set_pin(&[0x88; 16], 8), Ok(()));
+        assert!(!persist.has_force_pin_change().unwrap());
+    }
+
+    #[test]
+    fn test_pin_hash_and_length() {
+        let mut env = TestEnv::default();
+        let random_data = env.rng().gen_uniform_u8x32();
+        let persist = env.persist();
+
+        // Pin hash is initially not set.
+        assert!(persist.pin_hash().unwrap().is_none());
+        assert!(persist.pin_code_point_length().unwrap().is_none());
+
+        // Setting the pin sets the pin hash.
+        assert_eq!(random_data.len(), 2 * PIN_AUTH_LENGTH);
+        let pin_hash_1 = *array_ref!(random_data, 0, PIN_AUTH_LENGTH);
+        let pin_hash_2 = *array_ref!(random_data, PIN_AUTH_LENGTH, PIN_AUTH_LENGTH);
+        let pin_length_1 = 4;
+        let pin_length_2 = 63;
+        assert_eq!(persist.set_pin(&pin_hash_1, pin_length_1), Ok(()));
+        assert_eq!(persist.pin_hash().unwrap(), Some(pin_hash_1));
+        assert_eq!(persist.pin_code_point_length().unwrap(), Some(pin_length_1));
+        assert_eq!(persist.set_pin(&pin_hash_2, pin_length_2), Ok(()));
+        assert_eq!(persist.pin_hash().unwrap(), Some(pin_hash_2));
+        assert_eq!(persist.pin_code_point_length().unwrap(), Some(pin_length_2));
+
+        // Resetting the storage resets the pin hash.
+        assert_eq!(persist.reset(), Ok(()));
+        assert!(persist.pin_hash().unwrap().is_none());
+        assert!(persist.pin_code_point_length().unwrap().is_none());
     }
 }

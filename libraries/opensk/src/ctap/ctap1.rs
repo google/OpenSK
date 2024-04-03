@@ -641,7 +641,7 @@ mod test {
         ctap_state.u2f_up_state.grant_up(&mut env);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], 0x01);
-        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
+        let global_signature_counter = env.persist().global_signature_counter().unwrap();
         check_signature_counter(
             &mut env,
             array_ref!(response, 1, 4),
@@ -666,7 +666,7 @@ mod test {
         env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
         assert_eq!(response[0], 0x01);
-        let global_signature_counter = storage::global_signature_counter(&mut env).unwrap();
+        let global_signature_counter = env.persist().global_signature_counter().unwrap();
         check_signature_counter(
             &mut env,
             array_ref!(response, 1, 4),

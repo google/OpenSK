@@ -24,7 +24,6 @@ use crate::api::rng::Rng;
 use crate::api::user_presence::UserPresence;
 use crate::ctap::Channel;
 use alloc::vec::Vec;
-use persistent_store::{Storage, Store};
 
 #[cfg(feature = "std")]
 pub mod test;
@@ -44,7 +43,6 @@ pub trait Env {
     type Rng: Rng;
     type UserPresence: UserPresence;
     type Persist: Persist;
-    type Storage: Storage;
     type KeyStore: KeyStore;
     type Write: core::fmt::Write;
     type Customization: Customization;
@@ -55,7 +53,6 @@ pub trait Env {
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn persist(&mut self) -> &mut Self::Persist;
-    fn store(&mut self) -> &mut Store<Self::Storage>;
     fn key_store(&mut self) -> &mut Self::KeyStore;
     fn clock(&mut self) -> &mut Self::Clock;
 

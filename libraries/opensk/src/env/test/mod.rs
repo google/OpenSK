@@ -189,7 +189,6 @@ impl Env for TestEnv {
     type Rng = TestRng;
     type UserPresence = TestUserPresence;
     type Persist = Self;
-    type Storage = BufferStorage;
     type KeyStore = Self;
     type Clock = TestClock;
     type Write = TestWrite;
@@ -207,10 +206,6 @@ impl Env for TestEnv {
 
     fn persist(&mut self) -> &mut Self {
         self
-    }
-
-    fn store(&mut self) -> &mut Store<Self::Storage> {
-        &mut self.store
     }
 
     fn key_store(&mut self) -> &mut Self {

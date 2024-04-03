@@ -399,7 +399,6 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     type Rng = TockRng<S>;
     type UserPresence = Self;
     type Persist = Self;
-    type Storage = Storage<S, C>;
     type KeyStore = Self;
     type Clock = TockClock<S>;
     type Write = ConsoleWriter<S>;
@@ -417,10 +416,6 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
 
     fn persist(&mut self) -> &mut Self {
         self
-    }
-
-    fn store(&mut self) -> &mut Store<Self::Storage> {
-        &mut self.store
     }
 
     fn key_store(&mut self) -> &mut Self {

@@ -361,6 +361,7 @@ mod test {
     use super::super::CtapState;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
+    use crate::api::persist::Persist;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
@@ -401,7 +402,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let management_data = vec![CredentialManagementSubCommand::GetCredsMetadata as u8];
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
@@ -490,7 +491,7 @@ mod test {
         storage::store_credential(&mut env, credential_source1).unwrap();
         storage::store_credential(&mut env, credential_source2).unwrap();
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
@@ -587,7 +588,7 @@ mod test {
             storage::store_credential(&mut env, credential).unwrap();
         }
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0x1A, 0xA4, 0x96, 0xDA, 0x62, 0x80, 0x28, 0x13, 0xEB, 0x32, 0xB9, 0xF1, 0xD2, 0xA9,
             0xD0, 0xD1,
@@ -671,7 +672,7 @@ mod test {
         storage::store_credential(&mut env, credential_source1).unwrap();
         storage::store_credential(&mut env, credential_source2).unwrap();
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xF8, 0xB0, 0x3C, 0xC1, 0xD5, 0x58, 0x9C, 0xB7, 0x4D, 0x42, 0xA1, 0x64, 0x14, 0x28,
             0x2B, 0x68,
@@ -769,7 +770,7 @@ mod test {
 
         storage::store_credential(&mut env, credential_source).unwrap();
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xBD, 0xE3, 0xEF, 0x8A, 0x77, 0x01, 0xB1, 0x69, 0x19, 0xE6, 0x62, 0xB9, 0x9B, 0x89,
             0x9C, 0x64,
@@ -841,7 +842,7 @@ mod test {
 
         storage::store_credential(&mut env, credential_source).unwrap();
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
             0xA5, 0x55, 0x8F, 0x03, 0xC3, 0xD3, 0x73, 0x1C, 0x07, 0xDA, 0x1F, 0x8C, 0xC7, 0xBD,
             0x9D, 0xB7,
@@ -898,7 +899,7 @@ mod test {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::new(&mut env);
 
-        storage::set_pin(&mut env, &[0u8; 16], 4).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,

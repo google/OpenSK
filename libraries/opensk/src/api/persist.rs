@@ -34,8 +34,8 @@ pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, 
 ///
 /// The default implementations using the key-value store have assumptions on the ranges for key
 /// and value, if you decide to use them:
-/// - Keys must be valid at least in [0, 4095[.
-/// - Values must be byte arrays of size at least 1023.
+/// - Keys within 0 and 4095 are supported.
+/// - Values of at most 1023 bytes are supported.
 ///
 /// To implement this trait, you have 2 options:
 /// - Implement all high level functions with default implementations,

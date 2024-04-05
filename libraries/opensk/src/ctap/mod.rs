@@ -51,7 +51,7 @@ use self::data_formats::{
     PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 use self::hid::{ChannelID, CtapHid, CtapHidCommand, KeepaliveStatus, ProcessedPacket};
-use self::large_blobs::LargeBlobs;
+use self::large_blobs::LargeBlobState;
 use self::response::{
     AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
     AuthenticatorMakeCredentialResponse, ResponseData,
@@ -397,6 +397,7 @@ pub enum StatefulCommand {
     GetAssertion(Box<AssertionState>),
     EnumerateRps(usize),
     EnumerateCredentials(Vec<usize>),
+    LargeBlob(LargeBlobState),
 }
 
 /// Stores the current CTAP command state and when it times out.
@@ -548,6 +549,24 @@ impl<E: Env> StatefulPermission<E> {
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         }
     }
+
+    /// Returns the large blob state. If none is hold, create and hold a new state.
+    pub fn large_blob(&mut self, env: &mut E, channel: Channel) -> &mut LargeBlobState {
+        self.clear_timer(env);
+        if let Some(StatefulCommand::LargeBlob(_)) = &self.command_type {
+        } else {
+            self.set_command(
+                env,
+                StatefulCommand::LargeBlob(LargeBlobState::default()),
+                channel,
+            );
+        }
+        if let Some(StatefulCommand::LargeBlob(ref mut large_blob_state)) = &mut self.command_type {
+            large_blob_state
+        } else {
+            unreachable!();
+        }
+    }
 }
 
 // This struct currently holds all state, not only the persistent memory. The persistent members are
@@ -558,7 +577,6 @@ pub struct CtapState<E: Env> {
     pub(crate) u2f_up_state: U2fUserPresenceState<E>,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission<E>,
-    large_blobs: LargeBlobs,
 }
 
 impl<E: Env> CtapState<E> {
@@ -575,7 +593,6 @@ impl<E: Env> CtapState<E> {
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
             stateful_command_permission,
-            large_blobs: LargeBlobs::new(),
         }
     }
 
@@ -660,6 +677,7 @@ impl<E: Env> CtapState<E> {
         self.clear_other_channels(channel);
         match (&command, self.stateful_command_permission.get_command(env)) {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
+            | (Command::AuthenticatorLargeBlobs(_), Ok(StatefulCommand::LargeBlob(_)))
             | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
             // AuthenticatorGetInfo still allows Reset.
             | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
@@ -711,8 +729,8 @@ impl<E: Env> CtapState<E> {
             ),
             Command::AuthenticatorSelection => self.process_selection(env, channel),
             Command::AuthenticatorLargeBlobs(params) => {
-                self.large_blobs
-                    .process_command(env, &mut self.client_pin, params)
+                let large_blob_state = self.stateful_command_permission.large_blob(env, channel);
+                large_blob_state.process_command(env, &mut self.client_pin, params)
             }
             #[cfg(feature = "config_command")]
             Command::AuthenticatorConfig(params) => {
@@ -1457,6 +1475,7 @@ mod test {
     use crate::api::customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
     use crate::api::user_presence::UserPresenceResult;
+    use crate::ctap::command::AuthenticatorLargeBlobsParameters;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
     use crate::test_helpers;
@@ -3526,5 +3545,92 @@ mod test {
             response,
             Ok(ResponseData::AuthenticatorGetInfo(_))
         ));
+    }
+
+    #[test]
+    fn test_large_blob_stateful() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        const EMPTY_BLOB_ARRAY: [u8; 17] = [
+            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+            0x7A, 0x6D, 0x3C,
+        ];
+
+        let params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(EMPTY_BLOB_ARRAY[..1].to_vec()),
+            offset: 0,
+            length: Some(EMPTY_BLOB_ARRAY.len()),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorLargeBlobs(params),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorLargeBlobs(None)));
+
+        let params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(EMPTY_BLOB_ARRAY[1..].to_vec()),
+            offset: 1,
+            length: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorLargeBlobs(params),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorLargeBlobs(None)));
+    }
+
+    #[test]
+    fn test_large_blob_stateful_interleaved() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        const EMPTY_BLOB_ARRAY: [u8; 17] = [
+            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+            0x7A, 0x6D, 0x3C,
+        ];
+
+        let params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(EMPTY_BLOB_ARRAY[..1].to_vec()),
+            offset: 0,
+            length: Some(EMPTY_BLOB_ARRAY.len()),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorLargeBlobs(params),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorLargeBlobs(None)));
+
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorSelection,
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorSelection));
+
+        let params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(EMPTY_BLOB_ARRAY[1..].to_vec()),
+            offset: 1,
+            length: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let response = ctap_state.process_parsed_command(
+            &mut env,
+            Command::AuthenticatorLargeBlobs(params),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ));
     }
 }

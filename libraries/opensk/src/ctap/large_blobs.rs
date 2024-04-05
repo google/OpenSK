@@ -15,7 +15,7 @@
 use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
-use super::status_code::Ctap2StatusCode;
+use super::status_code::{Ctap2StatusCode, CtapResult};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::persist::Persist;
@@ -24,33 +24,27 @@ use crate::env::{Env, Sha};
 use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{ByteOrder, LittleEndian};
+use core::cmp;
 
 /// The length of the truncated hash that is appended to the large blob data.
 const TRUNCATED_HASH_LEN: usize = 16;
 
-pub struct LargeBlobs {
+#[derive(Default)]
+pub struct LargeBlobState {
     buffer: Vec<u8>,
     expected_length: usize,
     expected_next_offset: usize,
 }
 
 /// Implements the logic for the AuthenticatorLargeBlobs command and keeps its state.
-impl LargeBlobs {
-    pub fn new() -> LargeBlobs {
-        LargeBlobs {
-            buffer: Vec::new(),
-            expected_length: 0,
-            expected_next_offset: 0,
-        }
-    }
-
+impl LargeBlobState {
     /// Process the large blob command.
     pub fn process_command<E: Env>(
         &mut self,
         env: &mut E,
         client_pin: &mut ClientPin<E>,
         large_blobs_params: AuthenticatorLargeBlobsParameters,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         let AuthenticatorLargeBlobsParameters {
             get,
             set,
@@ -66,7 +60,7 @@ impl LargeBlobs {
             if get > max_fragment_size || offset.checked_add(get).is_none() {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
-            let config = storage::get_large_blob_array(env, offset, get)?;
+            let config = get_large_blob_array(env, offset, get)?;
             return Ok(ResponseData::AuthenticatorLargeBlobs(Some(
                 AuthenticatorLargeBlobsResponse { config },
             )));
@@ -82,7 +76,12 @@ impl LargeBlobs {
                 if self.expected_length > env.customization().max_large_blob_array_size() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
                 }
+                if self.expected_length <= TRUNCATED_HASH_LEN {
+                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                }
                 self.expected_next_offset = 0;
+            } else if length.is_some() {
+                return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
             if offset != self.expected_next_offset {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
@@ -105,27 +104,41 @@ impl LargeBlobs {
                 )?;
                 client_pin.has_permission(PinPermission::LargeBlobWrite)?;
             }
-            if offset + set.len() > self.expected_length {
+            if offset.saturating_add(set.len()) > self.expected_length {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
             if offset == 0 {
-                self.buffer = Vec::with_capacity(self.expected_length);
+                self.buffer = env.persist().init_large_blob(self.expected_length)?;
             }
-            self.buffer.append(&mut set);
-            self.expected_next_offset = self.buffer.len();
+            let received_length = set.len();
+            env.persist()
+                .write_large_blob_chunk(offset, &mut set, &mut self.buffer)?;
+            self.expected_next_offset += received_length;
             if self.expected_next_offset == self.expected_length {
-                self.expected_length = 0;
-                self.expected_next_offset = 0;
-                // Must be a positive number.
-                let buffer_hash_index = self.buffer.len() - TRUNCATED_HASH_LEN;
-                if Sha::<E>::digest(&self.buffer[..buffer_hash_index])[..TRUNCATED_HASH_LEN]
-                    != self.buffer[buffer_hash_index..]
-                {
-                    self.buffer = Vec::new();
+                const CHUNK_SIZE: usize = 1024;
+                let mut hash = Sha::<E>::new();
+                let buffer_hash_index = self.expected_length.saturating_sub(TRUNCATED_HASH_LEN);
+                for i in (0..buffer_hash_index).step_by(CHUNK_SIZE) {
+                    let byte_count = cmp::min(buffer_hash_index - i, CHUNK_SIZE);
+                    let chunk = env
+                        .persist()
+                        .get_large_blob(i, byte_count, Some(&self.buffer))?
+                        .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                    hash.update(&chunk);
+                }
+                let mut computed_hash = [0; 32];
+                hash.finalize(&mut computed_hash);
+                let written_hash = env
+                    .persist()
+                    .get_large_blob(buffer_hash_index, TRUNCATED_HASH_LEN, Some(&self.buffer))?
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                if computed_hash[..TRUNCATED_HASH_LEN] != written_hash {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
                 }
-                storage::commit_large_blob_array(env, &self.buffer)?;
+                env.persist().commit_large_blob_array(&self.buffer)?;
                 self.buffer = Vec::new();
+                self.expected_length = 0;
+                self.expected_next_offset = 0;
             }
             return Ok(ResponseData::AuthenticatorLargeBlobs(None));
         }
@@ -133,6 +146,34 @@ impl LargeBlobs {
         // This should be unreachable, since the command has either get or set.
         Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
     }
+}
+
+/// Reads the byte vector stored as the serialized large blobs array.
+///
+/// If too few bytes exist at that offset, return the maximum number
+/// available. This includes cases of offset being beyond the stored array.
+///
+/// If no large blob is committed to the store, get responds as if an empty
+/// CBOR array (0x80) was written, together with the 16 byte prefix of its
+/// SHA256, to a total length of 17 byte (which is the shortest legitimate
+/// large blob entry possible).
+fn get_large_blob_array(
+    env: &mut impl Env,
+    offset: usize,
+    byte_count: usize,
+) -> CtapResult<Vec<u8>> {
+    let output = env.persist().get_large_blob(offset, byte_count, None)?;
+    Ok(output.unwrap_or_else(|| {
+        const EMPTY_LARGE_BLOB: [u8; 17] = [
+            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+            0x7A, 0x6D, 0x3C,
+        ];
+        let last_index = cmp::min(EMPTY_LARGE_BLOB.len(), offset.saturating_add(byte_count));
+        EMPTY_LARGE_BLOB
+            .get(offset..last_index)
+            .unwrap_or_default()
+            .to_vec()
+    }))
 }
 
 #[cfg(test)]
@@ -143,6 +184,46 @@ mod test {
     use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+
+    fn commit_chunk(
+        env: &mut TestEnv,
+        large_blobs: &mut LargeBlobState,
+        data: &[u8],
+        offset: usize,
+        length: Option<usize>,
+    ) -> CtapResult<ResponseData> {
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+
+        let large_blobs_params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(data.to_vec()),
+            offset,
+            length,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        large_blobs.process_command(env, &mut client_pin, large_blobs_params)
+    }
+
+    fn commit_valid_chunk(
+        env: &mut TestEnv,
+        large_blobs: &mut LargeBlobState,
+        data: &[u8],
+        offset: usize,
+        length: Option<usize>,
+    ) {
+        assert_eq!(
+            commit_chunk(env, large_blobs, data, offset, length),
+            Ok(ResponseData::AuthenticatorLargeBlobs(None))
+        );
+    }
 
     #[test]
     fn test_process_command_get_empty() {
@@ -155,7 +236,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         let large_blob = vec![
             0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
@@ -190,7 +271,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
@@ -257,7 +338,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
@@ -308,7 +389,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         const BLOB_LEN: usize = 200;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
@@ -359,7 +440,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: Some(1),
@@ -386,7 +467,7 @@ mod test {
             pin_uv_auth_token,
             PinUvAuthProtocol::V1,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         const BLOB_LEN: usize = 20;
         // This blob does not have an appropriate hash.
@@ -418,7 +499,7 @@ mod test {
             pin_uv_auth_token,
             pin_uv_auth_protocol,
         );
-        let mut large_blobs = LargeBlobs::new();
+        let mut large_blobs = LargeBlobState::default();
 
         const BLOB_LEN: usize = 20;
         const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
@@ -461,5 +542,161 @@ mod test {
     #[test]
     fn test_process_command_commit_with_pin_v2() {
         test_helper_process_command_commit_with_pin(PinUvAuthProtocol::V2);
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array() {
+        let mut env = TestEnv::default();
+        let mut large_blobs = LargeBlobState::default();
+        let mut data = vec![0x01, 0x02, 0x03];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data,
+            0,
+            Some(3 + TRUNCATED_HASH_LEN),
+        );
+
+        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 1).unwrap();
+        assert_eq!(vec![0x01], restored_large_blob_array);
+        let restored_large_blob_array = get_large_blob_array(&mut env, 1, 1).unwrap();
+        assert_eq!(vec![0x02], restored_large_blob_array);
+        let restored_large_blob_array = get_large_blob_array(&mut env, 2, 1).unwrap();
+        assert_eq!(vec![0x03], restored_large_blob_array);
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 2 + TRUNCATED_HASH_LEN, 2).unwrap();
+        assert_eq!(restored_large_blob_array.len(), 1);
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 3 + TRUNCATED_HASH_LEN, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 4 + TRUNCATED_HASH_LEN, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array_overwrite() {
+        let mut env = TestEnv::default();
+        let mut large_blobs = LargeBlobState::default();
+
+        let mut data = vec![0x11; 5];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data,
+            0,
+            Some(5 + TRUNCATED_HASH_LEN),
+        );
+
+        let mut data = vec![0x22; 4];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data,
+            0,
+            Some(4 + TRUNCATED_HASH_LEN),
+        );
+
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 0, 4 + TRUNCATED_HASH_LEN).unwrap();
+        assert_eq!(data, restored_large_blob_array);
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 4 + TRUNCATED_HASH_LEN, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+    }
+
+    #[test]
+    fn test_commit_get_large_blob_array_no_commit() {
+        let mut env = TestEnv::default();
+
+        let empty_blob_array = vec![
+            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+            0x7A, 0x6D, 0x3C,
+        ];
+        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 17).unwrap();
+        assert_eq!(empty_blob_array, restored_large_blob_array);
+        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 1).unwrap();
+        assert_eq!(vec![0x80], restored_large_blob_array);
+        let restored_large_blob_array = get_large_blob_array(&mut env, 16, 1).unwrap();
+        assert_eq!(vec![0x3C], restored_large_blob_array);
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_parts() {
+        let mut env = TestEnv::default();
+        let mut large_blobs = LargeBlobState::default();
+
+        let mut data = vec![0x01, 0x02, 0x03];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data[0..1],
+            0,
+            Some(3 + TRUNCATED_HASH_LEN),
+        );
+        commit_valid_chunk(&mut env, &mut large_blobs, &data[1..2], 1, None);
+        commit_valid_chunk(&mut env, &mut large_blobs, &data[2..], 2, None);
+
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 0, 3 + TRUNCATED_HASH_LEN).unwrap();
+        assert_eq!(data, restored_large_blob_array);
+        let restored_large_blob_array =
+            get_large_blob_array(&mut env, 3 + TRUNCATED_HASH_LEN, 1).unwrap();
+        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_invalid() {
+        let mut env = TestEnv::default();
+        let mut large_blobs = LargeBlobState::default();
+
+        let mut data = vec![0x01, 0x02, 0x03];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data[0..1],
+            0,
+            Some(3 + TRUNCATED_HASH_LEN),
+        );
+        assert_eq!(
+            commit_chunk(&mut env, &mut large_blobs, &data[1..2], 2, None),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ)
+        );
+
+        assert_eq!(
+            commit_chunk(
+                &mut env,
+                &mut large_blobs,
+                &data,
+                0,
+                Some(2 + TRUNCATED_HASH_LEN)
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &data[0..2 + TRUNCATED_HASH_LEN],
+            0,
+            Some(3 + TRUNCATED_HASH_LEN),
+        );
+        assert_eq!(
+            commit_chunk(
+                &mut env,
+                &mut large_blobs,
+                &[data.last().unwrap() ^ 0x01],
+                0,
+                None
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
     }
 }

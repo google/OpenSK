@@ -22,7 +22,6 @@ use crate::ctap::status_code::Ctap2StatusCode;
 use crate::env::{AesKey, Env};
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cmp;
 #[cfg(feature = "config_command")]
 use sk_cbor::cbor_array_vec;
 
@@ -250,46 +249,6 @@ pub fn set_min_pin_length_rp_ids(
     }
     env.persist()
         .set_min_pin_length_rp_ids(&serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?)
-}
-
-/// Reads the byte vector stored as the serialized large blobs array.
-///
-/// If too few bytes exist at that offset, return the maximum number
-/// available. This includes cases of offset being beyond the stored array.
-///
-/// If no large blob is committed to the store, get responds as if an empty
-/// CBOR array (0x80) was written, together with the 16 byte prefix of its
-/// SHA256, to a total length of 17 byte (which is the shortest legitimate
-/// large blob entry possible).
-pub fn get_large_blob_array(
-    env: &mut impl Env,
-    offset: usize,
-    byte_count: usize,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
-    let output = env.persist().get_large_blob_array(offset, byte_count)?;
-    Ok(output.unwrap_or_else(|| {
-        const EMPTY_LARGE_BLOB: [u8; 17] = [
-            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
-            0x7A, 0x6D, 0x3C,
-        ];
-        let last_index = cmp::min(EMPTY_LARGE_BLOB.len(), offset + byte_count);
-        EMPTY_LARGE_BLOB
-            .get(offset..last_index)
-            .unwrap_or_default()
-            .to_vec()
-    }))
-}
-
-/// Sets a byte vector as the serialized large blobs array.
-pub fn commit_large_blob_array(
-    env: &mut impl Env,
-    large_blob_array: &[u8],
-) -> Result<(), Ctap2StatusCode> {
-    // This input should have been caught at caller level.
-    if large_blob_array.len() > env.customization().max_large_blob_array_size() {
-        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-    }
-    env.persist().commit_large_blob_array(large_blob_array)
 }
 
 /// Returns whether enterprise attestation is enabled.
@@ -751,61 +710,6 @@ mod test {
             }
         }
         assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
-    }
-
-    #[test]
-    fn test_commit_get_large_blob_array() {
-        let mut env = TestEnv::default();
-
-        let large_blob_array = vec![0x01, 0x02, 0x03];
-        assert!(commit_large_blob_array(&mut env, &large_blob_array).is_ok());
-        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 1).unwrap();
-        assert_eq!(vec![0x01], restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 1, 1).unwrap();
-        assert_eq!(vec![0x02], restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 2, 1).unwrap();
-        assert_eq!(vec![0x03], restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 2, 2).unwrap();
-        assert_eq!(vec![0x03], restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 3, 1).unwrap();
-        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 4, 1).unwrap();
-        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
-    }
-
-    #[test]
-    fn test_commit_get_large_blob_array_overwrite() {
-        let mut env = TestEnv::default();
-
-        let large_blob_array = vec![0x11; 5];
-        assert!(commit_large_blob_array(&mut env, &large_blob_array).is_ok());
-        let large_blob_array = vec![0x22; 4];
-        assert!(commit_large_blob_array(&mut env, &large_blob_array).is_ok());
-        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 5).unwrap();
-        assert_eq!(large_blob_array, restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 4, 1).unwrap();
-        assert_eq!(Vec::<u8>::new(), restored_large_blob_array);
-
-        assert!(commit_large_blob_array(&mut env, &[]).is_ok());
-        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 20).unwrap();
-        // Committing an empty array resets to the default blob of 17 byte.
-        assert_eq!(restored_large_blob_array.len(), 17);
-    }
-
-    #[test]
-    fn test_commit_get_large_blob_array_no_commit() {
-        let mut env = TestEnv::default();
-
-        let empty_blob_array = vec![
-            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
-            0x7A, 0x6D, 0x3C,
-        ];
-        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 17).unwrap();
-        assert_eq!(empty_blob_array, restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 0, 1).unwrap();
-        assert_eq!(vec![0x80], restored_large_blob_array);
-        let restored_large_blob_array = get_large_blob_array(&mut env, 16, 1).unwrap();
-        assert_eq!(vec![0x3C], restored_large_blob_array);
     }
 
     #[test]

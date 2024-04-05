@@ -32,9 +32,6 @@ use core::convert::TryFrom;
 use sk_cbor as cbor;
 use sk_cbor::destructure_cbor_map;
 
-// This constant is a consequence of the structure of messages.
-const MIN_LARGE_BLOB_LEN: usize = 17;
-
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
@@ -399,10 +396,7 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
             .map(PinUvAuthProtocol::try_from)
             .transpose()?;
 
-        if get.is_none() && set.is_none() {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-        if get.is_some() && set.is_some() {
+        if get.is_some() == set.is_some() {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
         if get.is_some()
@@ -410,16 +404,7 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
         {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
-        if set.is_some() && offset == 0 {
-            match length {
-                None => return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
-                Some(len) if len < MIN_LARGE_BLOB_LEN => {
-                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-                }
-                Some(_) => (),
-            }
-        }
-        if set.is_some() && offset != 0 && length.is_some() {
+        if set.is_some() && ((offset == 0) != length.is_some()) {
             return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
         }
 
@@ -761,6 +746,8 @@ mod test {
 
     #[test]
     fn test_from_cbor_large_blobs_parameters() {
+        const MIN_LARGE_BLOB_LEN: usize = 17;
+
         // successful get
         let cbor_value = cbor_map! {
             0x01 => 2,
@@ -867,19 +854,6 @@ mod test {
         let cbor_value = cbor_map! {
             0x02 => vec! [0x5E],
             0x03 => 0,
-            0x05 => vec! [0xA9],
-            0x06 => 1,
-        };
-        assert_eq!(
-            AuthenticatorLargeBlobsParameters::try_from(cbor_value),
-            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
-        );
-
-        // failing with length smaller than minimum
-        let cbor_value = cbor_map! {
-            0x02 => vec! [0x5E],
-            0x03 => 0,
-            0x04 => MIN_LARGE_BLOB_LEN as u64 - 1,
             0x05 => vec! [0xA9],
             0x06 => 1,
         };

@@ -561,7 +561,7 @@ impl<E: Env> StatefulPermission<E> {
                 channel,
             );
         }
-        if let Some(StatefulCommand::LargeBlob(ref mut large_blob_state)) = &mut self.command_type {
+        if let Some(StatefulCommand::LargeBlob(large_blob_state)) = &mut self.command_type {
             large_blob_state
         } else {
             unreachable!();

@@ -66,7 +66,7 @@ impl LargeBlobState {
             )));
         }
 
-        if let Some(mut set) = set {
+        if let Some(set) = set {
             if set.len() > max_fragment_size {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
@@ -112,7 +112,7 @@ impl LargeBlobState {
             }
             let received_length = set.len();
             env.persist()
-                .write_large_blob_chunk(offset, &mut set, &mut self.buffer)?;
+                .write_large_blob_chunk(offset, &set, &mut self.buffer)?;
             self.expected_next_offset += received_length;
             if self.expected_next_offset == self.expected_length {
                 const CHUNK_SIZE: usize = 1024;
@@ -132,7 +132,7 @@ impl LargeBlobState {
                     .persist()
                     .get_large_blob(buffer_hash_index, TRUNCATED_HASH_LEN, Some(&self.buffer))?
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-                if computed_hash[..TRUNCATED_HASH_LEN] != written_hash {
+                if computed_hash[..TRUNCATED_HASH_LEN] != written_hash[..] {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
                 }
                 env.persist().commit_large_blob_array(&self.buffer)?;
@@ -163,17 +163,20 @@ fn get_large_blob_array(
     byte_count: usize,
 ) -> CtapResult<Vec<u8>> {
     let output = env.persist().get_large_blob(offset, byte_count, None)?;
-    Ok(output.unwrap_or_else(|| {
-        const EMPTY_LARGE_BLOB: [u8; 17] = [
-            0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
-            0x7A, 0x6D, 0x3C,
-        ];
-        let last_index = cmp::min(EMPTY_LARGE_BLOB.len(), offset.saturating_add(byte_count));
-        EMPTY_LARGE_BLOB
-            .get(offset..last_index)
-            .unwrap_or_default()
-            .to_vec()
-    }))
+    Ok(match output {
+        Some(data) => data.into(),
+        None => {
+            const EMPTY_LARGE_BLOB: [u8; 17] = [
+                0x80, 0x76, 0xBE, 0x8B, 0x52, 0x8D, 0x00, 0x75, 0xF7, 0xAA, 0xE9, 0x8D, 0x6F, 0xA5,
+                0x7A, 0x6D, 0x3C,
+            ];
+            let last_index = cmp::min(EMPTY_LARGE_BLOB.len(), offset.saturating_add(byte_count));
+            EMPTY_LARGE_BLOB
+                .get(offset..last_index)
+                .unwrap_or_default()
+                .to_vec()
+        }
+    })
 }
 
 #[cfg(test)]

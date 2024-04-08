@@ -18,6 +18,7 @@ use crate::api::crypto::EC_FIELD_SIZE;
 use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::PIN_AUTH_LENGTH;
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cmp;
@@ -27,6 +28,7 @@ use enum_iterator::IntoEnumIterator;
 
 pub type PersistIter<'a> = Box<dyn Iterator<Item = CtapResult<usize>> + 'a>;
 pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, Vec<u8>)>> + 'a>;
+pub type LargeBlobBuffer = Vec<u8>;
 
 /// Stores data that persists across reboots.
 ///
@@ -235,7 +237,7 @@ pub trait Persist {
     /// Prepares writing a new large blob.
     ///
     /// Returns a buffer that is returned to other API calls for potential usage.
-    fn init_large_blob(&mut self, expected_length: usize) -> CtapResult<Vec<u8>> {
+    fn init_large_blob(&mut self, expected_length: usize) -> CtapResult<LargeBlobBuffer> {
         Ok(Vec::with_capacity(expected_length))
     }
 
@@ -245,14 +247,14 @@ pub trait Persist {
     fn write_large_blob_chunk(
         &mut self,
         offset: usize,
-        chunk: &mut Vec<u8>,
-        buffer: &mut Vec<u8>,
+        chunk: &[u8],
+        buffer: &mut LargeBlobBuffer,
     ) -> CtapResult<()> {
         if buffer.len() != offset {
             // This should be caught on CTAP level.
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
-        buffer.append(chunk);
+        buffer.extend_from_slice(chunk);
         Ok(())
     }
 
@@ -262,17 +264,17 @@ pub trait Persist {
     /// available. This includes cases of offset being beyond the stored array.
     ///
     /// The buffer is passed in when writing is in process.
-    fn get_large_blob(
-        &self,
+    fn get_large_blob<'a>(
+        &'a self,
         mut offset: usize,
         byte_count: usize,
-        buffer: Option<&Vec<u8>>,
-    ) -> CtapResult<Option<Vec<u8>>> {
+        buffer: Option<&'a LargeBlobBuffer>,
+    ) -> CtapResult<Option<Cow<[u8]>>> {
         if let Some(buffer) = buffer {
             let start = cmp::min(offset, buffer.len());
             let end = offset.saturating_add(byte_count);
             let end = cmp::min(end, buffer.len());
-            return Ok(Some(buffer[start..end].to_vec()));
+            return Ok(Some(Cow::from(&buffer[start..end])));
         }
         let mut result = Vec::with_capacity(byte_count);
         for key in keys::LARGE_BLOB_SHARDS {
@@ -288,16 +290,16 @@ pub trait Persist {
             }
             let end = cmp::min(end, value.len());
             if end < offset {
-                return Ok(Some(result));
+                return Ok(Some(Cow::from(result)));
             }
             result.extend(&value[offset..end]);
             offset = offset.saturating_sub(VALUE_LENGTH);
         }
-        Ok(Some(result))
+        Ok(Some(Cow::from(result)))
     }
 
     /// Sets a byte vector as the serialized large blobs array.
-    fn commit_large_blob_array(&mut self, buffer: &Vec<u8>) -> CtapResult<()> {
+    fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
         debug_assert!(buffer.len() <= keys::LARGE_BLOB_SHARDS.len() * VALUE_LENGTH);
         let mut offset = 0;
         for key in keys::LARGE_BLOB_SHARDS {

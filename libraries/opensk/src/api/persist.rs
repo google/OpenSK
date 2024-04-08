@@ -265,11 +265,11 @@ pub trait Persist {
     ///
     /// The buffer is passed in when writing is in process.
     fn get_large_blob<'a>(
-        &'a self,
+        &self,
         mut offset: usize,
         byte_count: usize,
         buffer: Option<&'a LargeBlobBuffer>,
-    ) -> CtapResult<Option<Cow<[u8]>>> {
+    ) -> CtapResult<Option<Cow<'a, [u8]>>> {
         if let Some(buffer) = buffer {
             let start = cmp::min(offset, buffer.len());
             let end = offset.saturating_add(byte_count);

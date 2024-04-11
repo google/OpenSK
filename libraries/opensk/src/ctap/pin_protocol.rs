@@ -21,7 +21,7 @@ use crate::ctap::client_pin::PIN_TOKEN_LENGTH;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{CoseKey, PinUvAuthProtocol};
 use crate::ctap::secret::Secret;
-use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(test)]
 use crate::env::test::TestEnv;
 use crate::env::{AesKey, EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
@@ -69,7 +69,7 @@ impl<E: Env> PinProtocol<E> {
         &self,
         peer_cose_key: CoseKey,
         pin_uv_auth_protocol: PinUvAuthProtocol,
-    ) -> Result<SharedSecret<E>, Ctap2StatusCode> {
+    ) -> CtapResult<SharedSecret<E>> {
         let (x_bytes, y_bytes) = peer_cose_key.try_into_ecdh_coordinates()?;
         let pk = EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
             .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
@@ -119,7 +119,7 @@ pub fn verify_pin_uv_auth_token<E: Env>(
     message: &[u8],
     signature: &[u8],
     pin_uv_auth_protocol: PinUvAuthProtocol,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     match pin_uv_auth_protocol {
         PinUvAuthProtocol::V1 => verify_v1::<E>(token, message, signature),
         PinUvAuthProtocol::V2 => verify_v2::<E>(token, message, signature),
@@ -143,7 +143,7 @@ impl<E: Env> SharedSecret<E> {
     }
 
     /// Returns the encrypted plaintext.
-    pub fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    pub fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> CtapResult<Vec<u8>> {
         match self {
             SharedSecret::V1(s) => s.encrypt(env, plaintext),
             SharedSecret::V2(s) => s.encrypt(env, plaintext),
@@ -151,7 +151,7 @@ impl<E: Env> SharedSecret<E> {
     }
 
     /// Returns the decrypted ciphertext.
-    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
+    pub fn decrypt(&self, ciphertext: &[u8]) -> CtapResult<Secret<[u8]>> {
         match self {
             SharedSecret::V1(s) => s.decrypt(ciphertext),
             SharedSecret::V2(s) => s.decrypt(ciphertext),
@@ -159,7 +159,7 @@ impl<E: Env> SharedSecret<E> {
     }
 
     /// Verifies that the signature is a valid MAC for the given message.
-    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> CtapResult<()> {
         match self {
             SharedSecret::V1(s) => s.verify(message, signature),
             SharedSecret::V2(s) => s.verify(message, signature),
@@ -177,11 +177,7 @@ impl<E: Env> SharedSecret<E> {
     }
 }
 
-fn verify_v1<E: Env>(
-    key: &[u8; 32],
-    message: &[u8],
-    signature: &[u8],
-) -> Result<(), Ctap2StatusCode> {
+fn verify_v1<E: Env>(key: &[u8; 32], message: &[u8], signature: &[u8]) -> CtapResult<()> {
     if signature.len() != 16 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -192,11 +188,7 @@ fn verify_v1<E: Env>(
     }
 }
 
-fn verify_v2<E: Env>(
-    key: &[u8; 32],
-    message: &[u8],
-    signature: &[u8],
-) -> Result<(), Ctap2StatusCode> {
+fn verify_v2<E: Env>(key: &[u8; 32], message: &[u8], signature: &[u8]) -> CtapResult<()> {
     if signature.len() != 32 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -224,15 +216,15 @@ impl<E: Env> SharedSecretV1<E> {
         }
     }
 
-    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> CtapResult<Vec<u8>> {
         aes256_cbc_encrypt::<E>(env.rng(), &self.aes_key, plaintext, false)
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
+    fn decrypt(&self, ciphertext: &[u8]) -> CtapResult<Secret<[u8]>> {
         aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, false)
     }
 
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> CtapResult<()> {
         verify_v1::<E>(&self.common_secret, message, signature)
     }
 
@@ -262,15 +254,15 @@ impl<E: Env> SharedSecretV2<E> {
         }
     }
 
-    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    fn encrypt(&self, env: &mut E, plaintext: &[u8]) -> CtapResult<Vec<u8>> {
         aes256_cbc_encrypt::<E>(env.rng(), &self.aes_key, plaintext, true)
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) -> Result<Secret<[u8]>, Ctap2StatusCode> {
+    fn decrypt(&self, ciphertext: &[u8]) -> CtapResult<Secret<[u8]>> {
         aes256_cbc_decrypt::<E>(&self.aes_key, ciphertext, true)
     }
 
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Ctap2StatusCode> {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> CtapResult<()> {
         verify_v2::<E>(&self.hmac_key, message, signature)
     }
 

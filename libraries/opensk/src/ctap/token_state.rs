@@ -15,7 +15,7 @@
 use crate::api::clock::Clock;
 use crate::api::crypto::sha256::Sha256;
 use crate::ctap::client_pin::PinPermission;
-use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::{Env, Sha};
 use alloc::string::String;
 
@@ -59,7 +59,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Checks if the permission is granted.
-    pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
+    pub fn has_permission(&self, permission: PinPermission) -> CtapResult<()> {
         if permission as u8 & self.permissions_set != 0 {
             Ok(())
         } else {
@@ -68,7 +68,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Checks if there is no associated permissions RPID.
-    pub fn has_no_permissions_rp_id(&self) -> Result<(), Ctap2StatusCode> {
+    pub fn has_no_permissions_rp_id(&self) -> CtapResult<()> {
         if self.permissions_rp_id.is_some() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
@@ -76,7 +76,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Checks if the permissions RPID is associated.
-    pub fn has_permissions_rp_id(&self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+    pub fn has_permissions_rp_id(&self, rp_id: &str) -> CtapResult<()> {
         match &self.permissions_rp_id {
             Some(p) if rp_id == p => Ok(()),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),
@@ -84,7 +84,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Checks if the permissions RPID's association matches the hash.
-    pub fn has_permissions_rp_id_hash(&self, rp_id_hash: &[u8]) -> Result<(), Ctap2StatusCode> {
+    pub fn has_permissions_rp_id_hash(&self, rp_id_hash: &[u8]) -> CtapResult<()> {
         match &self.permissions_rp_id {
             Some(p) if rp_id_hash == Sha::<E>::digest(p.as_bytes()) => Ok(()),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID),

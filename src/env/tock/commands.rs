@@ -29,7 +29,7 @@ use opensk::ctap::data_formats::{
     extract_bool, extract_byte_string, extract_map, extract_unsigned, ok_or_missing,
 };
 use opensk::ctap::secret::Secret;
-use opensk::ctap::status_code::Ctap2StatusCode;
+use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use opensk::ctap::{cbor_read, cbor_write, Channel};
 use opensk::env::{Env, Sha};
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
@@ -58,7 +58,7 @@ fn process_cbor<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro
     env: &mut TockEnv<S, C>,
     bytes: &[u8],
     channel: Channel,
-) -> Result<Option<Vec<u8>>, Ctap2StatusCode> {
+) -> CtapResult<Option<Vec<u8>>> {
     match bytes[0] {
         VENDOR_COMMAND_CONFIGURE => {
             let decoded_cbor = cbor_read(&bytes[1..])?;
@@ -97,7 +97,7 @@ fn process_vendor_configure<
     params: VendorConfigureParameters,
     // Unused in std only
     _channel: Channel,
-) -> Result<VendorConfigureResponse, Ctap2StatusCode> {
+) -> CtapResult<VendorConfigureResponse> {
     if params.attestation_material.is_some() || params.lockdown {
         // This is removed in std so we don't need too many mocks in TockEnv.
         #[cfg(not(feature = "std"))]
@@ -154,7 +154,7 @@ fn process_vendor_upgrade<
 >(
     env: &mut TockEnv<S, C>,
     params: VendorUpgradeParameters,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     let VendorUpgradeParameters { offset, data, hash } = params;
     let calculated_hash = Sha::<TockEnv<S>>::digest(&data);
     if hash != calculated_hash {
@@ -171,7 +171,7 @@ fn process_vendor_upgrade_info<
     C: platform::subscribe::Config + platform::allow_ro::Config,
 >(
     env: &mut TockEnv<S, C>,
-) -> Result<VendorUpgradeInfoResponse, Ctap2StatusCode> {
+) -> CtapResult<VendorUpgradeInfoResponse> {
     let upgrade_locations = env
         .upgrade_storage()
         .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND)?;
@@ -189,7 +189,7 @@ pub struct AttestationMaterial {
 impl TryFrom<cbor::Value> for AttestationMaterial {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => certificate,
@@ -218,7 +218,7 @@ pub struct VendorConfigureParameters {
 impl TryFrom<cbor::Value> for VendorConfigureParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => lockdown,
@@ -246,7 +246,7 @@ pub struct VendorUpgradeParameters {
 impl TryFrom<cbor::Value> for VendorUpgradeParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => offset,

@@ -15,6 +15,7 @@
 use super::status_code::Ctap2StatusCode;
 use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_SIZE};
 use crate::api::private_key::PrivateKey;
+use crate::ctap::status_code::CtapResult;
 use crate::env::{AesKey, Env};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -44,7 +45,7 @@ pub struct PublicKeyCredentialRpEntity {
 impl TryFrom<cbor::Value> for PublicKeyCredentialRpEntity {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "id" => rp_id,
@@ -88,7 +89,7 @@ pub struct PublicKeyCredentialUserEntity {
 impl TryFrom<cbor::Value> for PublicKeyCredentialUserEntity {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "id" => user_id,
@@ -147,7 +148,7 @@ impl From<PublicKeyCredentialType> for cbor::Value {
 impl TryFrom<cbor::Value> for PublicKeyCredentialType {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         let cred_type_string = extract_text_string(cbor_value)?;
         match &cred_type_string[..] {
             "public-key" => Ok(PublicKeyCredentialType::PublicKey),
@@ -167,7 +168,7 @@ pub struct PublicKeyCredentialParameter {
 impl TryFrom<cbor::Value> for PublicKeyCredentialParameter {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "alg" => alg,
@@ -216,7 +217,7 @@ impl From<AuthenticatorTransport> for cbor::Value {
 impl TryFrom<cbor::Value> for AuthenticatorTransport {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         let transport_string = extract_text_string(cbor_value)?;
         match &transport_string[..] {
             "usb" => Ok(AuthenticatorTransport::Usb),
@@ -240,7 +241,7 @@ pub struct PublicKeyCredentialDescriptor {
 impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "id" => key_id,
@@ -257,7 +258,7 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
                 let transports = transport_vec
                     .into_iter()
                     .map(AuthenticatorTransport::try_from)
-                    .collect::<Result<Vec<AuthenticatorTransport>, Ctap2StatusCode>>()?;
+                    .collect::<CtapResult<Vec<AuthenticatorTransport>>>()?;
                 Some(transports)
             }
             None => None,
@@ -294,7 +295,7 @@ pub struct MakeCredentialExtensions {
 impl TryFrom<cbor::Value> for MakeCredentialExtensions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "credBlob" => cred_blob,
@@ -338,7 +339,7 @@ pub struct GetAssertionExtensions {
 impl TryFrom<cbor::Value> for GetAssertionExtensions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "credBlob" => cred_blob,
@@ -377,7 +378,7 @@ pub struct GetAssertionHmacSecretInput {
 impl TryFrom<cbor::Value> for GetAssertionHmacSecretInput {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 1 => key_agreement,
@@ -412,7 +413,7 @@ pub struct MakeCredentialOptions {
 impl TryFrom<cbor::Value> for MakeCredentialOptions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "rk" => rk,
@@ -458,7 +459,7 @@ impl Default for GetAssertionOptions {
 impl TryFrom<cbor::Value> for GetAssertionOptions {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 "rk" => rk,
@@ -536,7 +537,7 @@ impl From<i64> for SignatureAlgorithm {
 impl TryFrom<cbor::Value> for SignatureAlgorithm {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         extract_integer(cbor_value).map(SignatureAlgorithm::from)
     }
 }
@@ -567,7 +568,7 @@ impl From<CredentialProtectionPolicy> for cbor::Value {
 impl TryFrom<cbor::Value> for CredentialProtectionPolicy {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         match extract_integer(cbor_value)? {
             0x01 => Ok(CredentialProtectionPolicy::UserVerificationOptional),
             0x02 => Ok(CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIdList),
@@ -637,7 +638,7 @@ impl PublicKeyCredentialSource {
         self,
         rng: &mut E::Rng,
         wrap_key: &AesKey<E>,
-    ) -> Result<cbor::Value, Ctap2StatusCode> {
+    ) -> CtapResult<cbor::Value> {
         Ok(cbor_map_options! {
             PublicKeyCredentialSourceField::CredentialId => Some(self.credential_id),
             PublicKeyCredentialSourceField::RpId => Some(self.rp_id),
@@ -653,10 +654,7 @@ impl PublicKeyCredentialSource {
         })
     }
 
-    pub fn from_cbor<E: Env>(
-        wrap_key: &AesKey<E>,
-        cbor_value: cbor::Value,
-    ) -> Result<Self, Ctap2StatusCode> {
+    pub fn from_cbor<E: Env>(wrap_key: &AesKey<E>, cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 PublicKeyCredentialSourceField::CredentialId => credential_id,
@@ -816,7 +814,7 @@ impl CoseKey {
 impl TryFrom<cbor::Value> for CoseKey {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 // This is sorted correctly, negative encoding is bigger.
@@ -902,7 +900,7 @@ pub enum PinUvAuthProtocol {
 impl TryFrom<cbor::Value> for PinUvAuthProtocol {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         match extract_unsigned(cbor_value)? {
             1 => Ok(PinUvAuthProtocol::V1),
             2 => Ok(PinUvAuthProtocol::V2),
@@ -934,7 +932,7 @@ impl From<ClientPinSubCommand> for cbor::Value {
 impl TryFrom<cbor::Value> for ClientPinSubCommand {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
             0x01 => Ok(ClientPinSubCommand::GetPinRetries),
@@ -968,7 +966,7 @@ impl From<ConfigSubCommand> for cbor::Value {
 impl TryFrom<cbor::Value> for ConfigSubCommand {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
             0x01 => Ok(ConfigSubCommand::EnableEnterpriseAttestation),
@@ -1005,7 +1003,7 @@ pub struct SetMinPinLengthParams {
 impl TryFrom<cbor::Value> for SetMinPinLengthParams {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => new_min_pin_length,
@@ -1025,7 +1023,7 @@ impl TryFrom<cbor::Value> for SetMinPinLengthParams {
                 extract_array(entry)?
                     .into_iter()
                     .map(extract_text_string)
-                    .collect::<Result<Vec<String>, Ctap2StatusCode>>()?,
+                    .collect::<CtapResult<Vec<String>>>()?,
             ),
             None => None,
         };
@@ -1064,7 +1062,7 @@ pub enum EnterpriseAttestationMode {
 impl TryFrom<u64> for EnterpriseAttestationMode {
     type Error = Ctap2StatusCode;
 
-    fn try_from(value: u64) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(value: u64) -> CtapResult<Self> {
         match value {
             1 => Ok(EnterpriseAttestationMode::VendorFacilitated),
             2 => Ok(EnterpriseAttestationMode::PlatformManaged),
@@ -1094,7 +1092,7 @@ impl From<CredentialManagementSubCommand> for cbor::Value {
 impl TryFrom<cbor::Value> for CredentialManagementSubCommand {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         let subcommand_int = extract_unsigned(cbor_value)?;
         match subcommand_int {
             0x01 => Ok(CredentialManagementSubCommand::GetCredsMetadata),
@@ -1119,7 +1117,7 @@ pub struct CredentialManagementSubCommandParameters {
 impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => rp_id_hash,
@@ -1153,27 +1151,27 @@ impl From<CredentialManagementSubCommandParameters> for cbor::Value {
     }
 }
 
-fn ok_or_cbor_type<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
+fn ok_or_cbor_type<T>(value_option: Option<T>) -> CtapResult<T> {
     value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
 }
 
-pub fn extract_unsigned(cbor_value: cbor::Value) -> Result<u64, Ctap2StatusCode> {
+pub fn extract_unsigned(cbor_value: cbor::Value) -> CtapResult<u64> {
     ok_or_cbor_type(cbor_value.extract_unsigned())
 }
 
-pub fn extract_integer(cbor_value: cbor::Value) -> Result<i64, Ctap2StatusCode> {
+pub fn extract_integer(cbor_value: cbor::Value) -> CtapResult<i64> {
     ok_or_cbor_type(cbor_value.extract_integer())
 }
 
-pub fn extract_byte_string(cbor_value: cbor::Value) -> Result<Vec<u8>, Ctap2StatusCode> {
+pub fn extract_byte_string(cbor_value: cbor::Value) -> CtapResult<Vec<u8>> {
     ok_or_cbor_type(cbor_value.extract_byte_string())
 }
 
-pub fn extract_text_string(cbor_value: cbor::Value) -> Result<String, Ctap2StatusCode> {
+pub fn extract_text_string(cbor_value: cbor::Value) -> CtapResult<String> {
     ok_or_cbor_type(cbor_value.extract_text_string())
 }
 
-pub fn extract_array(cbor_value: cbor::Value) -> Result<Vec<cbor::Value>, Ctap2StatusCode> {
+pub fn extract_array(cbor_value: cbor::Value) -> CtapResult<Vec<cbor::Value>> {
     ok_or_cbor_type(cbor_value.extract_array())
 }
 
@@ -1183,11 +1181,11 @@ pub fn extract_map(
     ok_or_cbor_type(cbor_value.extract_map())
 }
 
-pub fn extract_bool(cbor_value: cbor::Value) -> Result<bool, Ctap2StatusCode> {
+pub fn extract_bool(cbor_value: cbor::Value) -> CtapResult<bool> {
     ok_or_cbor_type(cbor_value.extract_bool())
 }
 
-pub fn ok_or_missing<T>(value_option: Option<T>) -> Result<T, Ctap2StatusCode> {
+pub fn ok_or_missing<T>(value_option: Option<T>) -> CtapResult<T> {
     value_option.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
 }
 

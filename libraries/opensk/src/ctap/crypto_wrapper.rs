@@ -14,7 +14,7 @@
 
 use crate::api::crypto::aes256::Aes256;
 use crate::ctap::secret::Secret;
-use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::{AesKey, Env};
 use alloc::vec::Vec;
 use rand_core::RngCore;
@@ -25,7 +25,7 @@ pub fn aes256_cbc_encrypt<E: Env>(
     aes_key: &AesKey<E>,
     plaintext: &[u8],
     embeds_iv: bool,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
+) -> CtapResult<Vec<u8>> {
     if plaintext.len() % 16 != 0 {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
@@ -48,7 +48,7 @@ pub fn aes256_cbc_decrypt<E: Env>(
     aes_key: &AesKey<E>,
     ciphertext: &[u8],
     embeds_iv: bool,
-) -> Result<Secret<[u8]>, Ctap2StatusCode> {
+) -> CtapResult<Secret<[u8]>> {
     if ciphertext.len() % 16 != 0 || (embeds_iv && ciphertext.is_empty()) {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }

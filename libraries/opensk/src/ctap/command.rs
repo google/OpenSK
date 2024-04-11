@@ -24,6 +24,7 @@ use super::data_formats::{
 #[cfg(feature = "config_command")]
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::CtapResult;
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -70,7 +71,7 @@ impl Command {
     const AUTHENTICATOR_VENDOR_CREDENTIAL_MANAGEMENT: u8 = 0x41;
     const _AUTHENTICATOR_VENDOR_LAST: u8 = 0xBF;
 
-    pub fn deserialize(bytes: &[u8]) -> Result<Command, Ctap2StatusCode> {
+    pub fn deserialize(bytes: &[u8]) -> CtapResult<Command> {
         if bytes.is_empty() {
             // The error to return is not specified, missing parameter seems to fit best.
             return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER);
@@ -157,7 +158,7 @@ pub struct AuthenticatorMakeCredentialParameters {
 impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => client_data_hash,
@@ -181,7 +182,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         let pub_key_cred_params = cred_param_vec
             .into_iter()
             .map(PublicKeyCredentialParameter::try_from)
-            .collect::<Result<Vec<PublicKeyCredentialParameter>, Ctap2StatusCode>>()?;
+            .collect::<CtapResult<Vec<PublicKeyCredentialParameter>>>()?;
 
         let exclude_list = match exclude_list {
             Some(entry) => {
@@ -189,7 +190,7 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
                 let exclude_list = exclude_list_vec
                     .into_iter()
                     .map(PublicKeyCredentialDescriptor::try_from)
-                    .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
+                    .collect::<CtapResult<Vec<PublicKeyCredentialDescriptor>>>()?;
                 Some(exclude_list)
             }
             None => None,
@@ -244,7 +245,7 @@ pub struct AuthenticatorGetAssertionParameters {
 impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => rp_id,
@@ -266,7 +267,7 @@ impl TryFrom<cbor::Value> for AuthenticatorGetAssertionParameters {
                 let allow_list = allow_list_vec
                     .into_iter()
                     .map(PublicKeyCredentialDescriptor::try_from)
-                    .collect::<Result<Vec<PublicKeyCredentialDescriptor>, Ctap2StatusCode>>()?;
+                    .collect::<CtapResult<Vec<PublicKeyCredentialDescriptor>>>()?;
                 Some(allow_list)
             }
             None => None,
@@ -315,7 +316,7 @@ pub struct AuthenticatorClientPinParameters {
 impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => pin_uv_auth_protocol,
@@ -370,7 +371,7 @@ pub struct AuthenticatorLargeBlobsParameters {
 impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => get,
@@ -432,7 +433,7 @@ pub struct AuthenticatorConfigParameters {
 impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => sub_command,
@@ -474,7 +475,7 @@ pub struct AuthenticatorCredentialManagementParameters {
 impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
     type Error = Ctap2StatusCode;
 
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Ctap2StatusCode> {
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
         destructure_cbor_map! {
             let {
                 0x01 => sub_command,

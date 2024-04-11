@@ -18,7 +18,7 @@ use crate::api::persist::{Persist, PersistCredentialIter};
 use crate::ctap::data_formats::{
     extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
 };
-use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::{AesKey, Env};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 use sk_cbor::cbor_array_vec;
 
 /// Initializes the store by creating missing objects.
-pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn init(env: &mut impl Env) -> CtapResult<()> {
     env.persist().init()?;
     env.key_store().init()?;
     Ok(())
@@ -37,10 +37,7 @@ pub fn init(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
 /// # Errors
 ///
 /// Returns `CTAP2_ERR_VENDOR_INTERNAL_ERROR` if the key does not hold a valid credential.
-pub fn get_credential<E: Env>(
-    env: &mut E,
-    key: usize,
-) -> Result<PublicKeyCredentialSource, Ctap2StatusCode> {
+pub fn get_credential<E: Env>(env: &mut E, key: usize) -> CtapResult<PublicKeyCredentialSource> {
     let credential_entry = env.persist().credential_bytes(key)?;
     let wrap_key = env.key_store().wrap_key::<E>()?;
     deserialize_credential::<E>(&wrap_key, &credential_entry)
@@ -78,7 +75,7 @@ pub fn find_credential(
     env: &mut impl Env,
     rp_id: &str,
     credential_id: &[u8],
-) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+) -> CtapResult<Option<PublicKeyCredentialSource>> {
     let credential = match find_credential_item(env, credential_id) {
         Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS) => return Ok(None),
         Err(e) => return Err(e),
@@ -96,7 +93,7 @@ pub fn find_credential(
 pub fn store_credential<E: Env>(
     env: &mut E,
     new_credential: PublicKeyCredentialSource,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     // Holds the key of the existing credential if this is an update.
     let mut old_key = None;
     let mut iter_result = Ok(());
@@ -132,7 +129,7 @@ pub fn store_credential<E: Env>(
 /// # Errors
 ///
 /// Returns `CTAP2_ERR_NO_CREDENTIALS` if the credential is not found.
-pub fn delete_credential(env: &mut impl Env, credential_id: &[u8]) -> Result<(), Ctap2StatusCode> {
+pub fn delete_credential(env: &mut impl Env, credential_id: &[u8]) -> CtapResult<()> {
     let (key, _) = find_credential_item(env, credential_id)?;
     env.persist().remove_credential(key)
 }
@@ -146,7 +143,7 @@ pub fn update_credential<E: Env>(
     env: &mut E,
     credential_id: &[u8],
     user: PublicKeyCredentialUserEntity,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     let (key, mut credential) = find_credential_item(env, credential_id)?;
     credential.user_name = user.user_name;
     credential.user_display_name = user.user_display_name;
@@ -157,12 +154,12 @@ pub fn update_credential<E: Env>(
 }
 
 /// Returns the number of credentials.
-pub fn count_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCode> {
+pub fn count_credentials(env: &mut impl Env) -> CtapResult<usize> {
     Ok(env.persist().iter_credentials()?.count())
 }
 
 /// Returns the estimated number of credentials that can still be stored.
-pub fn remaining_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCode> {
+pub fn remaining_credentials(env: &mut impl Env) -> CtapResult<usize> {
     env.customization()
         .max_supported_resident_keys()
         .checked_sub(count_credentials(env)?)
@@ -174,13 +171,13 @@ pub fn remaining_credentials(env: &mut impl Env) -> Result<usize, Ctap2StatusCod
 /// If an error is encountered during iteration, it is written to `result`.
 pub fn iter_credentials<'a, E: Env>(
     env: &'a mut E,
-    result: &'a mut Result<(), Ctap2StatusCode>,
+    result: &'a mut CtapResult<()>,
 ) -> Result<IterCredentials<'a, E>, Ctap2StatusCode> {
     IterCredentials::new(env, result)
 }
 
 /// Returns the next creation order.
-pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
+pub fn new_creation_order(env: &mut impl Env) -> CtapResult<u64> {
     let mut iter_result = Ok(());
     let iter = iter_credentials(env, &mut iter_result)?;
     let max = iter.map(|(_, credential)| credential.creation_order).max();
@@ -189,7 +186,7 @@ pub fn new_creation_order(env: &mut impl Env) -> Result<u64, Ctap2StatusCode> {
 }
 
 /// Returns the number of remaining PIN retries.
-pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
+pub fn pin_retries(env: &mut impl Env) -> CtapResult<u8> {
     Ok(env
         .customization()
         .max_pin_retries()
@@ -197,17 +194,17 @@ pub fn pin_retries(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
 }
 
 /// Decrements the number of remaining PIN retries.
-pub fn decr_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn decr_pin_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().incr_pin_fails()
 }
 
 /// Resets the number of remaining PIN retries.
-pub fn reset_pin_retries(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn reset_pin_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().reset_pin_retries()
 }
 
 /// Returns the minimum PIN length.
-pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
+pub fn min_pin_length(env: &mut impl Env) -> CtapResult<u8> {
     Ok(env
         .persist()
         .min_pin_length()?
@@ -216,13 +213,13 @@ pub fn min_pin_length(env: &mut impl Env) -> Result<u8, Ctap2StatusCode> {
 
 /// Sets the minimum PIN length.
 #[cfg(feature = "config_command")]
-pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> Result<(), Ctap2StatusCode> {
+pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> CtapResult<()> {
     env.persist().set_min_pin_length(min_pin_length)
 }
 
 /// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
 /// allowed.
-pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2StatusCode> {
+pub fn min_pin_length_rp_ids(env: &mut impl Env) -> CtapResult<Vec<String>> {
     let rp_ids_bytes = env.persist().min_pin_length_rp_ids_bytes()?;
     let rp_ids = if rp_ids_bytes.is_empty() {
         Some(env.customization().default_min_pin_length_rp_ids())
@@ -238,7 +235,7 @@ pub fn min_pin_length_rp_ids(env: &mut impl Env) -> Result<Vec<String>, Ctap2Sta
 pub fn set_min_pin_length_rp_ids(
     env: &mut impl Env,
     mut min_pin_length_rp_ids: Vec<String>,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     for rp_id in env.customization().default_min_pin_length_rp_ids() {
         if !min_pin_length_rp_ids.contains(&rp_id) {
             min_pin_length_rp_ids.push(rp_id);
@@ -255,7 +252,7 @@ pub fn set_min_pin_length_rp_ids(
 ///
 /// Without the AuthenticatorConfig command, customization determines the result.
 #[cfg(not(feature = "config_command"))]
-pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+pub fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
     Ok(env.customization().enterprise_attestation_mode().is_some())
 }
 
@@ -263,18 +260,18 @@ pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCod
 ///
 /// Use the AuthenticatorConfig command to turn it on.
 #[cfg(feature = "config_command")]
-pub fn enterprise_attestation(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+pub fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
     env.persist().enterprise_attestation()
 }
 
 /// Marks enterprise attestation as enabled.
 #[cfg(feature = "config_command")]
-pub fn enable_enterprise_attestation(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<()> {
     env.persist().enable_enterprise_attestation()
 }
 
 /// Returns whether alwaysUv is enabled.
-pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
+pub fn has_always_uv(env: &mut impl Env) -> CtapResult<bool> {
     if env.customization().enforce_always_uv() {
         return Ok(true);
     }
@@ -283,7 +280,7 @@ pub fn has_always_uv(env: &mut impl Env) -> Result<bool, Ctap2StatusCode> {
 
 /// Enables alwaysUv, when disabled, and vice versa.
 #[cfg(feature = "config_command")]
-pub fn toggle_always_uv(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn toggle_always_uv(env: &mut impl Env) -> CtapResult<()> {
     if env.customization().enforce_always_uv() {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
@@ -302,15 +299,12 @@ pub struct IterCredentials<'a, E: Env> {
     ///
     /// It starts as success and gets written at most once with an error if something fails. The
     /// iteration stops as soon as an error is encountered.
-    result: &'a mut Result<(), Ctap2StatusCode>,
+    result: &'a mut CtapResult<()>,
 }
 
 impl<'a, E: Env> IterCredentials<'a, E> {
     /// Creates a credential iterator.
-    fn new(
-        env: &'a mut E,
-        result: &'a mut Result<(), Ctap2StatusCode>,
-    ) -> Result<Self, Ctap2StatusCode> {
+    fn new(env: &'a mut E, result: &'a mut CtapResult<()>) -> CtapResult<Self> {
         let wrap_key = env.key_store().wrap_key::<E>()?;
         let iter = env.persist().iter_credentials()?;
         Ok(IterCredentials {
@@ -362,7 +356,7 @@ fn serialize_credential<E: Env>(
     env: &mut E,
     wrap_key: &AesKey<E>,
     credential: PublicKeyCredentialSource,
-) -> Result<Vec<u8>, Ctap2StatusCode> {
+) -> CtapResult<Vec<u8>> {
     let mut data = Vec::new();
     super::cbor_write(credential.to_cbor::<E>(env.rng(), wrap_key)?, &mut data)?;
     Ok(data)
@@ -375,13 +369,13 @@ fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
         .ok()?
         .into_iter()
         .map(extract_text_string)
-        .collect::<Result<Vec<String>, Ctap2StatusCode>>()
+        .collect::<CtapResult<Vec<String>>>()
         .ok()
 }
 
 /// Serializes a list of RP IDs to storage representation.
 #[cfg(feature = "config_command")]
-fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> Result<Vec<u8>, Ctap2StatusCode> {
+fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> CtapResult<Vec<u8>> {
     let mut data = Vec::new();
     super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;
     Ok(data)

@@ -16,7 +16,7 @@ use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::secret::Secret;
-use crate::ctap::status_code::Ctap2StatusCode;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::{AesKey, EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -89,7 +89,7 @@ impl PrivateKey {
     }
 
     /// Returns the ECDSA private key.
-    pub fn ecdsa_key<E: Env>(&self) -> Result<EcdsaSk<E>, Ctap2StatusCode> {
+    pub fn ecdsa_key<E: Env>(&self) -> CtapResult<EcdsaSk<E>> {
         match self {
             PrivateKey::Ecdsa(bytes) => ecdsa_key_from_bytes::<E>(bytes),
             #[allow(unreachable_patterns)]
@@ -98,7 +98,7 @@ impl PrivateKey {
     }
 
     /// Returns the corresponding public key.
-    pub fn get_pub_key<E: Env>(&self) -> Result<CoseKey, Ctap2StatusCode> {
+    pub fn get_pub_key<E: Env>(&self) -> CtapResult<CoseKey> {
         Ok(match self {
             PrivateKey::Ecdsa(bytes) => {
                 CoseKey::from_ecdsa_public_key(ecdsa_key_from_bytes::<E>(bytes)?.public_key())
@@ -109,7 +109,7 @@ impl PrivateKey {
     }
 
     /// Returns the encoded signature for a given message.
-    pub fn sign_and_encode<E: Env>(&self, message: &[u8]) -> Result<Vec<u8>, Ctap2StatusCode> {
+    pub fn sign_and_encode<E: Env>(&self, message: &[u8]) -> CtapResult<Vec<u8>> {
         Ok(match self {
             PrivateKey::Ecdsa(bytes) => ecdsa_key_from_bytes::<E>(bytes)?.sign(message).to_der(),
             #[cfg(feature = "ed25519")]
@@ -141,7 +141,7 @@ impl PrivateKey {
         &self,
         rng: &mut E::Rng,
         wrap_key: &AesKey<E>,
-    ) -> Result<cbor::Value, Ctap2StatusCode> {
+    ) -> CtapResult<cbor::Value> {
         let bytes = self.to_bytes();
         let wrapped_bytes = aes256_cbc_encrypt::<E>(rng, wrap_key, &bytes, true)?;
         Ok(cbor_array![
@@ -150,10 +150,7 @@ impl PrivateKey {
         ])
     }
 
-    pub fn from_cbor<E: Env>(
-        wrap_key: &AesKey<E>,
-        cbor_value: cbor::Value,
-    ) -> Result<Self, Ctap2StatusCode> {
+    pub fn from_cbor<E: Env>(wrap_key: &AesKey<E>, cbor_value: cbor::Value) -> CtapResult<Self> {
         let mut array = extract_array(cbor_value)?;
         if array.len() != 2 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
@@ -171,7 +168,7 @@ impl PrivateKey {
     }
 }
 
-fn ecdsa_key_from_bytes<E: Env>(bytes: &[u8; 32]) -> Result<EcdsaSk<E>, Ctap2StatusCode> {
+fn ecdsa_key_from_bytes<E: Env>(bytes: &[u8; 32]) -> CtapResult<EcdsaSk<E>> {
     EcdsaSk::<E>::from_slice(bytes).ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 

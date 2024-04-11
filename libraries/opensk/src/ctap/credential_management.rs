@@ -25,6 +25,7 @@ use super::{Channel, StatefulCommand, StatefulPermission};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::ctap::data_formats::CredentialProtectionPolicy;
+use crate::ctap::status_code::CtapResult;
 use crate::ctap::storage;
 use crate::env::{Env, Sha};
 use alloc::collections::BTreeSet;
@@ -33,7 +34,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 /// Generates a set with all existing RP IDs.
-fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2StatusCode> {
+fn get_stored_rp_ids(env: &mut impl Env) -> CtapResult<BTreeSet<String>> {
     let mut rp_set = BTreeSet::new();
     let mut iter_result = Ok(());
     for (_, credential) in storage::iter_credentials(env, &mut iter_result)? {
@@ -47,7 +48,7 @@ fn get_stored_rp_ids(env: &mut impl Env) -> Result<BTreeSet<String>, Ctap2Status
 fn enumerate_rps_response<E: Env>(
     rp_id: String,
     total_rps: Option<u64>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let rp_id_hash = Some(Sha::<E>::digest(rp_id.as_bytes()).to_vec());
     let rp = Some(PublicKeyCredentialRpEntity {
         rp_id,
@@ -67,7 +68,7 @@ fn enumerate_credentials_response<E: Env>(
     env: &mut E,
     credential: PublicKeyCredentialSource,
     total_credentials: Option<u64>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let PublicKeyCredentialSource {
         key_type,
         credential_id,
@@ -115,7 +116,7 @@ fn check_rp_id_permissions<E: Env>(
     env: &mut E,
     client_pin: &mut ClientPin<E>,
     credential_id: &[u8],
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     // Pre-check a sufficient condition before calling the store.
     if client_pin.has_no_rp_id_permission().is_ok() {
         return Ok(());
@@ -127,7 +128,7 @@ fn check_rp_id_permissions<E: Env>(
 /// Processes the subcommand getCredsMetadata for CredentialManagement.
 fn process_get_creds_metadata(
     env: &mut impl Env,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     Ok(AuthenticatorCredentialManagementResponse {
         existing_resident_credentials_count: Some(storage::count_credentials(env)? as u64),
         max_possible_remaining_resident_credentials_count: Some(
@@ -142,7 +143,7 @@ fn process_enumerate_rps_begin<E: Env>(
     env: &mut E,
     stateful_command_permission: &mut StatefulPermission<E>,
     channel: Channel,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let mut rp_set = get_stored_rp_ids(env)?;
     let total_rps = rp_set.len();
 
@@ -159,7 +160,7 @@ fn process_enumerate_rps_begin<E: Env>(
 fn process_enumerate_rps_get_next_rp<E: Env>(
     env: &mut E,
     stateful_command_permission: &mut StatefulPermission<E>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let rp_id_index = stateful_command_permission.next_enumerate_rp(env)?;
     let rp_set = get_stored_rp_ids(env)?;
     // A BTreeSet is already sorted.
@@ -177,7 +178,7 @@ fn process_enumerate_credentials_begin<E: Env>(
     client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
     channel: Channel,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let rp_id_hash = sub_command_params
         .rp_id_hash
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
@@ -214,7 +215,7 @@ fn process_enumerate_credentials_begin<E: Env>(
 fn process_enumerate_credentials_get_next_credential<E: Env>(
     env: &mut E,
     stateful_command_permission: &mut StatefulPermission<E>,
-) -> Result<AuthenticatorCredentialManagementResponse, Ctap2StatusCode> {
+) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let credential_key = stateful_command_permission.next_enumerate_credential(env)?;
     let credential = storage::get_credential(env, credential_key)?;
     enumerate_credentials_response(env, credential, None)
@@ -225,7 +226,7 @@ fn process_delete_credential<E: Env>(
     env: &mut E,
     client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     let credential_id = sub_command_params
         .credential_id
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
@@ -239,7 +240,7 @@ fn process_update_user_information<E: Env>(
     env: &mut E,
     client_pin: &mut ClientPin<E>,
     sub_command_params: CredentialManagementSubCommandParameters,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     let credential_id = sub_command_params
         .credential_id
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
@@ -258,7 +259,7 @@ pub fn process_credential_management<E: Env>(
     client_pin: &mut ClientPin<E>,
     cred_management_params: AuthenticatorCredentialManagementParameters,
     channel: Channel,
-) -> Result<ResponseData, Ctap2StatusCode> {
+) -> CtapResult<ResponseData> {
     let AuthenticatorCredentialManagementParameters {
         sub_command,
         sub_command_params,

@@ -19,14 +19,13 @@ use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use crate::api::customization::Customization;
 use crate::api::persist::Persist;
+use crate::ctap::status_code::CtapResult;
 use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec;
 
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
-fn process_enable_enterprise_attestation(
-    env: &mut impl Env,
-) -> Result<ResponseData, Ctap2StatusCode> {
+fn process_enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<ResponseData> {
     if env.customization().enterprise_attestation_mode().is_some() {
         storage::enable_enterprise_attestation(env)?;
         Ok(ResponseData::AuthenticatorConfig)
@@ -36,7 +35,7 @@ fn process_enable_enterprise_attestation(
 }
 
 /// Processes the subcommand toggleAlwaysUv for AuthenticatorConfig.
-fn process_toggle_always_uv(env: &mut impl Env) -> Result<ResponseData, Ctap2StatusCode> {
+fn process_toggle_always_uv(env: &mut impl Env) -> CtapResult<ResponseData> {
     storage::toggle_always_uv(env)?;
     Ok(ResponseData::AuthenticatorConfig)
 }
@@ -45,7 +44,7 @@ fn process_toggle_always_uv(env: &mut impl Env) -> Result<ResponseData, Ctap2Sta
 fn process_set_min_pin_length(
     env: &mut impl Env,
     params: SetMinPinLengthParams,
-) -> Result<ResponseData, Ctap2StatusCode> {
+) -> CtapResult<ResponseData> {
     let SetMinPinLengthParams {
         new_min_pin_length,
         min_pin_length_rp_ids,
@@ -78,7 +77,7 @@ pub fn process_config<E: Env>(
     env: &mut E,
     client_pin: &mut ClientPin<E>,
     params: AuthenticatorConfigParameters,
-) -> Result<ResponseData, Ctap2StatusCode> {
+) -> CtapResult<ResponseData> {
     let AuthenticatorConfigParameters {
         sub_command,
         sub_command_params,

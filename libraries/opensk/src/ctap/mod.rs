@@ -57,7 +57,7 @@ use self::response::{
     AuthenticatorMakeCredentialResponse, ResponseData,
 };
 use self::secret::Secret;
-use self::status_code::Ctap2StatusCode;
+use self::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(feature = "with_ctap1")]
 use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
@@ -175,18 +175,18 @@ pub enum Channel {
 }
 
 // Helpers to perform CBOR read/write while respecting CTAP2 nesting limits.
-pub fn cbor_read(encoded_cbor: &[u8]) -> Result<cbor::Value, Ctap2StatusCode> {
+pub fn cbor_read(encoded_cbor: &[u8]) -> CtapResult<cbor::Value> {
     cbor::reader::read_nested(encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
 }
 
-pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> Result<(), Ctap2StatusCode> {
+pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> CtapResult<()> {
     cbor::writer::write_nested(value, encoded_cbor, Some(MAX_CBOR_NESTING_DEPTH))
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
 /// Resets the all state for a CTAP Reset command.
-pub fn reset(env: &mut impl Env) -> Result<(), Ctap2StatusCode> {
+pub fn reset(env: &mut impl Env) -> CtapResult<()> {
     env.persist().reset()?;
     env.key_store().reset()?;
     storage::init(env)
@@ -336,7 +336,7 @@ fn send_keepalive_up_needed<E: Env>(
 /// Blocks for user presence.
 ///
 /// Returns an error in case of timeout, user declining presence request, or keepalive error.
-pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> Result<(), Ctap2StatusCode> {
+pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
     env.user_presence().check_init();
 
     // The timeout is N times the keepalive delay.
@@ -480,7 +480,7 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Gets a reference to the current command state, if any exists.
-    pub fn get_command(&mut self, env: &mut E) -> Result<&StatefulCommand, Ctap2StatusCode> {
+    pub fn get_command(&mut self, env: &mut E) -> CtapResult<&StatefulCommand> {
         self.clear_timer(env);
         self.command_type
             .as_ref()
@@ -526,7 +526,7 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Returns the index to the next RP ID for enumeration and advances it.
-    pub fn next_enumerate_rp(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
+    pub fn next_enumerate_rp(&mut self, env: &mut E) -> CtapResult<usize> {
         self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateRps(rp_id_index)) = &mut self.command_type {
             let current_index = *rp_id_index;
@@ -538,7 +538,7 @@ impl<E: Env> StatefulPermission<E> {
     }
 
     /// Returns the next storage credential key for enumeration and advances it.
-    pub fn next_enumerate_credential(&mut self, env: &mut E) -> Result<usize, Ctap2StatusCode> {
+    pub fn next_enumerate_credential(&mut self, env: &mut E) -> CtapResult<usize> {
         self.clear_timer(env);
         if let Some(StatefulCommand::EnumerateCredentials(rp_credentials)) = &mut self.command_type
         {
@@ -596,10 +596,7 @@ impl<E: Env> CtapState<E> {
         }
     }
 
-    pub fn increment_global_signature_counter(
-        &mut self,
-        env: &mut E,
-    ) -> Result<(), Ctap2StatusCode> {
+    pub fn increment_global_signature_counter(&mut self, env: &mut E) -> CtapResult<()> {
         if env.customization().use_signature_counter() {
             let increment = env.rng().next_u32() % 8 + 1;
             env.persist().incr_global_signature_counter(increment)?;
@@ -611,7 +608,7 @@ impl<E: Env> CtapState<E> {
     // If alwaysUv is enabled and the authenticator does not support internal UV,
     // CTAP1 needs to be disabled.
     #[cfg(feature = "with_ctap1")]
-    pub fn allows_ctap1(&self, env: &mut E) -> Result<bool, Ctap2StatusCode> {
+    pub fn allows_ctap1(&self, env: &mut E) -> CtapResult<bool> {
         Ok(!storage::has_always_uv(env)?)
     }
 
@@ -670,7 +667,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         command: Command,
         channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         // The auth token timeouts are checked once here, to make error codes consistent. If your
         // auth token hasn't timed out now, you can fully use it for this command.
         self.client_pin.update_timeouts(env);
@@ -708,7 +705,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         command: Command,
         channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         match command {
             Command::AuthenticatorMakeCredential(params) => {
                 self.process_make_credential(env, params, channel)
@@ -744,7 +741,7 @@ impl<E: Env> CtapState<E> {
         &mut self,
         env: &mut E,
         command: Command,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         match command {
             Command::AuthenticatorGetInfo => self.process_get_info(env),
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
@@ -757,7 +754,7 @@ impl<E: Env> CtapState<E> {
         pin_uv_auth_param: &Option<Vec<u8>>,
         pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
         channel: Channel,
-    ) -> Result<(), Ctap2StatusCode> {
+    ) -> CtapResult<()> {
         if let Some(auth_param) = &pin_uv_auth_param {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
@@ -778,7 +775,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         make_credential_params: AuthenticatorMakeCredentialParameters,
         channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         let AuthenticatorMakeCredentialParameters {
             client_data_hash,
             rp,
@@ -1043,7 +1040,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         private_key: &PrivateKey,
         has_uv: bool,
-    ) -> Result<Secret<[u8; HASH_SIZE]>, Ctap2StatusCode> {
+    ) -> CtapResult<Secret<[u8; HASH_SIZE]>> {
         let private_key_bytes = private_key.to_bytes();
         let salt = array_ref!(private_key_bytes, 0, 32);
         let key = env.key_store().cred_random(has_uv)?;
@@ -1061,7 +1058,7 @@ impl<E: Env> CtapState<E> {
         assertion_input: AssertionInput,
         number_of_credentials: Option<usize>,
         is_next: bool,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         let AssertionInput {
             client_data_hash,
             mut auth_data,
@@ -1149,7 +1146,7 @@ impl<E: Env> CtapState<E> {
         rp_id: &str,
         rp_id_hash: &[u8],
         has_uv: bool,
-    ) -> Result<Option<PublicKeyCredentialSource>, Ctap2StatusCode> {
+    ) -> CtapResult<Option<PublicKeyCredentialSource>> {
         for allowed_credential in allow_list {
             let credential = filter_listed_resident_credential(
                 storage::find_credential(env, rp_id, &allowed_credential.key_id)?,
@@ -1175,7 +1172,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         get_assertion_params: AuthenticatorGetAssertionParameters,
         channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         let AuthenticatorGetAssertionParameters {
             rp_id,
             client_data_hash,
@@ -1307,7 +1304,7 @@ impl<E: Env> CtapState<E> {
         )
     }
 
-    fn process_get_next_assertion(&mut self, env: &mut E) -> Result<ResponseData, Ctap2StatusCode> {
+    fn process_get_next_assertion(&mut self, env: &mut E) -> CtapResult<ResponseData> {
         let (assertion_input, credential_key) = self
             .stateful_command_permission
             .next_assertion_credential(env)?;
@@ -1315,7 +1312,7 @@ impl<E: Env> CtapState<E> {
         self.assertion_response(env, credential, assertion_input, None, true)
     }
 
-    fn process_get_info(&self, env: &mut E) -> Result<ResponseData, Ctap2StatusCode> {
+    fn process_get_info(&self, env: &mut E) -> CtapResult<ResponseData> {
         let has_always_uv = storage::has_always_uv(env)?;
         #[cfg_attr(not(feature = "with_ctap1"), allow(unused_mut))]
         let mut versions = vec![
@@ -1394,11 +1391,7 @@ impl<E: Env> CtapState<E> {
         ))
     }
 
-    fn process_reset(
-        &mut self,
-        env: &mut E,
-        channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    fn process_reset(&mut self, env: &mut E, channel: Channel) -> CtapResult<ResponseData> {
         if !matches!(
             self.stateful_command_permission.get_command(env)?,
             StatefulCommand::Reset
@@ -1418,11 +1411,7 @@ impl<E: Env> CtapState<E> {
         Ok(ResponseData::AuthenticatorReset)
     }
 
-    fn process_selection(
-        &self,
-        env: &mut E,
-        channel: Channel,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    fn process_selection(&self, env: &mut E, channel: Channel) -> CtapResult<ResponseData> {
         check_user_presence(env, channel)?;
         Ok(ResponseData::AuthenticatorSelection)
     }
@@ -1432,7 +1421,7 @@ impl<E: Env> CtapState<E> {
         env: &mut E,
         rp_id_hash: &[u8],
         flag_byte: u8,
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+    ) -> CtapResult<Vec<u8>> {
         let mut auth_data = vec![];
         auth_data.extend(rp_id_hash);
         auth_data.push(flag_byte);
@@ -1490,7 +1479,7 @@ mod test {
     const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
     fn check_make_response(
-        make_credential_response: &Result<ResponseData, Ctap2StatusCode>,
+        make_credential_response: &CtapResult<ResponseData>,
         flags: u8,
         expected_aaguid: &[u8],
         expected_credential_id_size: u8,
@@ -2177,7 +2166,7 @@ mod test {
         );
     }
 
-    fn check_ep(make_credential_response: Result<ResponseData, Ctap2StatusCode>, has_ep: bool) {
+    fn check_ep(make_credential_response: CtapResult<ResponseData>, has_ep: bool) {
         let ep_att = if has_ep { Some(true) } else { None };
         match make_credential_response.unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
@@ -2315,7 +2304,7 @@ mod test {
     }
 
     fn check_assertion_response_with_user(
-        response: Result<ResponseData, Ctap2StatusCode>,
+        response: CtapResult<ResponseData>,
         expected_user: Option<PublicKeyCredentialUserEntity>,
         flags: u8,
         signature_counter: u32,
@@ -2350,7 +2339,7 @@ mod test {
     }
 
     fn check_assertion_response_with_extension(
-        response: Result<ResponseData, Ctap2StatusCode>,
+        response: CtapResult<ResponseData>,
         expected_user_id: Option<Vec<u8>>,
         signature_counter: u32,
         expected_number_of_credentials: Option<u64>,
@@ -2373,7 +2362,7 @@ mod test {
     }
 
     fn check_assertion_response(
-        response: Result<ResponseData, Ctap2StatusCode>,
+        response: CtapResult<ResponseData>,
         expected_user_id: Vec<u8>,
         signature_counter: u32,
         expected_number_of_credentials: Option<u64>,

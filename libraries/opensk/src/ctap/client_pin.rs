@@ -28,6 +28,7 @@ use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
+use crate::ctap::status_code::CtapResult;
 use crate::ctap::storage;
 #[cfg(test)]
 use crate::env::EcdhSk;
@@ -65,7 +66,7 @@ const PIN_PADDED_LENGTH: usize = 64;
 fn decrypt_pin<E: Env>(
     shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
-) -> Result<Secret<[u8]>, Ctap2StatusCode> {
+) -> CtapResult<Secret<[u8]>> {
     let decrypted_pin = shared_secret.decrypt(&new_pin_enc)?;
     if decrypted_pin.len() != PIN_PADDED_LENGTH {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
@@ -91,7 +92,7 @@ fn check_and_store_new_pin<E: Env>(
     env: &mut E,
     shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
-) -> Result<(), Ctap2StatusCode> {
+) -> CtapResult<()> {
     let pin = decrypt_pin(shared_secret, new_pin_enc)?;
     let min_pin_length = storage::min_pin_length(env)? as usize;
     let pin_length = str::from_utf8(&pin).unwrap_or("").chars().count();
@@ -168,7 +169,7 @@ impl<E: Env> ClientPin<E> {
         &self,
         pin_uv_auth_protocol: PinUvAuthProtocol,
         key_agreement: CoseKey,
-    ) -> Result<SharedSecret<E>, Ctap2StatusCode> {
+    ) -> CtapResult<SharedSecret<E>> {
         self.get_pin_protocol(pin_uv_auth_protocol)
             .decapsulate(key_agreement, pin_uv_auth_protocol)
     }
@@ -184,7 +185,7 @@ impl<E: Env> ClientPin<E> {
         pin_uv_auth_protocol: PinUvAuthProtocol,
         shared_secret: &SharedSecret<E>,
         pin_hash_enc: Vec<u8>,
-    ) -> Result<(), Ctap2StatusCode> {
+    ) -> CtapResult<()> {
         match env.persist().pin_hash()? {
             Some(pin_hash) => {
                 if self.consecutive_pin_mismatches >= 3 {
@@ -217,10 +218,7 @@ impl<E: Env> ClientPin<E> {
         Ok(())
     }
 
-    fn process_get_pin_retries(
-        &self,
-        env: &mut E,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    fn process_get_pin_retries(&self, env: &mut E) -> CtapResult<AuthenticatorClientPinResponse> {
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_uv_auth_token: None,
@@ -232,7 +230,7 @@ impl<E: Env> ClientPin<E> {
     fn process_get_key_agreement(
         &self,
         client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    ) -> CtapResult<AuthenticatorClientPinResponse> {
         let key_agreement = Some(
             self.get_pin_protocol(client_pin_params.pin_uv_auth_protocol)
                 .get_public_key(),
@@ -249,7 +247,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<(), Ctap2StatusCode> {
+    ) -> CtapResult<()> {
         let AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             key_agreement,
@@ -276,7 +274,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<(), Ctap2StatusCode> {
+    ) -> CtapResult<()> {
         let AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             key_agreement,
@@ -309,7 +307,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    ) -> CtapResult<AuthenticatorClientPinResponse> {
         let AuthenticatorClientPinParameters {
             pin_uv_auth_protocol,
             key_agreement,
@@ -357,12 +355,12 @@ impl<E: Env> ClientPin<E> {
         // If you want to support local user verification, implement this function.
         // Lacking a fingerprint reader, this subcommand is currently unsupported.
         _client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    ) -> CtapResult<AuthenticatorClientPinResponse> {
         // User verification is only supported through PIN currently.
         Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
     }
 
-    fn process_get_uv_retries(&self) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    fn process_get_uv_retries(&self) -> CtapResult<AuthenticatorClientPinResponse> {
         // User verification is only supported through PIN currently.
         Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
     }
@@ -371,7 +369,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         mut client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<AuthenticatorClientPinResponse, Ctap2StatusCode> {
+    ) -> CtapResult<AuthenticatorClientPinResponse> {
         // Mutating client_pin_params is just an optimization to move it into
         // process_get_pin_token, without cloning permissions_rp_id here.
         // getPinToken requires permissions* to be None.
@@ -399,7 +397,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         client_pin_params: AuthenticatorClientPinParameters,
-    ) -> Result<ResponseData, Ctap2StatusCode> {
+    ) -> CtapResult<ResponseData> {
         if !env.customization().allows_pin_protocol_v1()
             && client_pin_params.pin_uv_auth_protocol == PinUvAuthProtocol::V1
         {
@@ -441,7 +439,7 @@ impl<E: Env> ClientPin<E> {
         hmac_contents: &[u8],
         pin_uv_auth_param: &[u8],
         pin_uv_auth_protocol: PinUvAuthProtocol,
-    ) -> Result<(), Ctap2StatusCode> {
+    ) -> CtapResult<()> {
         if !self.pin_uv_auth_token_state.is_in_use() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
@@ -477,7 +475,7 @@ impl<E: Env> ClientPin<E> {
         env: &mut E,
         hmac_secret_input: GetAssertionHmacSecretInput,
         cred_random: &[u8; 32],
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+    ) -> CtapResult<Vec<u8>> {
         let GetAssertionHmacSecretInput {
             key_agreement,
             salt_enc,
@@ -523,7 +521,7 @@ impl<E: Env> ClientPin<E> {
     }
 
     /// Checks if user verification is cached for use of the pinUvAuthToken.
-    pub fn check_user_verified_flag(&mut self) -> Result<(), Ctap2StatusCode> {
+    pub fn check_user_verified_flag(&mut self) -> CtapResult<()> {
         if self.pin_uv_auth_token_state.get_user_verified_flag_value() {
             Ok(())
         } else {
@@ -532,27 +530,24 @@ impl<E: Env> ClientPin<E> {
     }
 
     /// Check if the required command's token permission is granted.
-    pub fn has_permission(&self, permission: PinPermission) -> Result<(), Ctap2StatusCode> {
+    pub fn has_permission(&self, permission: PinPermission) -> CtapResult<()> {
         self.pin_uv_auth_token_state.has_permission(permission)
     }
 
     /// Check if no RP ID is associated with the token permission.
-    pub fn has_no_rp_id_permission(&self) -> Result<(), Ctap2StatusCode> {
+    pub fn has_no_rp_id_permission(&self) -> CtapResult<()> {
         self.pin_uv_auth_token_state.has_no_permissions_rp_id()
     }
 
     /// Check if no or the passed RP ID is associated with the token permission.
-    pub fn has_no_or_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+    pub fn has_no_or_rp_id_permission(&mut self, rp_id: &str) -> CtapResult<()> {
         self.pin_uv_auth_token_state
             .has_no_permissions_rp_id()
             .or_else(|_| self.pin_uv_auth_token_state.has_permissions_rp_id(rp_id))
     }
 
     /// Check if no RP ID is associated with the token permission, or it matches the hash.
-    pub fn has_no_or_rp_id_hash_permission(
-        &self,
-        rp_id_hash: &[u8],
-    ) -> Result<(), Ctap2StatusCode> {
+    pub fn has_no_or_rp_id_hash_permission(&self, rp_id_hash: &[u8]) -> CtapResult<()> {
         self.pin_uv_auth_token_state
             .has_no_permissions_rp_id()
             .or_else(|_| {
@@ -564,7 +559,7 @@ impl<E: Env> ClientPin<E> {
     /// Check if the passed RP ID is associated with the token permission.
     ///
     /// If no RP ID is associated, associate the passed RP ID as a side effect.
-    pub fn ensure_rp_id_permission(&mut self, rp_id: &str) -> Result<(), Ctap2StatusCode> {
+    pub fn ensure_rp_id_permission(&mut self, rp_id: &str) -> CtapResult<()> {
         if self
             .pin_uv_auth_token_state
             .has_no_permissions_rp_id()
@@ -1277,7 +1272,7 @@ mod test {
         pin_uv_auth_protocol: PinUvAuthProtocol,
         cred_random: &[u8; 32],
         salt: Vec<u8>,
-    ) -> Result<Vec<u8>, Ctap2StatusCode> {
+    ) -> CtapResult<Vec<u8>> {
         let mut env = TestEnv::default();
         let (client_pin, shared_secret) = create_client_pin_and_shared_secret(pin_uv_auth_protocol);
 

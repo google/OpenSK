@@ -419,7 +419,7 @@ class OpenSKInstaller:
 
     command = [
         "cargo", "build", "--release", f"--target={props.arch}",
-        f"--features={','.join(self.args.features)}"  # pylint: disable:W1405
+        f"--features={','.join(self.args.features)}"  # pylint: disable=W1405
     ]
     if is_example:
       command.extend(["--example", self.args.application])
@@ -440,7 +440,7 @@ class OpenSKInstaller:
     features.extend(self.args.features)
     self.checked_command_output([
         "cargo", "test",
-        f"--features={','.join(features)}", "--lib",   # pylint: disable:W1405
+        f"--features={','.join(features)}", "--lib",   # pylint: disable=W1405
         "customization"
     ])
 

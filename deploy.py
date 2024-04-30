@@ -418,7 +418,10 @@ class OpenSKInstaller:
     env["APP_HEAP_SIZE"] = str(APP_HEAP_SIZE)
 
     command = [
-        "cargo", "build", "--release", f"--target={props.arch}",
+        "cargo",
+        "build",
+        "--release",
+        f"--target={props.arch}",
         f"--features={','.join(self.args.features)}"  # pylint: disable=W1405
     ]
     if is_example:
@@ -439,8 +442,10 @@ class OpenSKInstaller:
     features = ["std"]
     features.extend(self.args.features)
     self.checked_command_output([
-        "cargo", "test",
-        f"--features={','.join(features)}", "--lib",   # pylint: disable=W1405
+        "cargo",
+        "test",
+        f"--features={','.join(features)}",  # pylint: disable=W1405
+        "--lib",
         "customization"
     ])
 

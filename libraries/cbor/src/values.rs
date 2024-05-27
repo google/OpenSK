@@ -156,7 +156,7 @@ impl Value {
     pub fn extract_integer(self) -> Option<i64> {
         match self {
             Value(ValueImpl::Unsigned(unsigned)) => {
-                if unsigned <= core::i64::MAX as u64 {
+                if unsigned <= i64::MAX as u64 {
                     Some(unsigned as i64)
                 } else {
                     None

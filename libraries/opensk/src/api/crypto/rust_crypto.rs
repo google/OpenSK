@@ -34,6 +34,8 @@ use aes::cipher::{
     BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, KeyInit, KeyIvInit,
 };
 use alloc::vec::Vec;
+#[cfg(test)]
+use core::cell::RefCell;
 use core::convert::TryFrom;
 use hmac::digest::FixedOutput;
 use hmac::Mac;
@@ -43,6 +45,18 @@ use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::Digest;
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
+
+// To be able to support hardware cryptography, we want to make sure we never compute multiple
+// sha256 in parallel. Note that calling `digest` or `digest_mut` is statically correct.
+// These variables track whether `new` was called but `finalize` wasn't called yet.
+#[cfg(test)]
+static BUSY: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+thread_local! {
+    static BUSY_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = RefCell::new(None);
+}
 
 pub struct SoftwareCrypto;
 pub struct SoftwareEcdh;
@@ -224,6 +238,11 @@ impl Sha256 for SoftwareSha256 {
     }
 
     fn new() -> Self {
+        #[cfg(test)]
+        BUSY_GUARD.with_borrow_mut(|guard| {
+            assert!(guard.is_none());
+            *guard = Some(BUSY.lock().unwrap());
+        });
         let hasher = sha2::Sha256::new();
         Self { hasher }
     }
@@ -236,6 +255,11 @@ impl Sha256 for SoftwareSha256 {
     /// Finalizes the hashing process, returns the hash value.
     fn finalize(self, output: &mut [u8; HASH_SIZE]) {
         FixedOutput::finalize_into(self.hasher, output.into());
+        #[cfg(test)]
+        BUSY_GUARD.with_borrow_mut(|guard| {
+            assert!(guard.is_some());
+            *guard = None;
+        });
     }
 }
 

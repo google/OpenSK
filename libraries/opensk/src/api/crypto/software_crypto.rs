@@ -22,8 +22,22 @@ use crate::api::crypto::{
 };
 use crate::api::rng::Rng;
 use alloc::vec::Vec;
+#[cfg(test)]
+use core::cell::RefCell;
 use crypto::Hash256;
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
 use zeroize::Zeroize;
+
+// To be able to support hardware cryptography, we want to make sure we never compute multiple
+// sha256 in parallel. Note that calling `digest` or `digest_mut` is statically correct.
+// These variables track whether `new` was called but `finalize` wasn't called yet.
+#[cfg(test)]
+static BUSY: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+thread_local! {
+    static BUSY_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = RefCell::new(None);
+}
 
 /// Cryptography implementation using our own library of primitives.
 ///
@@ -184,6 +198,11 @@ pub struct SoftwareSha256 {
 
 impl Sha256 for SoftwareSha256 {
     fn new() -> Self {
+        #[cfg(test)]
+        BUSY_GUARD.with_borrow_mut(|guard| {
+            assert!(guard.is_none());
+            *guard = Some(BUSY.lock().unwrap());
+        });
         let hasher = crypto::sha256::Sha256::new();
         Self { hasher }
     }
@@ -195,7 +214,12 @@ impl Sha256 for SoftwareSha256 {
 
     /// Finalizes the hashing process, returns the hash value.
     fn finalize(self, output: &mut [u8; HASH_SIZE]) {
-        self.hasher.finalize(output)
+        self.hasher.finalize(output);
+        #[cfg(test)]
+        BUSY_GUARD.with_borrow_mut(|guard| {
+            assert!(guard.is_some());
+            *guard = None;
+        });
     }
 }
 

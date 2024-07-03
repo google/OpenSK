@@ -15,17 +15,10 @@
 use super::{Hash256, HashBlockSize64Bytes};
 use arrayref::{array_mut_ref, array_ref};
 use byteorder::{BigEndian, ByteOrder};
-use core::cell::Cell;
 use core::num::Wrapping;
 use zeroize::Zeroize;
 
 const BLOCK_SIZE: usize = 64;
-
-// To be able to support hardware cryptography, we want to make sure we never compute multiple
-// sha256 in parallel. (Note that almost all usage of Sha256 is through Hash256::hash which is
-// statically correct. There's only 2 low-level usages in the `hmac::hmac_256` and those are
-// sequential.) This variable tracks whether `new` was called but `finalize` wasn't called yet.
-const BUSY: Cell<bool> = Cell::new(false);
 
 pub struct Sha256 {
     state: [Wrapping<u32>; 8],
@@ -46,7 +39,6 @@ impl Drop for Sha256 {
 
 impl Hash256 for Sha256 {
     fn new() -> Self {
-        assert!(!BUSY.replace(true));
         Sha256 {
             state: Sha256::H,
             block: [0; BLOCK_SIZE],
@@ -112,7 +104,6 @@ impl Hash256 for Sha256 {
         for i in 0..8 {
             BigEndian::write_u32(array_mut_ref![output, 4 * i, 4], self.state[i].0);
         }
-        BUSY.set(false);
     }
 }
 

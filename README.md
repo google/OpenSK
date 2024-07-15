@@ -42,6 +42,8 @@ protocol are compatible with the other.
 
 ### :warning: Disclaimer
 
+This is not an officially supported Google product.
+
 This project is **proof-of-concept and a research platform**. It is **NOT**
 meant for a daily usage. This branch is under development, and therefore less
 rigorously tested than the numbered branches.

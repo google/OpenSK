@@ -107,31 +107,3 @@ alloc[256, 1] = 0x2002401c (2 ptrs, 384 bytes)
 # After this operation, 1 pointers are allocated, totalling 512 bytes.
 dealloc[64, 1] = 0x2002410c (1 ptrs, 512 bytes)
 ```
-
-A tool is provided to analyze such reports, in `tools/heapviz`. This tool
-parses the console output, identifies the lines corresponding to (de)allocation
-operations, and first computes some statistics:
-
-*   Address range used by the heap over this run of the program,
-*   Peak heap usage (how many useful bytes are allocated),
-*   Peak heap consumption (how many bytes are used by the heap, including
-    unavailable bytes between allocated blocks, due to alignment constraints and
-    memory fragmentation),
-*   Fragmentation overhead (difference between heap consumption and usage).
-
-Then, the `heapviz` tool displays an animated "movie" of the allocated bytes in
-heap memory. Each frame in this "movie" shows bytes that are currently
-allocated, that were allocated but are now freed, and that have never been
-allocated. A new frame is generated for each (de)allocation operation. This tool
-uses the `ncurses` library, that you may have to install beforehand.
-
-You can control the tool with the following parameters:
-
-*   `--logfile` (required) to provide the file which contains the console output
-    to parse,
-*   `--fps` (optional) to customize the number of frames per second in the movie
-    animation.
-
-```shell
-cargo run --manifest-path tools/heapviz/Cargo.toml -- --logfile console.log --fps 50
-```

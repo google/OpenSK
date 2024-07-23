@@ -35,7 +35,6 @@ cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
 cargo check --release --target=thumbv7em-none-eabi --examples
 cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
 cargo check --release --target=thumbv7em-none-eabi --manifest-path bootloader/Cargo.toml
-cargo check --release --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking Rust formatting..."
 cargo fmt -- --check
@@ -46,7 +45,6 @@ cargo fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/crypto/Cargo.toml -- --check
-cargo fmt --manifest-path tools/heapviz/Cargo.toml -- --check
 cargo fmt --manifest-path bootloader/Cargo.toml -- --check
 
 echo "Checking Python formatting..."
@@ -90,7 +88,6 @@ cargo test --manifest-path libraries/cbor/Cargo.toml
 cargo test --manifest-path libraries/persistent_store/Cargo.toml --features std
 # Running release mode to speed up. This library is legacy anyway.
 cargo test --manifest-path libraries/crypto/Cargo.toml --features std --release
-cargo test --manifest-path tools/heapviz/Cargo.toml
 
 echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk

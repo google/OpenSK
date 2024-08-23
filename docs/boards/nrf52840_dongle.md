@@ -67,7 +67,7 @@ Follow these steps:
 Run our script for compiling/flashing Tock OS on your device:
 
 ```shell
-$ ./deploy.py --board=nrf52840_dongle --programmer=jlink
+$ ./deploy.py --board=nrf52840_dongle_opensk --opensk --programmer=jlink
 ```
 
 #### OpenOCD
@@ -99,7 +99,7 @@ $ ./deploy.py --board=nrf52840_dongle --programmer=jlink
 1.  Run the deploy script with the appropriate options, i.e.:
 
     ```shell
-    ./deploy.py --board=nrf52840_dongle --opensk --programmer=openocd
+    ./deploy.py --board=nrf52840_dongle_opensk --opensk --programmer=openocd
     ```
 
 

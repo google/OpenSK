@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::api::clock::Clock;
-use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus};
+use crate::api::connection::{HidConnection, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 use crate::api::key_store;
@@ -128,9 +128,14 @@ impl Persist for TestEnv {
 }
 
 impl HidConnection for TestEnv {
-    fn send_and_maybe_recv(&mut self, _buf: &mut [u8; 64], _timeout_ms: usize) -> SendOrRecvResult {
-        // TODO: Implement I/O from canned requests/responses for integration testing.
+    // TODO: Implement I/O from canned requests/responses for integration testing.
+
+    fn send(&mut self, _buf: &[u8; 64], _endpoint: UsbEndpoint) -> SendOrRecvResult {
         Ok(SendOrRecvStatus::Sent)
+    }
+
+    fn recv(&mut self, _buf: &mut [u8; 64], _timeout_ms: usize) -> SendOrRecvResult {
+        Ok(SendOrRecvStatus::Received(UsbEndpoint::MainHid))
     }
 }
 
@@ -138,7 +143,7 @@ impl Default for TestEnv {
     fn default() -> Self {
         let rng = StdRng::seed_from_u64(0);
         let user_presence = TestUserPresence {
-            check: Box::new(|| Ok(())),
+            check: Box::new(|| (Ok(()), None)),
         };
         let storage = new_storage();
         let store = Store::new(storage).ok().unwrap();
@@ -224,12 +229,7 @@ impl Env for TestEnv {
         &self.customization
     }
 
-    fn main_hid_connection(&mut self) -> &mut Self::HidConnection {
-        self
-    }
-
-    #[cfg(feature = "vendor_hid")]
-    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
+    fn hid_connection(&mut self) -> &mut Self {
         self
     }
 

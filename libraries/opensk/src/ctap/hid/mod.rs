@@ -440,6 +440,11 @@ impl<E: Env> CtapHid<E> {
         })
     }
 
+    /// Generates a the HID response packets for a busy error.
+    pub fn busy_error(cid: ChannelID) -> HidPacketIterator {
+        Self::split_message(Self::error_message(cid, CtapHidError::ChannelBusy))
+    }
+
     #[cfg(test)]
     pub fn new_initialized() -> (Self, ChannelID) {
         (
@@ -631,6 +636,25 @@ mod test {
             assert_eq!(response.next(), Some(expected_packet));
             assert_eq!(response.next(), None);
         }
+    }
+
+    #[test]
+    fn test_busy_error() {
+        let cid = [0x12, 0x34, 0x56, 0x78];
+        let mut response = CtapHid::<TestEnv>::busy_error(cid);
+        let mut expected_packet = [0x00; 64];
+        expected_packet[..8].copy_from_slice(&[
+            0x12,
+            0x34,
+            0x56,
+            0x78,
+            0xBF,
+            0x00,
+            0x01,
+            CtapHidError::ChannelBusy as u8,
+        ]);
+        assert_eq!(response.next(), Some(expected_packet));
+        assert_eq!(response.next(), None);
     }
 
     #[test]

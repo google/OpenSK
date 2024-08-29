@@ -46,7 +46,8 @@ pub struct SendOrRecvError;
 pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
 
 pub trait HidConnection {
-    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult;
+    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> SendOrRecvResult;
+    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult;
 }
 
 #[cfg(test)]

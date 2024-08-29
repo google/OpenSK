@@ -10,6 +10,7 @@ edition = "2018"
 
 [dependencies]
 libtock_alarm = { path = "../../third_party/libtock-rs/apis/alarm" }
+libtock_buttons = { path = "../../third_party/libtock-rs/apis/buttons" }
 libtock_console = { path = "../../third_party/libtock-rs/apis/console" }
 libtock_platform = { path = "../../third_party/libtock-rs/platform" }
 

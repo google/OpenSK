@@ -26,6 +26,7 @@ use libtock_platform::{share, DefaultConfig, ErrorCode, Syscalls};
 use platform::share::Handle;
 use platform::subscribe::OneId;
 use platform::{AllowRo, AllowRw, Subscribe, Upcall};
+use libtock_buttons::{ButtonListener, ButtonState, Buttons};
 
 const DRIVER_NUMBER: u32 = 0x20009;
 
@@ -35,7 +36,7 @@ mod command_nr {
     pub const CONNECT: u32 = 1;
     pub const TRANSMIT: u32 = 2;
     pub const RECEIVE: u32 = 3;
-    pub const TRANSMIT_OR_RECEIVE: u32 = 4;
+    pub const _TRANSMIT_OR_RECEIVE: u32 = 4;
     pub const CANCEL: u32 = 5;
 }
 
@@ -167,49 +168,6 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         .unwrap();
 
         Self::send_detail(buf, timeout_delay, endpoint)
-    }
-
-    /// Either sends or receives a packet within a given time.
-    ///
-    /// Because USB transactions are initiated by the host, we don't decide whether an IN transaction
-    /// (send for us), an OUT transaction (receive for us), or no transaction at all will happen next.
-    ///
-    /// - If an IN transaction happens first, the initial content of buf is sent to the host and the
-    /// Sent status is returned.
-    /// - If an OUT transaction happens first, the content of buf is replaced by the packet received
-    /// from the host and Received status is returned. In that case, the original content of buf is not
-    /// sent to the host, and it's up to the caller to retry sending or to handle the packet received
-    /// from the host.
-    /// If the timeout elapses, return None.
-    #[allow(clippy::let_and_return)]
-    pub fn send_or_recv_with_timeout(
-        buf: &mut [u8; 64],
-        timeout_delay: Duration<isize>,
-        endpoint: u32,
-    ) -> TockResult<SendOrRecvStatus> {
-        #[cfg(feature = "verbose_usb")]
-        writeln!(
-            Console::<S>::writer(),
-            "Sending packet with timeout of {} ms = {:02x?}",
-            timeout_delay.ms(),
-            buf as &[u8]
-        )
-        .unwrap();
-
-        let result = Self::send_or_recv_with_timeout_detail(buf, timeout_delay, endpoint);
-
-        #[cfg(feature = "verbose_usb")]
-        if let Ok(SendOrRecvStatus::Received(received_endpoint)) = result {
-            writeln!(
-                Console::<S>::writer(),
-                "Received packet = {:02x?} on endpoint {}",
-                buf as &[u8],
-                received_endpoint as u8,
-            )
-            .unwrap();
-        }
-
-        result
     }
 
     fn recv_with_timeout_detail(
@@ -393,7 +351,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                     // The app should wait for it, but it may never happen if the remote app crashes.
                     // We just return to avoid a deadlock.
                     #[cfg(feature = "debug_ctap")]
-                    writeln!(Console::<S>::writer(), "Couldn't cancel the USB receive").unwrap();
+                    writeln!(Console::<S>::writer(), "Couldn't cancel the USB send").unwrap();
                 }
                 Err(e) => panic!("Unexpected error when cancelling USB receive: {:?}", e),
             }
@@ -402,61 +360,69 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
         status
     }
 
-    fn send_or_recv_with_timeout_detail(
+    pub fn recv_with_buttons(
         buf: &mut [u8; 64],
         timeout_delay: Duration<isize>,
-        endpoint: u32,
-    ) -> TockResult<SendOrRecvStatus> {
+    ) -> TockResult<(SendOrRecvStatus, bool)> {
         let status: Cell<Option<SendOrRecvStatus>> = Cell::new(None);
-        let alarm = UsbCtapHidListener(|direction, endpoint| {
-            let option = match direction {
-                subscribe_nr::TRANSMIT => Some(SendOrRecvStatus::Sent),
-                subscribe_nr::RECEIVE => Some(SendOrRecvStatus::Received(endpoint)),
-                _ => None,
-            };
-            status.set(option);
-        });
-        let mut recv_buf = [0; 64];
 
-        // init the time-out callback but don't enable it yet
-        let mut timeout_callback = timer::with_callback::<S, C, _>(|_| {
-            status.set(Some(SendOrRecvStatus::Timeout));
+        let alarm = UsbCtapHidListener(|direction, endpoint| match direction {
+            subscribe_nr::RECEIVE => status.set(Some(SendOrRecvStatus::Received(endpoint))),
+            // Unknown direction or "transmitted" sent by the kernel
+            _ => status.set(None),
         });
+
+        let num_buttons = Buttons::<S>::count().map_err(|_| ErrorCode::Fail)?;
+        (0..num_buttons)
+            .try_for_each(|n| Buttons::<S>::enable_interrupts(n))
+            .map_err(|_| ErrorCode::Fail)?;
+
+        let button_touched = Cell::new(false);
+        let button_listener = ButtonListener(|_button_num, state| {
+            match state {
+                ButtonState::Pressed => {
+                    status.set(Some(SendOrRecvStatus::Timeout));
+                    button_touched.set(true);
+                }
+                ButtonState::Released => (),
+            };
+        });
+
+        let mut timeout_callback =
+            timer::with_callback::<S, C, _>(|_| status.set(Some(SendOrRecvStatus::Timeout)));
         let status = share::scope::<
             (
-                AllowRo<_, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>,
                 AllowRw<_, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>,
-                Subscribe<_, DRIVER_NUMBER, { subscribe_nr::TRANSMIT }>,
                 Subscribe<_, DRIVER_NUMBER, { subscribe_nr::RECEIVE }>,
-                Subscribe<_, { timer::DRIVER_NUM }, { timer::subscribe::CALLBACK }>,
+                Subscribe<S, { timer::DRIVER_NUM }, { timer::subscribe::CALLBACK }>,
+                Subscribe<_, { libtock_buttons::DRIVER_NUM }, 0>,
             ),
             _,
             _,
         >(|handle| {
-            let (allow_ro, allow_rw, sub_send, sub_recv, sub_timer) = handle.split();
+            let (allow, subscribe_recv, subscribe_timer, sub_button) = handle.split();
+            S::allow_rw::<C, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>(allow, buf)?;
 
-            S::allow_ro::<C, DRIVER_NUMBER, { ro_allow_nr::TRANSMIT }>(allow_ro, buf)?;
-            S::allow_rw::<C, DRIVER_NUMBER, { rw_allow_nr::RECEIVE }>(allow_rw, &mut recv_buf)?;
-
-            Self::register_listener::<{ subscribe_nr::TRANSMIT }, _>(&alarm, sub_send)?;
-            Self::register_listener::<{ subscribe_nr::RECEIVE }, _>(&alarm, sub_recv)?;
+            Self::register_listener::<{ subscribe_nr::RECEIVE }, _>(&alarm, subscribe_recv)?;
+            Buttons::<S>::register_listener(&button_listener, sub_button)
+                .map_err(|_| ErrorCode::Fail)?;
 
             let mut timeout = timeout_callback.init()?;
-            timeout_callback.enable(sub_timer)?;
-            timeout.set_alarm(timeout_delay)?;
+            timeout_callback.enable(subscribe_timer)?;
+            timeout
+                .set_alarm(timeout_delay)
+                .map_err(|_| ErrorCode::Fail)?;
 
-            // Trigger USB transmission.
-            S::command(
-                DRIVER_NUMBER,
-                command_nr::TRANSMIT_OR_RECEIVE,
-                endpoint as u32,
-                0,
-            )
-            .to_result::<(), ErrorCode>()?;
+            S::command(DRIVER_NUMBER, command_nr::RECEIVE, 0, 0).to_result::<(), ErrorCode>()?;
 
-            util::Util::<S>::yieldk_for(|| status.get().is_some());
-            Self::unregister_listener(subscribe_nr::TRANSMIT);
+            Util::<S>::yieldk_for(|| button_touched.get() || status.get().is_some());
             Self::unregister_listener(subscribe_nr::RECEIVE);
+            Buttons::<S>::unregister_listener();
+
+            // disable event interrupts for all buttons
+            (0..num_buttons)
+                .try_for_each(|n| Buttons::<S>::disable_interrupts(n))
+                .map_err(|_| ErrorCode::Fail)?;
 
             let status = match status.get() {
                 Some(status) => Ok::<SendOrRecvStatus, TockError>(status),
@@ -465,15 +431,11 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
 
             // Cleanup alarm callback.
             match timeout.stop_alarm() {
-                Ok(_) => (),
+                Ok(()) => (),
                 Err(TockError::Command(ErrorCode::Already)) => {
                     if matches!(status, SendOrRecvStatus::Timeout) {
                         #[cfg(feature = "debug_ctap")]
-                        writeln!(
-                            Console::<S>::writer(),
-                            "The send/receive timeout already expired, but the callback wasn't executed."
-                        )
-                        .unwrap();
+                        write!(Console::<S>::writer(), ".").unwrap();
                     }
                 }
                 Err(_e) => {
@@ -491,7 +453,7 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
             #[cfg(feature = "verbose_usb")]
             writeln!(
                 Console::<S>::writer(),
-                "Cancelling USB transaction due to timeout"
+                "Cancelling USB receive due to timeout"
             )
             .unwrap();
             let result =
@@ -505,17 +467,12 @@ impl<S: Syscalls, C: Config> UsbCtapHid<S, C> {
                     // The app should wait for it, but it may never happen if the remote app crashes.
                     // We just return to avoid a deadlock.
                     #[cfg(feature = "debug_ctap")]
-                    writeln!(Console::<S>::writer(), "Couldn't cancel the transaction").unwrap();
+                    writeln!(Console::<S>::writer(), "Couldn't cancel the USB receive with buttons").unwrap();
                 }
-                Err(e) => panic!("Unexpected error when cancelling USB transaction: {:?}", e),
+                Err(e) => panic!("Unexpected error when cancelling USB receive: {:?}", e),
             }
-            #[cfg(feature = "debug_ctap")]
-            writeln!(Console::<S>::writer(), "Cancelled USB transaction!").unwrap();
         }
 
-        if matches!(status, Ok(SendOrRecvStatus::Received(_))) {
-            buf.copy_from_slice(&recv_buf);
-        }
-        status
+        status.map(|s| (s, button_touched.get()))
     }
 }

@@ -66,12 +66,8 @@ pub trait Env {
 
     fn customization(&self) -> &Self::Customization;
 
-    /// I/O connection for sending packets implementing CTAP HID protocol.
-    fn main_hid_connection(&mut self) -> &mut Self::HidConnection;
-
-    /// I/O connection for sending packets implementing vendor extensions to CTAP HID protocol.
-    #[cfg(feature = "vendor_hid")]
-    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection;
+    /// I/O connection for sending HID packets.
+    fn hid_connection(&mut self) -> &mut Self::HidConnection;
 
     /// Indicates that the last power cycle was not caused by user action.
     fn boots_after_soft_reset(&self) -> bool;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::connection::UsbEndpoint;
+
 #[derive(Debug)]
 pub enum UserPresenceError {
     /// User explicitly declined user presence check.
@@ -24,7 +26,10 @@ pub enum UserPresenceError {
     Fail,
 }
 
-pub type UserPresenceResult = Result<(), UserPresenceError>;
+pub type UserPresenceResult = (
+    Result<(), UserPresenceError>,
+    Option<([u8; 64], UsbEndpoint)>,
+);
 
 pub trait UserPresence {
     /// Initializes for a user presence check.
@@ -35,6 +40,7 @@ pub trait UserPresence {
     /// Waits until user presence is confirmed, rejected, or the given timeout expires.
     ///
     /// Must be called between calls to [`Self::check_init`] and [`Self::check_complete`].
+    /// Additionally returns a packet if one was received during the wait.
     fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult;
 
     /// Finalizes a user presence check.

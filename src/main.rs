@@ -34,15 +34,13 @@ use libtock_buttons::Buttons;
 use libtock_console::Console;
 #[cfg(feature = "debug_ctap")]
 use libtock_console::ConsoleWriter;
-use libtock_drivers::result::FlexUnwrap;
-use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid;
 #[cfg(not(feature = "std"))]
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 #[cfg(feature = "std")]
 use libtock_unittest::fake;
 use opensk::api::clock::Clock;
-use opensk::api::connection::UsbEndpoint;
+use opensk::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
 use opensk::ctap::hid::HidPacketIterator;
 use opensk::ctap::KEEPALIVE_DELAY_MS;
 use opensk::env::Env;
@@ -52,9 +50,6 @@ use opensk::Transport;
 stack_size! {0x4000}
 #[cfg(not(feature = "std"))]
 set_main! {main}
-
-const SEND_TIMEOUT_MS: Duration<isize> = Duration::from_ms(1000);
-const KEEPALIVE_DELAY_MS_TOCK: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS as isize);
 
 #[cfg(not(feature = "vendor_hid"))]
 const NUM_ENDPOINTS: usize = 1;
@@ -160,22 +155,9 @@ fn main() {
         let mut pkt_request = [0; 64];
 
         if let Some(packet) = replies.next_packet() {
-            match usb_ctap_hid::UsbCtapHid::<SyscallImplementation>::send(
-                &packet.packet,
-                SEND_TIMEOUT_MS,
-                packet.endpoint as u32,
-            )
-            .flex_unwrap()
-            {
-                usb_ctap_hid::SendOrRecvStatus::Sent => {
-                    #[cfg(feature = "debug_ctap")]
-                    print_packet_notice::<SyscallImplementation>(
-                        "Sent packet",
-                        ctap.env().clock().timestamp_us(),
-                        &mut writer,
-                    );
-                }
-                usb_ctap_hid::SendOrRecvStatus::Timeout => {
+            let hid_connection = ctap.env().hid_connection();
+            match hid_connection.send(&packet.packet, packet.endpoint) {
+                Ok(SendOrRecvStatus::Timeout) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice::<SyscallImplementation>(
                         "Timeout while sending packet",
@@ -185,30 +167,31 @@ fn main() {
                     // The client is unresponsive, so we discard all pending packets.
                     replies.clear(packet.endpoint);
                 }
-                _ => panic!("Unexpected status on USB transmission"),
-            };
+                Ok(SendOrRecvStatus::Sent) => {
+                    #[cfg(feature = "debug_ctap")]
+                    print_packet_notice::<SyscallImplementation>(
+                        "Sent packet",
+                        ctap.env().clock().timestamp_us(),
+                        &mut writer,
+                    );
+                }
+                _ => panic!("Unexpected status on USB send"),
+            }
         } else {
-            usb_endpoint =
-                match usb_ctap_hid::UsbCtapHid::<SyscallImplementation>::recv_with_timeout(
-                    &mut pkt_request,
-                    KEEPALIVE_DELAY_MS_TOCK,
-                )
-                .flex_unwrap()
-                {
-                    usb_ctap_hid::SendOrRecvStatus::Received(endpoint) => {
-                        #[cfg(feature = "debug_ctap")]
-                        print_packet_notice::<SyscallImplementation>(
-                            "Received packet",
-                            ctap.env().clock().timestamp_us(),
-                            &mut writer,
-                        );
-                        UsbEndpoint::try_from(endpoint as usize).ok()
-                    }
-                    usb_ctap_hid::SendOrRecvStatus::Sent => {
-                        panic!("Returned transmit status on receive")
-                    }
-                    usb_ctap_hid::SendOrRecvStatus::Timeout => None,
-                };
+            let hid_connection = ctap.env().hid_connection();
+            usb_endpoint = match hid_connection.recv(&mut pkt_request, KEEPALIVE_DELAY_MS) {
+                Ok(SendOrRecvStatus::Timeout) => None,
+                Ok(SendOrRecvStatus::Received(endpoint)) => {
+                    #[cfg(feature = "debug_ctap")]
+                    print_packet_notice::<SyscallImplementation>(
+                        "Received packet",
+                        ctap.env().clock().timestamp_us(),
+                        &mut writer,
+                    );
+                    UsbEndpoint::try_from(endpoint as usize).ok()
+                }
+                _ => panic!("Unexpected status on USB recv"),
+            };
         }
 
         #[cfg(feature = "with_ctap1")]

@@ -15,20 +15,17 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use clock::TockClock;
-use core::cell::Cell;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
 #[cfg(all(target_has_atomic = "8", not(feature = "std")))]
 use core::sync::atomic::{AtomicBool, Ordering};
-use libtock_buttons::{ButtonListener, ButtonState, Buttons};
 use libtock_console::{Console, ConsoleWriter};
-use libtock_drivers::result::{FlexUnwrap, TockError};
 use libtock_drivers::timer::Duration;
 use libtock_drivers::usb_ctap_hid::UsbCtapHid;
-use libtock_drivers::{rng, timer, usb_ctap_hid};
+use libtock_drivers::{rng, usb_ctap_hid};
 use libtock_leds::Leds;
 use libtock_platform as platform;
-use libtock_platform::{ErrorCode, Syscalls};
+use libtock_platform::Syscalls;
 use opensk::api::connection::{
     HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
 };
@@ -44,7 +41,7 @@ use opensk::env::Env;
 #[cfg(feature = "std")]
 use persistent_store::BufferOptions;
 use persistent_store::{StorageResult, Store};
-use platform::{share, DefaultConfig, Subscribe};
+use platform::DefaultConfig;
 use rand_core::{impls, CryptoRng, Error, RngCore};
 
 #[cfg(feature = "std")]
@@ -75,6 +72,9 @@ const TOCK_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     aaguid: AAGUID,
     ..DEFAULT_CUSTOMIZATION
 };
+
+// This timeout should rarely be relevant, execution returns without blocking.
+const SEND_TIMEOUT_MS: Duration<isize> = Duration::from_ms(1000);
 
 /// RNG backed by the TockOS rng driver.
 pub struct TockRng<S: Syscalls> {
@@ -112,28 +112,6 @@ impl<S: Syscalls> RngCore for TockRng<S> {
 
 impl<S: Syscalls> Rng for TockRng<S> {}
 
-pub struct TockHidConnection<S: Syscalls> {
-    endpoint: UsbEndpoint,
-    s: PhantomData<S>,
-}
-
-impl<S: Syscalls> HidConnection for TockHidConnection<S> {
-    fn send_and_maybe_recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult {
-        match UsbCtapHid::<S>::send_or_recv_with_timeout(
-            buf,
-            Duration::from_ms(timeout_ms as isize),
-            self.endpoint as u32,
-        ) {
-            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
-            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
-            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
-                UsbEndpoint::try_from(recv_endpoint as usize).map(SendOrRecvStatus::Received)
-            }
-            _ => Err(SendOrRecvError),
-        }
-    }
-}
-
 pub struct TockEnv<
     S: Syscalls,
     C: platform::subscribe::Config + platform::allow_ro::Config = DefaultConfig,
@@ -141,9 +119,6 @@ pub struct TockEnv<
     rng: TockRng<S>,
     store: Store<Storage<S, C>>,
     upgrade_storage: Option<UpgradeStorage<S, C>>,
-    main_connection: TockHidConnection<S>,
-    #[cfg(feature = "vendor_hid")]
-    vendor_connection: TockHidConnection<S>,
     blink_pattern: usize,
     clock: TockClock<S>,
     c: PhantomData<C>,
@@ -167,15 +142,6 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> D
             rng,
             store,
             upgrade_storage,
-            main_connection: TockHidConnection {
-                endpoint: UsbEndpoint::MainHid,
-                s: PhantomData,
-            },
-            #[cfg(feature = "vendor_hid")]
-            vendor_connection: TockHidConnection {
-                endpoint: UsbEndpoint::VendorHid,
-                s: PhantomData,
-            },
             blink_pattern: 0,
             clock: TockClock::default(),
             c: PhantomData,
@@ -287,6 +253,36 @@ where
     }
 }
 
+impl<S, C> HidConnection for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
+    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> SendOrRecvResult {
+        match UsbCtapHid::<S>::send(buf, SEND_TIMEOUT_MS, endpoint as u32) {
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(_)) => {
+                panic!("Returned Received status on send")
+            }
+            Err(_) => Err(SendOrRecvError),
+        }
+    }
+
+    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult {
+        match UsbCtapHid::<S>::recv_with_timeout(buf, Duration::from_ms(timeout_ms as isize)) {
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => {
+                panic!("Returned Sent status on receive")
+            }
+            Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
+                UsbEndpoint::try_from(recv_endpoint as usize).map(SendOrRecvStatus::Received)
+            }
+            Err(_) => Err(SendOrRecvError),
+        }
+    }
+}
+
 impl<S, C> UserPresence for TockEnv<S, C>
 where
     S: Syscalls,
@@ -297,87 +293,32 @@ where
     }
 
     fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult {
-        if timeout_ms == 0 {
-            return Err(UserPresenceError::Timeout);
-        }
         blink_leds::<S>(self.blink_pattern);
         self.blink_pattern += 1;
 
-        // enable interrupts for all buttons
-        let num_buttons = Buttons::<S>::count().map_err(|_| UserPresenceError::Fail)?;
-        (0..num_buttons)
-            .try_for_each(|n| Buttons::<S>::enable_interrupts(n))
-            .map_err(|_| UserPresenceError::Fail)?;
-
-        let button_touched = Cell::new(false);
-        let button_listener = ButtonListener(|_button_num, state| {
-            match state {
-                ButtonState::Pressed => button_touched.set(true),
-                ButtonState::Released => (),
-            };
-        });
-
-        // Setup a keep-alive callback but don't enable it yet
-        let keepalive_expired = Cell::new(false);
-        let mut keepalive_callback =
-            timer::with_callback::<S, C, _>(|_| keepalive_expired.set(true));
-        share::scope::<
-            (
-                Subscribe<_, { libtock_buttons::DRIVER_NUM }, 0>,
-                Subscribe<
-                    S,
-                    { libtock_drivers::timer::DRIVER_NUM },
-                    { libtock_drivers::timer::subscribe::CALLBACK },
-                >,
-            ),
-            _,
-            _,
-        >(|handle| {
-            let (sub_button, sub_timer) = handle.split();
-            Buttons::<S>::register_listener(&button_listener, sub_button)
-                .map_err(|_| UserPresenceError::Fail)?;
-
-            let mut keepalive = keepalive_callback.init().flex_unwrap();
-            keepalive_callback
-                .enable(sub_timer)
-                .map_err(|_| UserPresenceError::Fail)?;
-            keepalive
-                .set_alarm(timer::Duration::from_ms(timeout_ms as isize))
-                .flex_unwrap();
-
-            // Wait for a button touch or an alarm.
-            libtock_drivers::util::Util::<S>::yieldk_for(|| {
-                button_touched.get() || keepalive_expired.get()
-            });
-
-            Buttons::<S>::unregister_listener();
-
-            // disable event interrupts for all buttons
-            (0..num_buttons)
-                .try_for_each(|n| Buttons::<S>::disable_interrupts(n))
-                .map_err(|_| UserPresenceError::Fail)?;
-
-            // Cleanup alarm callback.
-            match keepalive.stop_alarm() {
-                Ok(()) => (),
-                Err(TockError::Command(ErrorCode::Already)) => assert!(keepalive_expired.get()),
-                Err(_e) => {
-                    #[cfg(feature = "debug_ctap")]
-                    panic!("Unexpected error when stopping alarm: {:?}", _e);
-                    #[cfg(not(feature = "debug_ctap"))]
-                    panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
-                }
+        let mut packet = [0; 64];
+        let result =
+            UsbCtapHid::<S>::recv_with_buttons(&mut packet, Duration::from_ms(timeout_ms as isize));
+        let (status, button_touched) = match result {
+            Ok((status, button_touched)) => (status, button_touched),
+            Err(_) => return (Err(UserPresenceError::Fail), None),
+        };
+        let data = match status {
+            usb_ctap_hid::SendOrRecvStatus::Timeout => None,
+            usb_ctap_hid::SendOrRecvStatus::Sent => {
+                panic!("Returned Sent status on receive")
             }
+            usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint) => {
+                UsbEndpoint::try_from(recv_endpoint as usize)
+                    .ok()
+                    .map(|e| (packet, e))
+            }
+        };
 
-            Ok::<(), UserPresenceError>(())
-        })?;
-
-        if button_touched.get() {
-            Ok(())
-        } else if keepalive_expired.get() {
-            Err(UserPresenceError::Timeout)
+        if button_touched {
+            (Ok(()), data)
         } else {
-            panic!("Unexpected exit condition");
+            (Err(UserPresenceError::Timeout), data)
         }
     }
 
@@ -403,7 +344,7 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     type Clock = TockClock<S>;
     type Write = ConsoleWriter<S>;
     type Customization = CustomizationImpl;
-    type HidConnection = TockHidConnection<S>;
+    type HidConnection = Self;
     type Crypto = SoftwareCrypto;
 
     fn rng(&mut self) -> &mut Self::Rng {
@@ -434,13 +375,8 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
         &TOCK_CUSTOMIZATION
     }
 
-    fn main_hid_connection(&mut self) -> &mut Self::HidConnection {
-        &mut self.main_connection
-    }
-
-    #[cfg(feature = "vendor_hid")]
-    fn vendor_hid_connection(&mut self) -> &mut Self::HidConnection {
-        &mut self.vendor_connection
+    fn hid_connection(&mut self) -> &mut Self {
+        self
     }
 
     fn process_vendor_command(&mut self, bytes: &[u8], channel: Channel) -> Option<Vec<u8>> {

@@ -412,6 +412,7 @@ name = "libtock_drivers"
 version = "0.1.0"
 dependencies = [
  "libtock_alarm",
+ "libtock_buttons",
  "libtock_console",
  "libtock_platform",
 ]

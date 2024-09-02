@@ -63,7 +63,7 @@ use self::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(feature = "with_ctap1")]
 use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
-use crate::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
+use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
@@ -258,25 +258,25 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 }
 
 /// Send non-critical packets using fire-and-forget.
-fn send_packets<E: Env>(env: &mut E, endpoint: UsbEndpoint, packets: HidPacketIterator) {
+fn send_packets<E: Env>(
+    env: &mut E,
+    endpoint: UsbEndpoint,
+    packets: HidPacketIterator,
+) -> CtapResult<()> {
     for pkt in packets {
-        match env.hid_connection().send(&pkt, endpoint) {
-            Ok(SendOrRecvStatus::Timeout) => {
-                debug_ctap!(env, "Timeout sending packet");
-            }
-            Ok(SendOrRecvStatus::Sent) => (),
-            _ => panic!("Error sending packet"),
-        }
+        env.hid_connection().send(&pkt, endpoint)?;
+    }
+    Ok(())
+}
+
+fn is_cancel(packet: &ProcessedPacket) -> bool {
+    match packet {
+        ProcessedPacket::InitPacket { cmd, .. } => *cmd == CtapHidCommand::Cancel as u8,
+        ProcessedPacket::ContinuationPacket { .. } => false,
     }
 }
 
-/// Blocks for user presence.
-///
-/// Returns an error in case of timeout, user declining presence request, or keepalive error.
-pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
-    env.user_presence().check_init();
-    let loop_timer = env.clock().make_timer(TOUCH_TIMEOUT_MS);
-
+fn wait_and_respond_busy<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
     let (cid, transport) = match channel {
         Channel::MainHid(cid) => (cid, Transport::MainHid),
         #[cfg(feature = "vendor_hid")]
@@ -284,13 +284,13 @@ pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> CtapResult<
     };
     let endpoint = transport.usb_endpoint();
 
-    // All fallible functions are called without '?' operator to always reach
-    // check_complete(...) cleanup function.
-
-    let mut result = Err(UserPresenceError::Timeout);
-    while !env.clock().is_elapsed(&loop_timer) {
-        let (status, data) = env.user_presence().wait_with_timeout(KEEPALIVE_DELAY_MS);
-        if let Some((packet, rx_endpoint)) = data {
+    let mut packet = [0; 64];
+    let (up_status, recv_status) = env
+        .user_presence()
+        .wait_with_timeout(&mut packet, KEEPALIVE_DELAY_MS)?;
+    match recv_status {
+        RecvStatus::Timeout => (),
+        RecvStatus::Received(rx_endpoint) => {
             let (received_cid, processed_packet) = CtapHid::<E>::process_single_packet(&packet);
             if rx_endpoint != endpoint || received_cid != cid {
                 debug_ctap!(
@@ -299,42 +299,49 @@ pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> CtapResult<
                      rx_endpoint,
                 );
                 let busy_error = CtapHid::<E>::busy_error(received_cid);
-                send_packets(env, rx_endpoint, busy_error);
-            }
-            match processed_packet {
-                ProcessedPacket::InitPacket { cmd, .. } => {
-                    if cmd == CtapHidCommand::Cancel as u8 {
-                        // Ignored, CANCEL specification says: "the authenticator MUST NOT reply"
-                        debug_ctap!(env, "User presence check cancelled");
-                        return Err(UserPresenceError::Canceled.into());
-                    } else {
-                        // Ignored. A client shouldn't try to talk to us on this channel yet.
-                        debug_ctap!(
-                            env,
-                            "Discarded packet with command {} received while sending a KEEPALIVE packet",
-                            cmd,
-                        );
-                    }
-                }
-                // Ignored. We likely ignore the init packet before as well.
-                ProcessedPacket::ContinuationPacket { .. } => {
-                    debug_ctap!(
-                        env,
-                        "Discarded continuation packet received while sending a KEEPALIVE packet",
-                    );
-                }
+                // Don't send errors from other channels on the active channel.
+                let _ = send_packets(env, rx_endpoint, busy_error);
+            } else if is_cancel(&processed_packet) {
+                // Ignored, CANCEL specification says: "the authenticator MUST NOT reply"
+                debug_ctap!(env, "User presence check cancelled");
+                return Err(UserPresenceError::Canceled.into());
+            } else {
+                // Ignored. A client shouldn't try to talk to us on this channel yet.
+                debug_ctap!(env, "Discarded packet while checking user presence.");
             }
         }
-        if !matches!(status, Err(UserPresenceError::Timeout)) {
-            result = status;
-            break;
-        }
+    }
+    if matches!(up_status, Err(UserPresenceError::Timeout)) {
         let keepalive_msg = CtapHid::<E>::keepalive(cid, KeepaliveStatus::UpNeeded);
-        send_packets(env, endpoint, keepalive_msg);
+        send_packets(env, endpoint, keepalive_msg)?;
+    }
+    up_status.map_err(|e| e.into())
+}
+
+/// Blocks for user presence.
+///
+/// Returns an error in case of timeout, user declining presence request, or keepalive error.
+pub fn check_user_presence<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
+    const TIMEOUT_ERROR: Ctap2StatusCode = Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT;
+
+    env.user_presence().check_init();
+    let loop_timer = env.clock().make_timer(TOUCH_TIMEOUT_MS);
+
+    // We don't use the '?' operator to always reach check_complete(...).
+    let mut result = Err(TIMEOUT_ERROR);
+    while !env.clock().is_elapsed(&loop_timer) {
+        match wait_and_respond_busy(env, channel) {
+            Err(TIMEOUT_ERROR) => (),
+            r => {
+                result = r;
+                // We want to break on Ok(()) too, indicating touch.
+                break;
+            }
+        }
     }
 
     env.user_presence().check_complete();
-    result.map_err(|e| e.into())
+    result
 }
 
 /// Holds data necessary to sign an assertion for a credential.
@@ -1425,7 +1432,6 @@ mod test {
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
-    use crate::api::user_presence::UserPresenceResult;
     use crate::ctap::command::AuthenticatorLargeBlobsParameters;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
@@ -2252,8 +2258,7 @@ mod test {
     #[test]
     fn test_process_make_credential_cancelled() {
         let mut env = TestEnv::default();
-        env.user_presence()
-            .set(|| (Err(UserPresenceError::Canceled), None));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let make_credential_params = create_minimal_make_credential_parameters();
@@ -3133,8 +3138,7 @@ mod test {
     #[test]
     fn test_process_reset_cancelled() {
         let mut env = TestEnv::default();
-        env.user_presence()
-            .set(|| (Err(UserPresenceError::Canceled), None));
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let reset_reponse = ctap_state.process_reset(&mut env, DUMMY_CHANNEL);
@@ -3358,6 +3362,22 @@ mod test {
         let mut env = TestEnv::default();
         let response = check_user_presence(&mut env, DUMMY_CHANNEL);
         assert!(matches!(response, Ok(_)));
+    }
+
+    #[test]
+    fn test_check_user_presence_timeout() {
+        let mut env = TestEnv::default();
+        let now_ms = env.clock().access();
+        env.user_presence().set(move || {
+            let mut locked_now_ms = now_ms.lock().unwrap();
+            *locked_now_ms += 100;
+            Err(UserPresenceError::Timeout)
+        });
+        let response = check_user_presence(&mut env, DUMMY_CHANNEL);
+        assert!(matches!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+        ));
     }
 
     #[test]

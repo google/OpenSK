@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::connection::UsbEndpoint;
+use crate::api::connection::RecvStatus;
+use crate::ctap::status_code::CtapResult;
 
 #[derive(Debug)]
 pub enum UserPresenceError {
@@ -22,14 +23,10 @@ pub enum UserPresenceError {
     Canceled,
     /// User presence check timed out.
     Timeout,
-    /// Unexpected (e.g., hardware) failures
-    Fail,
 }
+pub type UserPresenceResult = Result<(), UserPresenceError>;
 
-pub type UserPresenceResult = (
-    Result<(), UserPresenceError>,
-    Option<([u8; 64], UsbEndpoint)>,
-);
+pub type UserPresenceWaitResult = CtapResult<(UserPresenceResult, RecvStatus)>;
 
 pub trait UserPresence {
     /// Initializes for a user presence check.
@@ -40,8 +37,13 @@ pub trait UserPresence {
     /// Waits until user presence is confirmed, rejected, or the given timeout expires.
     ///
     /// Must be called between calls to [`Self::check_init`] and [`Self::check_complete`].
-    /// Additionally returns a packet if one was received during the wait.
-    fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult;
+    /// The function may write to the packet buffer, if it receives one during the wait.
+    /// If it does, the returned option contains the endpoint it received the data from.
+    fn wait_with_timeout(
+        &mut self,
+        packet: &mut [u8; 64],
+        timeout_ms: usize,
+    ) -> UserPresenceWaitResult;
 
     /// Finalizes a user presence check.
     ///

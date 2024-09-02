@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use core::convert::TryFrom;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,32 +23,26 @@ pub enum UsbEndpoint {
 }
 
 impl TryFrom<usize> for UsbEndpoint {
-    type Error = SendOrRecvError;
+    type Error = Ctap2StatusCode;
 
-    fn try_from(endpoint_num: usize) -> Result<Self, SendOrRecvError> {
+    fn try_from(endpoint_num: usize) -> CtapResult<Self> {
         match endpoint_num {
             1 => Ok(UsbEndpoint::MainHid),
             #[cfg(feature = "vendor_hid")]
             2 => Ok(UsbEndpoint::VendorHid),
-            _ => Err(SendOrRecvError),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE),
         }
     }
 }
 
-pub enum SendOrRecvStatus {
+pub enum RecvStatus {
     Timeout,
-    Sent,
     Received(UsbEndpoint),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct SendOrRecvError;
-
-pub type SendOrRecvResult = Result<SendOrRecvStatus, SendOrRecvError>;
-
 pub trait HidConnection {
-    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> SendOrRecvResult;
-    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult;
+    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> CtapResult<()>;
+    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> CtapResult<RecvStatus>;
 }
 
 #[cfg(test)]
@@ -59,6 +54,9 @@ mod test {
         assert_eq!(UsbEndpoint::try_from(1), Ok(UsbEndpoint::MainHid));
         #[cfg(feature = "vendor_hid")]
         assert_eq!(UsbEndpoint::try_from(2), Ok(UsbEndpoint::VendorHid));
-        assert_eq!(UsbEndpoint::try_from(3), Err(SendOrRecvError));
+        assert_eq!(
+            UsbEndpoint::try_from(3),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE)
+        );
     }
 }

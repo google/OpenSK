@@ -40,8 +40,9 @@ use libtock_runtime::{set_main, stack_size, TockSyscalls};
 #[cfg(feature = "std")]
 use libtock_unittest::fake;
 use opensk::api::clock::Clock;
-use opensk::api::connection::{HidConnection, SendOrRecvStatus, UsbEndpoint};
+use opensk::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use opensk::ctap::hid::HidPacketIterator;
+use opensk::ctap::status_code::Ctap2StatusCode;
 use opensk::ctap::KEEPALIVE_DELAY_MS;
 use opensk::env::Env;
 use opensk::Transport;
@@ -157,17 +158,17 @@ fn main() {
         if let Some(packet) = replies.next_packet() {
             let hid_connection = ctap.env().hid_connection();
             match hid_connection.send(&packet.packet, packet.endpoint) {
-                Ok(SendOrRecvStatus::Timeout) => {
+                Err(Ctap2StatusCode::CTAP1_ERR_TIMEOUT) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice::<SyscallImplementation>(
-                        "Timeout while sending packet",
+                        "Timeout on USB send",
                         ctap.env().clock().timestamp_us(),
                         &mut writer,
                     );
                     // The client is unresponsive, so we discard all pending packets.
                     replies.clear(packet.endpoint);
                 }
-                Ok(SendOrRecvStatus::Sent) => {
+                Ok(()) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice::<SyscallImplementation>(
                         "Sent packet",
@@ -175,13 +176,13 @@ fn main() {
                         &mut writer,
                     );
                 }
-                _ => panic!("Unexpected status on USB send"),
+                Err(_) => panic!("Error on USB send"),
             }
         } else {
             let hid_connection = ctap.env().hid_connection();
             usb_endpoint = match hid_connection.recv(&mut pkt_request, KEEPALIVE_DELAY_MS) {
-                Ok(SendOrRecvStatus::Timeout) => None,
-                Ok(SendOrRecvStatus::Received(endpoint)) => {
+                Ok(RecvStatus::Timeout) => None,
+                Ok(RecvStatus::Received(endpoint)) => {
                     #[cfg(feature = "debug_ctap")]
                     print_packet_notice::<SyscallImplementation>(
                         "Received packet",
@@ -190,7 +191,7 @@ fn main() {
                     );
                     UsbEndpoint::try_from(endpoint as usize).ok()
                 }
-                _ => panic!("Unexpected status on USB recv"),
+                Err(_) => panic!("Error on USB recv"),
             };
         }
 

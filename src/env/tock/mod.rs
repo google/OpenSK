@@ -26,16 +26,14 @@ use libtock_drivers::{rng, usb_ctap_hid};
 use libtock_leds::Leds;
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
-use opensk::api::connection::{
-    HidConnection, SendOrRecvError, SendOrRecvResult, SendOrRecvStatus, UsbEndpoint,
-};
+use opensk::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
 use opensk::api::key_store;
 use opensk::api::persist::{Persist, PersistIter};
 use opensk::api::rng::Rng;
-use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceResult};
-use opensk::ctap::status_code::CtapResult;
+use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceWaitResult};
+use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use opensk::ctap::Channel;
 use opensk::env::Env;
 #[cfg(feature = "std")]
@@ -258,27 +256,27 @@ where
     S: Syscalls,
     C: platform::subscribe::Config + platform::allow_ro::Config,
 {
-    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> SendOrRecvResult {
+    fn send(&mut self, buf: &[u8; 64], endpoint: UsbEndpoint) -> CtapResult<()> {
         match UsbCtapHid::<S>::send(buf, SEND_TIMEOUT_MS, endpoint as u32) {
-            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
-            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(SendOrRecvStatus::Sent),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Err(Ctap2StatusCode::CTAP1_ERR_TIMEOUT),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => Ok(()),
             Ok(usb_ctap_hid::SendOrRecvStatus::Received(_)) => {
                 panic!("Returned Received status on send")
             }
-            Err(_) => Err(SendOrRecvError),
+            Err(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE),
         }
     }
 
-    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> SendOrRecvResult {
+    fn recv(&mut self, buf: &mut [u8; 64], timeout_ms: usize) -> CtapResult<RecvStatus> {
         match UsbCtapHid::<S>::recv_with_timeout(buf, Duration::from_ms(timeout_ms as isize)) {
-            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(SendOrRecvStatus::Timeout),
+            Ok(usb_ctap_hid::SendOrRecvStatus::Timeout) => Ok(RecvStatus::Timeout),
             Ok(usb_ctap_hid::SendOrRecvStatus::Sent) => {
                 panic!("Returned Sent status on receive")
             }
             Ok(usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint)) => {
-                UsbEndpoint::try_from(recv_endpoint as usize).map(SendOrRecvStatus::Received)
+                UsbEndpoint::try_from(recv_endpoint as usize).map(RecvStatus::Received)
             }
-            Err(_) => Err(SendOrRecvError),
+            Err(_) => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE),
         }
     }
 }
@@ -292,34 +290,35 @@ where
         self.blink_pattern = 0;
     }
 
-    fn wait_with_timeout(&mut self, timeout_ms: usize) -> UserPresenceResult {
+    fn wait_with_timeout(
+        &mut self,
+        packet: &mut [u8; 64],
+        timeout_ms: usize,
+    ) -> UserPresenceWaitResult {
         blink_leds::<S>(self.blink_pattern);
         self.blink_pattern += 1;
 
-        let mut packet = [0; 64];
         let result =
-            UsbCtapHid::<S>::recv_with_buttons(&mut packet, Duration::from_ms(timeout_ms as isize));
+            UsbCtapHid::<S>::recv_with_buttons(packet, Duration::from_ms(timeout_ms as isize));
         let (status, button_touched) = match result {
             Ok((status, button_touched)) => (status, button_touched),
-            Err(_) => return (Err(UserPresenceError::Fail), None),
+            Err(_) => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE),
         };
-        let data = match status {
-            usb_ctap_hid::SendOrRecvStatus::Timeout => None,
+        let recv_status = match status {
+            usb_ctap_hid::SendOrRecvStatus::Timeout => RecvStatus::Timeout,
             usb_ctap_hid::SendOrRecvStatus::Sent => {
                 panic!("Returned Sent status on receive")
             }
             usb_ctap_hid::SendOrRecvStatus::Received(recv_endpoint) => {
-                UsbEndpoint::try_from(recv_endpoint as usize)
-                    .ok()
-                    .map(|e| (packet, e))
+                RecvStatus::Received(UsbEndpoint::try_from(recv_endpoint as usize)?)
             }
         };
-
-        if button_touched {
-            (Ok(()), data)
+        let up_result = if button_touched {
+            Ok(())
         } else {
-            (Err(UserPresenceError::Timeout), data)
-        }
+            Err(UserPresenceError::Timeout)
+        };
+        Ok((up_result, recv_status))
     }
 
     fn check_complete(&mut self) {

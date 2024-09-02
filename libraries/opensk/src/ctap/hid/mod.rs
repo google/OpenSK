@@ -440,7 +440,7 @@ impl<E: Env> CtapHid<E> {
         })
     }
 
-    /// Generates a the HID response packets for a busy error.
+    /// Generates the HID response packets for a busy error.
     pub fn busy_error(cid: ChannelID) -> HidPacketIterator {
         Self::split_message(Self::error_message(cid, CtapHidError::ChannelBusy))
     }

@@ -640,7 +640,9 @@ impl<E: Env> CtapState<E> {
         // The auth token timeouts are checked once here, to make error codes consistent. If your
         // auth token hasn't timed out now, you can fully use it for this command.
         self.client_pin.update_timeouts(env);
-        self.clear_other_channels(channel);
+        if !matches!(&command, Command::AuthenticatorGetInfo) {
+            self.clear_other_channels(channel);
+        }
         match (&command, self.stateful_command_permission.get_command(env)) {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
             | (Command::AuthenticatorLargeBlobs(_), Ok(StatefulCommand::LargeBlob(_)))

@@ -17,6 +17,7 @@ use alloc::vec::Vec;
 use clock::TockClock;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
+use core::mem;
 #[cfg(all(target_has_atomic = "8", not(feature = "std")))]
 use core::sync::atomic::{AtomicBool, Ordering};
 use libtock_console::{Console, ConsoleWriter};
@@ -26,6 +27,7 @@ use libtock_drivers::{rng, usb_ctap_hid};
 use libtock_leds::Leds;
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
+use opensk::api::clock::Clock;
 use opensk::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
@@ -118,6 +120,7 @@ pub struct TockEnv<
     store: Store<Storage<S, C>>,
     upgrade_storage: Option<UpgradeStorage<S, C>>,
     blink_pattern: usize,
+    blink_timer: <TockClock<S> as Clock>::Timer,
     clock: TockClock<S>,
     c: PhantomData<C>,
 }
@@ -141,6 +144,7 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> D
             store,
             upgrade_storage,
             blink_pattern: 0,
+            blink_timer: <TockClock<S> as Clock>::Timer::default(),
             clock: TockClock::default(),
             c: PhantomData,
         }
@@ -295,8 +299,14 @@ where
         packet: &mut [u8; 64],
         timeout_ms: usize,
     ) -> UserPresenceWaitResult {
-        blink_leds::<S>(self.blink_pattern);
-        self.blink_pattern += 1;
+        let mut new_timer = self.clock.make_timer(timeout_ms);
+        mem::swap(&mut self.blink_timer, &mut new_timer);
+        if self.clock().is_elapsed(&new_timer) {
+            blink_leds::<S>(self.blink_pattern);
+            self.blink_pattern += 1;
+        } else {
+            mem::swap(&mut self.blink_timer, &mut new_timer);
+        }
 
         let result =
             UsbCtapHid::<S>::recv_with_buttons(packet, Duration::from_ms(timeout_ms as isize));
@@ -323,6 +333,7 @@ where
 
     fn check_complete(&mut self) {
         switch_off_leds::<S>();
+        self.blink_timer = <TockClock<S> as Clock>::Timer::default();
     }
 }
 

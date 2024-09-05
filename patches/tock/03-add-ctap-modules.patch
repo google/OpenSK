@@ -559,10 +559,10 @@ index 000000000..30cac1323
 +}
 diff --git a/capsules/src/usb/usbc_ctap_hid.rs b/capsules/src/usb/usbc_ctap_hid.rs
 new file mode 100644
-index 000000000..5ad2c44b3
+index 000000000..fdf92a28e
 --- /dev/null
 +++ b/capsules/src/usb/usbc_ctap_hid.rs
-@@ -0,0 +1,554 @@
+@@ -0,0 +1,553 @@
 +//! A USB HID client of the USB hardware interface
 +
 +use super::app::App;
@@ -927,9 +927,8 @@ index 000000000..5ad2c44b3
 +            if self
 +                .client
 +                .map_or(false, |client| client.can_receive_packet(&app))
++                && self.pending_out.take()
 +            {
-+                assert!(self.pending_out.take());
-+
 +                // Clear any pending packet on the transmitting side.
 +                // It's up to the client to handle the received packet and decide if this packet
 +                // should be re-transmitted or not.

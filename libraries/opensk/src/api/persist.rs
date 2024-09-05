@@ -521,8 +521,7 @@ mod test {
         let mut env = TestEnv::default();
         let persist = env.persist();
 
-        let mut counter_value = 1;
-        assert_eq!(persist.global_signature_counter().unwrap(), counter_value);
+        let mut counter_value = persist.global_signature_counter().unwrap();
         for increment in 1..10 {
             assert!(persist.incr_global_signature_counter(increment).is_ok());
             counter_value += increment;

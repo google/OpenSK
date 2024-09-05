@@ -1479,13 +1479,14 @@ mod test {
     const VENDOR_CHANNEL: Channel = Channel::VendorHid([0x12, 0x34, 0x56, 0x78]);
 
     fn check_make_response(
+        env: &mut impl Env,
         make_credential_response: &CtapResult<ResponseData>,
         flags: u8,
-        expected_aaguid: &[u8],
         expected_credential_id_size: u8,
         expected_extension_cbor: &[u8],
     ) {
-        const INITIAL_SIGNATURE_COUNTER: u32 = 1;
+        let expected_aaguid = env.customization().aaguid();
+        let signature_counter = env.persist().global_signature_counter().unwrap();
         match make_credential_response.as_ref().unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let AuthenticatorMakeCredentialResponse {
@@ -1500,9 +1501,9 @@ mod test {
                 let mut expected_auth_data = vec![
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
                     0x34, 0xE2, 0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2,
-                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags, 0x00, 0x00, 0x00,
+                    0x12, 0x55, 0x86, 0xCE, 0x19, 0x47, flags,
                 ];
-                expected_auth_data.push(INITIAL_SIGNATURE_COUNTER as u8);
+                expected_auth_data.extend(&signature_counter.to_be_bytes());
                 expected_auth_data.extend(expected_aaguid);
                 expected_auth_data.extend(&[0x00, expected_credential_id_size]);
                 assert_eq!(
@@ -1680,13 +1681,7 @@ mod test {
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
-        check_make_response(
-            &make_credential_response,
-            0x41,
-            env.customization().aaguid(),
-            0x20,
-            &[],
-        );
+        check_make_response(&mut env, &make_credential_response, 0x41, 0x20, &[]);
     }
 
     #[test]
@@ -1700,9 +1695,9 @@ mod test {
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
+            &mut env,
             &make_credential_response,
             0x41,
-            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
@@ -1870,9 +1865,9 @@ mod test {
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );
@@ -1896,9 +1891,9 @@ mod test {
             0xA1, 0x6B, 0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0xF5,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1918,13 +1913,7 @@ mod test {
         make_credential_params.extensions = extensions;
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
-        check_make_response(
-            &make_credential_response,
-            0x41,
-            env.customization().aaguid(),
-            0x20,
-            &[],
-        );
+        check_make_response(&mut env, &make_credential_response, 0x41, 0x20, &[]);
 
         // Second part: The extension is used.
         assert_eq!(
@@ -1945,9 +1934,9 @@ mod test {
             0x04,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -1970,9 +1959,9 @@ mod test {
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -2002,9 +1991,9 @@ mod test {
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF4,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             0x20,
             &expected_extension_cbor,
         );
@@ -2079,13 +2068,7 @@ mod test {
             DUMMY_CHANNEL,
         );
 
-        check_make_response(
-            &make_credential_response,
-            0x45,
-            env.customization().aaguid(),
-            0x20,
-            &[],
-        );
+        check_make_response(&mut env, &make_credential_response, 0x45, 0x20, &[]);
 
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
@@ -2117,9 +2100,9 @@ mod test {
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
 
         check_make_response(
+            &mut env,
             &make_credential_response,
             0x41,
-            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &[],
         );
@@ -2816,9 +2799,9 @@ mod test {
             0xA1, 0x68, 0x63, 0x72, 0x65, 0x64, 0x42, 0x6C, 0x6F, 0x62, 0xF5,
         ];
         check_make_response(
+            &mut env,
             &make_credential_response,
             0xC1,
-            env.customization().aaguid(),
             CBOR_CREDENTIAL_ID_SIZE as u8,
             &expected_extension_cbor,
         );

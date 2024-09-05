@@ -48,20 +48,20 @@ pub struct TestTimer {
     end_ms: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TestClock {
     /// The current time, as advanced, in milliseconds.
     now_ms: Arc<Mutex<usize>>,
 }
 
 impl TestClock {
-    pub fn advance(&mut self, milliseconds: usize) {
-        let mut locked_now_ms = self.now_ms.lock().unwrap();
-        *locked_now_ms += milliseconds;
+    pub fn now(&self) -> usize {
+        *self.now_ms.lock().unwrap()
     }
 
-    pub fn access(&self) -> Arc<Mutex<usize>> {
-        self.now_ms.clone()
+    pub fn advance(&self, milliseconds: usize) {
+        let mut locked_now_ms = self.now_ms.lock().unwrap();
+        *locked_now_ms += milliseconds;
     }
 }
 
@@ -70,18 +70,18 @@ impl Clock for TestClock {
 
     fn make_timer(&mut self, milliseconds: usize) -> Self::Timer {
         TestTimer {
-            end_ms: *self.now_ms.lock().unwrap() + milliseconds,
+            end_ms: self.now() + milliseconds,
         }
     }
 
     fn is_elapsed(&mut self, timer: &Self::Timer) -> bool {
-        *self.now_ms.lock().unwrap() >= timer.end_ms
+        self.now() >= timer.end_ms
     }
 
     #[cfg(feature = "debug_ctap")]
     fn timestamp_us(&mut self) -> usize {
         // Unused, but let's implement something because it's easy.
-        *self.now_ms.lock().unwrap() * 1000
+        self.now() * 1000
     }
 }
 

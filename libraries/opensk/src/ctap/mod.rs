@@ -3367,10 +3367,9 @@ mod test {
     #[test]
     fn test_check_user_presence_timeout() {
         let mut env = TestEnv::default();
-        let now_ms = env.clock().access();
+        let clock = env.clock().clone();
         env.user_presence().set(move || {
-            let mut locked_now_ms = now_ms.lock().unwrap();
-            *locked_now_ms += 100;
+            clock.advance(100);
             Err(UserPresenceError::Timeout)
         });
         let response = check_user_presence(&mut env, DUMMY_CHANNEL);

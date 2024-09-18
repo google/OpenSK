@@ -31,7 +31,7 @@ use opensk::{test_helpers, Ctap, Transport};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputType {
     CborMakeCredentialParameter,
     CborGetAssertionParameter,

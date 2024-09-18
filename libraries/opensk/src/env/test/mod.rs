@@ -43,7 +43,7 @@ pub type TestRng = StdRng;
 
 impl Rng for TestRng {}
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct TestTimer {
     end_ms: usize,
 }

@@ -22,7 +22,6 @@ extern crate byteorder;
 extern crate core;
 extern crate lang_items;
 
-use core::convert::TryFrom;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 #[cfg(feature = "with_ctap1")]
@@ -151,7 +150,7 @@ fn main() {
         #[cfg(feature = "with_ctap1")]
         let num_buttons = Buttons::<SyscallImplementation>::count().ok().unwrap();
 
-        // Variable for use in both the send_and_maybe_recv and recv cases.
+        // Variable for use in both the send and recv cases.
         let mut usb_endpoint: Option<UsbEndpoint> = None;
         let mut pkt_request = [0; 64];
 
@@ -189,7 +188,7 @@ fn main() {
                         ctap.env().clock().timestamp_us(),
                         &mut writer,
                     );
-                    UsbEndpoint::try_from(endpoint as usize).ok()
+                    Some(endpoint)
                 }
                 Err(_) => panic!("Error on USB recv"),
             };

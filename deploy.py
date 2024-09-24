@@ -205,6 +205,7 @@ def assert_python_library(module: str):
 class RemoveConstAction(argparse.Action):
 
   # pylint: disable=redefined-builtin
+  # pylint: disable=too-many-positional-arguments
   def __init__(self,
                option_strings,
                dest,

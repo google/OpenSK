@@ -233,8 +233,7 @@ impl Ctap1Command {
             // U2F raw message format specification (version 20170411) section 6.3
             U2fCommand::Version => Ok(Vec::<u8>::from(super::U2F_VERSION_STRING)),
 
-            // TODO: should we return an error instead such as SW_INS_NOT_SUPPORTED?
-            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_SUCCESS),
+            U2fCommand::VendorSpecific { .. } => Err(Ctap1StatusCode::SW_INS_INVALID),
         }
     }
 

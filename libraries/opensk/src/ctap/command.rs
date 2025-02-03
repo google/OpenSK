@@ -14,8 +14,8 @@
 
 use super::cbor_read;
 use super::data_formats::{
-    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
-    ok_or_missing, ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
+    extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
+    extract_unsigned, ok_or_missing, ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
     CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
     MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
@@ -43,6 +43,7 @@ pub enum Command {
     AuthenticatorClientPin(AuthenticatorClientPinParameters),
     AuthenticatorReset,
     AuthenticatorGetNextAssertion,
+    AuthenticatorBioEnrollment(AuthenticatorBioEnrollmentParameters),
     AuthenticatorCredentialManagement(AuthenticatorCredentialManagementParameters),
     AuthenticatorSelection,
     AuthenticatorLargeBlobs(AuthenticatorLargeBlobsParameters),
@@ -58,7 +59,7 @@ impl Command {
     const AUTHENTICATOR_RESET: u8 = 0x07;
     const AUTHENTICATOR_GET_NEXT_ASSERTION: u8 = 0x08;
     // Implement Bio Enrollment when your hardware supports biometrics.
-    const _AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
+    const AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0x0A;
     const AUTHENTICATOR_SELECTION: u8 = 0x0B;
     const AUTHENTICATOR_LARGE_BLOBS: u8 = 0x0C;
@@ -109,6 +110,12 @@ impl Command {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorGetNextAssertion)
             }
+            Command::AUTHENTICATOR_BIO_ENROLLMENT => {
+                let decoded_cbor = cbor_read(&bytes[1..])?;
+                Ok(Command::AuthenticatorBioEnrollment(
+                    AuthenticatorBioEnrollmentParameters::try_from(decoded_cbor)?,
+                ))
+            }
             Command::AUTHENTICATOR_CREDENTIAL_MANAGEMENT
             | Command::AUTHENTICATOR_VENDOR_CREDENTIAL_MANAGEMENT => {
                 let decoded_cbor = cbor_read(&bytes[1..])?;
@@ -135,6 +142,49 @@ impl Command {
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthenticatorBioEnrollmentParameters {
+    pub modality: Option<u64>,
+    pub sub_command: Option<u64>,
+    pub sub_command_params: Option<cbor::Value>,
+    pub pin_protocol: Option<u64>,
+    pub pin_auth: Option<Vec<u8>>,
+    pub get_modality: Option<bool>,
+}
+
+impl TryFrom<cbor::Value> for AuthenticatorBioEnrollmentParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Self::Error> {
+        destructure_cbor_map! {
+            let {
+                0x01 => modality,
+                0x02 => sub_command,
+                0x03 => sub_command_params,
+                0x04 => pin_protocol,
+                0x05 => pin_auth,
+                0x06 => get_modality,
+            } = extract_map(cbor_value)?;
+        }
+
+        let modality = modality.map(extract_unsigned).transpose()?;
+        let sub_command = sub_command.map(extract_unsigned).transpose()?;
+        let sub_command_params = sub_command_params;
+        let pin_protocol = pin_protocol.map(extract_unsigned).transpose()?;
+        let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
+        let get_modality = get_modality.map(extract_bool).transpose()?;
+
+        Ok(AuthenticatorBioEnrollmentParameters {
+            modality,
+            sub_command,
+            sub_command_params,
+            pin_protocol,
+            pin_auth,
+            get_modality,
+        })
     }
 }
 

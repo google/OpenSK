@@ -31,6 +31,7 @@ use opensk::api::clock::Clock;
 use opensk::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
+use opensk::api::fingerprint::{Fingerprint, FingerprintCaptureError, FingerprintCheckError};
 use opensk::api::key_store;
 use opensk::api::persist::{Persist, PersistIter};
 use opensk::api::rng::Rng;
@@ -337,6 +338,46 @@ where
     }
 }
 
+impl<S, C> Fingerprint for TockEnv<S, C>
+where
+    S: Syscalls,
+    C: platform::subscribe::Config + platform::allow_ro::Config,
+{
+    fn get_enrollment_count_maximum(&self) -> u8 {
+        0
+    }
+
+    fn get_enrollment_count(&self) -> u8 {
+        0
+    }
+
+    fn prepare_enrollment(&self, _index: u8) {}
+
+    fn capture_sample(&self, _timeout_ms: usize) -> Result<(), FingerprintCaptureError> {
+        Err(FingerprintCaptureError::Other)
+    }
+
+    fn commit_enrollment(&self) -> Result<(), ()> {
+        Err(())
+    }
+
+    fn cancel_enrollment(&self) {}
+
+    fn get_enrollments(&self, _fingerlist: &mut [u8; 5]) {}
+
+    fn check_fingerprint_init(&mut self) {}
+
+    fn check_fingerprint(&self, _timeout_ms: usize) -> Result<u8, FingerprintCheckError> {
+        Err(FingerprintCheckError::Other)
+    }
+
+    fn check_fingerprint_complete(&mut self) {}
+
+    fn delete_enrollment(&self, _index: u8) {}
+
+    fn setloglevel(&self, _level: u8) {}
+}
+
 impl<S, C> key_store::Helper for TockEnv<S, C>
 where
     S: Syscalls,
@@ -356,12 +397,17 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     type Customization = CustomizationImpl;
     type HidConnection = Self;
     type Crypto = SoftwareCrypto;
+    type Fingerprint = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
     }
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
+        self
+    }
+
+    fn fingerprint(&mut self) -> &mut Self::Fingerprint {
         self
     }
 

@@ -142,6 +142,12 @@ make_partition! {
     ///
     /// If the entry is absent, the counter is 0.
     GLOBAL_SIGNATURE_COUNTER = 2047;
+
+    /// Stored counter  UV retries.
+    UV_RETRIES = 2048;
+
+    /// Stored friendly names for enrolled fingerprints.
+    FRIENDLY_NAMES = 2100..2105;
 }
 
 #[cfg(test)]

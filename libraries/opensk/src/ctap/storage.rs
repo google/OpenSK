@@ -203,6 +203,24 @@ pub fn reset_pin_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().reset_pin_retries()
 }
 
+/// Returns the number of remaining UV retries.
+pub fn uv_retries(env: &mut impl Env) -> CtapResult<u8> {
+    Ok(env
+        .customization()
+        .max_uv_retries()
+        .saturating_sub(env.persist().uv_fails()?))
+}
+
+/// Decrements the number of remaining UV retries.
+pub fn decr_uv_retries(env: &mut impl Env) -> CtapResult<()> {
+    env.persist().incr_uv_fails()
+}
+
+/// Resets the number of remaining UV retries.
+pub fn reset_uv_retries(env: &mut impl Env) -> CtapResult<()> {
+    env.persist().reset_uv_retries()
+}
+
 /// Returns the minimum PIN length.
 pub fn min_pin_length(env: &mut impl Env) -> CtapResult<u8> {
     Ok(env
@@ -285,6 +303,21 @@ pub fn toggle_always_uv(env: &mut impl Env) -> CtapResult<()> {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
     env.persist().toggle_always_uv()
+}
+
+/// Store a Bio Enrollment friendly name for a given template_id.
+pub fn store_friendly_name<E: Env>(
+    env: &mut E,
+    template_id: u8,
+    friendly_name: &str,
+) -> CtapResult<()> {
+    env.persist()
+        .store_friendly_name(template_id, friendly_name)
+}
+
+/// Retrieve the Bio Enrollment friendly name for a given template_id.
+pub fn get_friendly_name<E: Env>(env: &mut E, template_id: u8) -> CtapResult<String> {
+    env.persist().get_friendly_name(template_id)
 }
 
 /// Iterator for credentials.

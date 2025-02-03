@@ -16,6 +16,7 @@ use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
+use crate::api::fingerprint::{Fingerprint, FingerprintCaptureError, FingerprintCheckError};
 use crate::api::key_store;
 use crate::api::persist::{Persist, PersistIter};
 use crate::api::rng::Rng;
@@ -37,6 +38,7 @@ pub struct TestEnv {
     customization: TestCustomization,
     clock: TestClock,
     soft_reset: bool,
+    fingerprint: TestFingerprint,
 }
 
 pub type TestRng = StdRng;
@@ -88,6 +90,8 @@ impl Clock for TestClock {
 pub struct TestUserPresence {
     check: Box<dyn Fn() -> UserPresenceResult>,
 }
+
+pub struct TestFingerprint {}
 
 pub struct TestWrite;
 
@@ -155,6 +159,7 @@ impl Default for TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let customization = DEFAULT_CUSTOMIZATION.into();
         let clock = TestClock::default();
+        let fingerprint = TestFingerprint {};
         TestEnv {
             rng,
             user_presence,
@@ -162,6 +167,7 @@ impl Default for TestEnv {
             customization,
             clock,
             soft_reset: false,
+            fingerprint,
         }
     }
 }
@@ -198,6 +204,42 @@ impl UserPresence for TestUserPresence {
     fn check_complete(&mut self) {}
 }
 
+impl Fingerprint for TestFingerprint {
+    fn get_enrollment_count_maximum(&self) -> u8 {
+        10
+    }
+
+    fn get_enrollment_count(&self) -> u8 {
+        0
+    }
+
+    fn prepare_enrollment(&self, _index: u8) {}
+
+    fn capture_sample(&self, _timeout: usize) -> Result<(), FingerprintCaptureError> {
+        Ok(())
+    }
+
+    fn commit_enrollment(&self) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn cancel_enrollment(&self) {}
+
+    fn get_enrollments(&self, _fingerlist: &mut [u8; 5]) {}
+
+    fn check_fingerprint_init(&mut self) {}
+
+    fn check_fingerprint(&self, _timeout: usize) -> Result<u8, FingerprintCheckError> {
+        Ok(0)
+    }
+
+    fn check_fingerprint_complete(&mut self) {}
+
+    fn delete_enrollment(&self, _index: u8) {}
+
+    fn setloglevel(&self, _level: u8) {}
+}
+
 impl key_store::Helper for TestEnv {}
 
 impl Env for TestEnv {
@@ -210,6 +252,7 @@ impl Env for TestEnv {
     type Customization = TestCustomization;
     type HidConnection = Self;
     type Crypto = SoftwareCrypto;
+    type Fingerprint = TestFingerprint;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
@@ -217,6 +260,10 @@ impl Env for TestEnv {
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {
         &mut self.user_presence
+    }
+
+    fn fingerprint(&mut self) -> &mut Self::Fingerprint {
+        &mut self.fingerprint
     }
 
     fn persist(&mut self) -> &mut Self {

@@ -20,6 +20,7 @@ use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::PIN_AUTH_LENGTH;
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp;
 use core::convert::TryFrom;
@@ -204,6 +205,27 @@ pub trait Persist {
         self.remove(keys::PIN_RETRIES)
     }
 
+    /// Returns the number of failed UV attempts.
+    fn uv_fails(&self) -> CtapResult<u8> {
+        match self.find(keys::UV_RETRIES)? {
+            None => Ok(0),
+            Some(value) if value.len() == 1 => Ok(value[0]),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Decrements the number of remaining UV retries.
+    fn incr_uv_fails(&mut self) -> CtapResult<()> {
+        let old_value = self.uv_fails()?;
+        let new_value = old_value.saturating_add(1);
+        self.insert(keys::UV_RETRIES, &[new_value])
+    }
+
+    /// Resets the number of remaining UV retries.
+    fn reset_uv_retries(&mut self) -> CtapResult<()> {
+        self.remove(keys::UV_RETRIES)
+    }
+
     /// Returns the minimum PIN length, if stored.
     fn min_pin_length(&self) -> CtapResult<Option<u8>> {
         match self.find(keys::MIN_PIN_LENGTH)? {
@@ -383,6 +405,23 @@ pub trait Persist {
             Ok(self.remove(keys::ALWAYS_UV)?)
         } else {
             Ok(self.insert(keys::ALWAYS_UV, &[])?)
+        }
+    }
+
+    /// Store a Bio Enrollment friendly name for a given template_id.
+    fn store_friendly_name(&mut self, template_id: u8, friendly_name: &str) -> CtapResult<()> {
+        let key = keys::FRIENDLY_NAMES.start + template_id as usize;
+        self.insert(key, friendly_name.as_bytes())?;
+        Ok(())
+    }
+
+    /// Retrieve the Bio Enrollment friendly name for a given template_id.
+    fn get_friendly_name(&mut self, template_id: u8) -> CtapResult<String> {
+        let key = keys::FRIENDLY_NAMES.start + template_id as usize;
+
+        match self.find(key)? {
+            None => Err(Ctap2StatusCode::CTAP1_ERR_OTHER),
+            Some(value) => Ok(String::from_utf8(value).unwrap_or(String::from(""))),
         }
     }
 

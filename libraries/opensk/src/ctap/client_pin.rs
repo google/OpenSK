@@ -21,11 +21,13 @@ use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::secret::Secret;
 use super::status_code::Ctap2StatusCode;
 use super::token_state::PinUvAuthTokenState;
+use super::Channel;
 #[cfg(test)]
 use crate::api::crypto::ecdh::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
+use crate::api::fingerprint::{Fingerprint, FingerprintCheckError};
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
 use crate::ctap::status_code::CtapResult;
@@ -224,6 +226,7 @@ impl<E: Env> ClientPin<E> {
             pin_uv_auth_token: None,
             retries: Some(storage::pin_retries(env)? as u64),
             power_cycle_state: Some(self.consecutive_pin_mismatches >= 3),
+            uv_retries: None,
         })
     }
 
@@ -240,6 +243,7 @@ impl<E: Env> ClientPin<E> {
             pin_uv_auth_token: None,
             retries: None,
             power_cycle_state: None,
+            uv_retries: None,
         })
     }
 
@@ -342,27 +346,218 @@ impl<E: Env> ClientPin<E> {
                 .get_pin_uv_auth_token(),
         )?;
 
+        // Because using a PIN succeeded, we can clear the UV retry counter.
+        let _ = storage::reset_uv_retries(env);
+
         Ok(AuthenticatorClientPinResponse {
             key_agreement: None,
             pin_uv_auth_token: Some(pin_uv_auth_token),
             retries: None,
             power_cycle_state: None,
+            uv_retries: None,
         })
     }
 
     fn process_get_pin_uv_auth_token_using_uv_with_permissions(
-        &self,
-        // If you want to support local user verification, implement this function.
-        // Lacking a fingerprint reader, this subcommand is currently unsupported.
-        _client_pin_params: AuthenticatorClientPinParameters,
+        &mut self,
+        env: &mut E,
+        client_pin_params: AuthenticatorClientPinParameters,
+        channel: Channel,
     ) -> CtapResult<AuthenticatorClientPinResponse> {
-        // User verification is only supported through PIN currently.
-        Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
+        let AuthenticatorClientPinParameters {
+            pin_uv_auth_protocol,
+            key_agreement,
+            permissions,
+            permissions_rp_id,
+            ..
+        } = client_pin_params;
+        let key_agreement = ok_or_missing(key_agreement)?;
+
+        // If the authenticator does not receive mandatory parameters for this
+        // command, it returns CTAP2_ERR_MISSING_PARAMETER error.
+        if permissions.is_none() {
+            debug_ctap!(env, "CP: getPinUvAuthUv no  permissions",);
+        }
+        let permissions_bitfield =
+            permissions.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
+
+        // If the authenticator receives a permissions parameter with value 0,
+        // return CTAP1_ERR_INVALID_PARAMETER.
+        if permissions_bitfield == 0 {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
+
+        // For each pinUvAuthToken permission present in the permissions
+        // parameter, if the statement corresponding to the permission is
+        // currently true, terminate these steps and return
+        // CTAP2_ERR_UNAUTHORIZED_PERMISSION.
+        // - cm: credMgmt is false or absent.
+        // - be: uvBioEnroll is false or absent.
+        // - lbw: largeBlobs is false or absent.
+        // - acfg: uvAcfg is false or absent.
+        //
+        // We set the credMgmt, uvBioEnroll, and largeBlobs options to true, so
+        // we only need to check for acfg.
+        #[cfg(feature = "config_command")]
+        if permissions_bitfield & PinPermission::AuthenticatorConfiguration as u8 > 0 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNAUTHORIZED_PERMISSION);
+        }
+
+        let internal_retry = env.customization().preferred_platform_uv_attempts() == 1;
+        self.perform_built_in_uv(env, channel, internal_retry)?;
+
+        let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
+        if env.persist().has_force_pin_change()? {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
+        }
+
+        // Create a new pinUvAuthToken by calling resetPinUvAuthToken() for all
+        // pinUvAuthProtocols supported by this authenticator.
+        self.pin_protocol_v1.reset_pin_uv_auth_token(env);
+        self.pin_protocol_v2.reset_pin_uv_auth_token(env);
+
+        // If the employed built-in user verification method supplied evidence
+        // of user interaction, then call
+        // beginUsingPinUvAuthToken(userIsPresent: true).
+        self.pin_uv_auth_token_state
+            .begin_using_pin_uv_auth_token(env);
+
+        // Assign the requested permissions to the pinUvAuthToken, ignoring any
+        // undefined permissions.
+        self.pin_uv_auth_token_state
+            .set_permissions(permissions_bitfield);
+
+        // If the rpId parameter is present, use its value as the permissions RP
+        // ID and associate it with the pinUvAuthToken.
+        self.pin_uv_auth_token_state
+            .set_permissions_rp_id(permissions_rp_id);
+
+        let pin_uv_auth_token = shared_secret.encrypt(
+            env,
+            self.get_pin_protocol(pin_uv_auth_protocol)
+                .get_pin_uv_auth_token(),
+        )?;
+
+        Ok(AuthenticatorClientPinResponse {
+            key_agreement: None,
+            pin_uv_auth_token: Some(pin_uv_auth_token),
+            retries: None,
+            power_cycle_state: None,
+            uv_retries: None,
+        })
     }
 
-    fn process_get_uv_retries(&self) -> CtapResult<AuthenticatorClientPinResponse> {
-        // User verification is only supported through PIN currently.
-        Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)
+    pub fn perform_built_in_uv(
+        &self,
+        env: &mut E,
+        channel: Channel,
+        internal_retry: bool,
+    ) -> CtapResult<()> {
+        // Create helper function so we can clear LEDs after trying the
+        // fingerprint potentially multiple times.
+        fn check_fingerprint_loop<E: Env>(
+            env: &mut E,
+            channel: Channel,
+            internal_retry: bool,
+        ) -> Result<(), Ctap2StatusCode> {
+            // How long we give the user to touch the device before returning
+            // `CTAP2_ERR_USER_ACTION_TIMEOUT`.
+            const UV_TIMEOUT_MS: usize = 10000;
+            // How long we wait for the fingerprint sensor on each iteration.
+            const FINGERPRINT_TIMEOUT_MS: usize = 500;
+            // How many iterations we need to get the full UV timeout time.
+            const FINGERPRINT_TIMEOUT_LOOPS: usize = UV_TIMEOUT_MS / FINGERPRINT_TIMEOUT_MS;
+
+            // Keep track of the number of times the fingerprint detection timed
+            // out. If this happens too many times we need to return with
+            // `CTAP2_ERR_USER_ACTION_TIMEOUT`.
+            let mut timeouts = 0;
+
+            let mut attempts_before_returning = if internal_retry {
+                env.customization().max_uv_attempts_for_internal_retries()
+            } else {
+                1
+            };
+
+            while attempts_before_returning > 0 {
+                // If uvRetries <= 0 then return error.
+                storage::uv_retries(env).and_then(|retries| {
+                    if retries == 0 {
+                        Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
+                    } else {
+                        Ok(())
+                    }
+                })?;
+
+                // Decrement the uvRetries counter by 1.
+                let _ = storage::decr_uv_retries(env);
+
+                // Decrement attemptsBeforeReturning by 1.
+                attempts_before_returning -= 1;
+
+                // We need to give the user time to touch the device during UV.
+                // Also, on Windows, it seems we need to send KEEPALIVEs to
+                // avoid timeouts, so we need to do the check incrementally.
+                //
+                // The total timeout is specified this way in the spec:
+                //
+                // > This refers to a timeout that occurs when the authenticator
+                // > is waiting for direct action from the user, like a touch.
+                // > (I.e. not a command from the platform.) The duration of
+                // > this timeout is chosen by the authenticator but MUST be at
+                // > least 10 seconds. Thirty seconds is a reasonable value.
+                while timeouts < FINGERPRINT_TIMEOUT_LOOPS {
+                    // Perform built-in user verification.
+                    match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
+                        Ok(_finger_index) => {
+                            // set the uvRetries counter to maxUvRetries
+                            let _ = storage::reset_uv_retries(env);
+
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            // Send a KEEPALIVE to avoid timeouts on Windows.
+                            crate::ctap::send_keepalive_packet(env, channel)?;
+
+                            match e {
+                                FingerprintCheckError::NoMatch | FingerprintCheckError::Other => {
+                                    // We got a fingerprint touch, but it was
+                                    // invalid. We break out of the timeouts
+                                    // loop.
+                                    break;
+                                }
+                                FingerprintCheckError::Timeout => {
+                                    timeouts += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if timeouts >= FINGERPRINT_TIMEOUT_LOOPS {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT);
+                }
+            }
+
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        }
+
+        env.fingerprint().check_fingerprint_init();
+        let res = check_fingerprint_loop(env, channel, internal_retry);
+        env.fingerprint().check_fingerprint_complete();
+        res
+    }
+
+    fn process_get_uv_retries(&self, env: &mut E) -> CtapResult<AuthenticatorClientPinResponse> {
+        debug_ctap!(env, "CP:  process_get_uv_retries");
+
+        Ok(AuthenticatorClientPinResponse {
+            key_agreement: None,
+            pin_uv_auth_token: None,
+            retries: None,
+            power_cycle_state: None,
+            uv_retries: Some(storage::uv_retries(env)? as u64),
+        })
     }
 
     fn process_get_pin_uv_auth_token_using_pin_with_permissions(
@@ -397,6 +592,7 @@ impl<E: Env> ClientPin<E> {
         &mut self,
         env: &mut E,
         client_pin_params: AuthenticatorClientPinParameters,
+        channel: Channel,
     ) -> CtapResult<ResponseData> {
         if !env.customization().allows_pin_protocol_v1()
             && client_pin_params.pin_uv_auth_protocol == PinUvAuthProtocol::V1
@@ -420,9 +616,13 @@ impl<E: Env> ClientPin<E> {
                 Some(self.process_get_pin_token(env, client_pin_params)?)
             }
             ClientPinSubCommand::GetPinUvAuthTokenUsingUvWithPermissions => Some(
-                self.process_get_pin_uv_auth_token_using_uv_with_permissions(client_pin_params)?,
+                self.process_get_pin_uv_auth_token_using_uv_with_permissions(
+                    env,
+                    client_pin_params,
+                    channel,
+                )?,
             ),
-            ClientPinSubCommand::GetUvRetries => Some(self.process_get_uv_retries()?),
+            ClientPinSubCommand::GetUvRetries => Some(self.process_get_uv_retries(env)?),
             ClientPinSubCommand::GetPinUvAuthTokenUsingPinWithPermissions => Some(
                 self.process_get_pin_uv_auth_token_using_pin_with_permissions(
                     env,

@@ -252,6 +252,31 @@ pub trait Customization {
     /// With P=20 and K=150, we have I=2M which is enough for 500 increments per day
     /// for 10 years.
     fn max_supported_resident_keys(&self) -> usize;
+
+    /// This specifies the preferred number of invocations of the
+    /// `getPinUvAuthTokenUsingUvWithPermissions` subCommand the platform may
+    /// attempt before falling back to the
+    /// `getPinUvAuthTokenUsingPinWithPermissions` subCommand or displaying an
+    /// error.
+    ///
+    /// MUST be greater than zero. If the value is 1 then all uvRetries are
+    /// internal and the platform MUST only invoke the
+    /// getPinUvAuthTokenUsingUvWithPermissions subCommand a single time. If the
+    /// value is > 1 the authenticator MUST only decrement uvRetries by 1 for
+    /// each iteration.
+    fn preferred_platform_uv_attempts(&self) -> usize;
+
+    /// Sets the number of consecutive failed User Verification attempts before
+    /// blocking built-in UV.
+    ///
+    /// # Invariant
+    ///
+    /// - CTAP2.1: Maximum PIN retries must be 25 at most.
+    fn max_uv_retries(&self) -> u8;
+
+    /// The maximum number of times the authenticator will retry internally when
+    /// internalRetry is true as part of the performBuiltInUv() algorithm.
+    fn max_uv_attempts_for_internal_retries(&self) -> u8;
 }
 
 #[derive(Clone)]
@@ -273,15 +298,18 @@ pub struct CustomizationImpl {
     pub max_large_blob_array_size: usize,
     pub max_rp_ids_length: usize,
     pub max_supported_resident_keys: usize,
+    pub preferred_platform_uv_attempts: usize,
+    pub max_uv_retries: u8,
+    pub max_uv_attempts_for_internal_retries: u8,
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     aaguid: &[0; AAGUID_LENGTH],
     allows_pin_protocol_v1: true,
-    default_cred_protect: None,
+    default_cred_protect: Some(CredentialProtectionPolicy::UserVerificationOptional),
     default_min_pin_length: 4,
     default_min_pin_length_rp_ids: &[],
-    enforce_always_uv: false,
+    enforce_always_uv: true,
     enterprise_attestation_mode: None,
     enterprise_rp_id_list: &[],
     max_msg_size: 7609,
@@ -293,6 +321,9 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     max_large_blob_array_size: 2048,
     max_rp_ids_length: 8,
     max_supported_resident_keys: 150,
+    preferred_platform_uv_attempts: 5,
+    max_uv_retries: 8,
+    max_uv_attempts_for_internal_retries: 8,
 };
 
 impl Customization for CustomizationImpl {
@@ -373,6 +404,18 @@ impl Customization for CustomizationImpl {
 
     fn max_supported_resident_keys(&self) -> usize {
         self.max_supported_resident_keys
+    }
+
+    fn preferred_platform_uv_attempts(&self) -> usize {
+        self.preferred_platform_uv_attempts
+    }
+
+    fn max_uv_retries(&self) -> u8 {
+        self.max_uv_retries
+    }
+
+    fn max_uv_attempts_for_internal_retries(&self) -> u8 {
+        self.max_uv_attempts_for_internal_retries
     }
 }
 

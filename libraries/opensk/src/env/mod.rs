@@ -18,6 +18,7 @@ use crate::api::crypto::ecdh::Ecdh;
 use crate::api::crypto::ecdsa::Ecdsa;
 use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
+use crate::api::fingerprint::Fingerprint;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
 use crate::api::rng::Rng;
@@ -49,12 +50,14 @@ pub trait Env {
     type HidConnection: HidConnection;
     type Clock: Clock;
     type Crypto: Crypto;
+    type Fingerprint: Fingerprint;
 
     fn rng(&mut self) -> &mut Self::Rng;
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn persist(&mut self) -> &mut Self::Persist;
     fn key_store(&mut self) -> &mut Self::KeyStore;
     fn clock(&mut self) -> &mut Self::Clock;
+    fn fingerprint(&mut self) -> &mut Self::Fingerprint;
 
     /// Creates a write instance for debugging.
     ///

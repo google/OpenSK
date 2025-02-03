@@ -35,6 +35,9 @@ pub struct TestCustomization {
     max_large_blob_array_size: usize,
     max_rp_ids_length: usize,
     max_supported_resident_keys: usize,
+    preferred_platform_uv_attempts: usize,
+    max_uv_retries: u8,
+    max_uv_attempts_for_internal_retries: u8,
 }
 
 impl TestCustomization {
@@ -126,6 +129,18 @@ impl Customization for TestCustomization {
     fn max_supported_resident_keys(&self) -> usize {
         self.max_supported_resident_keys
     }
+
+    fn preferred_platform_uv_attempts(&self) -> usize {
+        self.preferred_platform_uv_attempts
+    }
+
+    fn max_uv_retries(&self) -> u8 {
+        self.max_uv_retries
+    }
+
+    fn max_uv_attempts_for_internal_retries(&self) -> u8 {
+        self.max_uv_attempts_for_internal_retries
+    }
 }
 
 impl From<CustomizationImpl> for TestCustomization {
@@ -148,6 +163,9 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
+            preferred_platform_uv_attempts,
+            max_uv_retries,
+            max_uv_attempts_for_internal_retries,
         } = c;
 
         let default_min_pin_length_rp_ids = default_min_pin_length_rp_ids
@@ -178,6 +196,9 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
+            preferred_platform_uv_attempts,
+            max_uv_retries,
+            max_uv_attempts_for_internal_retries,
         }
     }
 }

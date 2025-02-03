@@ -38,6 +38,8 @@ pub enum ResponseData {
     AuthenticatorLargeBlobs(Option<AuthenticatorLargeBlobsResponse>),
     #[cfg(feature = "config_command")]
     AuthenticatorConfig,
+
+    AuthenticatorBioEnrollment(Option<AuthenticatorBioEnrollmentResponse>),
 }
 
 impl From<ResponseData> for Option<cbor::Value> {
@@ -54,6 +56,8 @@ impl From<ResponseData> for Option<cbor::Value> {
             ResponseData::AuthenticatorLargeBlobs(data) => data.map(|d| d.into()),
             #[cfg(feature = "config_command")]
             ResponseData::AuthenticatorConfig => None,
+
+            ResponseData::AuthenticatorBioEnrollment(data) => data.map(|d| d.into()),
         }
     }
 }
@@ -143,6 +147,9 @@ pub struct AuthenticatorGetInfoResponse {
     // - 0x12: uvModality
     // Add them when your hardware supports any kind of user verification within
     // the boundary of the device, e.g. fingerprint or built-in keyboard.
+    pub preferred_platform_uv_attempts: Option<u64>,
+    pub uv_modality: Option<u64>,
+
     pub certifications: Option<Vec<(String, i64)>>,
     pub remaining_discoverable_credentials: Option<u64>,
     // - 0x15: vendorPrototypeConfigCommands missing as we don't support it.
@@ -167,6 +174,10 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             firmware_version,
             max_cred_blob_length,
             max_rp_ids_for_set_min_pin_length,
+
+            preferred_platform_uv_attempts,
+            uv_modality,
+
             certifications,
             remaining_discoverable_credentials,
         } = get_info_response;
@@ -204,6 +215,8 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x0E => firmware_version,
             0x0F => max_cred_blob_length,
             0x10 => max_rp_ids_for_set_min_pin_length,
+            0x11 => preferred_platform_uv_attempts,
+            0x12 => uv_modality,
             0x13 => certifications_cbor,
             0x14 => remaining_discoverable_credentials,
         }
@@ -216,7 +229,7 @@ pub struct AuthenticatorClientPinResponse {
     pub pin_uv_auth_token: Option<Vec<u8>>,
     pub retries: Option<u64>,
     pub power_cycle_state: Option<bool>,
-    // - 0x05: uvRetries missing as we don't support internal UV.
+    pub uv_retries: Option<u64>,
 }
 
 impl From<AuthenticatorClientPinResponse> for cbor::Value {
@@ -226,6 +239,7 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
             pin_uv_auth_token,
             retries,
             power_cycle_state,
+            uv_retries,
         } = client_pin_response;
 
         cbor_map_options! {
@@ -233,8 +247,21 @@ impl From<AuthenticatorClientPinResponse> for cbor::Value {
             0x02 => pin_uv_auth_token,
             0x03 => retries,
             0x04 => power_cycle_state,
+            0x05 => uv_retries,
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthenticatorBioEnrollmentResponse {
+    pub modality: Option<u64>,
+    pub fingerprint_kind: Option<u64>,
+    pub max_capture_samples_required_for_enroll: Option<u64>,
+    pub max_template_friendly_name: Option<u64>,
+    pub template_id: Option<Vec<u8>>,
+    pub last_enroll_sample_status: Option<u64>,
+    pub remaining_samples: Option<u64>,
+    pub template_infos: Option<cbor::Value>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -265,6 +292,21 @@ pub struct AuthenticatorCredentialManagementResponse {
     pub total_credentials: Option<u64>,
     pub cred_protect: Option<CredentialProtectionPolicy>,
     pub large_blob_key: Option<Vec<u8>>,
+}
+
+impl From<AuthenticatorBioEnrollmentResponse> for cbor::Value {
+    fn from(bio_enrollment_response: AuthenticatorBioEnrollmentResponse) -> Self {
+        cbor_map_options! {
+            0x01 => bio_enrollment_response.modality,
+            0x02 => bio_enrollment_response.fingerprint_kind,
+            0x03 => bio_enrollment_response.max_capture_samples_required_for_enroll,
+            0x04 => bio_enrollment_response.template_id,
+            0x05 => bio_enrollment_response.last_enroll_sample_status,
+            0x06 => bio_enrollment_response.remaining_samples,
+            0x07 => bio_enrollment_response.template_infos,
+            0x08 => bio_enrollment_response.max_template_friendly_name,
+        }
+    }
 }
 
 impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
@@ -472,6 +514,7 @@ mod test {
             pin_uv_auth_token: Some(vec![70]),
             retries: Some(8),
             power_cycle_state: Some(false),
+            uv_retries: Some(0),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorClientPin(Some(client_pin_response)).into();

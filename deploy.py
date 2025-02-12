@@ -771,6 +771,10 @@ class OpenSKInstaller:
     if self.args.clear_storage:
       self.clear_storage()
 
+    if "debug_ctap" in self.args.features:
+      error("The debug feature does not work correctly on this branch. "
+            "For development and debugging, please use the develop branch.")
+
     # Flashing
     if self.args.programmer in ("jlink", "openocd"):
       # We rely on Tockloader to do the job

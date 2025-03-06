@@ -154,8 +154,8 @@ def main(args):
       )
       status = {"cert": result[1], "pkey": result[2]}
       responses.append(status)
-      info(f"Certificate: {'Present' if result[1] else 'Missing'}")
-      info(f"Private Key: {'Present' if result[2] else 'Missing'}")
+      info(f'Certificate: {"Present" if result[1] else "Missing"}')
+      info(f'Private Key: {"Present" if result[2] else "Missing"}')
       if args.lock:
         info("Device is now locked down!")
     except ctap.CtapError as ex:

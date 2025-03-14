@@ -427,8 +427,8 @@ class OpenSKInstaller:
 
     command = [
         "cargo", "build", "--release", f"--target={props.arch}",
-        f'--features={",".join(self.args.features)}',
-        "-Zbuild-std=core,alloc", "-Zbuild-std-features=panic_immediate_abort"
+        f'--features={",".join(self.args.features)}', "-Zbuild-std=core,alloc",
+        "-Zbuild-std-features=panic_immediate_abort"
     ]
     if is_example:
       command.extend(["--example", self.args.application])

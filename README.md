@@ -3,6 +3,11 @@
 ![markdownlint](https://github.com/google/OpenSK/workflows/markdownlint/badge.svg?branch=2.1)
 [![Coverage Status](https://coveralls.io/repos/github/google/OpenSK/badge.svg?branch=2.1)](https://coveralls.io/github/google/OpenSK?branch=2.1)
 
+:warning: Maintenance:
+
+This branch is not fully maintained. For a more recent version, please visit the
+[develop branch](https://github.com/google/OpenSK/tree/develop).
+
 *News:*
 
 - 2023-08-24: [PQC paper reference](#Research)

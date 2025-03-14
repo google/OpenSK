@@ -110,5 +110,3 @@ echo "Check app deployment"
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --oom_test
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --console_test
 ./deploy.py --board=nrf52840dk_opensk --programmer=none --nfct_test --nfc
-
-cargo audit

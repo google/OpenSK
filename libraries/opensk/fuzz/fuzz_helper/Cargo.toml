@@ -8,6 +8,5 @@ edition = "2018"
 [dependencies]
 arrayref = "0.3.6"
 opensk = { path = "../..", features = ["fuzz"] }
-crypto = { path = "../../../crypto", features = ['std'] }
 sk-cbor = { path = "../../../cbor" }
 arbitrary = { version = "0.4.7", features = ["derive"] }

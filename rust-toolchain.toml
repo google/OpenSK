@@ -1,6 +1,6 @@
 [toolchain]
 channel = "nightly-2024-05-01"
-components = ["clippy", "miri", "rustfmt"]
+components = ["clippy", "miri", "rustfmt", "rust-src"]
 targets = ["thumbv7em-none-eabi",
            "riscv32imac-unknown-none-elf",
            "riscv32imc-unknown-none-elf"]

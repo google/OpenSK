@@ -53,13 +53,7 @@ We're still in the process of integrating the
 embedded in the
 [Nordic nRF52840 chip](https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fcryptocell.html)
 to enable hardware-accelerated cryptography.
-In the meantime, there are 2 options for cryptography implementations:
-
-*   Our own placeholder implementation. The code is research quality and doesn't
-    provide constant-time guarantees.
-*   The [RustCrypto](https://github.com/RustCrypto) interface. Deploy with
-    `--rust-crypto`. Note that our own ECC implementation is faster and has
-    smaller binary size, so not all boards support RustCrypto yet.
+In the meantime, we use [RustCrypto](https://github.com/RustCrypto).
 
 ## Hardware
 

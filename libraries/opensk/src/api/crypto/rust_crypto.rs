@@ -12,14 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This cryptography implementation is an alternative for our own library.
-//!
-//! You can use it with the `rust_crypto` feature. An example call to cargo test is in
-//! `run_desktop_tests.sh`. It is currently impossible to use it with our version of TockOS due to
-//! a compiler version imcompatibility.
-//!
-//! If you want to use OpenSK outside of Tock v1, maybe this is useful for you though!
-
 use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;

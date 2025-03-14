@@ -30,7 +30,6 @@ cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
 cargo check --release --target=thumbv7em-none-eabi --features with_nfc
 cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
 cargo check --release --target=thumbv7em-none-eabi --features ed25519
-cargo check --release --target=thumbv7em-none-eabi --features rust_crypto
 cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
 cargo check --release --target=thumbv7em-none-eabi --examples
 cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
@@ -44,7 +43,6 @@ cargo fmt --manifest-path libraries/cbor/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
-cargo fmt --manifest-path libraries/crypto/Cargo.toml -- --check
 cargo fmt --manifest-path bootloader/Cargo.toml -- --check
 
 echo "Checking Python formatting..."
@@ -55,12 +53,10 @@ echo "Running Clippy lints..."
 cargo clippy --lib --tests --bins --benches --features std -- -D warnings
 cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -D warnings
 (cd libraries/opensk && cargo clippy --features std -- -D warnings)
-(cd libraries/opensk && cargo clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519,rust_crypto  -- -D warnings)
+(cd libraries/opensk && cargo clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519 -- -D warnings)
 (cd libraries/cbor && cargo clippy -- -D warnings)
 # Uncomment when persistent store is fixed:
 # (cd libraries/persistent_store && cargo clippy --features std -- -D warnings)
-# Probably not worth fixing:
-# (cd libraries/crypto && cargo clippy --features std -- -D warnings)
 
 echo "Checking that fuzz targets..."
 (cd libraries/opensk && cargo fuzz check)
@@ -86,8 +82,6 @@ cargo test --lib --tests --bins --benches --features std
 cargo test --lib --tests --bins --benches --all-features
 cargo test --manifest-path libraries/cbor/Cargo.toml
 cargo test --manifest-path libraries/persistent_store/Cargo.toml --features std
-# Running release mode to speed up. This library is legacy anyway.
-cargo test --manifest-path libraries/crypto/Cargo.toml --features std --release
 
 echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk

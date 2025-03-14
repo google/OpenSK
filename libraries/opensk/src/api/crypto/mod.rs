@@ -15,11 +15,7 @@
 pub mod aes256;
 pub mod ecdh;
 pub mod ecdsa;
-#[cfg(feature = "rust_crypto")]
 pub mod rust_crypto;
-#[cfg(not(feature = "rust_crypto"))]
-pub mod software_crypto;
-#[cfg(feature = "rust_crypto")]
 pub use rust_crypto as software_crypto;
 pub mod hkdf256;
 pub mod hmac256;

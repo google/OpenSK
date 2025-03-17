@@ -81,6 +81,8 @@ impl U2fUserPresenceState {
     }
 
     // Granting user presence is ignored if it needs activation, but waits. Also cleans up.
+
+    #[allow(dead_code)]
     pub fn grant_up(&mut self, now: ClockValue) {
         self.check_expiration(now);
         if self.needs_up.is_granted(now) {
@@ -102,6 +104,7 @@ impl U2fUserPresenceState {
     }
 
     // Returns if user presence was requested. Also cleans up.
+    #[allow(dead_code)]
     pub fn is_up_needed(&mut self, now: ClockValue) -> bool {
         self.check_expiration(now);
         self.needs_up.is_granted(now)

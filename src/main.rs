@@ -4,16 +4,14 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate core;
@@ -21,11 +19,9 @@ extern crate lang_items;
 #[macro_use]
 extern crate arrayref;
 extern crate byteorder;
-
 mod ctap;
 pub mod embedded_flash;
-
-use core::cell::Cell;
+use::core::cell::Cell;
 #[cfg(feature = "debug_ctap")]
 use core::fmt::Write;
 use crypto::rng256::TockRng256;
@@ -33,8 +29,6 @@ use ctap::hid::{ChannelID, CtapHid, KeepaliveStatus, ProcessedPacket};
 use ctap::status_code::Ctap2StatusCode;
 use ctap::CtapState;
 use libtock_core::result::{CommandError, EALREADY};
-use libtock_drivers::buttons;
-use libtock_drivers::buttons::ButtonState;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::console::Console;
 use libtock_drivers::led;
@@ -46,52 +40,89 @@ use libtock_drivers::timer::Timer;
 #[cfg(feature = "debug_ctap")]
 use libtock_drivers::timer::Timestamp;
 use libtock_drivers::usb_ctap_hid;
+use nrf52::uart::Uarte;
+use nrf5x::pinmux::Pinmux;
 
 const KEEPALIVE_DELAY_MS: isize = 100;
 const KEEPALIVE_DELAY: Duration<isize> = Duration::from_ms(KEEPALIVE_DELAY_MS);
 const SEND_TIMEOUT: Duration<isize> = Duration::from_ms(1000);
 
+// Define TX and RX Pins for UART
+const TX_PIN: u32 = 24;  // P24
+const RX_PIN: u32 = 20;  // P20
+const BUFFER_SIZE: usize = 8;
+
+// UART Instance
+static mut UART: Option<Uarte> = None;
+static mut RX_BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE]; // Only RX_BUFFER is needed
+
+// UART Initialization
+fn initialize_uart() {
+    let tx_pin = unsafe { Pinmux::new(TX_PIN) }; // Marking this call as unsafe
+    let rx_pin = unsafe { Pinmux::new(RX_PIN) }; // Marking this call as unsafe
+
+    unsafe {
+        UART = Some(Uarte::new());
+        if let Some(uart) = &UART {
+            uart.set_baud_rate(19200);
+            uart.initialize(tx_pin, rx_pin, None, None);
+        }
+    }
+}
+
+// Send Command via UART
+fn send_uart_command(command: &[u8]) {
+    unsafe {
+        if let Some(uart) = &UART {
+            for &byte in command {
+                uart.send_byte(byte);  // Transmit each byte using send_byte()
+            }
+        }
+    }
+}
+
+// Receive Response via UART
+fn receive_uart_response(buffer: &mut [u8]) -> usize {
+    let mut index = 0;
+    unsafe {
+        if let Some(uart) = &mut UART {  // Make uart mutable
+            while index < buffer.len() {
+                if uart.rx_ready() {
+                    uart.handle_interrupt(); // Process received data (now mutable)
+                    buffer[index] = RX_BUFFER[index];
+                    index += 1;
+                }
+            }
+        }
+    }
+    index
+}
+
 fn main() {
     // Setup the timer with a dummy callback (we only care about reading the current time, but the
     // API forces us to set an alarm callback too).
-    let mut with_callback = timer::with_callback(|_, _| {});
+    let mut with_callback = timer::with_callback(
+        |_, _| {}
+    );
     let timer = with_callback.init().flex_unwrap();
-
     // Setup USB driver.
     if !usb_ctap_hid::setup() {
         panic!("Cannot setup USB driver");
     }
-
     let boot_time = timer.get_current_clock().flex_unwrap();
     let mut rng = TockRng256 {};
     let mut ctap_state = CtapState::new(&mut rng, check_user_presence, boot_time);
     let mut ctap_hid = CtapHid::new();
-
-    let mut led_counter = 0;
     let mut last_led_increment = boot_time;
+    let mut led_counter: usize = 0;
+
+    // Initialize UART
+    initialize_uart();
 
     // Main loop. If CTAP1 is used, we register button presses for U2F while receiving and waiting.
     // The way TockOS and apps currently interact, callbacks need a yield syscall to execute,
     // making consistent blinking patterns and sending keepalives harder.
     loop {
-        // Create the button callback, used for CTAP1.
-        #[cfg(feature = "with_ctap1")]
-        let button_touched = Cell::new(false);
-        #[cfg(feature = "with_ctap1")]
-        let mut buttons_callback = buttons::with_callback(|_button_num, state| {
-            match state {
-                ButtonState::Pressed => button_touched.set(true),
-                ButtonState::Released => (),
-            };
-        });
-        #[cfg(feature = "with_ctap1")]
-        let mut buttons = buttons_callback.init().flex_unwrap();
-        #[cfg(feature = "with_ctap1")]
-        // At the moment, all buttons are accepted. You can customize your setup here.
-        for mut button in &mut buttons {
-            button.enable().flex_unwrap();
-        }
-
         let mut pkt_request = [0; 64];
         let has_packet = match usb_ctap_hid::recv_with_timeout(&mut pkt_request, KEEPALIVE_DELAY) {
             Some(usb_ctap_hid::SendOrRecvStatus::Received) => {
@@ -104,26 +135,10 @@ fn main() {
         };
 
         let now = timer.get_current_clock().flex_unwrap();
-        #[cfg(feature = "with_ctap1")]
-        {
-            if button_touched.get() {
-                ctap_state.u2f_up_state.grant_up(now);
-            }
-            // Cleanup button callbacks. We miss button presses while processing though.
-            // Heavy computation mostly follows a registered touch luckily. Unregistering
-            // callbacks is important to not clash with those from check_user_presence.
-            for mut button in &mut buttons {
-                button.disable().flex_unwrap();
-            }
-            drop(buttons);
-            drop(buttons_callback);
-        }
-
         // These calls are making sure that even for long inactivity, wrapping clock values
         // never randomly wink or grant user presence for U2F.
         ctap_state.update_command_permission(now);
         ctap_hid.wink_permission = ctap_hid.wink_permission.check_expiration(now);
-
         if has_packet {
             let reply = ctap_hid.process_hid_packet(&pkt_request, now, &mut ctap_state);
             // This block handles sending packets.
@@ -168,18 +183,7 @@ fn main() {
         if ctap_hid.wink_permission.is_granted(now) {
             wink_leds(led_counter);
         } else {
-            #[cfg(not(feature = "with_ctap1"))]
             switch_off_leds();
-            #[cfg(feature = "with_ctap1")]
-            {
-                if ctap_state.u2f_up_state.is_up_needed(now) {
-                    // Flash the LEDs with an almost regular pattern. The inaccuracy comes from
-                    // delay caused by processing and sending of packets.
-                    blink_leds(led_counter);
-                } else {
-                    switch_off_leds();
-                }
-            }
         }
     }
 }
@@ -226,8 +230,7 @@ fn send_keepalive_up_needed(
                         Console::new(),
                         "Received a packet on channel ID {:?} while sending a KEEPALIVE packet",
                         received_cid,
-                    )
-                    .unwrap();
+                    ).unwrap();
                     return Ok(());
                 }
                 match processed_packet {
@@ -243,8 +246,7 @@ fn send_keepalive_up_needed(
                                 Console::new(),
                                 "Discarded packet with command {} received while sending a KEEPALIVE packet",
                                 cmd,
-                            )
-                            .unwrap();
+                            ).unwrap();
                         }
                     }
                     ProcessedPacket::ContinuationPacket { .. } => {
@@ -252,8 +254,7 @@ fn send_keepalive_up_needed(
                         writeln!(
                             Console::new(),
                             "Discarded continuation packet received while sending a KEEPALIVE packet",
-                        )
-                        .unwrap();
+                        ).unwrap();
                     }
                 }
             }
@@ -274,22 +275,18 @@ fn blink_leds(pattern_seed: usize) {
 
 fn wink_leds(pattern_seed: usize) {
     // This generates a "snake" pattern circling through the LEDs.
-    // Fox example with 4 LEDs the sequence of lit LEDs will be the following.
+    // For example with 4 LEDs the sequence of lit LEDs will be the following.
     // 0 1 2 3
     // * *
     // * * *
-    //   * *
-    //   * * *
-    //     * *
-    // *   * *
-    // *     *
-    // * *   *
+    // * * *
+    // * *
+    // * * *
     // * *
     let count = led::count().flex_unwrap();
     let a = (pattern_seed / 2) % count;
     let b = ((pattern_seed + 1) / 2) % count;
     let c = ((pattern_seed + 3) / 2) % count;
-
     for l in 0..count {
         // On nRF52840-DK, logically swap LEDs 3 and 4 so that the order of LEDs form a circle.
         let k = match l {
@@ -314,40 +311,31 @@ fn switch_off_leds() {
 fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
     // The timeout is N times the keepalive delay.
     const TIMEOUT_ITERATIONS: usize = ctap::TOUCH_TIMEOUT_MS as usize / KEEPALIVE_DELAY_MS as usize;
-
-    // First, send a keep-alive packet to notify that the keep-alive status has changed.
+    // a keep-alive packet to notify that the keep-alive status has changed.
     send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;
+    // Listen to the fingerprint sensor.
+    let mut response_buffer = [0u8; 8];
+    let command = [0xF5, 0x0C, 0, 0, 0, 0, 0, 0xF5];
+    send_uart_command(&command);
 
-    // Listen to the button presses.
-    let button_touched = Cell::new(false);
-    let mut buttons_callback = buttons::with_callback(|_button_num, state| {
-        match state {
-            ButtonState::Pressed => button_touched.set(true),
-            ButtonState::Released => (),
-        };
-    });
-    let mut buttons = buttons_callback.init().flex_unwrap();
-    // At the moment, all buttons are accepted. You can customize your setup here.
-    for mut button in &mut buttons {
-        button.enable().flex_unwrap();
-    }
-
-    let mut keepalive_response = Ok(());
     for i in 0..TIMEOUT_ITERATIONS {
         blink_leds(i);
-
         // Setup a keep-alive callback.
         let keepalive_expired = Cell::new(false);
-        let mut keepalive_callback = timer::with_callback(|_, _| {
-            keepalive_expired.set(true);
-        });
+        let mut keepalive_callback = timer::with_callback( |_, _| {
+                keepalive_expired.set(true);
+            });
         let mut keepalive = keepalive_callback.init().flex_unwrap();
         let keepalive_alarm = keepalive.set_alarm(KEEPALIVE_DELAY).flex_unwrap();
+        // Wait for a fingerprint match or an alarm.
+        fn check_uart_response(buffer: &mut [u8], keepalive_expired: &Cell<bool>) -> bool {
+            receive_uart_response(buffer) > 0 || keepalive_expired.get()
+        }
 
-        // Wait for a button touch or an alarm.
-        libtock_drivers::util::yieldk_for(|| button_touched.get() || keepalive_expired.get());
+        let response_ready = check_uart_response(&mut response_buffer, &keepalive_expired);
+        libtock_drivers::util::yieldk_for(|| response_ready);
 
-        // Cleanup alarm callback.
+
         match keepalive.stop_alarm(keepalive_alarm) {
             Ok(()) => (),
             Err(TockError::Command(CommandError {
@@ -361,32 +349,16 @@ fn check_user_presence(cid: ChannelID) -> Result<(), Ctap2StatusCode> {
                 panic!("Unexpected error when stopping alarm: <error is only visible with the debug_ctap feature>");
             }
         }
-
-        // TODO: this may take arbitrary time. The keepalive_delay should be adjusted accordingly,
-        // so that LEDs blink with a consistent pattern.
+        // Check if the fingerprint was recognized.
+        if response_buffer[1] == 0x0C && response_buffer[4] == 0x00 {
+            switch_off_leds();
+            return Ok(());
+        }
+        // Send keep-alive packet if the alarm expired.
         if keepalive_expired.get() {
-            // Do not return immediately, because we must clean up still.
-            keepalive_response = send_keepalive_up_needed(cid, KEEPALIVE_DELAY);
-        }
-
-        if button_touched.get() || keepalive_response.is_err() {
-            break;
+            send_keepalive_up_needed(cid, KEEPALIVE_DELAY)?;
         }
     }
-
     switch_off_leds();
-
-    // Cleanup button callbacks.
-    for mut button in &mut buttons {
-        button.disable().flex_unwrap();
-    }
-
-    // Returns whether the user was present.
-    if keepalive_response.is_err() {
-        keepalive_response
-    } else if button_touched.get() {
-        Ok(())
-    } else {
-        Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
-    }
+    Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
 }

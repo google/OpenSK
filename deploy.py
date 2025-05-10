@@ -164,7 +164,7 @@ APP_HEAP_SIZE = 90_000
 CARGO_TARGET_DIR = os.environ.get("CARGO_TARGET_DIR", "target")
 
 
-def get_supported_boards() -> Tuple[str]:
+def get_supported_boards() -> Tuple[str, ...]:
   """Returns a tuple all valid supported boards."""
   boards = []
   for name, props in SUPPORTED_BOARDS.items():

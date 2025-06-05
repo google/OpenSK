@@ -1,4 +1,3 @@
-libraries/**/Cargo.lock
 target/
 /build/
 /py_virtual_env/

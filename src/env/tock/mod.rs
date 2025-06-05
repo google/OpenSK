@@ -31,7 +31,10 @@ use opensk::api::clock::Clock;
 use opensk::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use opensk::api::crypto::software_crypto::SoftwareCrypto;
 use opensk::api::customization::{CustomizationImpl, AAGUID_LENGTH, DEFAULT_CUSTOMIZATION};
-use opensk::api::fingerprint::{Fingerprint, FingerprintCaptureError, FingerprintCheckError};
+#[cfg(feature = "fingerprint")]
+use opensk::api::fingerprint::{
+    Ctap2EnrollFeedback, Fingerprint, FingerprintCheckError, FingerprintKind,
+};
 use opensk::api::key_store;
 use opensk::api::persist::{Persist, PersistIter};
 use opensk::api::rng::Rng;
@@ -338,44 +341,48 @@ where
     }
 }
 
+#[cfg(feature = "fingerprint")]
 impl<S, C> Fingerprint for TockEnv<S, C>
 where
     S: Syscalls,
     C: platform::subscribe::Config + platform::allow_ro::Config,
 {
-    fn get_enrollment_count_maximum(&self) -> u8 {
-        0
+    // This is a placeholder implementation, WIP.
+    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>> {
+        Ok(Vec::new())
     }
 
-    fn get_enrollment_count(&self) -> u8 {
-        0
+    fn capture_sample(
+        &mut self,
+        _template_id: &[u8],
+        _timeout_ms: Option<usize>,
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize)> {
+        Ok((Ctap2EnrollFeedback::FpGood, 0))
     }
 
-    fn prepare_enrollment(&self, _index: u8) {}
-
-    fn capture_sample(&self, _timeout_ms: usize) -> Result<(), FingerprintCaptureError> {
-        Err(FingerprintCaptureError::Other)
+    fn cancel_enrollment(&mut self) -> CtapResult<()> {
+        Ok(())
     }
 
-    fn commit_enrollment(&self) -> Result<(), ()> {
-        Err(())
+    fn remove_enrollment(&mut self, _template_id: &[u8]) -> CtapResult<()> {
+        Ok(())
     }
-
-    fn cancel_enrollment(&self) {}
-
-    fn get_enrollments(&self, _fingerlist: &mut [u8; 5]) {}
 
     fn check_fingerprint_init(&mut self) {}
 
-    fn check_fingerprint(&self, _timeout_ms: usize) -> Result<u8, FingerprintCheckError> {
-        Err(FingerprintCheckError::Other)
+    fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<(), FingerprintCheckError> {
+        Ok(())
     }
 
     fn check_fingerprint_complete(&mut self) {}
 
-    fn delete_enrollment(&self, _index: u8) {}
+    fn fingerprint_kind(&self) -> FingerprintKind {
+        FingerprintKind::Touch
+    }
 
-    fn setloglevel(&self, _level: u8) {}
+    fn max_capture_samples_required_for_enroll(&self) -> usize {
+        6
+    }
 }
 
 impl<S, C> key_store::Helper for TockEnv<S, C>
@@ -397,6 +404,7 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
     type Customization = CustomizationImpl;
     type HidConnection = Self;
     type Crypto = SoftwareCrypto;
+    #[cfg(feature = "fingerprint")]
     type Fingerprint = Self;
 
     fn rng(&mut self) -> &mut Self::Rng {
@@ -407,6 +415,7 @@ impl<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config> E
         self
     }
 
+    #[cfg(feature = "fingerprint")]
     fn fingerprint(&mut self) -> &mut Self::Fingerprint {
         self
     }

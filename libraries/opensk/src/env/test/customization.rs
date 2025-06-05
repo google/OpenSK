@@ -28,6 +28,12 @@ pub struct TestCustomization {
     enterprise_rp_id_list: Vec<String>,
     max_msg_size: usize,
     max_pin_retries: u8,
+    #[cfg(feature = "fingerprint")]
+    max_uv_attempts_for_internal_retries: u8,
+    #[cfg(feature = "fingerprint")]
+    max_uv_retries: u8,
+    #[cfg(feature = "fingerprint")]
+    preferred_platform_uv_attempts: usize,
     use_batch_attestation: bool,
     use_signature_counter: bool,
     max_cred_blob_length: usize,
@@ -35,9 +41,8 @@ pub struct TestCustomization {
     max_large_blob_array_size: usize,
     max_rp_ids_length: usize,
     max_supported_resident_keys: usize,
-    preferred_platform_uv_attempts: usize,
-    max_uv_retries: u8,
-    max_uv_attempts_for_internal_retries: u8,
+    #[cfg(feature = "fingerprint")]
+    max_template_friendly_name: usize,
 }
 
 impl TestCustomization {
@@ -102,6 +107,21 @@ impl Customization for TestCustomization {
         self.max_pin_retries
     }
 
+    #[cfg(feature = "fingerprint")]
+    fn max_uv_attempts_for_internal_retries(&self) -> u8 {
+        self.max_uv_attempts_for_internal_retries
+    }
+
+    #[cfg(feature = "fingerprint")]
+    fn max_uv_retries(&self) -> u8 {
+        self.max_uv_retries
+    }
+
+    #[cfg(feature = "fingerprint")]
+    fn preferred_platform_uv_attempts(&self) -> usize {
+        self.preferred_platform_uv_attempts
+    }
+
     fn use_batch_attestation(&self) -> bool {
         self.use_batch_attestation
     }
@@ -130,16 +150,9 @@ impl Customization for TestCustomization {
         self.max_supported_resident_keys
     }
 
-    fn preferred_platform_uv_attempts(&self) -> usize {
-        self.preferred_platform_uv_attempts
-    }
-
-    fn max_uv_retries(&self) -> u8 {
-        self.max_uv_retries
-    }
-
-    fn max_uv_attempts_for_internal_retries(&self) -> u8 {
-        self.max_uv_attempts_for_internal_retries
+    #[cfg(feature = "fingerprint")]
+    fn max_template_friendly_name(&self) -> usize {
+        self.max_template_friendly_name
     }
 }
 
@@ -156,6 +169,12 @@ impl From<CustomizationImpl> for TestCustomization {
             enterprise_rp_id_list,
             max_msg_size,
             max_pin_retries,
+            #[cfg(feature = "fingerprint")]
+            max_uv_attempts_for_internal_retries,
+            #[cfg(feature = "fingerprint")]
+            max_uv_retries,
+            #[cfg(feature = "fingerprint")]
+            preferred_platform_uv_attempts,
             use_batch_attestation,
             use_signature_counter,
             max_cred_blob_length,
@@ -163,9 +182,8 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
-            preferred_platform_uv_attempts,
-            max_uv_retries,
-            max_uv_attempts_for_internal_retries,
+            #[cfg(feature = "fingerprint")]
+            max_template_friendly_name,
         } = c;
 
         let default_min_pin_length_rp_ids = default_min_pin_length_rp_ids
@@ -189,6 +207,12 @@ impl From<CustomizationImpl> for TestCustomization {
             enterprise_rp_id_list,
             max_msg_size,
             max_pin_retries,
+            #[cfg(feature = "fingerprint")]
+            max_uv_attempts_for_internal_retries,
+            #[cfg(feature = "fingerprint")]
+            max_uv_retries,
+            #[cfg(feature = "fingerprint")]
+            preferred_platform_uv_attempts,
             use_batch_attestation,
             use_signature_counter,
             max_cred_blob_length,
@@ -196,9 +220,8 @@ impl From<CustomizationImpl> for TestCustomization {
             max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
-            preferred_platform_uv_attempts,
-            max_uv_retries,
-            max_uv_attempts_for_internal_retries,
+            #[cfg(feature = "fingerprint")]
+            max_template_friendly_name,
         }
     }
 }

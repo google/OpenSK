@@ -18,6 +18,7 @@ use crate::api::crypto::ecdh::Ecdh;
 use crate::api::crypto::ecdsa::Ecdsa;
 use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
+#[cfg(feature = "fingerprint")]
 use crate::api::fingerprint::Fingerprint;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
@@ -50,6 +51,7 @@ pub trait Env {
     type HidConnection: HidConnection;
     type Clock: Clock;
     type Crypto: Crypto;
+    #[cfg(feature = "fingerprint")]
     type Fingerprint: Fingerprint;
 
     fn rng(&mut self) -> &mut Self::Rng;
@@ -57,6 +59,7 @@ pub trait Env {
     fn persist(&mut self) -> &mut Self::Persist;
     fn key_store(&mut self) -> &mut Self::KeyStore;
     fn clock(&mut self) -> &mut Self::Clock;
+    #[cfg(feature = "fingerprint")]
     fn fingerprint(&mut self) -> &mut Self::Fingerprint;
 
     /// Creates a write instance for debugging.

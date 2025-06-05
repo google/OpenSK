@@ -17,7 +17,7 @@ set -ex
 
 ./fuzzing_setup.sh
 # Excludes std
-MOST_FEATURES=config_command,debug_allocations,debug_ctap,panic_console,verbose,with_ctap1,vendor_hid,ed25519
+MOST_FEATURES=config_command,debug_allocations,debug_ctap,panic_console,verbose,with_ctap1,vendor_hid,ed25519,fingerprint
 
 echo "Checking that OpenSK builds properly..."
 cargo check --release --target=thumbv7em-none-eabi
@@ -30,6 +30,7 @@ cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
 cargo check --release --target=thumbv7em-none-eabi --features with_nfc
 cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
 cargo check --release --target=thumbv7em-none-eabi --features ed25519
+cargo check --release --target=thumbv7em-none-eabi --features fingerprint
 cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
 cargo check --release --target=thumbv7em-none-eabi --examples
 cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc

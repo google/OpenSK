@@ -21,6 +21,7 @@ pub mod clock;
 pub mod connection;
 pub mod crypto;
 pub mod customization;
+#[cfg(feature = "fingerprint")]
 pub mod fingerprint;
 pub mod firmware_protection;
 pub mod key_store;

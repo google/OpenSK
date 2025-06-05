@@ -204,6 +204,7 @@ pub fn reset_pin_retries(env: &mut impl Env) -> CtapResult<()> {
 }
 
 /// Returns the number of remaining UV retries.
+#[cfg(feature = "fingerprint")]
 pub fn uv_retries(env: &mut impl Env) -> CtapResult<u8> {
     Ok(env
         .customization()
@@ -212,11 +213,13 @@ pub fn uv_retries(env: &mut impl Env) -> CtapResult<u8> {
 }
 
 /// Decrements the number of remaining UV retries.
+#[cfg(feature = "fingerprint")]
 pub fn decr_uv_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().incr_uv_fails()
 }
 
 /// Resets the number of remaining UV retries.
+#[cfg(feature = "fingerprint")]
 pub fn reset_uv_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().reset_uv_retries()
 }
@@ -303,21 +306,6 @@ pub fn toggle_always_uv(env: &mut impl Env) -> CtapResult<()> {
         return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
     }
     env.persist().toggle_always_uv()
-}
-
-/// Store a Bio Enrollment friendly name for a given template_id.
-pub fn store_friendly_name<E: Env>(
-    env: &mut E,
-    template_id: u8,
-    friendly_name: &str,
-) -> CtapResult<()> {
-    env.persist()
-        .store_friendly_name(template_id, friendly_name)
-}
-
-/// Retrieve the Bio Enrollment friendly name for a given template_id.
-pub fn get_friendly_name<E: Env>(env: &mut E, template_id: u8) -> CtapResult<String> {
-    env.persist().get_friendly_name(template_id)
 }
 
 /// Iterator for credentials.
@@ -671,6 +659,35 @@ mod test {
         assert_eq!(
             pin_retries(&mut env),
             Ok(env.customization().max_pin_retries())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_uv_retries() {
+        let mut env = TestEnv::default();
+
+        // The uv retries is initially at the maximum.
+        assert_eq!(
+            uv_retries(&mut env),
+            Ok(env.customization().max_uv_retries())
+        );
+
+        // Decrementing the uv retries decrements the uv retries.
+        for retries in (0..env.customization().max_uv_retries()).rev() {
+            decr_uv_retries(&mut env).unwrap();
+            assert_eq!(uv_retries(&mut env), Ok(retries));
+        }
+
+        // Decrementing the uv retries after zero does not modify the uv retries.
+        decr_uv_retries(&mut env).unwrap();
+        assert_eq!(uv_retries(&mut env), Ok(0));
+
+        // Resetting the uv retries resets the uv retries.
+        reset_uv_retries(&mut env).unwrap();
+        assert_eq!(
+            uv_retries(&mut env),
+            Ok(env.customization().max_uv_retries())
         );
     }
 

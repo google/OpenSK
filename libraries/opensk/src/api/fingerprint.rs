@@ -1,81 +1,100 @@
-#[derive(Debug)]
-pub enum FingerprintCaptureError {
-    NoTouch,
-    ImageBad,
-    ImagePartial,
-    TooFast,
-    Other,
+use crate::ctap::status_code::CtapResult;
+use alloc::vec::Vec;
+use sk_cbor as cbor;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FingerprintKind {
+    Touch = 1,
+    Swipe = 2,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FingerprintCheckError {
     NoMatch,
     Timeout,
     Other,
 }
 
+/// Status code for enrolling fingerprints
+///
+/// See lastEnrollSampleStatus in section authenticatorBioEnrollment
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ctap2EnrollFeedback {
+    FpGood = 0x00,
+    FpTooHigh = 0x01,
+    FpTooLow = 0x02,
+    FpTooLeft = 0x03,
+    FpTooRight = 0x04,
+    FpTooFast = 0x05,
+    FpTooSlow = 0x06,
+    FpPoorQuality = 0x07,
+    FpTooSkewed = 0x08,
+    FpTooShort = 0x09,
+    FpMergeFailure = 0x0A,
+    FpExists = 0x0B,
+    // 0x0C is intentionally unused
+    NoUserActivity = 0x0D,
+    NoUserPresenceTransition = 0x0E,
+}
+
+impl From<Ctap2EnrollFeedback> for cbor::Value {
+    fn from(feedback: Ctap2EnrollFeedback) -> Self {
+        (feedback as u64).into()
+    }
+}
+
 pub trait Fingerprint {
-    /// Get the maximum number of fingerprint enrollments the sensor can
-    /// support.
-    fn get_enrollment_count_maximum(&self) -> u8;
+    /// Starts the fingerprint enrollment process.
+    ///
+    /// Returns the newly assigned template ID.
+    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>>;
 
-    /// Get the number of fingerprints currently enrolled.
-    fn get_enrollment_count(&self) -> u8;
-
-    /// Start an enrollment session for the fingerprint at the given index.
+    /// Captures a fingerprint image.
     ///
-    /// `index` should be from 0 to `get_enrollment_count_maximum()-1`.
-    fn prepare_enrollment(&self, index: u8);
-
-    /// Capture a fingerprint image.
-    ///
-    /// `prepare_enrollment()` must be called first.
-    ///
-    /// Waits for a fingerprint image or returns if `timeout_ms` happens without
-    /// a touch.
-    ///
-    /// ## Return
-    ///
-    /// `Ok(())` on success and `Err(())` on any failure.
-    fn capture_sample(&self, timeout_ms: usize) -> Result<(), FingerprintCaptureError>;
-
-    /// Store a fingerprint enrollment.
-    ///
-    /// ## Return
-    ///
-    /// `Ok(())` on success and `Err(())` on any failure.
-    fn commit_enrollment(&self) -> Result<(), ()>;
+    /// Waits for the user to present a finger.
+    /// If `timeout_ms` is provided, the function times out on user inaction.
+    /// `prepare_enrollment` must be called first.
+    /// A returned `Ctap2StatusCode` indicates an unexpected failure processing
+    /// the command.
+    /// The `Ctap2EnrollFeedback` contains expected errors from the fingerprint
+    /// capture process.
+    /// Also returns the expected number of remaining samples.
+    fn capture_sample(
+        &mut self,
+        template_id: &[u8],
+        timeout_ms: Option<usize>,
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize)>;
 
     /// Cancel a fingerprint enrollment.
-    fn cancel_enrollment(&self);
+    fn cancel_enrollment(&mut self) -> CtapResult<()>;
 
-    /// Check all enrollments to see if they are enrolled.
-    fn get_enrollments(&self, fingerlist: &mut [u8; 5]);
-
-    /// Called before [`check_fingerprint()`].
+    /// Delete the fingerprint matching the given template ID.
     ///
+    /// Does not delete stored information from persistent storage.
+    /// This function signals to the sensor to remove the enrollment only.
+    fn remove_enrollment(&mut self, template_id: &[u8]) -> CtapResult<()>;
+
+    /// Initialize hardware to prepare a fingerprint check.
+    ///
+    /// Called before [`check_fingerprint`].
     /// Useful for starting any operation that needs to happen before
     /// potentially repeated fingerprint checks, such as blinking LEDs.
     fn check_fingerprint_init(&mut self);
 
-    /// Require the user to touch the sensor and verify the fingerprint is
-    /// valid.
+    /// Collects a fingerprint from the user and verifies it.
     ///
-    /// Waits for a fingerprint image or returns if `timeout_ms` happens without
-    /// a touch.
-    ///
-    /// Returns:
-    /// - `Ok(index)`: If fingerprint is valid, returns the index of the matched
-    ///   fingerprint.
-    /// - `Err(e)`: Error if fingerprint is not valid.
-    fn check_fingerprint(&self, timeout_ms: usize) -> Result<u8, FingerprintCheckError>;
+    /// Waits for the user to present a finger, or the timeout to pass.
+    /// Returns Ok if the fingerprint was valid, and an error otherwise.
+    fn check_fingerprint(&mut self, timeout_ms: usize) -> Result<(), FingerprintCheckError>;
 
-    /// Called after checking fingerprints has finished.
+    /// Deinitilize hardware after a fingerprint check.
+    ///
+    /// Called after [`check_fingerprint`] is finished.
     fn check_fingerprint_complete(&mut self);
 
-    /// Delete the fingerprint enrolled at the given index.
-    fn delete_enrollment(&self, index: u8);
+    /// The kind of fingerprint sensor.
+    fn fingerprint_kind(&self) -> FingerprintKind;
 
-    fn setloglevel(&self, level: u8);
-
+    /// Maximum number of good samples required for enrollment.
+    fn max_capture_samples_required_for_enroll(&self) -> usize;
 }

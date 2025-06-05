@@ -16,7 +16,10 @@ use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
-use crate::api::fingerprint::{Fingerprint, FingerprintCaptureError, FingerprintCheckError};
+#[cfg(feature = "fingerprint")]
+use crate::api::fingerprint::{
+    Ctap2EnrollFeedback, Fingerprint, FingerprintCheckError, FingerprintKind,
+};
 use crate::api::key_store;
 use crate::api::persist::{Persist, PersistIter};
 use crate::api::rng::Rng;
@@ -38,6 +41,7 @@ pub struct TestEnv {
     customization: TestCustomization,
     clock: TestClock,
     soft_reset: bool,
+    #[cfg(feature = "fingerprint")]
     fingerprint: TestFingerprint,
 }
 
@@ -91,7 +95,13 @@ pub struct TestUserPresence {
     check: Box<dyn Fn() -> UserPresenceResult>,
 }
 
-pub struct TestFingerprint {}
+#[cfg(feature = "fingerprint")]
+#[derive(Debug, Default)]
+pub struct TestFingerprint {
+    // TODO more complete fake
+    template_ids: Vec<Vec<u8>>,
+    template_counter: usize,
+}
 
 pub struct TestWrite;
 
@@ -159,7 +169,8 @@ impl Default for TestEnv {
         let store = Store::new(storage).ok().unwrap();
         let customization = DEFAULT_CUSTOMIZATION.into();
         let clock = TestClock::default();
-        let fingerprint = TestFingerprint {};
+        #[cfg(feature = "fingerprint")]
+        let fingerprint = TestFingerprint::default();
         TestEnv {
             rng,
             user_presence,
@@ -167,6 +178,7 @@ impl Default for TestEnv {
             customization,
             clock,
             soft_reset: false,
+            #[cfg(feature = "fingerprint")]
             fingerprint,
         }
     }
@@ -204,40 +216,53 @@ impl UserPresence for TestUserPresence {
     fn check_complete(&mut self) {}
 }
 
+#[cfg(feature = "fingerprint")]
 impl Fingerprint for TestFingerprint {
-    fn get_enrollment_count_maximum(&self) -> u8 {
-        10
+    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>> {
+        self.template_counter += 1;
+        let template_id = Vec::from(&self.template_counter.to_be_bytes());
+        self.template_ids.push(template_id.clone());
+        Ok(template_id)
     }
 
-    fn get_enrollment_count(&self) -> u8 {
-        0
+    fn capture_sample(
+        &mut self,
+        _template_id: &[u8],
+        _timeout_ms: Option<usize>,
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize)> {
+        Ok((Ctap2EnrollFeedback::FpGood, 0))
     }
 
-    fn prepare_enrollment(&self, _index: u8) {}
-
-    fn capture_sample(&self, _timeout: usize) -> Result<(), FingerprintCaptureError> {
+    fn cancel_enrollment(&mut self) -> CtapResult<()> {
         Ok(())
     }
 
-    fn commit_enrollment(&self) -> Result<(), ()> {
+    fn remove_enrollment(&mut self, template_id: &[u8]) -> CtapResult<()> {
+        let index = self.template_ids.iter().position(|x| x == template_id);
+        if let Some(index) = index {
+            self.template_ids.remove(index);
+        }
         Ok(())
     }
-
-    fn cancel_enrollment(&self) {}
-
-    fn get_enrollments(&self, _fingerlist: &mut [u8; 5]) {}
 
     fn check_fingerprint_init(&mut self) {}
 
-    fn check_fingerprint(&self, _timeout: usize) -> Result<u8, FingerprintCheckError> {
-        Ok(0)
+    fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<(), FingerprintCheckError> {
+        if self.template_ids.is_empty() {
+            return Err(FingerprintCheckError::NoMatch);
+        }
+        Ok(())
     }
 
     fn check_fingerprint_complete(&mut self) {}
 
-    fn delete_enrollment(&self, _index: u8) {}
+    fn fingerprint_kind(&self) -> FingerprintKind {
+        FingerprintKind::Touch
+    }
 
-    fn setloglevel(&self, _level: u8) {}
+    fn max_capture_samples_required_for_enroll(&self) -> usize {
+        1
+    }
 }
 
 impl key_store::Helper for TestEnv {}
@@ -252,6 +277,7 @@ impl Env for TestEnv {
     type Customization = TestCustomization;
     type HidConnection = Self;
     type Crypto = SoftwareCrypto;
+    #[cfg(feature = "fingerprint")]
     type Fingerprint = TestFingerprint;
 
     fn rng(&mut self) -> &mut Self::Rng {
@@ -262,6 +288,7 @@ impl Env for TestEnv {
         &mut self.user_presence
     }
 
+    #[cfg(feature = "fingerprint")]
     fn fingerprint(&mut self) -> &mut Self::Fingerprint {
         &mut self.fingerprint
     }

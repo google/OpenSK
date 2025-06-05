@@ -22,6 +22,8 @@ pub mod crypto_wrapper;
 #[cfg(feature = "with_ctap1")]
 mod ctap1;
 pub mod data_formats;
+#[cfg(feature = "fingerprint")]
+pub mod fingerprint;
 pub mod hid;
 mod large_blobs;
 pub mod main_hid;
@@ -39,8 +41,7 @@ pub mod vendor_hid;
 pub use self::client_pin::PIN_AUTH_LENGTH;
 use self::client_pin::{ClientPin, PinPermission};
 use self::command::{
-    AuthenticatorBioEnrollmentParameters, AuthenticatorGetAssertionParameters,
-    AuthenticatorMakeCredentialParameters, Command,
+    AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
 };
 #[cfg(feature = "config_command")]
 use self::config_command::process_config;
@@ -51,13 +52,15 @@ use self::data_formats::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
     PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
+#[cfg(feature = "fingerprint")]
+use self::fingerprint::{perform_built_in_uv, process_bio_enrollment};
 use self::hid::{
     ChannelID, CtapHid, CtapHidCommand, HidPacketIterator, KeepaliveStatus, ProcessedPacket,
 };
 use self::large_blobs::LargeBlobState;
 use self::response::{
-    AuthenticatorBioEnrollmentResponse, AuthenticatorGetAssertionResponse,
-    AuthenticatorGetInfoResponse, AuthenticatorMakeCredentialResponse, ResponseData,
+    AuthenticatorGetAssertionResponse, AuthenticatorGetInfoResponse,
+    AuthenticatorMakeCredentialResponse, ResponseData,
 };
 use self::secret::Secret;
 use self::status_code::{Ctap2StatusCode, CtapResult};
@@ -70,7 +73,8 @@ use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::customization::Customization;
-use crate::api::fingerprint::{Fingerprint, FingerprintCaptureError};
+#[cfg(feature = "fingerprint")]
+use crate::api::fingerprint::Fingerprint;
 use crate::api::key_store::{CredentialSource, KeyStore, MAX_CREDENTIAL_ID_SIZE};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
@@ -108,7 +112,6 @@ pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
 #[cfg(feature = "with_ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1";
-pub const FIDO2_1_PRE_VERSION_STRING: &str = "FIDO_2_1_PRE";
 
 // We currently only support one algorithm for signatures: ES256.
 // This algorithm is requested in MakeCredential and advertized in GetInfo.
@@ -128,34 +131,6 @@ const SUPPORTED_CRED_PARAMS: &[PublicKeyCredentialParameter] = &[
     #[cfg(feature = "ed25519")]
     EDDSA_CRED_PARAM,
 ];
-
-#[derive(Debug)]
-pub enum BioEnrollmentSubCommand {
-    EnrollBegin = 1,
-    EnrollCaptureNextSample = 2,
-    CancelCurrentEnrollment = 3,
-    EnumerateEnrollments = 4,
-    SetFriendlyName = 5,
-    RemoveEnrollment = 6,
-    GetFingerSensorInfo = 7,
-}
-
-impl TryFrom<u64> for BioEnrollmentSubCommand {
-    type Error = ();
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(BioEnrollmentSubCommand::EnrollBegin),
-            2 => Ok(BioEnrollmentSubCommand::EnrollCaptureNextSample),
-            3 => Ok(BioEnrollmentSubCommand::CancelCurrentEnrollment),
-            4 => Ok(BioEnrollmentSubCommand::EnumerateEnrollments),
-            5 => Ok(BioEnrollmentSubCommand::SetFriendlyName),
-            6 => Ok(BioEnrollmentSubCommand::RemoveEnrollment),
-            7 => Ok(BioEnrollmentSubCommand::GetFingerSensorInfo),
-            _ => Err(()),
-        }
-    }
-}
 
 fn get_preferred_cred_param(
     params: &[PublicKeyCredentialParameter],
@@ -289,7 +264,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 }
 
 /// Send non-critical packets using fire-and-forget.
-fn send_packets<E: Env>(
+pub fn send_packets<E: Env>(
     env: &mut E,
     endpoint: UsbEndpoint,
     packets: HidPacketIterator,
@@ -305,17 +280,6 @@ fn is_cancel(packet: &ProcessedPacket) -> bool {
         ProcessedPacket::InitPacket { cmd, .. } => *cmd == CtapHidCommand::Cancel as u8,
         ProcessedPacket::ContinuationPacket { .. } => false,
     }
-}
-
-pub fn send_keepalive_packet<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
-    let (cid, transport) = match channel {
-        Channel::MainHid(cid) => (cid, Transport::MainHid),
-        #[cfg(feature = "vendor_hid")]
-        Channel::VendorHid(cid) => (cid, Transport::VendorHid),
-    };
-    let endpoint = transport.usb_endpoint();
-    let keepalive_msg = CtapHid::<E>::keepalive(cid, KeepaliveStatus::UpNeeded);
-    send_packets(env, endpoint, keepalive_msg)
 }
 
 fn wait_and_respond_busy<E: Env>(env: &mut E, channel: Channel) -> CtapResult<()> {
@@ -409,30 +373,6 @@ pub enum StatefulCommand {
     EnumerateRps(usize),
     EnumerateCredentials(Vec<usize>),
     LargeBlob(LargeBlobState),
-}
-
-//https://fidoalliance.org/specs/fido2/vendor/BioEnrollmentPrototype.pdf
-#[repr(u64)]
-enum Ctap2EnrollFeedback {
-    FpGood = 0,
-    FpPoorQuality = 7,
-    FpMergeFailure = 10,
-    FpTooFast = 0x5,
-    FpTooHigh = 0x1,
-    NoUserActivity = 0xd,
-}
-
-#[repr(u64)]
-enum BioEnrollmentSubCommandParamFields {
-    TemplateId = 0x01,
-    TemplateFriendlyName = 0x02,
-    TimeoutMilliseconds = 0x03,
-}
-
-#[repr(u64)]
-enum BioEnrollmentSubCommandTemplateInfoFields {
-    TemplateId = 0x01,
-    TemplateFriendlyName = 0x02,
 }
 
 /// Stores the current CTAP command state and when it times out.
@@ -612,9 +552,6 @@ pub struct CtapState<E: Env> {
     pub(crate) u2f_up_state: U2fUserPresenceState<E>,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission<E>,
-    // Bio enrollment variables
-    remaining_samples: u64,
-    current_template_id: u8,
 }
 
 impl<E: Env> CtapState<E> {
@@ -631,8 +568,6 @@ impl<E: Env> CtapState<E> {
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
             stateful_command_permission,
-            remaining_samples: 3,
-            current_template_id: 0,
         }
     }
 
@@ -667,486 +602,6 @@ impl<E: Env> CtapState<E> {
     pub fn can_sleep(&mut self, env: &mut E) -> bool {
         !self.client_pin.has_token(env)
             && self.stateful_command_permission.get_command(env).is_err()
-    }
-
-    pub fn process_bio_enrollment(
-        &mut self,
-        env: &mut E,
-        params: AuthenticatorBioEnrollmentParameters,
-        _channel: Channel,
-    ) -> CtapResult<ResponseData> {
-        let sub_command = params
-            .sub_command
-            .map(|cmd| BioEnrollmentSubCommand::try_from(cmd))
-            .transpose()
-            .map_err(|_| Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND)?;
-
-        debug_ctap!(
-            env,
-            "CT: Received bio enrollment sub_command {:?}",
-            sub_command
-        );
-
-        match sub_command {
-            Some(BioEnrollmentSubCommand::EnrollBegin) => {
-                // Check which fingerprint slots are open, and use the first
-                // one. If none is open we will eventually return an error.
-                let mut fingerlist = [0u8; 5];
-                env.fingerprint().get_enrollments(&mut fingerlist);
-                debug_ctap!(env, "CT: EnrollBegin fingerlist {:?}", fingerlist);
-                let open_index = fingerlist.iter().position(|&x| x == 0);
-
-                let timeout_ms = params.sub_command_params.map_or(2000, |p| {
-                    p.extract_map().map_or(2000, |m| {
-                        m.iter()
-                            .find_map(|e| {
-                                if e.0.clone().extract_unsigned().unwrap_or(0)
-                                    == BioEnrollmentSubCommandParamFields::TimeoutMilliseconds
-                                        as u64
-                                {
-                                    e.1.clone().extract_unsigned()
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or(2000) as usize
-                    })
-                });
-
-                match open_index {
-                    Some(index) => {
-                        self.remaining_samples =
-                            env.fingerprint().get_enrollment_count_maximum() as u64;
-                        self.current_template_id = index as u8;
-
-                        debug_ctap!(
-                            env,
-                            "CT: EnrollBegin remaining samples {:?}    enrollment_count {:?}   timeout_ms {:?}",
-                            self.remaining_samples,
-                            self.current_template_id,
-                            timeout_ms,
-                        );
-                        env.fingerprint()
-                            .prepare_enrollment(self.current_template_id);
-                        let sample_ret = env.fingerprint().capture_sample(timeout_ms);
-
-                        let sample_status = match sample_ret {
-                            Ok(()) => {
-                                self.remaining_samples -= 1;
-                                Ctap2EnrollFeedback::FpGood
-                            }
-                            Err(e) => {
-                                debug_ctap!(env, "CT: EnrollBegin capture_sample() - Err\n");
-                                match e {
-                                    FingerprintCaptureError::NoTouch => {
-                                        Ctap2EnrollFeedback::NoUserActivity
-                                    }
-                                    FingerprintCaptureError::ImageBad => {
-                                        Ctap2EnrollFeedback::FpPoorQuality
-                                    }
-                                    FingerprintCaptureError::ImagePartial => {
-                                        Ctap2EnrollFeedback::FpTooHigh
-                                    }
-                                    FingerprintCaptureError::TooFast => {
-                                        Ctap2EnrollFeedback::FpTooFast
-                                    }
-                                    FingerprintCaptureError::Other => {
-                                        Ctap2EnrollFeedback::FpPoorQuality
-                                    }
-                                }
-                            }
-                        };
-
-                        let response = AuthenticatorBioEnrollmentResponse {
-                            modality: Some(1),
-                            fingerprint_kind: None,
-                            max_capture_samples_required_for_enroll: Some(self.remaining_samples),
-                            template_id: Some(vec![self.current_template_id]),
-                            last_enroll_sample_status: Some(sample_status as u64),
-                            remaining_samples: Some(self.remaining_samples),
-                            template_infos: None,
-                            max_template_friendly_name: Some(32),
-                        };
-
-                        Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-                    }
-                    None => {
-                        debug_ctap!(
-                            env,
-                            "CT: EnrollBegin no space (timeout_ms {:?})",
-                            timeout_ms,
-                        );
-
-                        Err(Ctap2StatusCode::CTAP2_ERR_FP_DATABASE_FULL)
-                    }
-                }
-            }
-            Some(BioEnrollmentSubCommand::EnrollCaptureNextSample) => {
-                //check_user_presence(env, channel)?;
-
-                let timeout_ms = params.sub_command_params.map_or(2000, |p| {
-                    p.extract_map().map_or(2000, |m| {
-                        m.iter()
-                            .find_map(|e| {
-                                if e.0.clone().extract_unsigned().unwrap_or(0)
-                                    == BioEnrollmentSubCommandParamFields::TimeoutMilliseconds
-                                        as u64
-                                {
-                                    e.1.clone().extract_unsigned()
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or(2000) as usize
-                    })
-                });
-
-                let sample_ret = env.fingerprint().capture_sample(timeout_ms);
-
-                debug_ctap!(
-                    env,
-                    "CT: EnrollCaptureNext capture_sample return {:?} remaining_sample {:?} timeout_ms {:?}",
-                    sample_ret,
-                    self.remaining_samples,
-                    timeout_ms,
-                );
-
-                let sample_status = match sample_ret {
-                    Ok(()) => {
-                        if self.remaining_samples == 1 {
-                            let commit_ret = env.fingerprint().commit_enrollment();
-                            debug_ctap!(
-                                env,
-                                "CT: EnrollCaptureNext return from commit enroll {:?}",
-                                commit_ret
-                            );
-                            match commit_ret {
-                                Ok(()) => {
-                                    // nothing to do
-                                    debug_ctap!(
-                                        env,
-                                        "CT: EnrollCaptureNext commit_enrollment() - OK\n"
-                                    );
-                                    self.remaining_samples -= 1;
-                                    Ctap2EnrollFeedback::FpGood
-                                }
-
-                                Err(()) => {
-                                    debug_ctap!(
-                                        env,
-                                        "CT: EnrollCaptureNext commit_enrollment() - Err\n"
-                                    );
-                                    Ctap2EnrollFeedback::FpMergeFailure
-                                }
-                            }
-                        } else {
-                            self.remaining_samples -= 1;
-                            Ctap2EnrollFeedback::FpGood
-                        }
-                    }
-
-                    Err(e) => {
-                        debug_ctap!(env, "CT: EnrollCaptureNext capture_sample() - Err\n");
-                        match e {
-                            FingerprintCaptureError::NoTouch => Ctap2EnrollFeedback::NoUserActivity,
-                            FingerprintCaptureError::ImageBad => Ctap2EnrollFeedback::FpPoorQuality,
-                            FingerprintCaptureError::ImagePartial => Ctap2EnrollFeedback::FpTooHigh,
-                            FingerprintCaptureError::TooFast => Ctap2EnrollFeedback::FpTooFast,
-                            FingerprintCaptureError::Other => Ctap2EnrollFeedback::FpPoorQuality,
-                        }
-                    }
-                };
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: None,
-                    max_capture_samples_required_for_enroll: None,
-                    template_id: Some(vec![self.current_template_id]),
-                    last_enroll_sample_status: Some(sample_status as u64),
-                    remaining_samples: Some(self.remaining_samples),
-                    template_infos: None,
-                    max_template_friendly_name: Some(32),
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            Some(BioEnrollmentSubCommand::CancelCurrentEnrollment) => {
-                {
-                    env.fingerprint().cancel_enrollment();
-                }
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: None,
-                    max_capture_samples_required_for_enroll: None,
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: None,
-                    max_template_friendly_name: Some(32),
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            Some(BioEnrollmentSubCommand::EnumerateEnrollments) => {
-                let mut fingerlist = [0u8; 5];
-                env.fingerprint().get_enrollments(&mut fingerlist);
-
-                debug_ctap!(env, "CT: EnumerateEnrollment fingerlist {:?}", fingerlist);
-
-                let template_ids: Vec<u8> = fingerlist
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, &id)| if id != 0 { Some(index as u8) } else { None })
-                    .collect();
-
-                debug_ctap!(
-                    env,
-                    "CT: EnumerateEnrollment template_ids {:?}",
-                    template_ids
-                );
-
-                // Check if there are no enrolled fingers
-                if template_ids.is_empty() {
-                    debug_ctap!(
-                        env,
-                        "CT: No enrolled fingers found. Returning CTAP2_ERR_INVALID_OPTION."
-                    );
-                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-                }
-
-                let template_infos_array: Vec<cbor::Value> = template_ids
-                    .iter()
-                    .map(|template_id| {
-                        let template_id = *template_id;
-                        let friendly_name =
-                            storage::get_friendly_name(env, template_id).unwrap_or("".to_string());
-                        debug_ctap!(env, "CT: Friendly name for template_id {}:", template_id);
-                        if friendly_name.len() > 0 {
-                            debug_ctap!(env, "'{}'", friendly_name);
-                        }
-                        let entries = vec![
-                            (
-                                cbor::Value::unsigned(
-                                    BioEnrollmentSubCommandTemplateInfoFields::TemplateId as u64,
-                                ),
-                                cbor::Value::byte_string(vec![template_id]),
-                            ),
-                            (
-                                cbor::Value::unsigned(
-                                    BioEnrollmentSubCommandTemplateInfoFields::TemplateFriendlyName
-                                        as u64,
-                                ),
-                                cbor::Value::text_string(friendly_name),
-                            ),
-                        ];
-                        cbor::Value::map(entries)
-                    })
-                    .collect();
-
-                let template_infos = cbor::Value::array(template_infos_array);
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: None,
-                    max_capture_samples_required_for_enroll: None,
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: Some(template_infos),
-                    max_template_friendly_name: Some(32),
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            Some(BioEnrollmentSubCommand::RemoveEnrollment) => {
-                debug_ctap!(env, "CT: RemoveEnrollment");
-
-                let template_id = params.sub_command_params.map_or(
-                    Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                    |p| {
-                        p.extract_map().map_or(
-                            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                            |m| {
-                                m.iter()
-                                    .find_map(|e| {
-                                        if e.0.clone().extract_unsigned().unwrap_or(0)
-                                            == BioEnrollmentSubCommandParamFields::TemplateId as u64
-                                        {
-                                            Some(Ok(*e
-                                                .1
-                                                .clone()
-                                                .extract_byte_string()
-                                                .unwrap_or(vec![])
-                                                .get(0)
-                                                .unwrap_or(&0)))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .unwrap_or(Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER))
-                            },
-                        )
-                    },
-                )?;
-
-                debug_ctap!(env, "Remove enrollment tempate_id {:?}", template_id);
-
-                env.fingerprint().delete_enrollment(template_id);
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: None,
-                    max_capture_samples_required_for_enroll: None,
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: None,
-                    max_template_friendly_name: Some(32),
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            Some(BioEnrollmentSubCommand::SetFriendlyName) => {
-                debug_ctap!(env, "CT: SetFriendlyName");
-
-                // placeholder:  Check token permission for "be"
-
-                let template_id = params.sub_command_params.clone().map_or(
-                    Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                    |p| {
-                        p.extract_map().map_or(
-                            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                            |m| {
-                                m.iter()
-                                    .find_map(|e| {
-                                        if e.0.clone().extract_unsigned().unwrap_or(0)
-                                            == BioEnrollmentSubCommandParamFields::TemplateId as u64
-                                        {
-                                            Some(Ok(*e
-                                                .1
-                                                .clone()
-                                                .extract_byte_string()
-                                                .unwrap_or(vec![])
-                                                .get(0)
-                                                .unwrap_or(&0)))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .unwrap_or(Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER))
-                            },
-                        )
-                    },
-                )?;
-
-                let friendly_name = params.sub_command_params.clone().map_or(
-                    Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                    |p| {
-                        p.extract_map().map_or(
-                            Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER),
-                            |m| {
-                                m.iter()
-                                    .find_map(|e| {
-                                        if e.0.clone().extract_unsigned().unwrap_or(0)
-                                            == BioEnrollmentSubCommandParamFields::TemplateFriendlyName as u64
-                                        {
-                                            Some(Ok(e
-                                                .1
-                                                .clone()
-                                                .extract_text_string()
-                                                .unwrap_or("".to_string())
-                                                ))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .unwrap_or(Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER))
-                            },
-                        )
-                    },
-                )?;
-
-                debug_ctap!(env, "CT: SetFriendlyName {} {}", template_id, friendly_name);
-
-                // Check if the friendly name length exceeds the maximum allowed
-                const MAX_TEMPLATE_FRIENDLY_NAME: usize = 32; // set it to 32 for now
-                if friendly_name.len() > MAX_TEMPLATE_FRIENDLY_NAME {
-                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
-                }
-
-                // Check if there's an existing enrollment for the given template_id
-                let mut fingerlist = [0u8; 5];
-                env.fingerprint().get_enrollments(&mut fingerlist);
-                if !fingerlist.contains(&template_id) {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-                }
-
-                storage::store_friendly_name(env, template_id, &friendly_name)?;
-
-                // Create a template_info map with the new friendly name
-                let template_info = cbor::Value::map(vec![
-                    (
-                        cbor::Value::unsigned(
-                            BioEnrollmentSubCommandTemplateInfoFields::TemplateId as u64,
-                        ),
-                        cbor::Value::byte_string(vec![template_id]),
-                    ),
-                    (
-                        cbor::Value::unsigned(
-                            BioEnrollmentSubCommandTemplateInfoFields::TemplateFriendlyName as u64,
-                        ),
-                        cbor::Value::text_string(friendly_name.clone()),
-                    ),
-                ]);
-
-                // Create the template_infos array with the single template_info
-                let template_infos = cbor::Value::array(vec![template_info]);
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: None,
-                    max_capture_samples_required_for_enroll: None,
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: Some(template_infos),
-                    max_template_friendly_name: Some(32),
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            Some(BioEnrollmentSubCommand::GetFingerSensorInfo) => {
-                // Finger sensor information
-                debug_ctap!(env, "CT: GetFingerSensorInfo");
-
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: Some(1),
-                    max_capture_samples_required_for_enroll: Some(6), // change to 6 to match RT
-                    max_template_friendly_name: Some(32),
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: None,
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-
-            _ => {
-                let response = AuthenticatorBioEnrollmentResponse {
-                    modality: Some(1),
-                    fingerprint_kind: Some(1),
-                    max_capture_samples_required_for_enroll: Some(5),
-                    max_template_friendly_name: Some(32),
-                    template_id: None,
-                    last_enroll_sample_status: None,
-                    remaining_samples: None,
-                    template_infos: None,
-                };
-                Ok(ResponseData::AuthenticatorBioEnrollment(Some(response)))
-            }
-        }
     }
 
     pub fn process_command(
@@ -1198,7 +653,6 @@ impl<E: Env> CtapState<E> {
             (Command::AuthenticatorGetNextAssertion, Ok(StatefulCommand::GetAssertion(_)))
             | (Command::AuthenticatorLargeBlobs(_), Ok(StatefulCommand::LargeBlob(_)))
             | (Command::AuthenticatorReset, Ok(StatefulCommand::Reset))
-            | (Command::AuthenticatorBioEnrollment(_), Ok(StatefulCommand::Reset))
             // AuthenticatorGetInfo still allows Reset.
             | (Command::AuthenticatorGetInfo, Ok(StatefulCommand::Reset))
             // AuthenticatorSelection still allows Reset.
@@ -1237,14 +691,15 @@ impl<E: Env> CtapState<E> {
                 self.process_get_assertion(env, params, channel)
             }
             Command::AuthenticatorGetNextAssertion => self.process_get_next_assertion(env),
-            Command::AuthenticatorBioEnrollment(params) => {
-                self.process_bio_enrollment(env, params, channel)
-            }
             Command::AuthenticatorGetInfo => self.process_get_info(env),
             Command::AuthenticatorClientPin(params) => {
                 self.client_pin.process_command(env, params, channel)
             }
             Command::AuthenticatorReset => self.process_reset(env, channel),
+            #[cfg(feature = "fingerprint")]
+            Command::AuthenticatorBioEnrollment(params) => {
+                process_bio_enrollment(env, &mut self.client_pin, params)
+            }
             Command::AuthenticatorCredentialManagement(params) => process_credential_management(
                 env,
                 &mut self.stateful_command_permission,
@@ -1373,45 +828,24 @@ impl<E: Env> CtapState<E> {
             }
             None => {
                 if options.uv {
-                    // Internal UV is enabled. Check the built in UV and return on error.
-                    // If no error, return the UV_FLAG bit.
-                    self.client_pin
-                        .perform_built_in_uv(env, channel, true)
-                        .map_err(|e| {
-                            // 6.1.2.11.2 error cases:
-                            //
-                            // 1. If the error reason is a user action timeout,
-                            //    then return CTAP2_ERR_USER_ACTION_TIMEOUT.
-                            // 2. If the ClientPin option ID is true and the
-                            //    noMcGaPermissionsWithClientPin option ID is
-                            //    absent or false, end the operation by
-                            //    returning CTAP2_ERR_PUAT_REQUIRED.
-                            // 3. If the uvRetries counter is <= 0, return
-                            //    CTAP2_ERR_PIN_BLOCKED.
-                            // 4. Otherwise, end the operation by returning
-                            //    CTAP2_ERR_OPERATION_DENIED.
-                            match e {
-                                Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT => {
-                                    Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT
-                                }
-                                Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED => {
-                                    Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED
-                                }
-                                _ => {
-                                    let client_pin_option =
-                                        env.persist().pin_hash().unwrap_or(None).is_some();
-                                    if client_pin_option {
-                                        // noMcGaPermissionsWithClientPin is absent
-                                        Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED
-                                    } else {
-                                        Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED
-                                    }
-                                }
-                            }
-                        })?;
+                    #[cfg(not(feature = "fingerprint"))]
+                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+                    // The specification says:
+                    // If the uvRetries counter is 0, return CTAP2_ERR_PIN_BLOCKED.
+                    // But I assume this is a typo and should be UV_BLOCKED instead.
+                    // https://github.com/fido-alliance/fido-2-specs/issues/1672
+                    #[cfg(feature = "fingerprint")]
+                    perform_built_in_uv(env, channel, true)?;
+                    #[cfg(feature = "fingerprint")]
                     UV_FLAG
                 } else {
-                    // Flags set to 0
+                    if storage::has_always_uv(env)? {
+                        return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                    }
+                    // Corresponds to makeCredUvNotRqd set to true.
+                    if options.rk && env.persist().pin_hash()?.is_some() {
+                        return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                    }
                     0x00
                 }
             }
@@ -1445,11 +879,7 @@ impl<E: Env> CtapState<E> {
         self.client_pin.clear_token_flags();
 
         let default_cred_protect = env.customization().default_cred_protect();
-        let mut cred_protect_policy = Some(
-            extensions
-                .cred_protect
-                .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional),
-        );
+        let mut cred_protect_policy = extensions.cred_protect;
         if cred_protect_policy.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
             < default_cred_protect.unwrap_or(CredentialProtectionPolicy::UserVerificationOptional)
         {
@@ -1777,15 +1207,20 @@ impl<E: Env> CtapState<E> {
                 UV_FLAG
             }
             None => {
-                debug_ctap!(env, "process_get_assertion: use UV (no pin_uv_auth_param)");
                 if options.uv {
-                    // Internal UV is enabled. Check the built in UV and return on error.
-                    // If no error, return the UV_FLAG bit.
-                    self.client_pin.perform_built_in_uv(env, channel, true)?;
+                    #[cfg(not(feature = "fingerprint"))]
+                    return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+                    // Same error code ambiguity as in MakeCredential.
+                    // https://github.com/fido-alliance/fido-2-specs/issues/1672
+                    #[cfg(feature = "fingerprint")]
+                    perform_built_in_uv(env, channel, true)?;
+                    #[cfg(feature = "fingerprint")]
                     UV_FLAG
                 } else {
-                    // Flags set to 0
-                    0
+                    if options.up && storage::has_always_uv(env)? {
+                        return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+                    }
+                    0x00
                 }
             }
         };
@@ -1885,45 +1320,39 @@ impl<E: Env> CtapState<E> {
         let mut versions = vec![
             String::from(FIDO2_VERSION_STRING),
             String::from(FIDO2_1_VERSION_STRING),
-            String::from(FIDO2_1_PRE_VERSION_STRING),
         ];
         #[cfg(feature = "with_ctap1")]
         if !has_always_uv {
             versions.insert(0, String::from(U2F_VERSION_STRING))
         }
-        let mut options = vec![];
+        let mut options = vec![
+            (String::from("rk"), true),
+            (
+                String::from("clientPin"),
+                env.persist().pin_hash()?.is_some(),
+            ),
+            (String::from("up"), true),
+            (String::from("pinUvAuthToken"), true),
+            (String::from("largeBlobs"), true),
+            #[cfg(feature = "config_command")]
+            (String::from("authnrCfg"), true),
+            #[cfg(feature = "config_command")]
+            (String::from("uvAcfg"), true),
+            (String::from("credMgmt"), true),
+            #[cfg(feature = "config_command")]
+            (String::from("setMinPINLength"), true),
+            (String::from("makeCredUvNotRqd"), !has_always_uv),
+            (String::from("alwaysUv"), has_always_uv),
+        ];
+        #[cfg(feature = "fingerprint")]
+        {
+            let has_fingerprint = !env.persist().template_infos()?.is_empty();
+            options.push((String::from("uv"), has_fingerprint));
+            options.push((String::from("bioEnroll"), has_fingerprint));
+        }
         if env.customization().enterprise_attestation_mode().is_some() {
             options.push((String::from("ep"), storage::enterprise_attestation(env)?));
         }
-        let client_pin_result = match env.persist().pin_hash() {
-            Ok(Some(pin_hash)) => Some(pin_hash),
-            Ok(None) => None,
-            Err(_) => None,
-        };
-        // `uv` is included in the options map since we have a fingerprint
-        // sensor, but we set the option to false if the sensor is not
-        // "configured" meaning it has no registered fingerprints (and therefore
-        // cannot provide user verification).
-        let uv = env.fingerprint().get_enrollment_count() > 0;
-        options.append(&mut vec![
-            (String::from("rk"), true),
-            (String::from("up"), true),
-            (String::from("uv"), uv),
-            (String::from("alwaysUv"), has_always_uv),
-            (String::from("credMgmt"), true),
-            (String::from("authnrCfg"), true),
-            //(String::from("clientPin"), storage::pin_hash(env)?.is_some()),
-            (String::from("clientPin"), client_pin_result.is_some()),
-            (String::from("largeBlobs"), true),
-            (String::from("pinUvAuthToken"), true),
-            (String::from("setMinPINLength"), true),
-            (String::from("makeCredUvNotRqd"), !has_always_uv),
-            (String::from("bioEnroll"), true),
-            (String::from("credentialMgmtPreview"), true),
-            (String::from("userVerificationMgmtPreview"), true),
-            (String::from("uvToken"), true),
-            (String::from("plat"), false),
-        ]);
         let mut pin_protocols = vec![PinUvAuthProtocol::V2 as u64];
         if env.customization().allows_pin_protocol_v1() {
             pin_protocols.push(PinUvAuthProtocol::V1 as u64);
@@ -1961,14 +1390,21 @@ impl<E: Env> CtapState<E> {
                 max_rp_ids_for_set_min_pin_length: Some(
                     env.customization().max_rp_ids_length() as u64
                 ),
+                #[cfg(feature = "fingerprint")]
+                preferred_platform_uv_attempts: Some(
+                    env.customization().preferred_platform_uv_attempts() as u64,
+                ),
+                #[cfg(not(feature = "fingerprint"))]
+                preferred_platform_uv_attempts: None,
+                // https://fidoalliance.org/specs/common-specs/fido-registry-v2.2-ps-20220523.html#user-verification-methods
+                #[cfg(feature = "fingerprint")]
+                uv_modality: Some(0x02),
+                #[cfg(not(feature = "fingerprint"))]
+                uv_modality: None,
                 certifications: None,
                 remaining_discoverable_credentials: Some(
                     storage::remaining_credentials(env)? as u64
                 ),
-                preferred_platform_uv_attempts: Some(
-                    env.customization().preferred_platform_uv_attempts() as u64,
-                ),
-                uv_modality: Some(2),
             },
         ))
     }
@@ -1985,8 +1421,16 @@ impl<E: Env> CtapState<E> {
         reset(env)?;
         self.client_pin.reset(env);
 
-        // FF is a special case to delete all fingerprints
-        env.fingerprint().delete_enrollment(0xff);
+        #[cfg(feature = "fingerprint")]
+        {
+            let template_infos = env.persist().template_infos()?;
+            for template_info in template_infos {
+                env.fingerprint()
+                    .remove_enrollment(&template_info.template_id)?;
+                env.persist()
+                    .remove_template_id(&template_info.template_id)?;
+            }
+        }
 
         #[cfg(feature = "with_ctap1")]
         {
@@ -2108,6 +1552,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "fingerprint")]
     fn test_get_info() {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -2134,6 +1579,74 @@ mod test {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
                 "up" => true,
+                "uv" => false,
+                #[cfg(feature = "config_command")]
+                "uvAcfg" => true,
+                #[cfg(feature = "config_command")]
+                "alwaysUv" => false,
+                "credMgmt" => true,
+                #[cfg(feature = "config_command")]
+                "authnrCfg" => true,
+                "bioEnroll" => false,
+                "clientPin" => false,
+                "largeBlobs" => true,
+                "pinUvAuthToken" => true,
+                #[cfg(feature = "config_command")]
+                "setMinPINLength" => true,
+                "makeCredUvNotRqd" => true,
+            },
+            0x05 => env.customization().max_msg_size() as u64,
+            0x06 => cbor_array![2, 1],
+            0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
+            0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
+            0x09 => cbor_array!["usb"],
+            0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
+            0x0B => env.customization().max_large_blob_array_size() as u64,
+            0x0C => false,
+            0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
+            0x0E => 0,
+            0x0F => env.customization().max_cred_blob_length() as u64,
+            0x10 => env.customization().max_rp_ids_length() as u64,
+            0x11 => env.customization().preferred_platform_uv_attempts() as u64,
+            0x12 => 0x02,
+            0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
+        };
+
+        let mut response_cbor = vec![0x00];
+        assert!(cbor_write(expected_cbor, &mut response_cbor).is_ok());
+        assert_eq!(info_reponse, response_cbor);
+    }
+
+    #[test]
+    #[cfg(not(feature = "fingerprint"))]
+    fn test_get_info() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
+
+        // Fails when removing `to_vec` for `SUPPORTED_CRED_PARAMS` as linted.
+        #[allow(clippy::unnecessary_to_owned)]
+        let expected_cbor = cbor_map_options! {
+             0x01 => cbor_array_vec![vec![
+                    #[cfg(feature = "with_ctap1")]
+                    String::from(U2F_VERSION_STRING),
+                    String::from(FIDO2_VERSION_STRING),
+                    String::from(FIDO2_1_VERSION_STRING),
+                ]],
+            0x02 => cbor_array![
+                    String::from("hmac-secret"),
+                    String::from("credProtect"),
+                    String::from("minPinLength"),
+                    String::from("credBlob"),
+                    String::from("largeBlobKey"),
+                ],
+            0x03 => env.customization().aaguid(),
+            0x04 => cbor_map_options! {
+                "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
+                "rk" => true,
+                "up" => true,
+                #[cfg(feature = "config_command")]
+                "uvAcfg" => true,
                 #[cfg(feature = "config_command")]
                 "alwaysUv" => false,
                 "credMgmt" => true,
@@ -3062,9 +2575,10 @@ mod test {
             permissions: None,
             permissions_rp_id: None,
         };
-        let key_agreement_response = ctap_state
-            .client_pin
-            .process_command(&mut env, client_pin_params);
+        let key_agreement_response =
+            ctap_state
+                .client_pin
+                .process_command(&mut env, client_pin_params, DUMMY_CHANNEL);
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),
@@ -3113,9 +2627,10 @@ mod test {
             permissions: None,
             permissions_rp_id: None,
         };
-        let key_agreement_response = ctap_state
-            .client_pin
-            .process_command(&mut env, client_pin_params);
+        let key_agreement_response =
+            ctap_state
+                .client_pin
+                .process_command(&mut env, client_pin_params, DUMMY_CHANNEL);
         let get_assertion_params = get_assertion_hmac_secret_params(
             key_agreement_key,
             key_agreement_response.unwrap(),

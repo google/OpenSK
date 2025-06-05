@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use super::cbor_read;
+#[cfg(feature = "fingerprint")]
+use super::data_formats::extract_bool;
 use super::data_formats::{
-    extract_array, extract_bool, extract_byte_string, extract_map, extract_text_string,
-    extract_unsigned, ok_or_missing, ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
+    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
+    ok_or_missing, ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
     CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
     MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
@@ -30,7 +32,11 @@ use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
 use arbitrary::Arbitrary;
 use core::convert::TryFrom;
+#[cfg(all(test, feature = "fingerprint"))]
+use enum_iterator::IntoEnumIterator;
 use sk_cbor as cbor;
+#[cfg(feature = "fingerprint")]
+use sk_cbor::cbor_map_options;
 use sk_cbor::destructure_cbor_map;
 
 // CTAP specification (version 20190130) section 6.1
@@ -43,6 +49,7 @@ pub enum Command {
     AuthenticatorClientPin(AuthenticatorClientPinParameters),
     AuthenticatorReset,
     AuthenticatorGetNextAssertion,
+    #[cfg(feature = "fingerprint")]
     AuthenticatorBioEnrollment(AuthenticatorBioEnrollmentParameters),
     AuthenticatorCredentialManagement(AuthenticatorCredentialManagementParameters),
     AuthenticatorSelection,
@@ -58,7 +65,7 @@ impl Command {
     const AUTHENTICATOR_CLIENT_PIN: u8 = 0x06;
     const AUTHENTICATOR_RESET: u8 = 0x07;
     const AUTHENTICATOR_GET_NEXT_ASSERTION: u8 = 0x08;
-    // Implement Bio Enrollment when your hardware supports biometrics.
+    #[cfg(feature = "fingerprint")]
     const AUTHENTICATOR_BIO_ENROLLMENT: u8 = 0x09;
     const AUTHENTICATOR_CREDENTIAL_MANAGEMENT: u8 = 0x0A;
     const AUTHENTICATOR_SELECTION: u8 = 0x0B;
@@ -110,6 +117,7 @@ impl Command {
                 // Parameters are ignored.
                 Ok(Command::AuthenticatorGetNextAssertion)
             }
+            #[cfg(feature = "fingerprint")]
             Command::AUTHENTICATOR_BIO_ENROLLMENT => {
                 let decoded_cbor = cbor_read(&bytes[1..])?;
                 Ok(Command::AuthenticatorBioEnrollment(
@@ -142,49 +150,6 @@ impl Command {
             }
             _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_COMMAND),
         }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct AuthenticatorBioEnrollmentParameters {
-    pub modality: Option<u64>,
-    pub sub_command: Option<u64>,
-    pub sub_command_params: Option<cbor::Value>,
-    pub pin_protocol: Option<u64>,
-    pub pin_auth: Option<Vec<u8>>,
-    pub get_modality: Option<bool>,
-}
-
-impl TryFrom<cbor::Value> for AuthenticatorBioEnrollmentParameters {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> Result<Self, Self::Error> {
-        destructure_cbor_map! {
-            let {
-                0x01 => modality,
-                0x02 => sub_command,
-                0x03 => sub_command_params,
-                0x04 => pin_protocol,
-                0x05 => pin_auth,
-                0x06 => get_modality,
-            } = extract_map(cbor_value)?;
-        }
-
-        let modality = modality.map(extract_unsigned).transpose()?;
-        let sub_command = sub_command.map(extract_unsigned).transpose()?;
-        let sub_command_params = sub_command_params;
-        let pin_protocol = pin_protocol.map(extract_unsigned).transpose()?;
-        let pin_auth = pin_auth.map(extract_byte_string).transpose()?;
-        let get_modality = get_modality.map(extract_bool).transpose()?;
-
-        Ok(AuthenticatorBioEnrollmentParameters {
-            modality,
-            sub_command,
-            sub_command_params,
-            pin_protocol,
-            pin_auth,
-            get_modality,
-        })
     }
 }
 
@@ -408,6 +373,147 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
     }
 }
 
+#[cfg(feature = "fingerprint")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthenticatorBioEnrollmentParameters {
+    pub modality: Option<u64>,
+    pub sub_command: Option<BioEnrollmentSubCommand>,
+    pub sub_command_params: Option<BioEnrollmentSubCommandParams>,
+    pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
+    pub get_modality: Option<bool>,
+}
+
+#[cfg(feature = "fingerprint")]
+impl TryFrom<cbor::Value> for AuthenticatorBioEnrollmentParameters {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Self::Error> {
+        destructure_cbor_map! {
+            let {
+                0x01 => modality,
+                0x02 => sub_command,
+                0x03 => sub_command_params,
+                0x04 => pin_uv_auth_protocol,
+                0x05 => pin_uv_auth_param,
+                0x06 => get_modality,
+            } = extract_map(cbor_value)?;
+        }
+
+        let modality = modality.map(extract_unsigned).transpose()?;
+        let sub_command = sub_command
+            .map(BioEnrollmentSubCommand::try_from)
+            .transpose()?;
+        let sub_command_params = sub_command_params
+            .map(BioEnrollmentSubCommandParams::try_from)
+            .transpose()?;
+        let pin_uv_auth_protocol = pin_uv_auth_protocol
+            .map(PinUvAuthProtocol::try_from)
+            .transpose()?;
+        let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
+        let get_modality = get_modality.map(extract_bool).transpose()?;
+
+        Ok(AuthenticatorBioEnrollmentParameters {
+            modality,
+            sub_command,
+            sub_command_params,
+            pin_uv_auth_protocol,
+            pin_uv_auth_param,
+            get_modality,
+        })
+    }
+}
+
+#[cfg(feature = "fingerprint")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(IntoEnumIterator))]
+pub enum BioEnrollmentSubCommand {
+    EnrollBegin = 0x01,
+    EnrollCaptureNextSample = 0x02,
+    CancelCurrentEnrollment = 0x03,
+    EnumerateEnrollments = 0x04,
+    SetFriendlyName = 0x05,
+    RemoveEnrollment = 0x06,
+    GetFingerprintSensorInfo = 0x07,
+}
+
+#[cfg(feature = "fingerprint")]
+impl From<BioEnrollmentSubCommand> for cbor::Value {
+    fn from(subcommand: BioEnrollmentSubCommand) -> Self {
+        (subcommand as u64).into()
+    }
+}
+
+#[cfg(feature = "fingerprint")]
+impl TryFrom<cbor::Value> for BioEnrollmentSubCommand {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
+        let subcommand_int = extract_unsigned(cbor_value)?;
+        match subcommand_int {
+            0x01 => Ok(BioEnrollmentSubCommand::EnrollBegin),
+            0x02 => Ok(BioEnrollmentSubCommand::EnrollCaptureNextSample),
+            0x03 => Ok(BioEnrollmentSubCommand::CancelCurrentEnrollment),
+            0x04 => Ok(BioEnrollmentSubCommand::EnumerateEnrollments),
+            0x05 => Ok(BioEnrollmentSubCommand::SetFriendlyName),
+            0x06 => Ok(BioEnrollmentSubCommand::RemoveEnrollment),
+            0x07 => Ok(BioEnrollmentSubCommand::GetFingerprintSensorInfo),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_SUBCOMMAND),
+        }
+    }
+}
+
+#[cfg(feature = "fingerprint")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BioEnrollmentSubCommandParams {
+    pub template_id: Option<Vec<u8>>,
+    pub template_friendly_name: Option<String>,
+    pub timeout_milliseconds: Option<usize>,
+}
+
+#[cfg(feature = "fingerprint")]
+impl TryFrom<cbor::Value> for BioEnrollmentSubCommandParams {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> Result<Self, Self::Error> {
+        destructure_cbor_map! {
+            let {
+                0x01 => template_id,
+                0x02 => template_friendly_name,
+                0x03 => timeout_milliseconds,
+            } = extract_map(cbor_value)?;
+        }
+
+        let template_id = template_id.map(extract_byte_string).transpose()?;
+        let template_friendly_name = template_friendly_name
+            .map(extract_text_string)
+            .transpose()?;
+        let timeout_milliseconds = timeout_milliseconds
+            .map(extract_unsigned)
+            .transpose()?
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+
+        Ok(BioEnrollmentSubCommandParams {
+            template_id,
+            template_friendly_name,
+            timeout_milliseconds,
+        })
+    }
+}
+
+#[cfg(feature = "fingerprint")]
+impl From<BioEnrollmentSubCommandParams> for cbor::Value {
+    fn from(sub_command_params: BioEnrollmentSubCommandParams) -> Self {
+        cbor_map_options! {
+            0x01 => sub_command_params.template_id,
+            0x02 => sub_command_params.template_friendly_name,
+            0x03 => sub_command_params.timeout_milliseconds.map(|u| u as u64),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorLargeBlobsParameters {
     pub get: Option<usize>,
@@ -561,6 +667,8 @@ mod test {
     };
     use super::super::ES256_CRED_PARAM;
     use super::*;
+    #[cfg(feature = "fingerprint")]
+    use cbor::cbor_int;
     use cbor::{cbor_array, cbor_map};
 
     #[test]
@@ -697,7 +805,6 @@ mod test {
             permissions: Some(0x03),
             permissions_rp_id: Some("example.com".to_string()),
         };
-
         assert_eq!(
             returned_client_pin_parameters,
             expected_client_pin_parameters
@@ -724,6 +831,81 @@ mod test {
         let cbor_bytes = [Command::AUTHENTICATOR_GET_NEXT_ASSERTION];
         let command = Command::deserialize(&cbor_bytes);
         assert_eq!(command, Ok(Command::AuthenticatorGetNextAssertion));
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_from_cbor_bio_enrollment_parameters() {
+        let sub_command_params_cbor_value = cbor_map! {
+            0x01 => vec![0x01],
+            0x02 => "Name",
+            0x03 => 1000,
+        };
+        let cbor_value = cbor_map! {
+            0x01 => 1,
+            0x02 => BioEnrollmentSubCommand::EnrollBegin,
+            0x03 => sub_command_params_cbor_value,
+            0x04 => 1,
+            0x05 => vec![0xBB],
+            0x06 => true,
+        };
+        let returned_bio_enrollment_parameters =
+            AuthenticatorBioEnrollmentParameters::try_from(cbor_value).unwrap();
+
+        let expected_sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(vec![0x01]),
+            template_friendly_name: Some(String::from("Name")),
+            timeout_milliseconds: Some(1000),
+        };
+        let expected_bio_enrollment_parameters = AuthenticatorBioEnrollmentParameters {
+            modality: Some(1),
+            sub_command: Some(BioEnrollmentSubCommand::EnrollBegin),
+            sub_command_params: Some(expected_sub_command_params),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param: Some(vec![0xBB]),
+            get_modality: Some(true),
+        };
+        assert_eq!(
+            returned_bio_enrollment_parameters,
+            expected_bio_enrollment_parameters
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_from_into_bio_enrollment_sub_command() {
+        let cbor_sub_command: cbor::Value = cbor_int!(0x01);
+        let sub_command = BioEnrollmentSubCommand::try_from(cbor_sub_command.clone());
+        let expected_sub_command = BioEnrollmentSubCommand::EnrollBegin;
+        assert_eq!(sub_command, Ok(expected_sub_command));
+        let created_cbor: cbor::Value = sub_command.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command);
+
+        for command in BioEnrollmentSubCommand::into_enum_iter() {
+            let created_cbor: cbor::Value = command.clone().into();
+            let reconstructed = BioEnrollmentSubCommand::try_from(created_cbor).unwrap();
+            assert_eq!(command, reconstructed);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_from_into_bio_enrollment_sub_command_params() {
+        let cbor_sub_command_params = cbor_map! {
+            0x01 => vec![0x1D; 32],
+            0x02 => "Name",
+            0x03 => 30_000,
+        };
+        let sub_command_params =
+            BioEnrollmentSubCommandParams::try_from(cbor_sub_command_params.clone());
+        let expected_sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(vec![0x1D; 32]),
+            template_friendly_name: Some(String::from("Name")),
+            timeout_milliseconds: Some(30_000),
+        };
+        assert_eq!(sub_command_params, Ok(expected_sub_command_params));
+        let created_cbor: cbor::Value = sub_command_params.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command_params);
     }
 
     #[test]

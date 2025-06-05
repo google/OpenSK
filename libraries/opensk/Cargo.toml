@@ -42,6 +42,7 @@ with_ctap1 = []
 vendor_hid = []
 fuzz = ["arbitrary", "std"]
 ed25519 = ["ed25519-compact"]
+fingerprint = []
 
 [dev-dependencies]
 enum-iterator = "0.6.0"

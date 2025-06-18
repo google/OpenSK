@@ -54,7 +54,7 @@ echo "Running Clippy lints..."
 cargo clippy --lib --tests --bins --benches --features std -- -D warnings
 cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -D warnings
 (cd libraries/opensk && cargo clippy --features std -- -D warnings)
-(cd libraries/opensk && cargo clippy --features std,config_command,debug_ctap,with_ctap1,vendor_hid,ed25519,fingerprint -- -D warnings)
+(cd libraries/opensk && cargo clippy --all-features -- -D warnings)
 (cd libraries/cbor && cargo clippy -- -D warnings)
 # Uncomment when persistent store is fixed:
 # (cd libraries/persistent_store && cargo clippy --features std -- -D warnings)

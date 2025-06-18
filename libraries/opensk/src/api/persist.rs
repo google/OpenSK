@@ -435,23 +435,37 @@ pub trait Persist {
 
     /// Stores a new template ID.
     ///
+    /// We shouldn't try to create the same template ID twice, so if it already
+    /// exists, return an internal error.
+    ///
     /// Returns `Err(CTAP2_ERR_FP_DATABASE_FULL)` if the storage is full.
     #[cfg(feature = "fingerprint")]
-    fn store_template_id(&mut self, template_id: &[u8]) -> CtapResult<()> {
+    fn store_template_id(&mut self, template_id: Vec<u8>) -> CtapResult<()> {
+        let mut new_key = None;
         for key in keys::FRIENDLY_NAMES {
-            if self.find(key)?.is_some() {
-                continue;
+            if let Some(data) = self.find(key)? {
+                let cbor_value = cbor_read(&data)
+                    .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+                let template_info = TemplateInfo::try_from(cbor_value)?;
+                if template_info.template_id == template_id {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+                }
+            } else if new_key.is_none() {
+                new_key = Some(key);
             }
+        }
+        if let Some(key) = new_key {
             let template_info = TemplateInfo {
-                template_id: template_id.to_vec(),
+                template_id,
                 template_friendly_name: None,
             };
             let mut data = Vec::new();
             cbor_write(cbor::Value::from(template_info), &mut data)?;
-            self.insert(key, &mut data)?;
-            return Ok(());
+            self.insert(key, &data)?;
+            Ok(())
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_FP_DATABASE_FULL)
         }
-        Err(Ctap2StatusCode::CTAP2_ERR_FP_DATABASE_FULL)
     }
 
     /// Removes the template information matching the template ID.
@@ -464,7 +478,7 @@ pub trait Persist {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 let template_info = TemplateInfo::try_from(cbor_value)?;
-                if &template_info.template_id == template_id {
+                if template_info.template_id == template_id {
                     self.remove(key)?;
                     return Ok(());
                 }
@@ -496,17 +510,17 @@ pub trait Persist {
     ///
     /// Returns `Err(CTAP2_ERR_INVALID_OPTION)` if the template was not found.
     #[cfg(feature = "fingerprint")]
-    fn store_friendly_name(&mut self, template_id: &[u8], friendly_name: &str) -> CtapResult<()> {
+    fn store_friendly_name(&mut self, template_id: &[u8], friendly_name: String) -> CtapResult<()> {
         for key in keys::FRIENDLY_NAMES {
             if let Some(bytes) = self.find(key)? {
                 let cbor_value = cbor_read(&bytes)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 let mut template_info = TemplateInfo::try_from(cbor_value)?;
-                if &template_info.template_id == template_id {
-                    template_info.template_friendly_name = Some(String::from(friendly_name));
+                if template_info.template_id == template_id {
+                    template_info.template_friendly_name = Some(friendly_name);
                     let mut data = Vec::new();
                     cbor_write(cbor::Value::from(template_info), &mut data)?;
-                    self.insert(key, &mut data)?;
+                    self.insert(key, &data)?;
                     return Ok(());
                 }
             }
@@ -730,7 +744,7 @@ mod test {
         let persist = env.persist();
 
         assert_eq!(persist.template_infos().unwrap(), vec![]);
-        assert_eq!(persist.store_template_id(&[0x00]), Ok(()));
+        assert_eq!(persist.store_template_id(vec![0x00]), Ok(()));
         let template_info = &persist.template_infos().unwrap()[0];
         assert_eq!(template_info.template_id, &[0x00]);
         assert_eq!(template_info.template_friendly_name, None);
@@ -750,11 +764,14 @@ mod test {
 
         assert_eq!(persist.get_friendly_name(&[0x00]).unwrap(), None);
         assert_eq!(
-            persist.store_friendly_name(&[0x00], "Name"),
+            persist.store_friendly_name(&[0x00], "Name".to_string()),
             Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION)
         );
-        assert_eq!(persist.store_template_id(&[0x00]), Ok(()));
-        assert_eq!(persist.store_friendly_name(&[0x00], "Name"), Ok(()));
+        assert_eq!(persist.store_template_id(vec![0x00]), Ok(()));
+        assert_eq!(
+            persist.store_friendly_name(&[0x00], "Name".to_string()),
+            Ok(())
+        );
         assert_eq!(
             persist.get_friendly_name(&[0x00]).unwrap(),
             Some(String::from("Name"))

@@ -172,7 +172,7 @@ fn enroll_capture_next_sample<E: Env>(
     let (sample_status, remaining_samples) =
         env.fingerprint().capture_sample(&template_id, timeout_ms)?;
     if remaining_samples == 0 {
-        env.persist().store_template_id(&template_id)?;
+        env.persist().store_template_id(template_id)?;
     }
     let response = AuthenticatorBioEnrollmentResponse {
         last_enroll_sample_status: Some(sample_status),
@@ -209,7 +209,7 @@ fn set_friendly_name<E: Env>(
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
     }
     env.persist()
-        .store_friendly_name(&template_id, &friendly_name)?;
+        .store_friendly_name(&template_id, friendly_name)?;
     Ok(ResponseData::AuthenticatorBioEnrollment(None))
 }
 
@@ -321,7 +321,7 @@ mod test {
             .1
             > 0
         {}
-        assert_eq!(env.persist().store_template_id(&template_id), Ok(()));
+        assert_eq!(env.persist().store_template_id(template_id.clone()), Ok(()));
         template_id
     }
 

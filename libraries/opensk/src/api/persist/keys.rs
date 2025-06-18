@@ -105,7 +105,7 @@ make_partition! {
 
     /// Stored friendly names for enrolled fingerprints.
     #[cfg(feature = "fingerprint")]
-    FRIENDLY_NAMES = 2031..2036;
+    FRIENDLY_NAMES = 2031..2037;
 
     /// Stores UV retry counter information.
     ///

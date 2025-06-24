@@ -1,0 +1,336 @@
+diff --git a/boards/nordic/nrf52_components/src/startup.rs b/boards/nordic/nrf52_components/src/startup.rs
+index 7b3ea5a59..87a566550 100644
+--- a/boards/nordic/nrf52_components/src/startup.rs
++++ b/boards/nordic/nrf52_components/src/startup.rs
+@@ -36,6 +36,13 @@ impl<'a> Component for NrfStartupComponent<'a> {
+     type StaticInput = ();
+     type Output = ();
+     unsafe fn finalize(self, _s: Self::StaticInput) -> Self::Output {
++        // Disable APPROTECT in software. This is required as of newer nRF52
++        // hardware revisions. See
++        // https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/posts/working-with-the-nrf52-series-improved-approtect.
++        // If run on older HW revisions this function will do nothing.
++        let approtect = nrf52::approtect::Approtect::new();
++        approtect.sw_disable_approtect();
++
+         // Make non-volatile memory writable and activate the reset button
+         let uicr = nrf52::uicr::Uicr::new();
+ 
+@@ -56,6 +63,12 @@ impl<'a> Component for NrfStartupComponent<'a> {
+         // Avoid killing the DFU bootloader if present
+         let (dfu_start_addr, dfu_settings_addr) = uicr.get_dfu_params();
+ 
++        // On new nRF52 variants we need to ensure that the APPROTECT field in UICR is
++        // set to `HwDisable`.
++        if uicr.is_ap_protect_enabled() {
++            erase_uicr = true;
++        }
++
+         if erase_uicr {
+             self.nvmc.erase_uicr();
+         }
+@@ -102,6 +115,12 @@ impl<'a> Component for NrfStartupComponent<'a> {
+             needs_soft_reset = true;
+         }
+ 
++        if uicr.is_ap_protect_enabled() {
++            uicr.disable_ap_protect();
++            while !self.nvmc.is_ready() {}
++            needs_soft_reset = true;
++        }
++
+         // Any modification of UICR needs a soft reset for the changes to be taken into account.
+         if needs_soft_reset {
+             cortexm4::scb::reset();
+diff --git a/chips/nrf52/src/approtect.rs b/chips/nrf52/src/approtect.rs
+new file mode 100644
+index 000000000..5900e10ec
+--- /dev/null
++++ b/chips/nrf52/src/approtect.rs
+@@ -0,0 +1,107 @@
++// Licensed under the Apache License, Version 2.0 or the MIT License.
++// SPDX-License-Identifier: Apache-2.0 OR MIT
++// Copyright Tock Contributors 2023.
++
++//! Access port protection
++//!
++//! <https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fdif.html&cp=5_0_0_3_7_1&anchor=register.DISABLE>
++//!
++//! The logic around APPROTECT was changed in newer revisions of the nRF52
++//! series chips (Oct 2021) and later which requires more careful disabling of
++//! the access port (JTAG), both in the UICR register and in a software written
++//! register. This module enables the kernel to disable the protection on boot.
++//!
++//! Example code to disable the APPROTECT protection in software:
++//!
++//! ```rust,ignore
++//! let approtect = nrf52::approtect::Approtect::new();
++//! approtect.sw_disable_approtect();
++//! ```
++
++use crate::ficr;
++use kernel::utilities::registers::interfaces::Writeable;
++use kernel::utilities::registers::{register_bitfields, register_structs, ReadWrite};
++use kernel::utilities::StaticRef;
++
++const APPROTECT_BASE: StaticRef<ApprotectRegisters> =
++    unsafe { StaticRef::new(0x40000000 as *const ApprotectRegisters) };
++
++register_structs! {
++    ApprotectRegisters {
++        (0x000 => _reserved0),
++        (0x550 => forceprotect: ReadWrite<u32, Forceprotect::Register>),
++        (0x554 => _reserved1),
++        (0x558 => disable: ReadWrite<u32, Disable::Register>),
++        (0x55c => @END),
++    }
++}
++
++register_bitfields! [u32,
++    Forceprotect [
++        FORCEPROTECT OFFSET(0) NUMBITS(8) [
++            FORCE = 0
++        ]
++    ],
++    /// Access port protection
++    Disable [
++        DISABLE OFFSET(0) NUMBITS(8) [
++            SWDISABLE = 0x5a
++        ]
++    ]
++];
++
++pub struct Approtect {
++    registers: StaticRef<ApprotectRegisters>,
++}
++
++impl Approtect {
++    pub const fn new() -> Approtect {
++        Approtect {
++            registers: APPROTECT_BASE,
++        }
++    }
++
++    /// Software disable the Access Port Protection mechanism.
++    ///
++    /// On newer variants of the nRF52, to enable JTAG, APPROTECT must be
++    /// disabled both in the UICR register (hardware) and in this register
++    /// (software). For older variants this is just a no-op.
++    ///
++    /// - <https://devzone.nordicsemi.com/f/nordic-q-a/96590/how-to-disable-approtect-permanently-dfu-is-needed>
++    /// - <https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/posts/working-with-the-nrf52-series-improved-approtect>
++    pub fn sw_disable_approtect(&self) {
++        let factory_config = ficr::Ficr::new();
++        match factory_config.variant() {
++            ficr::Variant::AAF0 | ficr::Variant::Unspecified => {
++                // Newer revisions of the chip require setting the APPROTECT
++                // software register to `SwDisable`. We assume that an unspecified
++                // version means that it is new and the FICR module hasn't been
++                // updated to recognize it.
++                self.registers.disable.write(Disable::DISABLE::SWDISABLE);
++            }
++
++            // Exhaustively list variants here to produce compiler error on
++            // adding a new variant, which would otherwise not match the above
++            // condition.
++            ficr::Variant::AAA0
++            | ficr::Variant::AAAA
++            | ficr::Variant::AAAB
++            | ficr::Variant::AAB0
++            | ficr::Variant::AABA
++            | ficr::Variant::AABB
++            | ficr::Variant::AAC0
++            | ficr::Variant::AACA
++            | ficr::Variant::AACB
++            | ficr::Variant::AAD0
++            | ficr::Variant::AAD1
++            | ficr::Variant::AADA
++            | ficr::Variant::AAE0
++            | ficr::Variant::AAEA
++            | ficr::Variant::ABBA
++            | ficr::Variant::BAAA
++            | ficr::Variant::CAAA => {
++                // All other revisions don't need this.
++            }
++        }
++    }
++}
+diff --git a/chips/nrf52/src/ficr.rs b/chips/nrf52/src/ficr.rs
+index ddd6a4093..00e37bd37 100644
+--- a/chips/nrf52/src/ficr.rs
++++ b/chips/nrf52/src/ficr.rs
+@@ -167,8 +167,16 @@ register_bitfields! [u32,
+             ABBA = 0x41424241,
+             /// AAD0
+             AAD0 = 0x41414430,
++            /// AAD1
++            AAD1 = 0x41414431,
++            /// AADA
++            AADA = 0x41414441,
+             /// AAE0
+             AAE0 = 0x41414530,
++            /// AAEA
++            AAEA = 0x41414541,
++            /// AAF0
++            AAF0 = 0x41414630,
+             /// BAAA
+             BAAA = 0x42414141,
+             /// CAAA
+@@ -234,7 +242,7 @@ register_bitfields! [u32,
+ /// Variant describes part variant, hardware version, and production configuration.
+ #[derive(PartialEq, Debug)]
+ #[repr(u32)]
+-enum Variant {
++pub(crate) enum Variant {
+     AAA0 = 0x41414130,
+     AAAA = 0x41414141,
+     AAAB = 0x41414142,
+@@ -244,9 +252,13 @@ enum Variant {
+     AAC0 = 0x41414330,
+     AACA = 0x41414341,
+     AACB = 0x41414342,
+-    ABBA = 0x41424241,
+     AAD0 = 0x41414430,
++    AAD1 = 0x41414431,
++    AADA = 0x41414441,
+     AAE0 = 0x41414530,
++    AAEA = 0x41414541,
++    AAF0 = 0x41414630,
++    ABBA = 0x41424241,
+     BAAA = 0x42414141,
+     CAAA = 0x43414141,
+     Unspecified = 0xffffffff,
+@@ -306,7 +318,7 @@ pub struct Ficr {
+ }
+ 
+ impl Ficr {
+-    const fn new() -> Ficr {
++    pub(crate) const fn new() -> Ficr {
+         Ficr {
+             registers: FICR_BASE,
+         }
+@@ -321,7 +333,9 @@ impl Ficr {
+         }
+     }
+ 
+-    fn variant(&self) -> Variant {
++    pub(crate) fn variant(&self) -> Variant {
++        // If you update this, make sure to update
++        // `has_updated_approtect_logic()` as well.
+         match self.registers.info_variant.get() {
+             0x41414130 => Variant::AAA0,
+             0x41414141 => Variant::AAAA,
+@@ -334,13 +348,32 @@ impl Ficr {
+             0x41414342 => Variant::AACB,
+             0x41424241 => Variant::ABBA,
+             0x41414430 => Variant::AAD0,
++            0x41414431 => Variant::AAD1,
++            0x41414441 => Variant::AADA,
+             0x41414530 => Variant::AAE0,
++            0x41414541 => Variant::AAEA,
++            0x41414630 => Variant::AAF0,
+             0x42414141 => Variant::BAAA,
+             0x43414141 => Variant::CAAA,
+             _ => Variant::Unspecified,
+         }
+     }
+ 
++    /// Returns if this variant of the nRF52 has the updated APPROTECT logic.
++    /// This changed occurred towards the end of 2021 with chips becoming widely
++    /// available/used in 2023.
++    ///
++    /// See <https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/posts/working-with-the-nrf52-series-improved-approtect>.
++    /// for more information.
++    pub(crate) fn has_updated_approtect_logic(&self) -> bool {
++        // We assume that an unspecified version means that it is new and this
++        // module hasn't been updated to recognize it.
++        match self.variant() {
++            Variant::AAF0 | Variant::Unspecified => true,
++            _ => false,
++        }
++    }
++
+     fn package(&self) -> Package {
+         match self.registers.info_package.get() {
+             0x2000 => Package::QF,
+diff --git a/chips/nrf52/src/lib.rs b/chips/nrf52/src/lib.rs
+index 5ea4263c7..5293a7c63 100644
+--- a/chips/nrf52/src/lib.rs
++++ b/chips/nrf52/src/lib.rs
+@@ -4,6 +4,7 @@
+ 
+ pub mod acomp;
+ pub mod adc;
++pub mod approtect;
+ pub mod ble_radio;
+ pub mod chip;
+ pub mod clock;
+diff --git a/chips/nrf52/src/uicr.rs b/chips/nrf52/src/uicr.rs
+index 3086394aa..cfaa6ba60 100644
+--- a/chips/nrf52/src/uicr.rs
++++ b/chips/nrf52/src/uicr.rs
+@@ -1,5 +1,6 @@
+ //! User information configuration registers
+ 
++use crate::ficr;
+ use enum_primitive::cast::FromPrimitive;
+ use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
+ use kernel::utilities::registers::{register_bitfields, register_structs, ReadWrite};
+@@ -60,7 +61,9 @@ register_bitfields! [u32,
+             /// Enable
+             ENABLED = 0x00,
+             /// Disable
+-            DISABLED = 0xff
++            DISABLED = 0xff,
++            /// Disable for later nRF52 variants
++            HWDISABLE = 0x5a
+         ]
+     ],
+ 
+@@ -207,14 +210,39 @@ impl Uicr {
+     }
+ 
+     pub fn is_ap_protect_enabled(&self) -> bool {
+-        // Here we compare to DISABLED value because any other value should enable the protection.
+-        !self
+-            .registers
+-            .approtect
+-            .matches_all(ApProtect::PALL::DISABLED)
++        // We need to understand the variant of this nRF52 chip to correctly
++        // implement this function. Newer versions use a different value to
++        // indicate disabled.
++        let factory_config = ficr::Ficr::new();
++        let disabled_val = if factory_config.has_updated_approtect_logic() {
++            ApProtect::PALL::HWDISABLE
++        } else {
++            ApProtect::PALL::DISABLED
++        };
++
++        // Here we compare to the correct DISABLED value because any other value
++        // should enable the protection.
++        !self.registers.approtect.matches_all(disabled_val)
+     }
+ 
+     pub fn set_ap_protect(&self) {
+         self.registers.approtect.write(ApProtect::PALL::ENABLED);
+     }
++
++    /// Disable the access port protection in the UICR register. This is stored
++    /// in flash and is persistent. This behavior can also be accomplished
++    /// outside of tock by running `nrfjprog --recover`.
++    pub fn disable_ap_protect(&self) {
++        // We need to understand the variant of this nRF52 chip to correctly
++        // implement this function.
++        let factory_config = ficr::Ficr::new();
++        if factory_config.has_updated_approtect_logic() {
++            // Newer revisions of the chip require setting the APPROTECT
++            // register to `HwDisable`.
++            self.registers.approtect.write(ApProtect::PALL::HWDISABLE);
++        } else {
++            // All other revisions just use normal disable.
++            self.registers.approtect.write(ApProtect::PALL::DISABLED);
++        }
++    }
+ }
+-- 
+2.39.5

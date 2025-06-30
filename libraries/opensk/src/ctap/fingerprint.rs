@@ -119,8 +119,7 @@ fn check_fingerprint_loop<E: Env>(
     for _ in 0..FINGERPRINT_TIMEOUT_LOOPS {
         match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
             Ok(()) => {
-                storage::reset_uv_retries(env)?;
-                return Ok(());
+                return storage::reset_uv_retries(env);
             }
             Err(error) => {
                 match error {
@@ -328,17 +327,36 @@ mod test {
     #[test]
     fn test_perform_built_in_uv() {
         let mut env = TestEnv::default();
-        assert_eq!(
-            perform_built_in_uv(&mut env, DUMMY_CHANNEL, true),
-            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
-        );
+        create_fingerprint(&mut env);
+        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, true), Ok(()));
+        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_unenrolled() {
+        let mut env = TestEnv::default();
         assert_eq!(
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
         );
-        create_fingerprint(&mut env);
-        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, true), Ok(()));
-        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_unenrolled_internal_retry() {
+        let mut env = TestEnv::default();
+        if env.customization().max_uv_attempts_for_internal_retries()
+            == env.customization().max_uv_retries()
+        {
+            assert_eq!(
+                perform_built_in_uv(&mut env, DUMMY_CHANNEL, true),
+                Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED)
+            );
+        } else {
+            assert_eq!(
+                perform_built_in_uv(&mut env, DUMMY_CHANNEL, true),
+                Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+            );
+        }
     }
 
     #[test]

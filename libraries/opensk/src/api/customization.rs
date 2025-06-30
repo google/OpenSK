@@ -532,6 +532,7 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         }
 
         // Maximum internal UV attemps must be in range [1, `max_uv_retries`].
+        // If preferred platform UV attemps is not 1, must additionally be in [1, 5].
         if customization.max_uv_attempts_for_internal_retries() < 1
             || customization.max_uv_attempts_for_internal_retries() > customization.max_uv_retries()
         {

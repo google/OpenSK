@@ -236,7 +236,7 @@ fn to_public_source(
     PublicKeyCredentialSource {
         key_type: PublicKeyCredentialType::PublicKey,
         credential_id,
-        private_key: credential_source.private_key,
+        wrapped_private_key: credential_source.wrapped_private_key,
         rp_id: String::new(),
         user_handle: Vec::new(),
         user_display_name: None,
@@ -917,7 +917,7 @@ impl<E: Env> CtapState<E> {
             let credential_source = PublicKeyCredentialSource {
                 key_type: PublicKeyCredentialType::PublicKey,
                 credential_id: random_id.clone(),
-                private_key: private_key.clone(),
+                wrapped_private_key: private_key.to_cbor(env)?,
                 rp_id,
                 user_handle: user.user_id,
                 // This input is user provided, so we crop it to 64 byte for storage.
@@ -940,7 +940,7 @@ impl<E: Env> CtapState<E> {
             random_id
         } else {
             let credential_source = CredentialSource {
-                private_key: private_key.clone(),
+                wrapped_private_key: private_key.to_cbor(env)?,
                 rp_id_hash,
                 cred_protect_policy,
                 cred_blob,
@@ -958,7 +958,7 @@ impl<E: Env> CtapState<E> {
         }
         auth_data.extend(vec![0x00, credential_id.len() as u8]);
         auth_data.extend(&credential_id);
-        let public_cose_key = private_key.get_pub_key::<E>()?;
+        let public_cose_key = private_key.get_pub_key()?;
         cbor_write(cbor::Value::from(public_cose_key), &mut auth_data)?;
         if has_extension_output {
             let hmac_secret_output = if extensions.hmac_secret {
@@ -1006,7 +1006,7 @@ impl<E: Env> CtapState<E> {
                     Some(vec![certificate]),
                 )
             }
-            None => (private_key.sign_and_encode::<E>(&signature_data)?, None),
+            None => (private_key.sign_and_encode(&signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
             alg: SignatureAlgorithm::Es256 as i64,
@@ -1031,7 +1031,7 @@ impl<E: Env> CtapState<E> {
     fn generate_cred_random(
         &mut self,
         env: &mut E,
-        private_key: &PrivateKey,
+        private_key: &PrivateKey<E>,
         has_uv: bool,
     ) -> CtapResult<Secret<[u8; HASH_SIZE]>> {
         let private_key_bytes = private_key.to_bytes();
@@ -1059,11 +1059,12 @@ impl<E: Env> CtapState<E> {
             has_uv,
         } = assertion_input;
 
+        let wrap_key = env.key_store().wrap_key::<E>()?;
+        let private_key = PrivateKey::from_cbor(&wrap_key, credential.wrapped_private_key)?;
         // Process extensions.
         if extensions.hmac_secret.is_some() || extensions.cred_blob {
             let encrypted_output = if let Some(hmac_secret_input) = extensions.hmac_secret {
-                let cred_random =
-                    self.generate_cred_random(env, &credential.private_key, has_uv)?;
+                let cred_random = self.generate_cred_random(env, &private_key, has_uv)?;
                 Some(
                     self.client_pin
                         .process_hmac_secret(env, hmac_secret_input, &cred_random)?,
@@ -1090,9 +1091,7 @@ impl<E: Env> CtapState<E> {
 
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
-        let signature = credential
-            .private_key
-            .sign_and_encode::<E>(&signature_data)?;
+        let signature = private_key.sign_and_encode(&signature_data)?;
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -1821,6 +1820,7 @@ mod test {
     fn test_process_make_credential_credential_excluded() {
         let mut env = TestEnv::default();
         let excluded_private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = excluded_private_key.to_cbor(&mut env).unwrap();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
@@ -1829,7 +1829,7 @@ mod test {
         let excluded_credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: excluded_credential_id,
-            private_key: excluded_private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
             user_display_name: None,
@@ -2656,6 +2656,7 @@ mod test {
     fn test_resident_process_get_assertion_with_cred_protect() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
@@ -2667,7 +2668,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: credential_id.clone(),
-            private_key: private_key.clone(),
+            wrapped_private_key: wrapped_private_key.clone(),
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2721,7 +2722,7 @@ mod test {
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2831,13 +2832,14 @@ mod test {
     fn test_process_get_assertion_with_cred_blob() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -2950,13 +2952,14 @@ mod test {
     fn test_process_get_assertion_with_large_blob_key() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x1D],
             user_display_name: None,
@@ -3224,13 +3227,14 @@ mod test {
     fn test_process_reset() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
         let credential_id = vec![0x01, 0x23, 0x45, 0x67];
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id,
-            private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
             user_display_name: None,
@@ -3392,10 +3396,11 @@ mod test {
         );
 
         let private_key = PrivateKey::new_ecdsa(&mut env);
+        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            private_key,
+            wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),

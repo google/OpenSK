@@ -16,7 +16,6 @@ use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::HASH_SIZE;
 use crate::api::persist::Persist;
-use crate::api::private_key::PrivateKey;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
@@ -44,7 +43,7 @@ const MAX_PADDING_LENGTH: u8 = 0xBF;
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct CredentialSource {
-    pub private_key: PrivateKey,
+    pub wrapped_private_key: cbor::Value,
     pub rp_id_hash: [u8; 32],
     pub cred_protect_policy: Option<CredentialProtectionPolicy>,
     pub cred_blob: Option<Vec<u8>>,
@@ -140,13 +139,8 @@ impl<T: Helper> KeyStore for T {
     /// stored server-side, this information is already available (unencrypted).
     fn wrap_credential(&mut self, credential: CredentialSource) -> Result<Vec<u8>, Error> {
         let mut payload = Vec::new();
-        let wrap_key = self.wrap_key::<T>()?;
-        let private_key_cbor = credential
-            .private_key
-            .to_cbor::<T>(self.rng(), &wrap_key)
-            .map_err(|_| Error)?;
         let cbor = cbor_map_options! {
-          CredentialSourceField::PrivateKey => private_key_cbor,
+          CredentialSourceField::PrivateKey => credential.wrapped_private_key,
           CredentialSourceField::RpIdHash => credential.rp_id_hash,
           CredentialSourceField::CredProtectPolicy => credential.cred_protect_policy,
           CredentialSourceField::CredBlob => credential.cred_blob,
@@ -205,7 +199,6 @@ impl<T: Helper> KeyStore for T {
                     return Ok(None);
                 }
                 decrypt_cbor_credential_id::<T>(
-                    self,
                     &master_keys.encryption,
                     &bytes[1..hmac_message_size],
                 )?
@@ -309,7 +302,6 @@ fn remove_padding(data: &[u8]) -> Result<&[u8], Error> {
 }
 
 fn decrypt_cbor_credential_id<E: Env>(
-    env: &mut E,
     encryption_key_bytes: &[u8; 32],
     bytes: &[u8],
 ) -> Result<Option<CredentialSource>, Error> {
@@ -320,17 +312,14 @@ fn decrypt_cbor_credential_id<E: Env>(
     let cbor_credential_source = cbor_read(unpadded).map_err(|_| Error)?;
     destructure_cbor_map! {
       let {
-          CredentialSourceField::PrivateKey => private_key,
+          CredentialSourceField::PrivateKey => wrapped_private_key,
           CredentialSourceField::RpIdHash => rp_id_hash,
           CredentialSourceField::CredProtectPolicy => cred_protect_policy,
           CredentialSourceField::CredBlob => cred_blob,
       } = extract_map(cbor_credential_source)?;
     }
-    Ok(match (private_key, rp_id_hash) {
-        (Some(private_key), Some(rp_id_hash)) => {
-            let wrap_key = env.key_store().wrap_key::<E>()?;
-            let private_key =
-                PrivateKey::from_cbor::<E>(&wrap_key, private_key).map_err(|_| Error)?;
+    Ok(match (wrapped_private_key, rp_id_hash) {
+        (Some(wrapped_private_key), Some(rp_id_hash)) => {
             let rp_id_hash = extract_byte_string(rp_id_hash)?;
             if rp_id_hash.len() != 32 {
                 return Err(Error);
@@ -341,7 +330,7 @@ fn decrypt_cbor_credential_id<E: Env>(
                 .map_err(|_| Error)?;
             let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
             Some(CredentialSource {
-                private_key,
+                wrapped_private_key,
                 rp_id_hash: rp_id_hash.try_into().unwrap(),
                 cred_protect_policy,
                 cred_blob,
@@ -363,10 +352,25 @@ fn extract_map(cbor_value: cbor::Value) -> Result<Vec<(cbor::Value, cbor::Value)
 mod test {
     use super::*;
     use crate::api::customization::Customization;
+    use crate::api::private_key::PrivateKey;
     use crate::ctap::data_formats::SignatureAlgorithm;
     use crate::env::test::TestEnv;
 
     const UNSUPPORTED_CREDENTIAL_ID_VERSION: u8 = 0x80;
+
+    fn generate_credential_source(
+        env: &mut TestEnv,
+        signature_algorithm: SignatureAlgorithm,
+    ) -> CredentialSource {
+        let private_key = PrivateKey::new(env, signature_algorithm);
+        let wrapped_private_key = private_key.to_cbor(env).unwrap();
+        CredentialSource {
+            wrapped_private_key,
+            rp_id_hash: [0x55; 32],
+            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
+            cred_blob: Some(vec![0xAA; 32]),
+        }
+    }
 
     #[test]
     fn test_key_store() {
@@ -422,13 +426,7 @@ mod test {
 
     fn test_wrap_unwrap_credential(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; 32]),
-        };
+        let credential_source = generate_credential_source(&mut env, signature_algorithm);
         let credential_id = env
             .key_store()
             .wrap_credential(credential_source.clone())
@@ -454,13 +452,7 @@ mod test {
 
     fn test_wrap_unwrap_credential_bad_version(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; 32]),
-        };
+        let credential_source = generate_credential_source(&mut env, signature_algorithm);
         let mut credential_id = env.key_store().wrap_credential(credential_source).unwrap();
         credential_id[0] = UNSUPPORTED_CREDENTIAL_ID_VERSION;
         // Override the HMAC to pass the check.
@@ -488,13 +480,7 @@ mod test {
 
     fn test_wrap_unwrap_credential_bad_hmac(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; 32]),
-        };
+        let credential_source = generate_credential_source(&mut env, signature_algorithm);
         let mut credential_id = env.key_store().wrap_credential(credential_source).unwrap();
         let hmac_byte_index = credential_id.len() - 1;
         credential_id[hmac_byte_index] ^= 0x01;
@@ -517,13 +503,7 @@ mod test {
 
     fn test_wrap_unwrap_credential_missing_blocks(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, signature_algorithm);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; 32]),
-        };
+        let credential_source = generate_credential_source(&mut env, signature_algorithm);
         let credential_id = env.key_store().wrap_credential(credential_source).unwrap();
         for length in (1..CBOR_CREDENTIAL_ID_SIZE).step_by(16) {
             let unwrapped = env
@@ -547,13 +527,7 @@ mod test {
     #[test]
     fn test_wrap_credential_size() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; 32]),
-        };
+        let credential_source = generate_credential_source(&mut env, SignatureAlgorithm::Es256);
         let credential_id = env.key_store().wrap_credential(credential_source).unwrap();
         assert_eq!(credential_id.len(), CBOR_CREDENTIAL_ID_SIZE);
     }
@@ -563,13 +537,8 @@ mod test {
         // The CBOR encoding length is variadic and depends on size of fields. Ensure that contents
         // still fit into the padded size when we use maximum length entries.
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
-        let credential_source = CredentialSource {
-            private_key,
-            rp_id_hash: [0x55; 32],
-            cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
-            cred_blob: Some(vec![0xAA; env.customization().max_cred_blob_length()]),
-        };
+        let mut credential_source = generate_credential_source(&mut env, SignatureAlgorithm::Es256);
+        credential_source.cred_blob = Some(vec![0xAA; env.customization().max_cred_blob_length()]);
         let credential_id = env.key_store().wrap_credential(credential_source);
         assert!(credential_id.is_ok());
     }

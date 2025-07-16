@@ -417,7 +417,7 @@ mod test {
 
     /// Creates an example wrapped credential and RP ID hash.
     fn create_wrapped_credential(env: &mut TestEnv) -> (Vec<u8>, [u8; 32]) {
-        let private_key = PrivateKey::new(env, SignatureAlgorithm::Es256);
+        let private_key = PrivateKey::new_ecdsa(env);
         let wrapped_private_key = private_key.to_cbor(env).unwrap();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {
@@ -725,7 +725,7 @@ mod test {
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
 
-        let private_key = PrivateKey::new(&mut env, SignatureAlgorithm::Es256);
+        let private_key = PrivateKey::new_ecdsa(&mut env);
         let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {

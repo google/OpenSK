@@ -103,7 +103,7 @@ impl<E: Env> PrivateKey<E> {
 
     /// Helper function that creates a private key of type Ed25519.
     #[cfg(feature = "ed25519")]
-    pub fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
+    fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 32 {
             return None;
         }

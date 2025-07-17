@@ -1000,7 +1000,8 @@ impl<E: Env> CtapState<E> {
                     .persist()
                     .get_attestation(id)?
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
-                let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key).unwrap();
+                let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
+                    .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 (
                     attestation_key.sign(&signature_data).to_der(),
                     Some(vec![certificate]),
@@ -1034,11 +1035,10 @@ impl<E: Env> CtapState<E> {
         private_key: &PrivateKey<E>,
         has_uv: bool,
     ) -> CtapResult<Secret<[u8; HASH_SIZE]>> {
-        let private_key_bytes = private_key.export();
-        let salt = array_ref!(private_key_bytes, 0, 32);
+        let salt = Sha::<E>::digest(&private_key.export());
         let key = env.key_store().cred_random(has_uv)?;
         let mut output = Secret::default();
-        Hkdf::<E>::hkdf_256(&*key, salt, b"credRandom", &mut output);
+        Hkdf::<E>::hkdf_256(&*key, &salt, b"credRandom", &mut output);
         Ok(output)
     }
 

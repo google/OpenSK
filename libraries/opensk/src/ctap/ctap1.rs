@@ -297,7 +297,8 @@ impl Ctap1Command {
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
-        let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key).unwrap();
+        let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let signature = attestation_key.sign(&signature_data);
 
         response.extend(signature.to_der());

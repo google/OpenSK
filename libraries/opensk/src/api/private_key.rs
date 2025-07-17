@@ -24,7 +24,8 @@ use crate::env::{AesKey, EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-use core::ops::{Deref, DerefMut};
+#[cfg(feature = "ed25519")]
+use core::ops::Deref;
 #[cfg(feature = "ed25519")]
 use rand_core::RngCore;
 use sk_cbor as cbor;
@@ -83,7 +84,7 @@ impl<E: Env> PrivateKey<E> {
             #[cfg(feature = "ed25519")]
             SignatureAlgorithm::Eddsa => {
                 let mut bytes: Secret<[u8; 32]> = Secret::default();
-                env.rng().fill_bytes(bytes.deref_mut());
+                env.rng().fill_bytes(&mut bytes[..]);
                 Self::new_ed25519_from_bytes(&*bytes).unwrap()
             }
             SignatureAlgorithm::Unknown => unreachable!(),
@@ -144,8 +145,8 @@ impl<E: Env> PrivateKey<E> {
         match self {
             PrivateKey::Ecdsa(key) => {
                 let mut array_bytes: Secret<[u8; 32]> = Secret::default();
-                key.to_slice(array_bytes.deref_mut());
-                bytes.copy_from_slice(array_bytes.deref())
+                key.to_slice(&mut array_bytes);
+                bytes.copy_from_slice(&array_bytes[..]);
             }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(ed25519_key) => bytes.copy_from_slice(ed25519_key.seed().deref()),

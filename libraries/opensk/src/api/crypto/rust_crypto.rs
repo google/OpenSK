@@ -141,11 +141,6 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         SoftwareEcdsaSecretKey { signing_key }
     }
 
-    fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
-        let signing_key = SigningKey::from_slice(bytes).ok()?;
-        Some(SoftwareEcdsaSecretKey { signing_key })
-    }
-
     fn public_key(&self) -> Self::PublicKey {
         let verifying_key = VerifyingKey::from(&self.signing_key);
         SoftwareEcdsaPublicKey { verifying_key }
@@ -156,8 +151,13 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
         SoftwareEcdsaSignature { signature }
     }
 
-    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_SIZE]) {
-        bytes.copy_from_slice(&self.signing_key.to_bytes());
+    fn export(&self) -> Vec<u8> {
+        self.signing_key.to_bytes().to_vec()
+    }
+
+    fn import(bytes: &[u8]) -> Option<Self> {
+        let signing_key = SigningKey::from_slice(bytes).ok()?;
+        Some(SoftwareEcdsaSecretKey { signing_key })
     }
 }
 

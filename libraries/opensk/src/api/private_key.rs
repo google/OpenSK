@@ -13,19 +13,14 @@
 // limitations under the License.
 
 use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
-#[cfg(test)]
-use crate::api::crypto::EC_FIELD_SIZE;
-use crate::api::key_store::KeyStore;
-use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
+#[cfg(feature = "ed25519")]
 use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
-use crate::env::{AesKey, EcdsaSk, Env};
+use crate::env::{EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-#[cfg(feature = "ed25519")]
-use core::ops::Deref;
 #[cfg(feature = "ed25519")]
 use rand_core::RngCore;
 use sk_cbor as cbor;
@@ -43,9 +38,7 @@ impl<E: Env> Clone for PrivateKey<E> {
     fn clone(&self) -> Self {
         match self {
             PrivateKey::Ecdsa(key) => {
-                let mut key_bytes = [0; EC_FIELD_SIZE];
-                key.to_slice(&mut key_bytes);
-                PrivateKey::Ecdsa(EcdsaSk::<E>::from_slice(&key_bytes).unwrap())
+                PrivateKey::Ecdsa(EcdsaSk::<E>::import(&key.export()).unwrap())
             }
             #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519(key) => Self::Ed25519(*key),
@@ -58,15 +51,10 @@ impl<E: Env> Clone for PrivateKey<E> {
 impl<E: Env> PartialEq for PrivateKey<E> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (PrivateKey::Ecdsa(key1), PrivateKey::Ecdsa(key2)) => {
-                let mut bytes1 = [0; EC_FIELD_SIZE];
-                key1.to_slice(&mut bytes1);
-                let mut bytes2 = [0; EC_FIELD_SIZE];
-                key2.to_slice(&mut bytes2);
-                bytes1 == bytes2
-            }
+            (PrivateKey::Ecdsa(key1), PrivateKey::Ecdsa(key2)) => key1.export() == key2.export(),
             #[cfg(feature = "ed25519")]
             (PrivateKey::Ed25519(key1), PrivateKey::Ed25519(key2)) => key1 == key2,
+            #[cfg(feature = "ed25519")]
             _ => false,
         }
     }
@@ -94,12 +82,6 @@ impl<E: Env> PrivateKey<E> {
     /// Creates a new ecdsa private key.
     pub fn new_ecdsa(env: &mut E) -> PrivateKey<E> {
         Self::new(env, SignatureAlgorithm::Es256)
-    }
-
-    /// Helper function that creates a private key of type ECDSA.
-    fn new_ecdsa_from_bytes(bytes: &[u8]) -> Option<Self> {
-        let bytes = <&[u8; 32]>::try_from(bytes).ok()?;
-        EcdsaSk::<E>::from_slice(bytes).map(|k| PrivateKey::Ecdsa(k))
     }
 
     /// Helper function that creates a private key of type Ed25519.
@@ -140,43 +122,34 @@ impl<E: Env> PrivateKey<E> {
     }
 
     /// Writes the key bytes.
-    pub fn to_bytes(&self) -> Secret<[u8]> {
-        let mut bytes = Secret::new(32);
+    pub fn export(&self) -> Vec<u8> {
         match self {
-            PrivateKey::Ecdsa(key) => {
-                let mut array_bytes: Secret<[u8; 32]> = Secret::default();
-                key.to_slice(&mut array_bytes);
-                bytes.copy_from_slice(&array_bytes[..]);
-            }
+            PrivateKey::Ecdsa(key) => key.export(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => bytes.copy_from_slice(ed25519_key.seed().deref()),
+            PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
         }
-        bytes
     }
 
     /// Encodes the private key into a CBOR array with type information.
-    pub fn to_cbor(&self, env: &mut E) -> CtapResult<cbor::Value> {
-        let bytes = self.to_bytes();
-        let wrap_key = env.key_store().wrap_key::<E>()?;
-        let wrapped_bytes = aes256_cbc_encrypt::<E>(env.rng(), &wrap_key, &bytes, true)?;
-        Ok(cbor_array![
+    pub fn to_cbor(&self) -> cbor::Value {
+        cbor_array![
             cbor_int!(self.signature_algorithm() as i64),
-            cbor_bytes!(wrapped_bytes),
-        ])
+            cbor_bytes!(self.export()),
+        ]
     }
 
-    pub fn from_cbor(wrap_key: &AesKey<E>, cbor_value: cbor::Value) -> CtapResult<Self> {
+    pub fn from_cbor(cbor_value: cbor::Value) -> CtapResult<Self> {
         let mut array = extract_array(cbor_value)?;
         if array.len() != 2 {
             return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR);
         }
         let wrapped_bytes = extract_byte_string(array.pop().unwrap())?;
-        let key_bytes = aes256_cbc_decrypt::<E>(wrap_key, &wrapped_bytes, true)?;
         match SignatureAlgorithm::try_from(array.pop().unwrap())? {
-            SignatureAlgorithm::Es256 => PrivateKey::<E>::new_ecdsa_from_bytes(&key_bytes)
+            SignatureAlgorithm::Es256 => EcdsaSk::<E>::import(&wrapped_bytes)
+                .map(|k| PrivateKey::Ecdsa(k))
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => PrivateKey::<E>::new_ed25519_from_bytes(&key_bytes)
+            SignatureAlgorithm::Eddsa => PrivateKey::<E>::new_ed25519_from_bytes(&wrapped_bytes)
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         }
@@ -186,15 +159,16 @@ impl<E: Env> PrivateKey<E> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::key_store::KeyStore;
     use crate::env::test::TestEnv;
 
     #[test]
-    fn test_new_ecdsa_from_bytes() {
+    fn test_new_ecdsa_wrap_unwrap() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::<TestEnv>::new(&mut env, SignatureAlgorithm::Es256);
-        let key_bytes = private_key.to_bytes();
-        assert!(PrivateKey::<TestEnv>::new_ecdsa_from_bytes(&key_bytes) == Some(private_key));
+        let private_key = PrivateKey::<TestEnv>::new_ecdsa(&mut env);
+        let key_bytes = private_key.export();
+        let ecdsa_key = EcdsaSk::<TestEnv>::import(&key_bytes).unwrap();
+        let reconstructed = PrivateKey::<TestEnv>::Ecdsa(ecdsa_key);
+        assert!(private_key == reconstructed);
     }
 
     #[test]
@@ -202,16 +176,8 @@ mod test {
     fn test_new_ed25519_from_bytes() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::<TestEnv>::new(&mut env, SignatureAlgorithm::Eddsa);
-        let key_bytes = private_key.to_bytes();
+        let key_bytes = private_key.export();
         assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&key_bytes) == Some(private_key));
-    }
-
-    #[test]
-    fn test_new_ecdsa_from_bytes_wrong_length() {
-        assert!(PrivateKey::<TestEnv>::new_ecdsa_from_bytes(&[0x55; 16]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ecdsa_from_bytes(&[0x55; 31]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ecdsa_from_bytes(&[0x55; 33]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ecdsa_from_bytes(&[0x55; 64]).is_none());
     }
 
     #[test]
@@ -264,10 +230,9 @@ mod test {
 
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let private_key = PrivateKey::<TestEnv>::new(&mut env, signature_algorithm);
-        let cbor = private_key.to_cbor(&mut env).unwrap();
-        assert!(PrivateKey::<TestEnv>::from_cbor(&wrap_key, cbor) == Ok(private_key));
+        let cbor = private_key.to_cbor();
+        assert!(PrivateKey::<TestEnv>::from_cbor(cbor) == Ok(private_key));
     }
 
     #[test]
@@ -282,8 +247,6 @@ mod test {
     }
 
     fn test_private_key_from_bad_cbor(signature_algorithm: SignatureAlgorithm) {
-        let mut env = TestEnv::default();
-        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let cbor = cbor_array![
             cbor_int!(signature_algorithm as i64),
             cbor_bytes!(vec![0x88; 32]),
@@ -291,8 +254,7 @@ mod test {
             cbor_int!(0),
         ];
         assert!(
-            PrivateKey::<TestEnv>::from_cbor(&wrap_key, cbor)
-                == Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
+            PrivateKey::<TestEnv>::from_cbor(cbor) == Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
         );
     }
 
@@ -309,16 +271,13 @@ mod test {
 
     #[test]
     fn test_private_key_from_bad_cbor_unsupported_algo() {
-        let mut env = TestEnv::default();
-        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
         let cbor = cbor_array![
             // This algorithms doesn't exist.
             cbor_int!(-1),
             cbor_bytes!(vec![0x88; 32]),
         ];
         assert!(
-            PrivateKey::<TestEnv>::from_cbor(&wrap_key, cbor)
-                == Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
+            PrivateKey::<TestEnv>::from_cbor(cbor) == Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR)
         );
     }
 }

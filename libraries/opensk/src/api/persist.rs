@@ -14,7 +14,7 @@
 
 mod keys;
 
-use crate::api::crypto::EC_FIELD_SIZE;
+use crate::ctap::data_formats::{extract_byte_string, extract_map, ok_or_missing};
 #[cfg(feature = "fingerprint")]
 use crate::ctap::fingerprint::TemplateInfo;
 use crate::ctap::secret::Secret;
@@ -31,8 +31,8 @@ use core::cmp;
 use core::convert::TryFrom;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
-#[cfg(feature = "fingerprint")]
 use sk_cbor as cbor;
+use sk_cbor::destructure_cbor_map;
 
 pub type PersistIter<'a> = Box<dyn Iterator<Item = CtapResult<usize>> + 'a>;
 pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, Vec<u8>)>> + 'a>;
@@ -543,18 +543,15 @@ pub trait Persist {
                 return Ok(None);
             }
         }
-        let private_key = self.find(keys::ATTESTATION_PRIVATE_KEY)?;
+        let wrapped_private_key = self.find(keys::ATTESTATION_PRIVATE_KEY)?;
         let certificate = self.find(keys::ATTESTATION_CERTIFICATE)?;
-        let (private_key, certificate) = match (private_key, certificate) {
+        let (wrapped_private_key, certificate) = match (wrapped_private_key, certificate) {
             (Some(x), Some(y)) => (x, y),
             (None, None) => return Ok(None),
             _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         };
-        if private_key.len() != EC_FIELD_SIZE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
         Ok(Some(Attestation {
-            private_key: Secret::from_exposed_secret(*array_ref![private_key, 0, EC_FIELD_SIZE]),
+            wrapped_private_key,
             certificate,
         }))
     }
@@ -578,8 +575,11 @@ pub trait Persist {
                 self.remove(keys::ATTESTATION_ID)?;
             }
             Some(attestation) => {
-                self.insert(keys::ATTESTATION_PRIVATE_KEY, &attestation.private_key[..])?;
-                self.insert(keys::ATTESTATION_CERTIFICATE, &attestation.certificate[..])?;
+                self.insert(
+                    keys::ATTESTATION_PRIVATE_KEY,
+                    &attestation.wrapped_private_key,
+                )?;
+                self.insert(keys::ATTESTATION_CERTIFICATE, &attestation.certificate)?;
                 self.insert(keys::ATTESTATION_ID, &[id as u8])?;
             }
         }
@@ -622,11 +622,32 @@ impl TryFrom<u8> for AttestationId {
     }
 }
 
-#[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Attestation {
-    /// ECDSA private key (big-endian).
-    pub private_key: Secret<[u8; EC_FIELD_SIZE]>,
+    /// ECDSA private key, wrapping is implementation specific.
+    ///
+    /// The wrapping needs to work together with your `ecdsa::SecretKey` implementation.
+    pub wrapped_private_key: Vec<u8>,
     pub certificate: Vec<u8>,
+}
+
+impl TryFrom<cbor::Value> for Attestation {
+    type Error = Ctap2StatusCode;
+
+    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
+        destructure_cbor_map! {
+            let {
+                0x01 => certificate,
+                0x02 => wrapped_private_key,
+            } = extract_map(cbor_value)?;
+        }
+        let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
+        let wrapped_private_key = extract_byte_string(ok_or_missing(wrapped_private_key)?)?;
+        Ok(Attestation {
+            wrapped_private_key,
+            certificate,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -636,6 +657,7 @@ mod test {
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
     use crate::env::Env;
+    use sk_cbor::cbor_map;
 
     #[test]
     fn test_max_large_blob_array_size() {
@@ -778,5 +800,19 @@ mod test {
         );
         assert_eq!(persist.remove_template_id(&[0x00]), Ok(()));
         assert_eq!(persist.get_friendly_name(&[0x00]).unwrap(), None);
+    }
+
+    #[test]
+    fn test_from_cbor_attestation() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0xCC],
+            0x02 => vec![0x55],
+        };
+        let returned_attestation = Attestation::try_from(cbor_value).unwrap();
+        let expected_attestation = Attestation {
+            wrapped_private_key: vec![0x55],
+            certificate: vec![0xCC],
+        };
+        assert_eq!(returned_attestation, expected_attestation);
     }
 }

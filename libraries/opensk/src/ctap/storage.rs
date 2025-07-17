@@ -395,7 +395,6 @@ mod test {
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
     use crate::ctap::reset;
-    use crate::ctap::secret::Secret;
     use crate::env::test::TestEnv;
 
     fn create_credential_source(
@@ -404,11 +403,10 @@ mod test {
         user_handle: Vec<u8>,
     ) -> PublicKeyCredentialSource {
         let private_key = PrivateKey::new_ecdsa(env);
-        let wrapped_private_key = private_key.to_cbor(env).unwrap();
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            wrapped_private_key,
+            wrapped_private_key: private_key.to_cbor(),
             rp_id: String::from(rp_id),
             user_handle,
             user_display_name: None,
@@ -688,7 +686,7 @@ mod test {
 
         // Make sure the persistent keys are initialized to dummy values.
         let dummy_attestation = Attestation {
-            private_key: Secret::from_exposed_secret([0x41; 32]),
+            wrapped_private_key: vec![0x41; 32],
             certificate: vec![0xdd; 20],
         };
         env.persist()
@@ -745,7 +743,7 @@ mod test {
         let mut env = TestEnv::default();
 
         let dummy_attestation = Attestation {
-            private_key: Secret::from_exposed_secret([0x41; 32]),
+            wrapped_private_key: vec![0x41; 32],
             certificate: vec![0xdd; 20],
         };
         env.persist()
@@ -782,11 +780,10 @@ mod test {
     fn test_serialize_deserialize_credential() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
-        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            wrapped_private_key,
+            wrapped_private_key: private_key.to_cbor(),
             rp_id: String::from("example.com"),
             user_handle: vec![0x00],
             user_display_name: Some(String::from("Display Name")),

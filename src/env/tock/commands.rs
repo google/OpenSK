@@ -15,7 +15,6 @@
 use super::TockEnv;
 use alloc::vec;
 use alloc::vec::Vec;
-use arrayref::array_ref;
 use core::convert::TryFrom;
 use libtock_platform::Syscalls;
 use opensk::api::crypto::sha256::Sha256;
@@ -28,7 +27,6 @@ use opensk::ctap::check_user_presence;
 use opensk::ctap::data_formats::{
     extract_bool, extract_byte_string, extract_map, extract_unsigned, ok_or_missing,
 };
-use opensk::ctap::secret::Secret;
 use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use opensk::ctap::{cbor_read, cbor_write, Channel};
 use opensk::env::{Env, Sha};
@@ -117,12 +115,7 @@ fn process_vendor_configure<
             // We don't overwrite the attestation if it's already set. We don't return any error
             // to not leak information.
             if current_attestation.is_none() {
-                let attestation = Attestation {
-                    private_key: Secret::from_exposed_secret(data.private_key),
-                    certificate: data.certificate,
-                };
-                env.persist()
-                    .set_attestation(attestation_id, Some(&attestation))?;
+                env.persist().set_attestation(attestation_id, Some(&data))?;
             }
             VendorConfigureResponse {
                 cert_programmed: true,
@@ -180,39 +173,10 @@ fn process_vendor_upgrade_info<
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttestationMaterial {
-    pub certificate: Vec<u8>,
-    pub private_key: [u8; EC_FIELD_SIZE],
-}
-
-impl TryFrom<cbor::Value> for AttestationMaterial {
-    type Error = Ctap2StatusCode;
-
-    fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
-        destructure_cbor_map! {
-            let {
-                0x01 => certificate,
-                0x02 => private_key,
-            } = extract_map(cbor_value)?;
-        }
-        let certificate = extract_byte_string(ok_or_missing(certificate)?)?;
-        let private_key = extract_byte_string(ok_or_missing(private_key)?)?;
-        if private_key.len() != EC_FIELD_SIZE {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-        let private_key = array_ref!(private_key, 0, EC_FIELD_SIZE);
-        Ok(AttestationMaterial {
-            certificate,
-            private_key: *private_key,
-        })
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct VendorConfigureParameters {
     pub lockdown: bool,
-    pub attestation_material: Option<AttestationMaterial>,
+    pub attestation_material: Option<Attestation>,
 }
 
 impl TryFrom<cbor::Value> for VendorConfigureParameters {
@@ -227,8 +191,14 @@ impl TryFrom<cbor::Value> for VendorConfigureParameters {
         }
         let lockdown = lockdown.map_or(Ok(false), extract_bool)?;
         let attestation_material = attestation_material
-            .map(AttestationMaterial::try_from)
+            .map(Attestation::try_from)
             .transpose()?;
+        // In this implementation, we expect the plain private key bytes.
+        if let Some(attestation) = &attestation_material {
+            if attestation.wrapped_private_key.len() != EC_FIELD_SIZE {
+                return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+            }
+        }
         Ok(VendorConfigureParameters {
             lockdown,
             attestation_material,
@@ -398,9 +368,9 @@ mod test {
             VendorConfigureParameters::try_from(cbor_value),
             Ok(VendorConfigureParameters {
                 lockdown: false,
-                attestation_material: Some(AttestationMaterial {
+                attestation_material: Some(Attestation {
+                    wrapped_private_key: dummy_pkey.to_vec(),
                     certificate: dummy_cert.to_vec(),
-                    private_key: dummy_pkey
                 }),
             })
         );
@@ -496,15 +466,15 @@ mod test {
         );
 
         // Inject dummy values
-        let dummy_key = [0x41u8; EC_FIELD_SIZE];
-        let dummy_cert = [0xddu8; 20];
+        let dummy_key = vec![0x41u8; EC_FIELD_SIZE];
+        let dummy_cert = vec![0xddu8; 20];
         let response = process_vendor_configure(
             &mut env,
             VendorConfigureParameters {
                 lockdown: false,
-                attestation_material: Some(AttestationMaterial {
-                    certificate: dummy_cert.to_vec(),
-                    private_key: dummy_key,
+                attestation_material: Some(Attestation {
+                    wrapped_private_key: dummy_key.clone(),
+                    certificate: dummy_cert.clone(),
                 }),
             },
             DUMMY_CHANNEL,
@@ -519,20 +489,20 @@ mod test {
         assert_eq!(
             env.persist().get_attestation(AttestationId::Batch),
             Ok(Some(Attestation {
-                private_key: Secret::from_exposed_secret(dummy_key),
-                certificate: dummy_cert.to_vec(),
+                wrapped_private_key: dummy_key.clone(),
+                certificate: dummy_cert.clone(),
             }))
         );
 
         // Try to inject other dummy values and check that initial values are retained.
-        let other_dummy_key = [0x44u8; EC_FIELD_SIZE];
+        let other_dummy_key = vec![0x44u8; EC_FIELD_SIZE];
         let response = process_vendor_configure(
             &mut env,
             VendorConfigureParameters {
                 lockdown: false,
-                attestation_material: Some(AttestationMaterial {
-                    certificate: dummy_cert.to_vec(),
-                    private_key: other_dummy_key,
+                attestation_material: Some(Attestation {
+                    wrapped_private_key: other_dummy_key,
+                    certificate: dummy_cert.clone(),
                 }),
             },
             DUMMY_CHANNEL,
@@ -547,8 +517,8 @@ mod test {
         assert_eq!(
             env.persist().get_attestation(AttestationId::Batch),
             Ok(Some(Attestation {
-                private_key: Secret::from_exposed_secret(dummy_key),
-                certificate: dummy_cert.to_vec(),
+                wrapped_private_key: dummy_key,
+                certificate: dummy_cert,
             }))
         );
 

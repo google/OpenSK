@@ -31,9 +31,6 @@ pub trait SecretKey: Sized {
     /// Generates a new random secret key.
     fn random(rng: &mut impl Rng) -> Self;
 
-    /// Creates a signing key from its representation in bytes.
-    fn from_slice(bytes: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
-
     /// Computes the corresponding public key for this private key.
     fn public_key(&self) -> Self::PublicKey;
 
@@ -42,8 +39,20 @@ pub trait SecretKey: Sized {
     /// For hashing, SHA256 is used implicitly.
     fn sign(&self, message: &[u8]) -> Self::Signature;
 
-    /// Writes the signing key bytes into the passed in parameter.
-    fn to_slice(&self, bytes: &mut [u8; EC_FIELD_SIZE]);
+    /// Returns the wrapped signing key.
+    ///
+    /// If you have access to a hardware module that securly wraps key material, the returned data
+    /// should not allow reconstructing the private key outside of the cryptography hardware.
+    ///
+    /// If you return the plain private key bytes, the key material is not exposed outside of the
+    /// security key. However, the data is present in plain text in memory and storage, and will
+    /// not be zeroized immediately after usage.
+    fn export(&self) -> Vec<u8>;
+
+    /// Creates a signing key from its wrapped representation.
+    ///
+    /// Returns None if the given bytes do not represent a wrapped secret key.
+    fn import(bytes: &[u8]) -> Option<Self>;
 }
 
 /// ECDSA verifying key.

@@ -70,14 +70,6 @@ pub trait KeyStore {
     /// This function should be a no-op if the key store is already initialized.
     fn init(&mut self) -> Result<(), Error>;
 
-    /// Key to wrap (secret) data.
-    ///
-    /// Useful for encrypting data before
-    /// - writing it to persistent storage,
-    /// - CBOR encoding it,
-    /// - doing anything that does not support [`Secret`].
-    fn wrap_key<E: Env>(&mut self) -> Result<AesKey<E>, Error>;
-
     /// Encodes a credential as a binary string.
     ///
     /// The output is encrypted and authenticated. Since the wrapped credentials are passed to the
@@ -127,10 +119,6 @@ pub trait Helper: Env {}
 impl<T: Helper> KeyStore for T {
     fn init(&mut self) -> Result<(), Error> {
         Ok(())
-    }
-
-    fn wrap_key<E: Env>(&mut self) -> Result<AesKey<E>, Error> {
-        Ok(AesKey::<E>::new(&get_master_keys(self)?.encryption))
     }
 
     /// Encrypts the given credential source data into a credential ID.
@@ -363,9 +351,8 @@ mod test {
         signature_algorithm: SignatureAlgorithm,
     ) -> CredentialSource {
         let private_key = PrivateKey::new(env, signature_algorithm);
-        let wrapped_private_key = private_key.to_cbor(env).unwrap();
         CredentialSource {
-            wrapped_private_key,
+            wrapped_private_key: private_key.to_cbor(),
             rp_id_hash: [0x55; 32],
             cred_protect_policy: Some(CredentialProtectionPolicy::UserVerificationOptional),
             cred_blob: Some(vec![0xAA; 32]),
@@ -388,15 +375,6 @@ mod test {
             &cred_random_with_uv
         );
 
-        // Same for wrap key.
-        let wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
-        let mut test_block = [0x33; 16];
-        wrap_key.encrypt_block(&mut test_block);
-        let new_wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
-        let mut new_test_block = [0x33; 16];
-        new_wrap_key.encrypt_block(&mut new_test_block);
-        assert_eq!(&new_test_block, &test_block);
-
         assert_eq!(crate::ctap::reset(&mut env), Ok(()));
         assert_ne!(
             &env.key_store().cred_random(false).unwrap(),
@@ -406,10 +384,6 @@ mod test {
             &env.key_store().cred_random(true).unwrap(),
             &cred_random_with_uv
         );
-        let new_wrap_key = env.key_store().wrap_key::<TestEnv>().unwrap();
-        let mut new_test_block = [0x33; 16];
-        new_wrap_key.encrypt_block(&mut new_test_block);
-        assert_ne!(&new_test_block, &test_block);
     }
 
     #[test]

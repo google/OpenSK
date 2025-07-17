@@ -2070,11 +2070,10 @@ mod test {
     fn test_credential_source_cbor_round_trip() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env);
-        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            wrapped_private_key,
+            wrapped_private_key: private_key.to_cbor(),
             rp_id: "example.com".to_string(),
             user_handle: b"foo".to_vec(),
             user_display_name: None,

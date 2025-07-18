@@ -41,6 +41,9 @@ pub trait SecretKey: Sized {
 
     /// Returns the wrapped signing key.
     ///
+    /// The returned representation needs to be deterministic. If you call this function twice for
+    /// the same private key, the return value has to stay the same.
+    ///
     /// If you have access to a hardware module that securly wraps key material, the returned data
     /// should not allow reconstructing the private key outside of the cryptography hardware.
     ///

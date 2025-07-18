@@ -125,7 +125,16 @@ mod test {
     }
 
     #[test]
-    fn test_ecdsa_secret_key_wrap_unwrap() {
+    fn test_ecdsa_secret_key_deterministic_export() {
+        let mut env = TestEnv::default();
+        let key = SoftwareEcdsaSecretKey::random(env.rng());
+        let wrapped1 = key.export();
+        let wrapped2 = key.export();
+        assert_eq!(wrapped1, wrapped2);
+    }
+
+    #[test]
+    fn test_ecdsa_secret_key_export_import() {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdsaSecretKey::random(env.rng());
         let wrapped = first_key.export();

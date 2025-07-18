@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE};
+use super::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
 use crate::api::rng::Rng;
 use alloc::vec::Vec;
 
 /// Container for all ECDSA cryptographic material.
-pub trait Ecdsa {
+pub trait EcSigning {
     type SecretKey: SecretKey<PublicKey = Self::PublicKey, Signature = Self::Signature>;
     type PublicKey: PublicKey<Signature = Self::Signature>;
     type Signature: Signature;
 }
 
-/// ECDSA signing key.
+/// Elliptic curve signing key.
 pub trait SecretKey: Sized {
     type PublicKey: PublicKey;
     type Signature: Signature;
@@ -58,30 +58,26 @@ pub trait SecretKey: Sized {
     fn import(bytes: &[u8]) -> Option<Self>;
 }
 
-/// ECDSA verifying key.
+/// Elliptic curve verifying key.
 pub trait PublicKey: Sized {
     type Signature: Signature;
 
     /// Creates a public key from its coordinates.
+    #[cfg(test)]
     fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
 
     /// Verifies if the signature matches the message.
-    ///
-    /// For hashing, SHA256 is used implicitly.
+    #[cfg(test)]
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
-
-    /// Verifies if the signature matches the hash of the message.
-    ///
-    /// Prehash is the SHA256 of the signed message.
-    fn verify_prehash(&self, prehash: &[u8; HASH_SIZE], signature: &Self::Signature) -> bool;
 
     /// Writes the public key coordinates into the passed in parameters.
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]);
 }
 
-/// ECDSA signature.
+/// Elliptic curve signature.
 pub trait Signature: Sized {
     /// Creates a signature from its affine coordinates, represented as concatenated bytes.
+    #[cfg(test)]
     fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self>;
 
     /// Writes the signature bytes into the passed in parameter.

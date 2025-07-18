@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{SecretKey as _, Signature};
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
-#[cfg(feature = "ed25519")]
-use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
+#[cfg(feature = "ed25519")]
+use crate::env::Ed25519Sk;
 use crate::env::{EcdsaSk, Env};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-#[cfg(feature = "ed25519")]
-use rand_core::RngCore;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
 
@@ -30,7 +28,7 @@ use sk_cbor::{cbor_array, cbor_bytes, cbor_int};
 pub enum PrivateKey<E: Env> {
     Ecdsa(EcdsaSk<E>),
     #[cfg(feature = "ed25519")]
-    Ed25519(ed25519_compact::SecretKey),
+    Ed25519(Ed25519Sk<E>),
 }
 
 #[cfg(test)]
@@ -41,7 +39,9 @@ impl<E: Env> Clone for PrivateKey<E> {
                 PrivateKey::Ecdsa(EcdsaSk::<E>::import(&key.export()).unwrap())
             }
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(key) => Self::Ed25519(*key),
+            PrivateKey::Ed25519(key) => {
+                PrivateKey::Ed25519(Ed25519Sk::<E>::import(&key.export()).unwrap())
+            }
         }
     }
 }
@@ -53,7 +53,9 @@ impl<E: Env> PartialEq for PrivateKey<E> {
         match (self, other) {
             (PrivateKey::Ecdsa(key1), PrivateKey::Ecdsa(key2)) => key1.export() == key2.export(),
             #[cfg(feature = "ed25519")]
-            (PrivateKey::Ed25519(key1), PrivateKey::Ed25519(key2)) => key1 == key2,
+            (PrivateKey::Ed25519(key1), PrivateKey::Ed25519(key2)) => {
+                key1.export() == key2.export()
+            }
             #[cfg(feature = "ed25519")]
             _ => false,
         }
@@ -70,11 +72,7 @@ impl<E: Env> PrivateKey<E> {
         match alg {
             SignatureAlgorithm::Es256 => Self::Ecdsa(EcdsaSk::<E>::random(env.rng())),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => {
-                let mut bytes: Secret<[u8; 32]> = Secret::default();
-                env.rng().fill_bytes(&mut bytes[..]);
-                Self::new_ed25519_from_bytes(&*bytes).unwrap()
-            }
+            SignatureAlgorithm::Eddsa => Self::Ed25519(Ed25519Sk::<E>::random(env.rng())),
             SignatureAlgorithm::Unknown => unreachable!(),
         }
     }
@@ -84,22 +82,12 @@ impl<E: Env> PrivateKey<E> {
         Self::new(env, SignatureAlgorithm::Es256)
     }
 
-    /// Helper function that creates a private key of type Ed25519.
-    #[cfg(feature = "ed25519")]
-    fn new_ed25519_from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != 32 {
-            return None;
-        }
-        let seed = ed25519_compact::Seed::from_slice(bytes).unwrap();
-        Some(Self::Ed25519(ed25519_compact::KeyPair::from_seed(seed).sk))
-    }
-
     /// Returns the corresponding public key.
     pub fn get_pub_key(&self) -> CtapResult<CoseKey> {
         Ok(match self {
-            PrivateKey::Ecdsa(key) => CoseKey::from_ecdsa_public_key(key.public_key()),
+            PrivateKey::Ecdsa(key) => CoseKey::from_ecdsa_public_key::<E>(key.public_key()),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => CoseKey::from(ed25519_key.public_key()),
+            PrivateKey::Ed25519(key) => CoseKey::from_ed25519_public_key::<E>(key.public_key()),
         })
     }
 
@@ -108,7 +96,7 @@ impl<E: Env> PrivateKey<E> {
         Ok(match self {
             PrivateKey::Ecdsa(key) => key.sign(message).to_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => ed25519_key.sign(message, None).to_vec(),
+            PrivateKey::Ed25519(key) => key.sign(message).to_der(),
         })
     }
 
@@ -126,7 +114,7 @@ impl<E: Env> PrivateKey<E> {
         match self {
             PrivateKey::Ecdsa(key) => key.export(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(ed25519_key) => ed25519_key.seed().to_vec(),
+            PrivateKey::Ed25519(key) => key.export(),
         }
     }
 
@@ -149,7 +137,8 @@ impl<E: Env> PrivateKey<E> {
                 .map(|k| PrivateKey::Ecdsa(k))
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => PrivateKey::<E>::new_ed25519_from_bytes(&wrapped_bytes)
+            SignatureAlgorithm::Eddsa => Ed25519Sk::<E>::import(&wrapped_bytes)
+                .map(|k| PrivateKey::Ed25519(k))
                 .ok_or(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR),
         }
@@ -162,7 +151,7 @@ mod test {
     use crate::env::test::TestEnv;
 
     #[test]
-    fn test_new_ecdsa_wrap_unwrap() {
+    fn test_new_ecdsa_export_import() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::<TestEnv>::new_ecdsa(&mut env);
         let key_bytes = private_key.export();
@@ -173,20 +162,13 @@ mod test {
 
     #[test]
     #[cfg(feature = "ed25519")]
-    fn test_new_ed25519_from_bytes() {
+    fn test_new_ed25519_export_import() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::<TestEnv>::new(&mut env, SignatureAlgorithm::Eddsa);
         let key_bytes = private_key.export();
-        assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&key_bytes) == Some(private_key));
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_new_ed25519_from_bytes_wrong_length() {
-        assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&[0x55; 16]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&[0x55; 31]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&[0x55; 33]).is_none());
-        assert!(PrivateKey::<TestEnv>::new_ed25519_from_bytes(&[0x55; 64]).is_none());
+        let ed25519_key = Ed25519Sk::<TestEnv>::import(&key_bytes).unwrap();
+        let reconstructed = PrivateKey::<TestEnv>::Ed25519(ed25519_key);
+        assert!(private_key == reconstructed);
     }
 
     #[test]
@@ -197,7 +179,7 @@ mod test {
         let private_key = PrivateKey::<TestEnv>::Ecdsa(ecdsa_key);
         assert_eq!(
             private_key.get_pub_key(),
-            Ok(CoseKey::from_ecdsa_public_key(public_key))
+            Ok(CoseKey::from_ecdsa_public_key::<TestEnv>(public_key))
         );
     }
 

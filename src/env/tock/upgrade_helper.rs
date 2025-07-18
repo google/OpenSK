@@ -23,8 +23,7 @@ use arrayref::array_ref;
 use byteorder::{ByteOrder, LittleEndian};
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
-use opensk::api::crypto::ecdsa::{PublicKey as _, Signature as _};
-use opensk::env::{EcdsaPk, EcdsaSignature, Env};
+use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use persistent_store::{StorageError, StorageResult};
 
 pub const METADATA_SIGN_OFFSET: usize = 0x800;
@@ -41,11 +40,7 @@ pub const METADATA_SIGN_OFFSET: usize = 0x800;
 ///
 /// Checks signature correctness against the hash, and whether the partition offset matches.
 /// Whether the hash matches the partition content is not tested here!
-pub fn check_metadata<
-    E: Env,
-    S: Syscalls,
-    C: platform::subscribe::Config + platform::allow_ro::Config,
->(
+pub fn check_metadata<S: Syscalls, C: platform::subscribe::Config + platform::allow_ro::Config>(
     #[cfg(not(feature = "std"))] upgrade_locations: &TockUpgradeStorage<S, C>,
     #[cfg(feature = "std")] upgrade_locations: &BufferUpgradeStorage<S, C>,
     public_key_bytes: &[u8],
@@ -66,7 +61,7 @@ pub fn check_metadata<
         return Err(StorageError::CustomError);
     }
 
-    verify_signature::<E>(
+    verify_signature(
         array_ref!(metadata, 32, 64),
         public_key_bytes,
         parse_metadata_hash(metadata),
@@ -87,23 +82,25 @@ pub fn parse_metadata_version(data: &[u8]) -> u64 {
 /// Verifies the signature over the given hash.
 ///
 /// The public key is COSE encoded, and the hash is a SHA256.
-fn verify_signature<E: Env>(
+fn verify_signature(
     signature_bytes: &[u8; 64],
     public_key_bytes: &[u8],
     signed_hash: &[u8; 32],
 ) -> StorageResult<()> {
-    let signature =
-        EcdsaSignature::<E>::from_slice(signature_bytes).ok_or(StorageError::CustomError)?;
+    let signature = p256::ecdsa::Signature::from_slice(signature_bytes)
+        .map_err(|_| StorageError::CustomError)?;
     if public_key_bytes.len() != 65 || public_key_bytes[0] != 0x04 {
         return Err(StorageError::CustomError);
     }
     let x = array_ref!(public_key_bytes, 1, 32);
     let y = array_ref!(public_key_bytes, 33, 32);
-    let public_key = EcdsaPk::<E>::from_coordinates(x, y).ok_or(StorageError::CustomError)?;
-    if !public_key.verify_prehash(signed_hash, &signature) {
-        return Err(StorageError::CustomError);
-    }
-    Ok(())
+    let encoded_point: p256::EncodedPoint =
+        p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
+    let verifying_key = p256::ecdsa::VerifyingKey::from_encoded_point(&encoded_point)
+        .map_err(|_| StorageError::CustomError)?;
+    verifying_key
+        .verify_prehash(signed_hash, &signature)
+        .map_err(|_| StorageError::CustomError)
 }
 
 #[cfg(test)]
@@ -111,11 +108,11 @@ mod test {
     use super::*;
     use arrayref::mut_array_refs;
     use libtock_unittest::fake::Syscalls;
-    use opensk::api::crypto::ecdsa::SecretKey as _;
+    use opensk::api::crypto::ec_signing::{PublicKey, SecretKey as _, Signature};
     use opensk::api::crypto::sha256::Sha256;
     use opensk::api::crypto::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
     use opensk::env::test::TestEnv;
-    use opensk::env::{EcdsaSk, Sha};
+    use opensk::env::{EcdsaPk, EcdsaSk, Env, Sha};
     use platform::DefaultConfig;
 
     fn to_uncompressed(public_key: &EcdsaPk<TestEnv>) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
@@ -155,7 +152,7 @@ mod test {
         let public_key_bytes = to_uncompressed(&public_key);
 
         assert_eq!(
-            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+            check_metadata::<Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata
@@ -166,7 +163,7 @@ mod test {
         // Manipulating the partition address fails.
         metadata[METADATA_SIGN_OFFSET + 8] = 0x88;
         assert_eq!(
-            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+            check_metadata::<Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata
@@ -176,7 +173,7 @@ mod test {
         metadata[METADATA_SIGN_OFFSET + 8] = 0x00;
         // Wrong metadata length fails.
         assert_eq!(
-            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+            check_metadata::<Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata[..METADATA_LEN - 1]
@@ -186,7 +183,7 @@ mod test {
         // Manipulating the hash fails.
         metadata[0] ^= 0x01;
         assert_eq!(
-            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+            check_metadata::<Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata
@@ -197,7 +194,7 @@ mod test {
         // Manipulating the signature fails.
         metadata[32] ^= 0x01;
         assert_eq!(
-            check_metadata::<TestEnv, Syscalls, DefaultConfig>(
+            check_metadata::<Syscalls, DefaultConfig>(
                 &upgrade_locations,
                 &public_key_bytes,
                 &metadata
@@ -221,22 +218,22 @@ mod test {
         let mut public_key_bytes = to_uncompressed(&public_key);
 
         assert_eq!(
-            verify_signature::<TestEnv>(&signature_bytes, &public_key_bytes, &signed_hash),
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
             Ok(())
         );
         assert_eq!(
-            verify_signature::<TestEnv>(&signature_bytes, &public_key_bytes, &[0x55; 32]),
+            verify_signature(&signature_bytes, &public_key_bytes, &[0x55; 32]),
             Err(StorageError::CustomError)
         );
         public_key_bytes[0] ^= 0x01;
         assert_eq!(
-            verify_signature::<TestEnv>(&signature_bytes, &public_key_bytes, &signed_hash),
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
             Err(StorageError::CustomError)
         );
         public_key_bytes[0] ^= 0x01;
         signature_bytes[0] ^= 0x01;
         assert_eq!(
-            verify_signature::<TestEnv>(&signature_bytes, &public_key_bytes, &signed_hash),
+            verify_signature(&signature_bytes, &public_key_bytes, &signed_hash),
             Err(StorageError::CustomError)
         );
     }

@@ -61,7 +61,7 @@ impl<E: Env> PinProtocol<E> {
 
     /// Returns the authenticator’s public key as a CoseKey structure.
     pub fn get_public_key(&self) -> CoseKey {
-        CoseKey::from_ecdh_public_key(self.key_agreement_key.public_key())
+        CoseKey::from_ecdh_public_key::<E>(self.key_agreement_key.public_key())
     }
 
     /// Processes the peer's encapsulated CoseKey and returns the shared secret.

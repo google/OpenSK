@@ -13,8 +13,13 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
-use crate::api::crypto::{ecdh, ecdsa, EC_FIELD_SIZE};
+use crate::api::crypto::ec_signing::PublicKey as _;
+use crate::api::crypto::ecdh::PublicKey as _;
+use crate::api::crypto::EC_FIELD_SIZE;
 use crate::ctap::status_code::CtapResult;
+#[cfg(feature = "ed25519")]
+use crate::env::Ed25519Pk;
+use crate::env::{EcdhPk, EcdsaPk, Env};
 use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
@@ -737,7 +742,7 @@ impl CoseKey {
     #[cfg(feature = "ed25519")]
     const ED25519_CURVE: i64 = 6;
 
-    pub fn from_ecdh_public_key(pk: impl ecdh::PublicKey) -> Self {
+    pub fn from_ecdh_public_key<E: Env>(pk: EcdhPk<E>) -> Self {
         let mut x_bytes = [0; EC_FIELD_SIZE];
         let mut y_bytes = [0; EC_FIELD_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
@@ -750,7 +755,7 @@ impl CoseKey {
         }
     }
 
-    pub fn from_ecdsa_public_key(pk: impl ecdsa::PublicKey) -> Self {
+    pub fn from_ecdsa_public_key<E: Env>(pk: EcdsaPk<E>) -> Self {
         let mut x_bytes = [0; EC_FIELD_SIZE];
         let mut y_bytes = [0; EC_FIELD_SIZE];
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
@@ -760,6 +765,20 @@ impl CoseKey {
             algorithm: ES256_ALGORITHM,
             key_type: CoseKey::EC2_KEY_TYPE,
             curve: CoseKey::P_256_CURVE,
+        }
+    }
+
+    #[cfg(feature = "ed25519")]
+    pub fn from_ed25519_public_key<E: Env>(pk: Ed25519Pk<E>) -> Self {
+        let mut x_bytes = [0; EC_FIELD_SIZE];
+        let mut y_bytes = [0; EC_FIELD_SIZE];
+        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        CoseKey {
+            x_bytes,
+            y_bytes,
+            algorithm: EDDSA_ALGORITHM,
+            key_type: CoseKey::OKP_KEY_TYPE,
+            curve: CoseKey::ED25519_CURVE,
         }
     }
 
@@ -873,19 +892,6 @@ impl From<CoseKey> for cbor::Value {
             -1 => curve,
             -2 => x_bytes,
             -3 => y_bytes,
-        }
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl From<ed25519_compact::PublicKey> for CoseKey {
-    fn from(pk: ed25519_compact::PublicKey) -> Self {
-        CoseKey {
-            x_bytes: *pk,
-            y_bytes: [0u8; 32],
-            key_type: CoseKey::OKP_KEY_TYPE,
-            curve: CoseKey::ED25519_CURVE,
-            algorithm: EDDSA_ALGORITHM,
         }
     }
 }
@@ -1193,8 +1199,6 @@ pub fn ok_or_missing<T>(value_option: Option<T>) -> CtapResult<T> {
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
-    use crate::api::crypto::ecdh::PublicKey as _;
-    use crate::api::crypto::ecdsa::PublicKey as _;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
@@ -1892,7 +1896,7 @@ mod test {
         let cose_key = CoseKey::example_ecdh_pubkey();
         let (x_bytes, y_bytes) = cose_key.clone().try_into_ecdh_coordinates().unwrap();
         let created_pk = EcdhPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
-        let new_cose_key = CoseKey::from_ecdh_public_key(created_pk);
+        let new_cose_key = CoseKey::from_ecdh_public_key::<TestEnv>(created_pk);
         assert_eq!(cose_key, new_cose_key);
     }
 
@@ -1909,7 +1913,7 @@ mod test {
             0x05, 0x60, 0xA0, 0xBC,
         ];
         let created_pk = EcdsaPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
-        let cose_key = CoseKey::from_ecdsa_public_key(created_pk);
+        let cose_key = CoseKey::from_ecdsa_public_key::<TestEnv>(created_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
         assert_eq!(cose_key.y_bytes, y_bytes);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);

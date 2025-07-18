@@ -13,8 +13,8 @@
 // limitations under the License.
 
 pub mod aes256;
+pub mod ec_signing;
 pub mod ecdh;
-pub mod ecdsa;
 pub mod rust_crypto;
 pub use rust_crypto as software_crypto;
 pub mod hkdf256;
@@ -22,8 +22,8 @@ pub mod hmac256;
 pub mod sha256;
 
 use self::aes256::Aes256;
+use self::ec_signing::EcSigning;
 use self::ecdh::Ecdh;
-use self::ecdsa::Ecdsa;
 use self::hkdf256::Hkdf256;
 use self::hmac256::Hmac256;
 use self::sha256::Sha256;
@@ -55,7 +55,9 @@ pub const TRUNCATED_HMAC_SIZE: usize = 16;
 pub trait Crypto {
     type Aes256: Aes256;
     type Ecdh: Ecdh;
-    type Ecdsa: Ecdsa;
+    type Ecdsa: EcSigning;
+    #[cfg(feature = "ed25519")]
+    type Ed25519: EcSigning;
     type Sha256: Sha256;
     type Hmac256: Hmac256;
     type Hkdf256: Hkdf256;
@@ -65,8 +67,8 @@ pub trait Crypto {
 mod test {
     use super::software_crypto::*;
     use super::*;
+    use crate::api::crypto::ec_signing::{PublicKey as _, SecretKey as _, Signature};
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
-    use crate::api::crypto::ecdsa::{PublicKey as _, SecretKey as _, Signature};
     use crate::env::test::TestEnv;
     use crate::env::Env;
     use core::convert::TryFrom;
@@ -104,24 +106,13 @@ mod test {
     }
 
     #[test]
-    fn test_sign_verify() {
+    fn test_ecdsa_sign_verify() {
         let mut env = TestEnv::default();
         let private_key = SoftwareEcdsaSecretKey::random(env.rng());
         let public_key = private_key.public_key();
         let message = [0x12, 0x34, 0x56, 0x78];
         let signature = private_key.sign(&message);
         assert!(public_key.verify(&message, &signature));
-    }
-
-    #[test]
-    fn test_sign_verify_hash() {
-        let mut env = TestEnv::default();
-        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let public_key = private_key.public_key();
-        let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        let message_hash = SoftwareSha256::digest(&message);
-        assert!(public_key.verify_prehash(&message_hash, &signature));
     }
 
     #[test]
@@ -147,6 +138,53 @@ mod test {
     fn test_ecdsa_signature_from_to_slice() {
         let mut env = TestEnv::default();
         let private_key = SoftwareEcdsaSecretKey::random(env.rng());
+        let message = [0x12, 0x34, 0x56, 0x78];
+        let signature = private_key.sign(&message);
+        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
+        signature.to_slice(&mut signature_bytes);
+        let new_signature = SoftwareEcdsaSignature::from_slice(&signature_bytes).unwrap();
+        let mut new_bytes = [0; EC_SIGNATURE_SIZE];
+        new_signature.to_slice(&mut new_bytes);
+        assert_eq!(signature_bytes, new_bytes);
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_sign_verify() {
+        let mut env = TestEnv::default();
+        let private_key = SoftwareEd25519SecretKey::random(env.rng());
+        let public_key = private_key.public_key();
+        let message = [0x12, 0x34, 0x56, 0x78];
+        let signature = private_key.sign(&message);
+        assert!(public_key.verify(&message, &signature));
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_secret_key_deterministic_export() {
+        let mut env = TestEnv::default();
+        let key = SoftwareEd25519SecretKey::random(env.rng());
+        let wrapped1 = key.export();
+        let wrapped2 = key.export();
+        assert_eq!(wrapped1, wrapped2);
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_secret_key_export_import() {
+        let mut env = TestEnv::default();
+        let first_key = SoftwareEd25519SecretKey::random(env.rng());
+        let wrapped = first_key.export();
+        let second_key = SoftwareEd25519SecretKey::import(&wrapped).unwrap();
+        let wrapped_again = second_key.export();
+        assert_eq!(wrapped, wrapped_again);
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_ed25519_signature_from_to_slice() {
+        let mut env = TestEnv::default();
+        let private_key = SoftwareEd25519SecretKey::random(env.rng());
         let message = [0x12, 0x34, 0x56, 0x78];
         let signature = private_key.sign(&message);
         let mut signature_bytes = [0; EC_SIGNATURE_SIZE];

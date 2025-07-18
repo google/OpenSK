@@ -30,7 +30,11 @@ libtock_unittest = { path = "third_party/libtock-rs/unittest", optional = true }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 rand_core = "0.6.4"
-ed25519-compact = { version = "1", default-features = false, optional = true }
+
+[dependencies.p256]
+version = "0.13.0"
+default-features = false
+features = ["ecdsa"]
 
 [features]
 config_command = ["opensk/config_command"]
@@ -42,7 +46,7 @@ verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["opensk/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
 vendor_hid = ["opensk/vendor_hid"]
-ed25519 = ["ed25519-compact", "opensk/ed25519"]
+ed25519 = ["opensk/ed25519"]
 fingerprint = ["opensk/fingerprint"]
 
 [dev-dependencies]

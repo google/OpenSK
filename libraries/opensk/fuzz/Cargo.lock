@@ -325,6 +325,7 @@ dependencies = [
  "arrayref",
  "byteorder",
  "cbc",
+ "der",
  "hkdf",
  "hmac",
  "openssl",

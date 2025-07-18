@@ -26,6 +26,7 @@ hmac = { version = "0.12.1", default-features = false }
 hkdf = { version = "0.12.3", default-features = false }
 aes = { version = "0.8.2", default-features = false }
 cbc = { version = "0.1.2", default-features = false }
+der = { version = "0.7.10", default-features = false }
 zeroize = { version = "1.5.7", features = ["derive"] }
 
 [dependencies.p256]

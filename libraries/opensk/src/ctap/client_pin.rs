@@ -739,7 +739,7 @@ mod test {
         let mut env = TestEnv::default();
         let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pk = key_agreement_key.public_key();
-        let key_agreement = CoseKey::from_ecdh_public_key(pk);
+        let key_agreement = CoseKey::from_ecdh_public_key::<TestEnv>(pk);
         let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
         let client_pin = ClientPin::<TestEnv>::new_test(
             &mut env,

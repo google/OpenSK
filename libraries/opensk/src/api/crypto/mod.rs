@@ -125,15 +125,22 @@ mod test {
     }
 
     #[test]
-    fn test_ecdsa_secret_key_from_to_slice() {
+    fn test_ecdsa_secret_key_deterministic_export() {
+        let mut env = TestEnv::default();
+        let key = SoftwareEcdsaSecretKey::random(env.rng());
+        let wrapped1 = key.export();
+        let wrapped2 = key.export();
+        assert_eq!(wrapped1, wrapped2);
+    }
+
+    #[test]
+    fn test_ecdsa_secret_key_export_import() {
         let mut env = TestEnv::default();
         let first_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let mut key_bytes = [0; EC_FIELD_SIZE];
-        first_key.to_slice(&mut key_bytes);
-        let second_key = SoftwareEcdsaSecretKey::from_slice(&key_bytes).unwrap();
-        let mut new_bytes = [0; EC_FIELD_SIZE];
-        second_key.to_slice(&mut new_bytes);
-        assert_eq!(key_bytes, new_bytes);
+        let wrapped = first_key.export();
+        let second_key = SoftwareEcdsaSecretKey::import(&wrapped).unwrap();
+        let wrapped_again = second_key.export();
+        assert_eq!(wrapped, wrapped_again);
     }
 
     #[test]

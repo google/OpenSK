@@ -15,7 +15,6 @@
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::ctap::command::{AuthenticatorConfigParameters, Command};
 use crate::ctap::data_formats::ConfigSubCommand;
-use crate::ctap::secret::Secret;
 use crate::ctap::status_code::CtapResult;
 use crate::ctap::{Channel, CtapState};
 use crate::env::Env;
@@ -29,7 +28,7 @@ pub fn enable_enterprise_attestation<E: Env>(
     env: &mut E,
 ) -> CtapResult<Attestation> {
     let attestation = Attestation {
-        private_key: Secret::from_exposed_secret([0x41; 32]),
+        wrapped_private_key: vec![0x41; 32],
         certificate: vec![0xdd; 20],
     };
     env.persist()

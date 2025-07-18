@@ -24,7 +24,6 @@ use super::status_code::Ctap2StatusCode;
 use super::{Channel, StatefulCommand, StatefulPermission};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
-use crate::api::key_store::KeyStore;
 use crate::api::private_key::PrivateKey;
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::status_code::CtapResult;
@@ -96,8 +95,7 @@ fn enumerate_credentials_response<E: Env>(
         key_id: credential_id,
         transports: None, // You can set USB as a hint here.
     };
-    let wrap_key = env.key_store().wrap_key::<E>()?;
-    let private_key = PrivateKey::<E>::from_cbor(&wrap_key, wrapped_private_key)?;
+    let private_key = PrivateKey::<E>::from_cbor(wrapped_private_key)?;
     let public_key = private_key.get_pub_key()?;
     let cred_protect = cred_protect_policy
         .or(env.customization().default_cred_protect())
@@ -376,11 +374,10 @@ mod test {
 
     fn create_credential_source(env: &mut TestEnv) -> PublicKeyCredentialSource {
         let private_key = PrivateKey::new_ecdsa(env);
-        let wrapped_private_key = private_key.to_cbor(env).unwrap();
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
-            wrapped_private_key,
+            wrapped_private_key: private_key.to_cbor(),
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: Some("display_name".to_string()),

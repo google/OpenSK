@@ -256,9 +256,7 @@ impl Ctap1Command {
         let sk = EcdsaSk::<E>::random(env.rng());
         let pk = sk.public_key();
         let private_key = PrivateKey::<E>::Ecdsa(sk);
-        let wrapped_private_key = private_key
-            .to_cbor(env)
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
+        let wrapped_private_key = private_key.to_cbor();
         let credential_source = CredentialSource {
             wrapped_private_key,
             rp_id_hash: application,
@@ -275,7 +273,7 @@ impl Ctap1Command {
         }
 
         let Attestation {
-            private_key,
+            wrapped_private_key,
             certificate,
         } = env
             .persist()
@@ -299,7 +297,8 @@ impl Ctap1Command {
         signature_data.extend(key_handle);
         signature_data.extend_from_slice(&user_pk);
 
-        let attestation_key = EcdsaSk::<E>::from_slice(&private_key).unwrap();
+        let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
+            .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let signature = attestation_key.sign(&signature_data);
 
         response.extend(signature.to_der());
@@ -348,13 +347,8 @@ impl Ctap1Command {
             )
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         signature_data.extend(&challenge);
-        let wrap_key = env
-            .key_store()
-            .wrap_key::<E>()
+        let private_key = PrivateKey::<E>::from_cbor(credential_source.wrapped_private_key)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let private_key =
-            PrivateKey::<E>::from_cbor(&wrap_key, credential_source.wrapped_private_key)
-                .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let signature = private_key
             .sign_and_encode(&signature_data)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
@@ -367,13 +361,12 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::{CredentialProtectionPolicy, SignatureAlgorithm};
+    use super::super::data_formats::CredentialProtectionPolicy;
     use super::super::TOUCH_TIMEOUT_MS;
     use super::*;
     use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
-    use crate::ctap::secret::Secret;
     use crate::ctap::storage;
     use crate::env::test::TestEnv;
     use crate::env::Sha;
@@ -418,7 +411,7 @@ mod test {
     /// Creates an example wrapped credential and RP ID hash.
     fn create_wrapped_credential(env: &mut TestEnv) -> (Vec<u8>, [u8; 32]) {
         let private_key = PrivateKey::new_ecdsa(env);
-        let wrapped_private_key = private_key.to_cbor(env).unwrap();
+        let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {
             wrapped_private_key,
@@ -462,7 +455,7 @@ mod test {
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
         let attestation = Attestation {
-            private_key: Secret::from_exposed_secret([0x41; 32]),
+            wrapped_private_key: vec![0x41; 32],
             certificate: vec![0x99; 100],
         };
         env.persist()
@@ -726,7 +719,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
 
         let private_key = PrivateKey::new_ecdsa(&mut env);
-        let wrapped_private_key = private_key.to_cbor(&mut env).unwrap();
+        let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {
             wrapped_private_key,

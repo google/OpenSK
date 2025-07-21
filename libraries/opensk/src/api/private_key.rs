@@ -31,21 +31,6 @@ pub enum PrivateKey<E: Env> {
     Ed25519(Ed25519Sk<E>),
 }
 
-#[cfg(test)]
-impl<E: Env> Clone for PrivateKey<E> {
-    fn clone(&self) -> Self {
-        match self {
-            PrivateKey::Ecdsa(key) => {
-                PrivateKey::Ecdsa(EcdsaSk::<E>::import(&key.export()).unwrap())
-            }
-            #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(key) => {
-                PrivateKey::Ed25519(Ed25519Sk::<E>::import(&key.export()).unwrap())
-            }
-        }
-    }
-}
-
 // We shouldn't compare private keys in prod without constant-time operations.
 #[cfg(test)]
 impl<E: Env> PartialEq for PrivateKey<E> {

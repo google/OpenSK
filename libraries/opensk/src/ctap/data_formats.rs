@@ -1203,6 +1203,8 @@ mod test {
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
+    #[cfg(feature = "ed25519")]
+    use crate::env::Ed25519Sk;
     use crate::env::{EcdhPk, EcdsaSk, Env};
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
@@ -1913,6 +1915,21 @@ mod test {
         assert_eq!(cose_key.x_bytes, x_bytes);
         assert_eq!(cose_key.y_bytes, y_bytes);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_from_cose_key_ed25519() {
+        let mut env = TestEnv::default();
+        let ed25519_sk = Ed25519Sk::<TestEnv>::random(env.rng());
+        let ed25519_pk = ed25519_sk.public_key();
+        let mut x_bytes = [0u8; EC_FIELD_SIZE];
+        let mut y_bytes = [0u8; EC_FIELD_SIZE];
+        ed25519_pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        let cose_key = CoseKey::from_ed25519_public_key::<TestEnv>(ed25519_pk);
+        assert_eq!(cose_key.x_bytes, x_bytes);
+        assert_eq!(cose_key.y_bytes, y_bytes);
+        assert_eq!(cose_key.algorithm, EDDSA_ALGORITHM);
     }
 
     #[test]

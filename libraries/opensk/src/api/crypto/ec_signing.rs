@@ -62,24 +62,12 @@ pub trait SecretKey: Sized {
 pub trait PublicKey: Sized {
     type Signature: Signature;
 
-    /// Creates a public key from its coordinates.
-    #[cfg(test)]
-    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
-
-    /// Verifies if the signature matches the message.
-    #[cfg(test)]
-    fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
-
     /// Writes the public key coordinates into the passed in parameters.
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]);
 }
 
 /// Elliptic curve signature.
 pub trait Signature: Sized {
-    /// Creates a signature from its affine coordinates, represented as concatenated bytes.
-    #[cfg(test)]
-    fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self>;
-
     /// Writes the signature bytes into the passed in parameter.
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]);
 

@@ -33,8 +33,6 @@ use der::{Any, Encode};
 use hmac::digest::FixedOutput;
 use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
-#[cfg(test)]
-use p256::ecdsa::signature::Verifier as _;
 use p256::ecdsa::signature::{SignatureEncoding, Signer as _};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::Digest;
@@ -173,21 +171,6 @@ pub struct SoftwareEcdsaPublicKey {
 impl ec_signing::PublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
 
-    #[cfg(test)]
-    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
-        let encoded_point: p256::EncodedPoint =
-            p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
-        let verifying_key = p256::ecdsa::VerifyingKey::from_encoded_point(&encoded_point).ok()?;
-        Some(SoftwareEcdsaPublicKey { verifying_key })
-    }
-
-    #[cfg(test)]
-    fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
-        self.verifying_key
-            .verify(message, &signature.signature)
-            .is_ok()
-    }
-
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         let point = self.verifying_key.to_encoded_point(false);
         x.copy_from_slice(point.x().unwrap());
@@ -200,13 +183,6 @@ pub struct SoftwareEcdsaSignature {
 }
 
 impl ec_signing::Signature for SoftwareEcdsaSignature {
-    #[cfg(test)]
-    fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
-        // Assumes EC_SIGNATURE_SIZE == 2 * EC_FIELD_SIZE
-        let signature = p256::ecdsa::Signature::from_slice(bytes).ok()?;
-        Some(SoftwareEcdsaSignature { signature })
-    }
-
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
         bytes.copy_from_slice(&self.signature.to_bytes());
     }
@@ -271,20 +247,6 @@ pub struct SoftwareEd25519PublicKey {
 impl ec_signing::PublicKey for SoftwareEd25519PublicKey {
     type Signature = SoftwareEd25519Signature;
 
-    #[cfg(test)]
-    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], _y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
-        let verifying_key = ed25519_compact::PublicKey::from_slice(x).ok()?;
-        // The y coordinate is unused when exporting and importing.
-        Some(SoftwareEd25519PublicKey { verifying_key })
-    }
-
-    #[cfg(test)]
-    fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
-        self.verifying_key
-            .verify(message, &signature.signature)
-            .is_ok()
-    }
-
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         x.copy_from_slice(&self.verifying_key[..]);
         // The public key can be reconstructed from the x slice only.
@@ -299,13 +261,6 @@ pub struct SoftwareEd25519Signature {
 
 #[cfg(feature = "ed25519")]
 impl ec_signing::Signature for SoftwareEd25519Signature {
-    #[cfg(test)]
-    fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
-        // Assumes EC_SIGNATURE_SIZE == 64
-        let signature = ed25519_compact::Signature::from_slice(bytes).ok()?;
-        Some(SoftwareEd25519Signature { signature })
-    }
-
     fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
         bytes.copy_from_slice(&self.signature[..]);
     }

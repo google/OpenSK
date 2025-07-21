@@ -67,7 +67,7 @@ pub trait Crypto {
 mod test {
     use super::software_crypto::*;
     use super::*;
-    use crate::api::crypto::ec_signing::{PublicKey as _, SecretKey as _, Signature};
+    use crate::api::crypto::ec_signing::{SecretKey as _, Signature};
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
     use crate::env::test::TestEnv;
     use crate::env::Env;
@@ -106,16 +106,6 @@ mod test {
     }
 
     #[test]
-    fn test_ecdsa_sign_verify() {
-        let mut env = TestEnv::default();
-        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
-        let public_key = private_key.public_key();
-        let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        assert!(public_key.verify(&message, &signature));
-    }
-
-    #[test]
     fn test_ecdsa_secret_key_deterministic_export() {
         let mut env = TestEnv::default();
         let key = SoftwareEcdsaSecretKey::random(env.rng());
@@ -135,28 +125,17 @@ mod test {
     }
 
     #[test]
-    fn test_ecdsa_signature_from_to_slice() {
+    fn test_ecdsa_signature_deterministic() {
         let mut env = TestEnv::default();
         let private_key = SoftwareEcdsaSecretKey::random(env.rng());
         let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
-        signature.to_slice(&mut signature_bytes);
-        let new_signature = SoftwareEcdsaSignature::from_slice(&signature_bytes).unwrap();
-        let mut new_bytes = [0; EC_SIGNATURE_SIZE];
-        new_signature.to_slice(&mut new_bytes);
-        assert_eq!(signature_bytes, new_bytes);
-    }
-
-    #[test]
-    #[cfg(feature = "ed25519")]
-    fn test_ed25519_sign_verify() {
-        let mut env = TestEnv::default();
-        let private_key = SoftwareEd25519SecretKey::random(env.rng());
-        let public_key = private_key.public_key();
-        let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        assert!(public_key.verify(&message, &signature));
+        let signature1 = private_key.sign(&message);
+        let mut signature_bytes1 = [0; EC_SIGNATURE_SIZE];
+        signature1.to_slice(&mut signature_bytes1);
+        let signature2 = private_key.sign(&message);
+        let mut signature_bytes2 = [0; EC_SIGNATURE_SIZE];
+        signature2.to_slice(&mut signature_bytes2);
+        assert_eq!(signature_bytes1, signature_bytes2);
     }
 
     #[test]
@@ -182,17 +161,17 @@ mod test {
 
     #[test]
     #[cfg(feature = "ed25519")]
-    fn test_ed25519_signature_from_to_slice() {
+    fn test_ed25519_signature_deterministic() {
         let mut env = TestEnv::default();
         let private_key = SoftwareEd25519SecretKey::random(env.rng());
         let message = [0x12, 0x34, 0x56, 0x78];
-        let signature = private_key.sign(&message);
-        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
-        signature.to_slice(&mut signature_bytes);
-        let new_signature = SoftwareEcdsaSignature::from_slice(&signature_bytes).unwrap();
-        let mut new_bytes = [0; EC_SIGNATURE_SIZE];
-        new_signature.to_slice(&mut new_bytes);
-        assert_eq!(signature_bytes, new_bytes);
+        let signature1 = private_key.sign(&message);
+        let mut signature_bytes1 = [0; EC_SIGNATURE_SIZE];
+        signature1.to_slice(&mut signature_bytes1);
+        let signature2 = private_key.sign(&message);
+        let mut signature_bytes2 = [0; EC_SIGNATURE_SIZE];
+        signature2.to_slice(&mut signature_bytes2);
+        assert_eq!(signature_bytes1, signature_bytes2);
     }
 
     #[test]

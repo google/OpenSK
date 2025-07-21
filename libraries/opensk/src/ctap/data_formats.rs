@@ -1199,10 +1199,11 @@ pub fn ok_or_missing<T>(value_option: Option<T>) -> CtapResult<T> {
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
+    use crate::api::crypto::ec_signing::SecretKey;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
-    use crate::env::{EcdhPk, EcdsaPk, Env};
+    use crate::env::{EcdhPk, EcdsaSk, Env};
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
         cbor_text, cbor_unsigned,
@@ -1902,18 +1903,13 @@ mod test {
 
     #[test]
     fn test_from_cose_key_ecdsa() {
-        let x_bytes = [
-            0x74, 0x4A, 0x48, 0xA0, 0xDC, 0x56, 0x9A, 0x42, 0x0B, 0x3F, 0x58, 0xBF, 0xD8, 0xD9,
-            0x62, 0xCF, 0x3A, 0xEA, 0xB1, 0x5A, 0x32, 0x03, 0xC1, 0xA4, 0x23, 0x8B, 0x57, 0x75,
-            0x74, 0xA4, 0x29, 0x50,
-        ];
-        let y_bytes = [
-            0xCD, 0x93, 0x26, 0x4A, 0xAF, 0x2A, 0xBA, 0xD1, 0x09, 0x3D, 0x2E, 0xD6, 0x8C, 0xC0,
-            0x59, 0xB1, 0xD9, 0xAB, 0xD7, 0x81, 0x71, 0x60, 0x35, 0xFE, 0xFF, 0xE8, 0xE1, 0x94,
-            0x05, 0x60, 0xA0, 0xBC,
-        ];
-        let created_pk = EcdsaPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
-        let cose_key = CoseKey::from_ecdsa_public_key::<TestEnv>(created_pk);
+        let mut env = TestEnv::default();
+        let ecdsa_sk = EcdsaSk::<TestEnv>::random(env.rng());
+        let ecdsa_pk = ecdsa_sk.public_key();
+        let mut x_bytes = [0u8; EC_FIELD_SIZE];
+        let mut y_bytes = [0u8; EC_FIELD_SIZE];
+        ecdsa_pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        let cose_key = CoseKey::from_ecdsa_public_key::<TestEnv>(ecdsa_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
         assert_eq!(cose_key.y_bytes, y_bytes);
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);

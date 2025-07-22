@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
-use crate::api::crypto::ec_signing::PublicKey as _;
+use crate::api::crypto::ec_signing::EcPublicKey;
+#[cfg(feature = "ed25519")]
+use crate::api::crypto::ec_signing::EdPublicKey;
 use crate::api::crypto::ecdh::PublicKey as _;
 use crate::api::crypto::EC_FIELD_SIZE;
 use crate::ctap::status_code::CtapResult;
@@ -770,8 +772,7 @@ impl CoseKey {
     #[cfg(feature = "ed25519")]
     pub fn from_ed25519_public_key<E: Env>(pk: Ed25519Pk<E>) -> Self {
         let mut x_bytes = [0; EC_FIELD_SIZE];
-        let mut y_bytes = [0; EC_FIELD_SIZE];
-        pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        pk.to_slice(&mut x_bytes);
         CoseKey {
             x_bytes,
             y_bytes: None,
@@ -1218,7 +1219,9 @@ pub fn ok_or_missing<T>(value_option: Option<T>) -> CtapResult<T> {
 mod test {
     use self::Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE;
     use super::*;
-    use crate::api::crypto::ec_signing::SecretKey;
+    use crate::api::crypto::ec_signing::EcSecretKey;
+    #[cfg(feature = "ed25519")]
+    use crate::api::crypto::ec_signing::EdSecretKey;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::env::test::TestEnv;
@@ -2020,8 +2023,7 @@ mod test {
         let ed25519_sk = Ed25519Sk::<TestEnv>::random(env.rng());
         let ed25519_pk = ed25519_sk.public_key();
         let mut x_bytes = [0u8; EC_FIELD_SIZE];
-        let mut y_bytes = [0u8; EC_FIELD_SIZE];
-        ed25519_pk.to_coordinates(&mut x_bytes, &mut y_bytes);
+        ed25519_pk.to_slice(&mut x_bytes);
         let cose_key = CoseKey::from_ed25519_public_key::<TestEnv>(ed25519_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
         assert_eq!(cose_key.y_bytes, None);

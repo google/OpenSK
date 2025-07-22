@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::crypto::ec_signing::{SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
+#[cfg(feature = "ed25519")]
+use crate::api::crypto::ec_signing::{EdSecretKey, EdSignature};
 use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(feature = "ed25519")]
@@ -81,7 +83,7 @@ impl<E: Env> PrivateKey<E> {
         Ok(match self {
             PrivateKey::Ecdsa(key) => key.sign(message).to_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(key) => key.sign(message).to_der(),
+            PrivateKey::Ed25519(key) => key.sign(message).to_bytes(),
         })
     }
 

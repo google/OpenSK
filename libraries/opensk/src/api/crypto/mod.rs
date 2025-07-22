@@ -22,7 +22,9 @@ pub mod hmac256;
 pub mod sha256;
 
 use self::aes256::Aes256;
-use self::ec_signing::EcSigning;
+use self::ec_signing::Ecdsa;
+#[cfg(feature = "ed25519")]
+use self::ec_signing::Ed25519;
 use self::ecdh::Ecdh;
 use self::hkdf256::Hkdf256;
 use self::hmac256::Hmac256;
@@ -36,9 +38,6 @@ pub const AES_KEY_SIZE: usize = 32;
 
 /// The size of field elements in the elliptic curve P256.
 pub const EC_FIELD_SIZE: usize = 32;
-
-/// The size of a serialized ECDSA signature.
-pub const EC_SIGNATURE_SIZE: usize = 2 * EC_FIELD_SIZE;
 
 /// The size in bytes of a SHA256.
 pub const HASH_SIZE: usize = 32;
@@ -55,9 +54,9 @@ pub const TRUNCATED_HMAC_SIZE: usize = 16;
 pub trait Crypto {
     type Aes256: Aes256;
     type Ecdh: Ecdh;
-    type Ecdsa: EcSigning;
+    type Ecdsa: Ecdsa;
     #[cfg(feature = "ed25519")]
-    type Ed25519: EcSigning;
+    type Ed25519: Ed25519;
     type Sha256: Sha256;
     type Hmac256: Hmac256;
     type Hkdf256: Hkdf256;
@@ -67,7 +66,9 @@ pub trait Crypto {
 mod test {
     use super::software_crypto::*;
     use super::*;
-    use crate::api::crypto::ec_signing::{SecretKey as _, Signature};
+    use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
+    #[cfg(feature = "ed25519")]
+    use crate::api::crypto::ec_signing::{EdSecretKey, EdSignature};
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
     use crate::env::test::TestEnv;
     use crate::env::Env;
@@ -130,12 +131,10 @@ mod test {
         let private_key = SoftwareEcdsaSecretKey::random(env.rng());
         let message = [0x12, 0x34, 0x56, 0x78];
         let signature1 = private_key.sign(&message);
-        let mut signature_bytes1 = [0; EC_SIGNATURE_SIZE];
-        signature1.to_slice(&mut signature_bytes1);
+        let der1 = signature1.to_der();
         let signature2 = private_key.sign(&message);
-        let mut signature_bytes2 = [0; EC_SIGNATURE_SIZE];
-        signature2.to_slice(&mut signature_bytes2);
-        assert_eq!(signature_bytes1, signature_bytes2);
+        let der2 = signature2.to_der();
+        assert_eq!(der1, der2);
     }
 
     #[test]
@@ -166,12 +165,10 @@ mod test {
         let private_key = SoftwareEd25519SecretKey::random(env.rng());
         let message = [0x12, 0x34, 0x56, 0x78];
         let signature1 = private_key.sign(&message);
-        let mut signature_bytes1 = [0; EC_SIGNATURE_SIZE];
-        signature1.to_slice(&mut signature_bytes1);
+        let bytes1 = signature1.to_bytes();
         let signature2 = private_key.sign(&message);
-        let mut signature_bytes2 = [0; EC_SIGNATURE_SIZE];
-        signature2.to_slice(&mut signature_bytes2);
-        assert_eq!(signature_bytes1, signature_bytes2);
+        let bytes2 = signature2.to_bytes();
+        assert_eq!(bytes1, bytes2);
     }
 
     #[test]

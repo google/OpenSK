@@ -108,14 +108,14 @@ mod test {
     use super::*;
     use arrayref::mut_array_refs;
     use libtock_unittest::fake::Syscalls;
-    use opensk::api::crypto::ec_signing::{PublicKey, SecretKey as _, Signature};
     use opensk::api::crypto::sha256::Sha256;
-    use opensk::api::crypto::{EC_FIELD_SIZE, EC_SIGNATURE_SIZE};
+    use opensk::api::crypto::EC_FIELD_SIZE;
     use opensk::env::test::TestEnv;
-    use opensk::env::{EcdsaPk, EcdsaSk, Env, Sha};
+    use opensk::env::{Env, Sha};
+    use p256::ecdsa::signature::Signer;
     use platform::DefaultConfig;
 
-    fn to_uncompressed(public_key: &EcdsaPk<TestEnv>) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
+    fn to_uncompressed(public_key: &p256::ecdsa::VerifyingKey) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
         // Formatting according to:
         // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
         const B0_BYTE_MARKER: u8 = 0x04;
@@ -123,14 +123,16 @@ mod test {
         #[allow(clippy::ptr_offset_with_cast)]
         let (marker, x, y) = mut_array_refs![&mut representation, 1, EC_FIELD_SIZE, EC_FIELD_SIZE];
         marker[0] = B0_BYTE_MARKER;
-        public_key.to_coordinates(x, y);
+        let point = public_key.to_encoded_point(false);
+        x.copy_from_slice(point.x().unwrap());
+        y.copy_from_slice(point.y().unwrap());
         representation
     }
 
     #[test]
     fn test_check_metadata() {
         let mut env = TestEnv::default();
-        let private_key = EcdsaSk::<TestEnv>::random(env.rng());
+        let private_key = p256::ecdsa::SigningKey::random(env.rng());
         let upgrade_locations = BufferUpgradeStorage::new().unwrap();
 
         const METADATA_LEN: usize = 0x1000;
@@ -143,12 +145,11 @@ mod test {
         let signed_hash = Sha::<TestEnv>::digest(&signed_over_data);
 
         metadata[..32].copy_from_slice(&signed_hash);
-        let signature = private_key.sign(&signed_over_data);
-        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
-        signature.to_slice(&mut signature_bytes);
+        let signature: p256::ecdsa::Signature = private_key.sign(&signed_over_data);
+        let signature_bytes = signature.to_bytes();
         metadata[32..96].copy_from_slice(&signature_bytes);
 
-        let public_key = private_key.public_key();
+        let public_key = p256::ecdsa::VerifyingKey::from(&private_key);
         let public_key_bytes = to_uncompressed(&public_key);
 
         assert_eq!(
@@ -206,15 +207,14 @@ mod test {
     #[test]
     fn test_verify_signature() {
         let mut env = TestEnv::default();
-        let private_key = EcdsaSk::<TestEnv>::random(env.rng());
+        let private_key = p256::ecdsa::SigningKey::random(env.rng());
         let message = [0x44; 64];
         let signed_hash = Sha::<TestEnv>::digest(&message);
-        let signature = private_key.sign(&message);
+        let signature: p256::ecdsa::Signature = private_key.sign(&message);
 
-        let mut signature_bytes = [0; EC_SIGNATURE_SIZE];
-        signature.to_slice(&mut signature_bytes);
-
-        let public_key = private_key.public_key();
+        let mut signature_bytes = [0u8; 64];
+        signature_bytes.copy_from_slice(&signature.to_bytes());
+        let public_key = p256::ecdsa::VerifyingKey::from(&private_key);
         let mut public_key_bytes = to_uncompressed(&public_key);
 
         assert_eq!(

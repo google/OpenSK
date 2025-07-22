@@ -14,7 +14,9 @@
 
 use crate::api::clock::Clock;
 use crate::api::connection::HidConnection;
-use crate::api::crypto::ec_signing::EcSigning;
+use crate::api::crypto::ec_signing::Ecdsa;
+#[cfg(feature = "ed25519")]
+use crate::api::crypto::ec_signing::Ed25519;
 use crate::api::crypto::ecdh::Ecdh;
 use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
@@ -33,15 +35,15 @@ pub mod test;
 pub type AesKey<E> = <<E as Env>::Crypto as Crypto>::Aes256;
 pub type EcdhSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::SecretKey;
 pub type EcdhPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdh as Ecdh>::PublicKey;
-pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as EcSigning>::SecretKey;
-pub type EcdsaPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as EcSigning>::PublicKey;
-pub type EcdsaSignature<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as EcSigning>::Signature;
+pub type EcdsaSk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::SecretKey;
+pub type EcdsaPk<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::PublicKey;
+pub type EcdsaSignature<E> = <<<E as Env>::Crypto as Crypto>::Ecdsa as Ecdsa>::Signature;
 #[cfg(feature = "ed25519")]
-pub type Ed25519Sk<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as EcSigning>::SecretKey;
+pub type Ed25519Sk<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as Ed25519>::SecretKey;
 #[cfg(feature = "ed25519")]
-pub type Ed25519Pk<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as EcSigning>::PublicKey;
+pub type Ed25519Pk<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as Ed25519>::PublicKey;
 #[cfg(feature = "ed25519")]
-pub type Ed25519Signature<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as EcSigning>::Signature;
+pub type Ed25519Signature<E> = <<<E as Env>::Crypto as Crypto>::Ed25519 as Ed25519>::Signature;
 pub type Sha<E> = <<E as Env>::Crypto as Crypto>::Sha256;
 pub type Hmac<E> = <<E as Env>::Crypto as Crypto>::Hmac256;
 pub type Hkdf<E> = <<E as Env>::Crypto as Crypto>::Hkdf256;

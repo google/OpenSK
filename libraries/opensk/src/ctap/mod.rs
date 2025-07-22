@@ -68,7 +68,7 @@ use self::status_code::{Ctap2StatusCode, CtapResult};
 use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
-use crate::api::crypto::ec_signing::{SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;

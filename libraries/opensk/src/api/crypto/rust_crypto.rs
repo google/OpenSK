@@ -17,8 +17,8 @@ use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::{
-    ec_signing, ecdh, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, EC_SIGNATURE_SIZE,
-    HASH_SIZE, HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
+    ec_signing, ecdh, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, HASH_SIZE,
+    HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
 };
 use crate::api::rng::Rng;
 use aes::cipher::generic_array::GenericArray;
@@ -123,7 +123,7 @@ impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
     }
 }
 
-impl ec_signing::EcSigning for SoftwareEcdsa {
+impl ec_signing::Ecdsa for SoftwareEcdsa {
     type SecretKey = SoftwareEcdsaSecretKey;
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
@@ -133,7 +133,7 @@ pub struct SoftwareEcdsaSecretKey {
     signing_key: p256::ecdsa::SigningKey,
 }
 
-impl ec_signing::SecretKey for SoftwareEcdsaSecretKey {
+impl ec_signing::EcSecretKey for SoftwareEcdsaSecretKey {
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
 
@@ -166,7 +166,7 @@ pub struct SoftwareEcdsaPublicKey {
     verifying_key: p256::ecdsa::VerifyingKey,
 }
 
-impl ec_signing::PublicKey for SoftwareEcdsaPublicKey {
+impl ec_signing::EcPublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
 
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
@@ -180,18 +180,14 @@ pub struct SoftwareEcdsaSignature {
     signature: p256::ecdsa::Signature,
 }
 
-impl ec_signing::Signature for SoftwareEcdsaSignature {
-    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
-        bytes.copy_from_slice(&self.signature.to_bytes());
-    }
-
+impl ec_signing::EcSignature for SoftwareEcdsaSignature {
     fn to_der(&self) -> Vec<u8> {
         self.signature.to_der().to_vec()
     }
 }
 
 #[cfg(feature = "ed25519")]
-impl ec_signing::EcSigning for SoftwareEd25519 {
+impl ec_signing::Ed25519 for SoftwareEd25519 {
     type SecretKey = SoftwareEd25519SecretKey;
     type PublicKey = SoftwareEd25519PublicKey;
     type Signature = SoftwareEd25519Signature;
@@ -203,7 +199,7 @@ pub struct SoftwareEd25519SecretKey {
 }
 
 #[cfg(feature = "ed25519")]
-impl ec_signing::SecretKey for SoftwareEd25519SecretKey {
+impl ec_signing::EdSecretKey for SoftwareEd25519SecretKey {
     type PublicKey = SoftwareEd25519PublicKey;
     type Signature = SoftwareEd25519Signature;
 
@@ -242,13 +238,11 @@ pub struct SoftwareEd25519PublicKey {
 }
 
 #[cfg(feature = "ed25519")]
-impl ec_signing::PublicKey for SoftwareEd25519PublicKey {
+impl ec_signing::EdPublicKey for SoftwareEd25519PublicKey {
     type Signature = SoftwareEd25519Signature;
 
-    fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
+    fn to_slice(&self, x: &mut [u8; EC_FIELD_SIZE]) {
         x.copy_from_slice(&self.verifying_key[..]);
-        // The public key can be reconstructed from the x slice only.
-        y.copy_from_slice(&[0u8; 32]);
     }
 }
 
@@ -258,13 +252,8 @@ pub struct SoftwareEd25519Signature {
 }
 
 #[cfg(feature = "ed25519")]
-impl ec_signing::Signature for SoftwareEd25519Signature {
-    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
-        bytes.copy_from_slice(&self.signature[..]);
-    }
-
-    fn to_der(&self) -> Vec<u8> {
-        // Ed25519 does not actually use DER encoding.
+impl ec_signing::EdSignature for SoftwareEd25519Signature {
+    fn to_bytes(&self) -> Vec<u8> {
         self.signature[..].to_vec()
     }
 }

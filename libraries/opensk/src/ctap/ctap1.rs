@@ -14,7 +14,7 @@
 
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{filter_listed_credential, CtapState};
-use crate::api::crypto::ec_signing::{PublicKey as _, SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
 use crate::api::crypto::EC_FIELD_SIZE;
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};

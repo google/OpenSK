@@ -29,7 +29,9 @@ use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 use opensk::api::crypto::aes256::Aes256;
-use opensk::api::crypto::ec_signing::SecretKey as _;
+use opensk::api::crypto::ec_signing::EcSecretKey;
+#[cfg(feature = "ed25519")]
+use opensk::api::crypto::ec_signing::EdSecretKey;
 use opensk::api::crypto::sha256::Sha256;
 #[cfg(feature = "ed25519")]
 use opensk::env::Ed25519Sk;

@@ -1010,7 +1010,7 @@ impl<E: Env> CtapState<E> {
             None => (private_key.sign_and_encode(&signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
-            alg: SignatureAlgorithm::Es256 as i64,
+            alg: algorithm as i64,
             sig: signature,
             x5c,
             ecdaa_key_id: None,

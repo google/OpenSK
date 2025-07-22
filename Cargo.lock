@@ -419,7 +419,6 @@ dependencies = [
  "arrayref",
  "byteorder",
  "cbc",
- "der",
  "ed25519-compact",
  "hkdf",
  "hmac",

@@ -331,7 +331,6 @@ dependencies = [
  "arrayref",
  "byteorder",
  "cbc",
- "der",
  "ed25519-compact",
  "enum-iterator",
  "hkdf",

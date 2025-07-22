@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::api::crypto::aes256::Aes256;
-use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret as _};
+use crate::api::crypto::ecdh::{SecretKey as _, SharedSecret as _};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
@@ -24,7 +24,7 @@ use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(test)]
 use crate::env::test::TestEnv;
-use crate::env::{AesKey, EcdhPk, EcdhSk, Env, Hkdf, Hmac, Sha};
+use crate::env::{AesKey, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
 use core::ops::DerefMut;
 use rand_core::RngCore;
@@ -70,9 +70,7 @@ impl<E: Env> PinProtocol<E> {
         peer_cose_key: CoseKey,
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> CtapResult<SharedSecret<E>> {
-        let (x_bytes, y_bytes) = peer_cose_key.try_into_ecdh_coordinates()?;
-        let pk = EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
-            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let pk = peer_cose_key.try_into_ecdh_public_key::<E>()?;
         let mut handshake = Secret::default();
         self.key_agreement_key
             .diffie_hellman(&pk)

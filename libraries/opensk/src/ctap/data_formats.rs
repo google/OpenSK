@@ -24,16 +24,15 @@ use alloc::string::String;
 use alloc::vec::Vec;
 #[cfg(feature = "fuzz")]
 use arbitrary::Arbitrary;
-use arrayref::array_ref;
 use core::convert::TryFrom;
 #[cfg(test)]
 use enum_iterator::IntoEnumIterator;
 use sk_cbor as cbor;
-use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options, destructure_cbor_map};
+use sk_cbor::{cbor_array_vec, cbor_map_options, destructure_cbor_map};
 
 // Used as the identifier for ECDSA in assertion signatures and COSE.
 pub const ES256_ALGORITHM: i64 = -7;
-#[cfg(feature = "ed25519")]
+#[cfg(any(test, feature = "ed25519"))]
 pub const EDDSA_ALGORITHM: i64 = -8;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
@@ -722,7 +721,7 @@ impl From<PublicKeyCredentialSource> for cbor::Value {
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct CoseKey {
     x_bytes: [u8; EC_FIELD_SIZE],
-    y_bytes: [u8; EC_FIELD_SIZE],
+    y_bytes: Option<[u8; EC_FIELD_SIZE]>,
     algorithm: i64,
     key_type: i64,
     curve: i64,
@@ -735,11 +734,11 @@ impl CoseKey {
     const ECDH_ALGORITHM: i64 = -25;
     // The parameter behind map key 1.
     const EC2_KEY_TYPE: i64 = 2;
-    #[cfg(feature = "ed25519")]
+    #[cfg(any(test, feature = "ed25519"))]
     const OKP_KEY_TYPE: i64 = 1;
     // The parameter behind map key -1.
     const P_256_CURVE: i64 = 1;
-    #[cfg(feature = "ed25519")]
+    #[cfg(any(test, feature = "ed25519"))]
     const ED25519_CURVE: i64 = 6;
 
     pub fn from_ecdh_public_key<E: Env>(pk: EcdhPk<E>) -> Self {
@@ -748,7 +747,7 @@ impl CoseKey {
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,
-            y_bytes,
+            y_bytes: Some(y_bytes),
             algorithm: CoseKey::ECDH_ALGORITHM,
             key_type: CoseKey::EC2_KEY_TYPE,
             curve: CoseKey::P_256_CURVE,
@@ -761,7 +760,7 @@ impl CoseKey {
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,
-            y_bytes,
+            y_bytes: Some(y_bytes),
             algorithm: ES256_ALGORITHM,
             key_type: CoseKey::EC2_KEY_TYPE,
             curve: CoseKey::P_256_CURVE,
@@ -775,7 +774,7 @@ impl CoseKey {
         pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         CoseKey {
             x_bytes,
-            y_bytes,
+            y_bytes: None,
             algorithm: EDDSA_ALGORITHM,
             key_type: CoseKey::OKP_KEY_TYPE,
             curve: CoseKey::ED25519_CURVE,
@@ -783,9 +782,7 @@ impl CoseKey {
     }
 
     /// Returns the x and y coordinates, if the key is an ECDH public key.
-    pub fn try_into_ecdh_coordinates(
-        self,
-    ) -> Result<([u8; EC_FIELD_SIZE], [u8; EC_FIELD_SIZE]), Ctap2StatusCode> {
+    pub fn try_into_ecdh_public_key<E: Env>(self) -> Result<EcdhPk<E>, Ctap2StatusCode> {
         let CoseKey {
             x_bytes,
             y_bytes,
@@ -804,7 +801,9 @@ impl CoseKey {
         if key_type != CoseKey::EC2_KEY_TYPE || curve != CoseKey::P_256_CURVE {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         }
-        Ok((x_bytes, y_bytes))
+        let y_bytes = y_bytes.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        EcdhPk::<E>::from_coordinates(&x_bytes, &y_bytes)
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
     }
 
     #[cfg(test)]
@@ -821,7 +820,7 @@ impl CoseKey {
         ];
         CoseKey {
             x_bytes,
-            y_bytes,
+            y_bytes: Some(y_bytes),
             algorithm: CoseKey::ECDH_ALGORITHM,
             key_type: CoseKey::EC2_KEY_TYPE,
             curve: CoseKey::P_256_CURVE,
@@ -829,7 +828,7 @@ impl CoseKey {
     }
 }
 
-// This conversion accepts both ECDH and ECDSA.
+// This conversion accepts ECDH, ECDSA and Ed25519.
 impl TryFrom<cbor::Value> for CoseKey {
     type Error = Ctap2StatusCode;
 
@@ -845,30 +844,50 @@ impl TryFrom<cbor::Value> for CoseKey {
             } = extract_map(cbor_value)?;
         }
 
+        let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
+        let x_bytes = <[u8; EC_FIELD_SIZE]>::try_from(x_bytes)
+            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let y_bytes = y_bytes.map(extract_byte_string).transpose()?;
+        let y_bytes = y_bytes
+            .map(<[u8; EC_FIELD_SIZE]>::try_from)
+            .transpose()
+            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
         let algorithm = extract_integer(ok_or_missing(algorithm)?)?;
-        if algorithm != CoseKey::ECDH_ALGORITHM && algorithm != ES256_ALGORITHM {
+        let key_type = extract_integer(ok_or_missing(key_type)?)?;
+        let curve = extract_integer(ok_or_missing(curve)?)?;
+
+        if algorithm == CoseKey::ECDH_ALGORITHM || algorithm == ES256_ALGORITHM {
+            if key_type != CoseKey::EC2_KEY_TYPE {
+                return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+            }
+            if curve != CoseKey::P_256_CURVE {
+                return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+            }
+            if y_bytes.is_none() {
+                return Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER);
+            }
+        } else {
+            #[cfg(feature = "ed25519")]
+            if algorithm == EDDSA_ALGORITHM {
+                if key_type != CoseKey::OKP_KEY_TYPE {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+                }
+                if curve != CoseKey::ED25519_CURVE {
+                    return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+                }
+                if y_bytes.is_some() {
+                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                }
+            } else {
+                return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+            }
+            #[cfg(not(feature = "ed25519"))]
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
         };
-        let x_bytes = extract_byte_string(ok_or_missing(x_bytes)?)?;
-        if x_bytes.len() != EC_FIELD_SIZE {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-        let y_bytes = extract_byte_string(ok_or_missing(y_bytes)?)?;
-        if y_bytes.len() != EC_FIELD_SIZE {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
-        let curve = extract_integer(ok_or_missing(curve)?)?;
-        if curve != CoseKey::P_256_CURVE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        let key_type = extract_integer(ok_or_missing(key_type)?)?;
-        if key_type != CoseKey::EC2_KEY_TYPE {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
 
         Ok(CoseKey {
-            x_bytes: *array_ref![x_bytes.as_slice(), 0, EC_FIELD_SIZE],
-            y_bytes: *array_ref![y_bytes.as_slice(), 0, EC_FIELD_SIZE],
+            x_bytes,
+            y_bytes,
             algorithm,
             key_type,
             curve,
@@ -886,12 +905,12 @@ impl From<CoseKey> for cbor::Value {
             curve,
         } = cose_key;
 
-        cbor_map! {
+        cbor_map_options! {
             1 => key_type,
             3 => algorithm,
             -1 => curve,
             -2 => x_bytes,
-            -3 => y_bytes,
+            -3 => y_bytes.map(Vec::from),
         }
     }
 }
@@ -1205,10 +1224,10 @@ mod test {
     use crate::env::test::TestEnv;
     #[cfg(feature = "ed25519")]
     use crate::env::Ed25519Sk;
-    use crate::env::{EcdhPk, EcdsaSk, Env};
+    use crate::env::{EcdsaSk, Env};
     use cbor::{
-        cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_null,
-        cbor_text, cbor_unsigned,
+        cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_map,
+        cbor_null, cbor_text, cbor_unsigned,
     };
 
     #[test]
@@ -1799,7 +1818,7 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_cose_key_cbor() {
+    fn test_from_into_cose_key_cbor_double_coordinates() {
         for algorithm in &[CoseKey::ECDH_ALGORITHM, ES256_ALGORITHM] {
             let cbor_value = cbor_map! {
                 1 => CoseKey::EC2_KEY_TYPE,
@@ -1812,6 +1831,81 @@ mod test {
             let created_cbor_value = cbor::Value::from(cose_key);
             assert_eq!(created_cbor_value, cbor_value);
         }
+    }
+
+    #[test]
+    fn test_cose_key_from_incorrect_cbor() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::OKP_KEY_TYPE,
+            3 => ES256_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone());
+        assert_eq!(
+            cose_key,
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => EDDSA_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone());
+        assert_eq!(
+            cose_key,
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::ED25519_CURVE,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone());
+        assert_eq!(
+            cose_key,
+            Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM)
+        );
+
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => ES256_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 33],
+            -3 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone());
+        assert_eq!(cose_key, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER));
+
+        let cbor_value = cbor_map! {
+            1 => CoseKey::EC2_KEY_TYPE,
+            3 => CoseKey::ECDH_ALGORITHM,
+            -1 => CoseKey::P_256_CURVE,
+            -2 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone());
+        assert_eq!(cose_key, Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER));
+    }
+
+    #[test]
+    #[cfg(feature = "ed25519")]
+    fn test_from_into_cose_key_cbor_ed25519() {
+        let cbor_value = cbor_map! {
+            1 => CoseKey::OKP_KEY_TYPE,
+            3 => EDDSA_ALGORITHM,
+            -1 => CoseKey::ED25519_CURVE,
+            -2 => [0u8; 32],
+        };
+        let cose_key = CoseKey::try_from(cbor_value.clone()).unwrap();
+        let created_cbor_value = cbor::Value::from(cose_key);
+        assert_eq!(created_cbor_value, cbor_value);
     }
 
     #[test]
@@ -1897,8 +1991,10 @@ mod test {
     #[test]
     fn test_from_into_cose_key_ecdh() {
         let cose_key = CoseKey::example_ecdh_pubkey();
-        let (x_bytes, y_bytes) = cose_key.clone().try_into_ecdh_coordinates().unwrap();
-        let created_pk = EcdhPk::<TestEnv>::from_coordinates(&x_bytes, &y_bytes).unwrap();
+        let created_pk = cose_key
+            .clone()
+            .try_into_ecdh_public_key::<TestEnv>()
+            .unwrap();
         let new_cose_key = CoseKey::from_ecdh_public_key::<TestEnv>(created_pk);
         assert_eq!(cose_key, new_cose_key);
     }
@@ -1913,7 +2009,7 @@ mod test {
         ecdsa_pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         let cose_key = CoseKey::from_ecdsa_public_key::<TestEnv>(ecdsa_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
-        assert_eq!(cose_key.y_bytes, y_bytes);
+        assert_eq!(cose_key.y_bytes, Some(y_bytes));
         assert_eq!(cose_key.algorithm, ES256_ALGORITHM);
     }
 
@@ -1928,7 +2024,7 @@ mod test {
         ed25519_pk.to_coordinates(&mut x_bytes, &mut y_bytes);
         let cose_key = CoseKey::from_ed25519_public_key::<TestEnv>(ed25519_pk);
         assert_eq!(cose_key.x_bytes, x_bytes);
-        assert_eq!(cose_key.y_bytes, y_bytes);
+        assert_eq!(cose_key.y_bytes, None);
         assert_eq!(cose_key.algorithm, EDDSA_ALGORITHM);
     }
 

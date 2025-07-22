@@ -28,8 +28,6 @@ use aes::cipher::{
 use alloc::vec::Vec;
 #[cfg(test)]
 use core::cell::RefCell;
-#[cfg(feature = "ed25519")]
-use der::{Any, Encode};
 use hmac::digest::FixedOutput;
 use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
@@ -266,9 +264,8 @@ impl ec_signing::Signature for SoftwareEd25519Signature {
     }
 
     fn to_der(&self) -> Vec<u8> {
-        // The ECDSA implementation has implicit unwraps, too.
-        let signature_any = Any::new(der::Tag::OctetString, &self.signature[..]).unwrap();
-        signature_any.to_der().unwrap()
+        // Ed25519 does not actually use DER encoding.
+        self.signature[..].to_vec()
     }
 }
 

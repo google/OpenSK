@@ -35,8 +35,6 @@ pub trait SecretKey: Sized {
     fn public_key(&self) -> Self::PublicKey;
 
     /// Signs the message.
-    ///
-    /// For hashing, SHA256 is used implicitly.
     fn sign(&self, message: &[u8]) -> Self::Signature;
 
     /// Returns the wrapped signing key.

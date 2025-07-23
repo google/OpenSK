@@ -29,11 +29,15 @@ use libtock_drivers::timer;
 use libtock_drivers::timer::{Timer, Timestamp};
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
 use opensk::api::crypto::aes256::Aes256;
-use opensk::api::crypto::ecdsa::SecretKey as _;
+use opensk::api::crypto::ec_signing::EcSecretKey;
+#[cfg(feature = "ed25519")]
+use opensk::api::crypto::ec_signing::EdSecretKey;
 use opensk::api::crypto::sha256::Sha256;
+#[cfg(feature = "ed25519")]
+use opensk::env::Ed25519Sk;
 use opensk::env::{AesKey, EcdsaSk, Sha};
 
-stack_size! {0x2000}
+stack_size! {0x4000}
 set_main! {main}
 
 type Syscalls = TockSyscalls;
@@ -118,6 +122,26 @@ fn main() {
     bench(&mut console, &timer, "Ecdsa::SecretKey::sign", || {
         sk.sign(&[]);
     });
+
+    // Ed25519
+    #[cfg(feature = "ed25519")]
+    {
+        bench(&mut console, &timer, "Ed25519::SecretKey::random", || {
+            Ed25519Sk::<TockEnv<Syscalls>>::random(&mut rng);
+        });
+        let sk = Ed25519Sk::<TockEnv<Syscalls>>::random(&mut rng);
+        bench(
+            &mut console,
+            &timer,
+            "Ed25519::SecretKey::public_key",
+            || {
+                black_box(sk.public_key());
+            },
+        );
+        bench(&mut console, &timer, "Ed25519::SecretKey::sign", || {
+            sk.sign(&[]);
+        });
+    }
 
     writeln!(console, "****************************************").unwrap();
     writeln!(console, "All the benchmarks are done.\nHave a nice day!").unwrap();

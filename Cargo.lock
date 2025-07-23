@@ -129,7 +129,6 @@ version = "1.0.0"
 dependencies = [
  "arrayref",
  "byteorder",
- "ed25519-compact",
  "enum-iterator",
  "lang_items",
  "libtock_alarm",
@@ -142,6 +141,7 @@ dependencies = [
  "libtock_unittest",
  "opensk",
  "openssl",
+ "p256",
  "persistent_store",
  "rand_core",
  "sk-cbor",
@@ -150,9 +150,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.7.9"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f55bf8e7b65898637379c1b74eb1551107c8294ed26d855ceb9fd1a09cfc9bc0"
+checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid",
  "zeroize",

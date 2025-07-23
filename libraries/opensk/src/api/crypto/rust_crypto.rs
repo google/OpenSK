@@ -17,7 +17,7 @@ use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::{
-    ecdh, ecdsa, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, EC_SIGNATURE_SIZE, HASH_SIZE,
+    ec_signing, ecdh, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, HASH_SIZE,
     HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
 };
 use crate::api::rng::Rng;
@@ -28,13 +28,10 @@ use aes::cipher::{
 use alloc::vec::Vec;
 #[cfg(test)]
 use core::cell::RefCell;
-use core::convert::TryFrom;
 use hmac::digest::FixedOutput;
 use hmac::Mac;
 use p256::ecdh::EphemeralSecret;
-use p256::ecdsa::signature::hazmat::PrehashVerifier;
-use p256::ecdsa::signature::{SignatureEncoding, Signer, Verifier};
-use p256::ecdsa::{SigningKey, VerifyingKey};
+use p256::ecdsa::signature::{SignatureEncoding, Signer as _};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::Digest;
 #[cfg(test)]
@@ -53,11 +50,15 @@ thread_local! {
 pub struct SoftwareCrypto;
 pub struct SoftwareEcdh;
 pub struct SoftwareEcdsa;
+#[cfg(feature = "ed25519")]
+pub struct SoftwareEd25519;
 
 impl Crypto for SoftwareCrypto {
     type Aes256 = SoftwareAes256;
     type Ecdh = SoftwareEcdh;
     type Ecdsa = SoftwareEcdsa;
+    #[cfg(feature = "ed25519")]
+    type Ed25519 = SoftwareEd25519;
     type Sha256 = SoftwareSha256;
     type Hmac256 = SoftwareHmac256;
     type Hkdf256 = SoftwareHkdf256;
@@ -122,27 +123,27 @@ impl ecdh::SharedSecret for SoftwareEcdhSharedSecret {
     }
 }
 
-impl ecdsa::Ecdsa for SoftwareEcdsa {
+impl ec_signing::Ecdsa for SoftwareEcdsa {
     type SecretKey = SoftwareEcdsaSecretKey;
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
 }
 
 pub struct SoftwareEcdsaSecretKey {
-    signing_key: SigningKey,
+    signing_key: p256::ecdsa::SigningKey,
 }
 
-impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
+impl ec_signing::EcSecretKey for SoftwareEcdsaSecretKey {
     type PublicKey = SoftwareEcdsaPublicKey;
     type Signature = SoftwareEcdsaSignature;
 
     fn random(rng: &mut impl Rng) -> Self {
-        let signing_key = SigningKey::random(rng);
+        let signing_key = p256::ecdsa::SigningKey::random(rng);
         SoftwareEcdsaSecretKey { signing_key }
     }
 
     fn public_key(&self) -> Self::PublicKey {
-        let verifying_key = VerifyingKey::from(&self.signing_key);
+        let verifying_key = p256::ecdsa::VerifyingKey::from(&self.signing_key);
         SoftwareEcdsaPublicKey { verifying_key }
     }
 
@@ -156,36 +157,17 @@ impl ecdsa::SecretKey for SoftwareEcdsaSecretKey {
     }
 
     fn import(bytes: &[u8]) -> Option<Self> {
-        let signing_key = SigningKey::from_slice(bytes).ok()?;
+        let signing_key = p256::ecdsa::SigningKey::from_slice(bytes).ok()?;
         Some(SoftwareEcdsaSecretKey { signing_key })
     }
 }
 
 pub struct SoftwareEcdsaPublicKey {
-    verifying_key: VerifyingKey,
+    verifying_key: p256::ecdsa::VerifyingKey,
 }
 
-impl ecdsa::PublicKey for SoftwareEcdsaPublicKey {
+impl ec_signing::EcPublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
-
-    fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
-        let encoded_point: p256::EncodedPoint =
-            p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
-        let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
-        Some(SoftwareEcdsaPublicKey { verifying_key })
-    }
-
-    fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
-        self.verifying_key
-            .verify(message, &signature.signature)
-            .is_ok()
-    }
-
-    fn verify_prehash(&self, prehash: &[u8; HASH_SIZE], signature: &Self::Signature) -> bool {
-        self.verifying_key
-            .verify_prehash(prehash, &signature.signature)
-            .is_ok()
-    }
 
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
         let point = self.verifying_key.to_encoded_point(false);
@@ -198,25 +180,81 @@ pub struct SoftwareEcdsaSignature {
     signature: p256::ecdsa::Signature,
 }
 
-impl ecdsa::Signature for SoftwareEcdsaSignature {
-    fn from_slice(bytes: &[u8; EC_SIGNATURE_SIZE]) -> Option<Self> {
-        // Assumes EC_SIGNATURE_SIZE == 2 * EC_FIELD_SIZE
-        let r = &bytes[..EC_FIELD_SIZE];
-        let s = &bytes[EC_FIELD_SIZE..];
-        let r = p256::NonZeroScalar::try_from(r).ok()?;
-        let s = p256::NonZeroScalar::try_from(s).ok()?;
-        let r = p256::FieldBytes::from(r);
-        let s = p256::FieldBytes::from(s);
-        let signature = p256::ecdsa::Signature::from_scalars(r, s).ok()?;
-        Some(SoftwareEcdsaSignature { signature })
-    }
-
-    fn to_slice(&self, bytes: &mut [u8; EC_SIGNATURE_SIZE]) {
-        bytes.copy_from_slice(&self.signature.to_bytes());
-    }
-
+impl ec_signing::EcSignature for SoftwareEcdsaSignature {
     fn to_der(&self) -> Vec<u8> {
         self.signature.to_der().to_vec()
+    }
+}
+
+#[cfg(feature = "ed25519")]
+impl ec_signing::Ed25519 for SoftwareEd25519 {
+    type SecretKey = SoftwareEd25519SecretKey;
+    type PublicKey = SoftwareEd25519PublicKey;
+    type Signature = SoftwareEd25519Signature;
+}
+
+#[cfg(feature = "ed25519")]
+pub struct SoftwareEd25519SecretKey {
+    signing_key: ed25519_compact::SecretKey,
+}
+
+#[cfg(feature = "ed25519")]
+impl ec_signing::EdSecretKey for SoftwareEd25519SecretKey {
+    type PublicKey = SoftwareEd25519PublicKey;
+    type Signature = SoftwareEd25519Signature;
+
+    fn random(rng: &mut impl Rng) -> Self {
+        let mut bytes = [0; 32];
+        rng.fill_bytes(&mut bytes[..]);
+        let seed = ed25519_compact::Seed::from_slice(&bytes).unwrap();
+        let signing_key = ed25519_compact::KeyPair::from_seed(seed).sk;
+        SoftwareEd25519SecretKey { signing_key }
+    }
+
+    fn public_key(&self) -> Self::PublicKey {
+        SoftwareEd25519PublicKey {
+            verifying_key: self.signing_key.public_key(),
+        }
+    }
+
+    fn sign(&self, message: &[u8]) -> Self::Signature {
+        let signature = self.signing_key.sign(message, None);
+        SoftwareEd25519Signature { signature }
+    }
+
+    fn export(&self) -> Vec<u8> {
+        self.signing_key[..].to_vec()
+    }
+
+    fn import(bytes: &[u8]) -> Option<Self> {
+        let signing_key = ed25519_compact::SecretKey::from_slice(bytes).ok()?;
+        Some(SoftwareEd25519SecretKey { signing_key })
+    }
+}
+
+#[cfg(feature = "ed25519")]
+pub struct SoftwareEd25519PublicKey {
+    verifying_key: ed25519_compact::PublicKey,
+}
+
+#[cfg(feature = "ed25519")]
+impl ec_signing::EdPublicKey for SoftwareEd25519PublicKey {
+    type Signature = SoftwareEd25519Signature;
+
+    fn to_slice(&self, x: &mut [u8; EC_FIELD_SIZE]) {
+        x.copy_from_slice(&self.verifying_key[..]);
+    }
+}
+
+#[cfg(feature = "ed25519")]
+pub struct SoftwareEd25519Signature {
+    signature: ed25519_compact::Signature,
+}
+
+#[cfg(feature = "ed25519")]
+impl ec_signing::EdSignature for SoftwareEd25519Signature {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.signature[..].to_vec()
     }
 }
 

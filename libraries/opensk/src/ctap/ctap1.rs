@@ -14,12 +14,12 @@
 
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{filter_listed_credential, CtapState};
-use crate::api::crypto::ecdsa::{self, SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
 use crate::api::crypto::EC_FIELD_SIZE;
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
-use crate::env::{EcdsaSk, Env};
+use crate::env::{EcdsaPk, EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
 use core::convert::TryFrom;
@@ -158,7 +158,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     }
 }
 
-fn to_uncompressed(public_key: &impl ecdsa::PublicKey) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
+fn to_uncompressed<E: Env>(public_key: &EcdsaPk<E>) -> [u8; 1 + 2 * EC_FIELD_SIZE] {
     // Formatting according to:
     // https://tools.ietf.org/id/draft-jivsov-ecc-compact-05.html#overview
     const B0_BYTE_MARKER: u8 = 0x04;
@@ -283,7 +283,7 @@ impl Ctap1Command {
 
         let mut response = Vec::with_capacity(105 + key_handle.len() + certificate.len());
         response.push(Ctap1Command::LEGACY_BYTE);
-        let user_pk = to_uncompressed(&pk);
+        let user_pk = to_uncompressed::<E>(&pk);
         response.extend_from_slice(&user_pk);
         response.push(key_handle.len() as u8);
         response.extend(key_handle.clone());

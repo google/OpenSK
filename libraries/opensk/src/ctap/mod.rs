@@ -68,7 +68,7 @@ use self::status_code::{Ctap2StatusCode, CtapResult};
 use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
-use crate::api::crypto::ecdsa::{SecretKey as _, Signature};
+use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::HASH_SIZE;
@@ -1010,7 +1010,7 @@ impl<E: Env> CtapState<E> {
             None => (private_key.sign_and_encode(&signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
-            alg: SignatureAlgorithm::Es256 as i64,
+            alg: algorithm as i64,
             sig: signature,
             x5c,
             ecdaa_key_id: None,
@@ -2514,7 +2514,7 @@ mod test {
         let salt_enc = shared_secret.encrypt(&mut env, &salt).unwrap();
         let salt_auth = shared_secret.authenticate(&salt_enc);
         let hmac_secret_input = GetAssertionHmacSecretInput {
-            key_agreement: CoseKey::from_ecdh_public_key(platform_public_key),
+            key_agreement: CoseKey::from_ecdh_public_key::<TestEnv>(platform_public_key),
             salt_enc,
             salt_auth,
             pin_uv_auth_protocol,

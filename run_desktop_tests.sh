@@ -33,7 +33,7 @@ cargo check --release --target=thumbv7em-none-eabi --features ed25519
 cargo check --release --target=thumbv7em-none-eabi --features fingerprint
 cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
 cargo check --release --target=thumbv7em-none-eabi --examples
-cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc
+cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc,ed25519
 cargo check --release --target=thumbv7em-none-eabi --manifest-path bootloader/Cargo.toml
 
 echo "Checking Rust formatting..."

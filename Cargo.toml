@@ -23,7 +23,6 @@ libtock_alarm = { path = "third_party/libtock-rs/apis/alarm" }
 libtock_console = { path = "third_party/libtock-rs/apis/console" }
 libtock_leds = { path = "third_party/libtock-rs/apis/leds" }
 lang_items = { path = "third_party/lang-items" }
-opensk = { path = "libraries/opensk", default-features = false }
 sk-cbor = { path = "libraries/cbor" }
 persistent_store = { path = "libraries/persistent_store" }
 libtock_unittest = { path = "third_party/libtock-rs/unittest", optional = true }
@@ -36,6 +35,11 @@ version = "0.13.0"
 default-features = false
 features = ["ecdsa"]
 
+[dependencies.opensk]
+path = "libraries/opensk"
+default-features = false
+features = ["persistent_store", "software_crypto"]
+
 [features]
 config_command = ["opensk/config_command"]
 debug_allocations = ["lang_items/debug_allocations"]
@@ -46,7 +50,7 @@ verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
 with_ctap1 = ["opensk/with_ctap1"]
 with_nfc = ["libtock_drivers/with_nfc"]
 vendor_hid = ["opensk/vendor_hid"]
-ed25519 = ["opensk/ed25519"]
+ed25519 = ["opensk/software_crypto_ed25519"]
 fingerprint = ["opensk/fingerprint"]
 
 [dev-dependencies]

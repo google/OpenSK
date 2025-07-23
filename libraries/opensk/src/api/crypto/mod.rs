@@ -15,7 +15,9 @@
 pub mod aes256;
 pub mod ec_signing;
 pub mod ecdh;
+#[cfg(feature = "software_crypto")]
 pub mod rust_crypto;
+#[cfg(feature = "software_crypto")]
 pub use rust_crypto as software_crypto;
 pub mod hkdf256;
 pub mod hmac256;

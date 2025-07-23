@@ -13,13 +13,13 @@ rust-version = "1.66"
 
 [dependencies]
 sk-cbor = { path = "../cbor" }
-persistent_store = { path = "../persistent_store" }
+persistent_store = { path = "../persistent_store", optional = true }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
-rand_core = { version = "0.6.4", optional = true }
+rand_core = "0.6.4"
 rand = { version = "0.8.5", default-features = false, optional = true }
 sha2 = { version = "0.10.6", default-features = false, optional = true }
 hmac = { version = "0.12.1", default-features = false, optional = true }
@@ -38,11 +38,11 @@ optional = true
 default = ["config_command", "with_ctap1"]
 config_command = []
 debug_ctap = []
-std = ["persistent_store/std", "rand/std_rng", "config_command", "software_crypto"]
+std = ["persistent_store/std", "rand?/std_rng", "config_command", "software_crypto"]
 with_ctap1 = []
 vendor_hid = []
 fuzz = ["arbitrary", "std"]
-software_crypto = ["rand_core", "rand", "sha2", "hmac", "hkdf", "aes", "cbc", "p256"]
+software_crypto = ["rand", "sha2", "hmac", "hkdf", "aes", "cbc", "p256"]
 ed25519 = []
 software_crypto_ed25519 = ["software_crypto", "ed25519", "ed25519-compact"]
 fingerprint = []

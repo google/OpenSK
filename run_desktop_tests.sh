@@ -20,6 +20,8 @@ set -ex
 MOST_FEATURES=config_command,debug_allocations,debug_ctap,panic_console,verbose,with_ctap1,vendor_hid,ed25519,fingerprint
 
 echo "Checking that OpenSK builds properly..."
+cargo check --release --manifest-path libraries/opensk/Cargo.toml
+cargo check --release --target=thumbv7em-none-eabi --manifest-path libraries/opensk/Cargo.toml
 cargo check --release --target=thumbv7em-none-eabi
 cargo check --release --target=thumbv7em-none-eabi --features config_command
 cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
@@ -73,7 +75,7 @@ cargo build --release --target=thumbv7em-none-eabi --features config_command,wit
 
 echo "Running OpenSK library unit tests..."
 cd libraries/opensk
-cargo test --features std
+cargo test --no-default-features --features std
 cargo test --features std,config_command,with_ctap1
 cargo test --all-features
 cd ../..

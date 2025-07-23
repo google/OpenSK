@@ -38,7 +38,7 @@ features = ["ecdsa"]
 [dependencies.opensk]
 path = "libraries/opensk"
 default-features = false
-features = ["software_crypto"]
+features = ["persistent_store", "software_crypto"]
 
 [features]
 config_command = ["opensk/config_command"]

@@ -64,11 +64,14 @@ following steps:
 
 * Flash your board according to the [instructions below](#flashing-a-firmware).
 
-If you come from an OpenSK version before the 2.0 certified one, your credential
-storage is not backwards compatible and you have to reset it. :warning: You will
-lose logins to all websites that you registered with OpenSK. To erase your
-persistent storage, run the deploy script twice: Once with the application
-parameter `--erase_storage`, and once with `--opensk` as usual.
+Changes on the `develop` branch may not always be backwards compatible with
+respect to the storage layout. If you upgrade your OpenSK by flashing a newer
+firmware, you may have to restart from a fresh storage.
+
+:warning: You will lose logins to all websites that you registered with OpenSK.
+
+To erase your persistent storage, run the deploy script twice: Once with the
+application parameter `--erase_storage`, and once with `--opensk` as usual.
 
 This reset also clears the certificate. For a privacy discussion, see the
 [certificate section in Customization](customization.md#Certificate-considerations).

@@ -92,10 +92,10 @@ storage format.
 
 :warning: You will lose logins to all websites that you registered with OpenSK.
 
-To erase your persistent storage, follow the steps for
-[Flashing a firmware](#flashing-a-firmware),
-but run the deploy script twice: Once with the application parameter
-`--erase_storage`, and once with `--opensk` as usual.
+To erase your persistent storage, refer to the instructions in
+[Flashing a firmware](#flashing-a-firmware) and run the deploy script twice:
+first with the `--erase_storage` application parameter, and then as usual with
+the `--opensk` application parameter.
 
 ### Flashing a firmware
 

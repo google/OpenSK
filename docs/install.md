@@ -45,52 +45,14 @@ might work for you.
 
 ### Compiling the firmware
 
-If this is your first time installing OpenSK, please skip directly to
-[Initial setup](#initial-setup). Else, see
-[Updating your setup](#updating-your-setup) below.
-
-#### Updating your setup
-
-Depending on the difference to your last state, you may need some of the
-following steps:
-
-* If you are not just testing minor changes, reset and redo the setup. This
-  will delete all uncommited changes.
-
-  ```shell
-  ./reset.sh
-  ./setup.sh
-  ```
-
-* Flash your board according to the [instructions below](#flashing-a-firmware).
-
-Changes on the `develop` branch may not always be backwards compatible with
-respect to the storage layout. If you upgrade your OpenSK by flashing a newer
-firmware, you may have to restart from a fresh storage.
-
-:warning: You will lose logins to all websites that you registered with OpenSK.
-
-To erase your persistent storage, run the deploy script twice: Once with the
-application parameter `--erase_storage`, and once with `--opensk` as usual.
-
-This reset also clears the certificate. For a privacy discussion, see the
-[certificate section in Customization](customization.md#Certificate-considerations).
-If you want to reinstall it, you also need to rerun:
+After cloning or pulling, from inside the OpenSK repository, first we make sure
+all patches are installed correctly.
+As a developer, skip this step after the initial setup and instead use the
+script `maintainers/patches` when necessary.
 
 ```shell
-./tools/configure.py \
-    --certificate=crypto_data/opensk_cert.pem \
-    --private-key=crypto_data/opensk.key
-```
-
-#### Initial setup
-
-To clone and setup the repository for the develop branch, run the following
-commands:
-
-```shell
-git clone -b develop https://github.com/google/OpenSK.git
-cd OpenSK
+# Warning for developers: resets uncommited changes.
+./reset.sh
 ./setup.sh
 ```
 
@@ -108,15 +70,43 @@ The setup script performs the following steps:
 
 1. Install [tockloader](https://github.com/tock/tockloader).
 
-Additionally on Linux, you need to install a `udev` rule file to allow non-root
-users to interact with OpenSK devices. To install it, execute:
+If this is the first time installing OpenSK on a Linux host machine, you need to
+install a `udev` rule file to allow non-root users to interact with OpenSK
+devices. To install it, execute:
 
 ```shell
 sudo cp rules.d/55-opensk.rules /etc/udev/rules.d/
 sudo udevadm control --reload
 ```
 
-Then, you need and replug the device for the rule to trigger.
+Then, you need to replug the device for the rule to trigger.
+
+### Erasing your storage
+
+We expect the flash pages for persistent storage to be either blank, or in
+OpenSK's storage format.
+If you install OpenSK for the first time, or come from an incompatible OpenSK
+version, you need to erase your flash before writing the OpenSK firmware.
+The develop branch has, and may in the future, introduce breaking changes to the
+storage format.
+
+:warning: You will lose logins to all websites that you registered with OpenSK.
+
+To erase your persistent storage, follow the steps for
+[Flashing a firmware](#flashing-a-firmware),
+but run the deploy script twice: Once with the application parameter
+`--erase_storage`, and once with `--opensk` as usual.
+
+### Flashing a firmware
+
+Please follow the instructions for your hardware:
+
+* [Nordic nRF52840-DK](boards/nrf52840dk.md)
+* [Nordic nRF52840 Dongle](boards/nrf52840_dongle.md)
+* [Makerdiary nRF52840-MDK USB dongle](boards/nrf52840_mdk.md)
+* [Feitian OpenSK dongle](boards/nrf52840_feitian.md)
+
+### Configuring the firmware
 
 Last, if you want to use U2F or attestation, configure the certificate. If your
 client does not support FIDO2 yet, this step is mandatory for your OpenSK to
@@ -130,15 +120,6 @@ for understand privacy tradeoffs.
     --certificate=crypto_data/opensk_cert.pem \
     --private-key=crypto_data/opensk.key
 ```
-
-### Flashing a firmware
-
-From here on, please follow the instructions for your hardware:
-
-* [Nordic nRF52840-DK](boards/nrf52840dk.md)
-* [Nordic nRF52840 Dongle](boards/nrf52840_dongle.md)
-* [Makerdiary nRF52840-MDK USB dongle](boards/nrf52840_mdk.md)
-* [Feitian OpenSK dongle](boards/nrf52840_feitian.md)
 
 ### Advanced installation
 

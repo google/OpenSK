@@ -147,10 +147,10 @@ fn check_fingerprint_loop<E: Env>(
 
 fn enroll_begin<E: Env>(
     env: &mut E,
-    sub_command_params: BioEnrollmentSubCommandParams,
+    sub_command_params: Option<BioEnrollmentSubCommandParams>,
 ) -> CtapResult<ResponseData> {
     let template_id = env.fingerprint().prepare_enrollment()?;
-    let timeout_ms = sub_command_params.timeout_milliseconds;
+    let timeout_ms = sub_command_params.and_then(|p| p.timeout_milliseconds);
     let (sample_status, remaining_samples) =
         env.fingerprint().capture_sample(&template_id, timeout_ms)?;
     let response = AuthenticatorBioEnrollmentResponse {
@@ -284,17 +284,20 @@ pub fn process_bio_enrollment<E: Env>(
     client_pin.verify_pin_uv_auth_token(&command_data, &pin_uv_auth_param, pin_uv_auth_protocol)?;
     client_pin.has_permission(PinPermission::BioEnrollment)?;
     // Now we process all other subcommands that need PIN UV authentication.
-    if sub_command == BioEnrollmentSubCommand::EnumerateEnrollments {
-        return enumerate_enrollments(env);
-    }
-    let sub_command_params = ok_or_missing(params.sub_command_params)?;
     match sub_command {
-        BioEnrollmentSubCommand::EnrollBegin => enroll_begin(env, sub_command_params),
+        // Since the subcommand parameter map can be empty, the whole map might be missing.
+        // In CTAP, the parameter is not marked as optional, but Chrome omits it when empty.
+        BioEnrollmentSubCommand::EnrollBegin => enroll_begin(env, params.sub_command_params),
         BioEnrollmentSubCommand::EnrollCaptureNextSample => {
-            enroll_capture_next_sample(env, sub_command_params)
+            enroll_capture_next_sample(env, ok_or_missing(params.sub_command_params)?)
         }
-        BioEnrollmentSubCommand::SetFriendlyName => set_friendly_name(env, sub_command_params),
-        BioEnrollmentSubCommand::RemoveEnrollment => remove_enrollment(env, sub_command_params),
+        BioEnrollmentSubCommand::EnumerateEnrollments => enumerate_enrollments(env),
+        BioEnrollmentSubCommand::SetFriendlyName => {
+            set_friendly_name(env, ok_or_missing(params.sub_command_params)?)
+        }
+        BioEnrollmentSubCommand::RemoveEnrollment => {
+            remove_enrollment(env, ok_or_missing(params.sub_command_params)?)
+        }
         _ => unreachable!(),
     }
 }

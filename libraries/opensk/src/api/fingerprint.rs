@@ -45,9 +45,7 @@ impl From<Ctap2EnrollFeedback> for cbor::Value {
 
 pub trait Fingerprint {
     /// Starts the fingerprint enrollment process.
-    ///
-    /// Returns the newly assigned template ID.
-    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>>;
+    fn prepare_enrollment(&mut self) -> CtapResult<()>;
 
     /// Captures a fingerprint image.
     ///
@@ -56,16 +54,28 @@ pub trait Fingerprint {
     /// `prepare_enrollment` must be called first.
     /// A returned `Ctap2StatusCode` indicates an unexpected failure processing
     /// the command.
-    /// The `Ctap2EnrollFeedback` contains expected errors from the fingerprint
-    /// capture process.
-    /// Also returns the expected number of remaining samples.
+    ///
+    /// This function returns:
+    /// - The `Ctap2EnrollFeedback` contains expected errors from the
+    /// fingerprint capture process.
+    /// - The expected number of remaining samples.
+    /// If the sensor finished template creation, return a hardware ID for this
+    /// template. This ID is different from the FIDO template ID, but they are
+    /// mapped to each other in OpenSK. This should happen exactly when the
+    /// returned number of `remainingSamples` is 0.
+    ///
+    /// There is always only one fingerprint enrollment in progress, and the
+    /// capture implicitly refers to that.
     fn capture_sample(
         &mut self,
-        template_id: &[u8],
         timeout_ms: Option<usize>,
-    ) -> CtapResult<(Ctap2EnrollFeedback, usize)>;
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize, Option<Vec<u8>>)>;
 
     /// Cancel a fingerprint enrollment.
+    ///
+    /// Returns the newly assigned hardware template ID. This is not to be
+    /// confused with FIDO's template ID that the CTAP command returns when we
+    /// being enrollment.
     fn cancel_enrollment(&mut self) -> CtapResult<()>;
 
     /// Delete the fingerprint matching the given template ID.

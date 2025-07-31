@@ -53,7 +53,7 @@ use self::data_formats::{
     PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
 };
 #[cfg(feature = "fingerprint")]
-use self::fingerprint::{perform_built_in_uv, process_bio_enrollment};
+use self::fingerprint::{perform_built_in_uv, process_bio_enrollment, EnrollmentStatus};
 use self::hid::{
     ChannelID, CtapHid, CtapHidCommand, HidPacketIterator, KeepaliveStatus, ProcessedPacket,
 };
@@ -552,6 +552,11 @@ pub struct CtapState<E: Env> {
     pub(crate) u2f_up_state: U2fUserPresenceState<E>,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission<E>,
+    // While fingerprint enrollment is in progress, we store its progress here.
+    // Despite being state of a command, by the CTAP standard, BioEnrollment is
+    // not a "stateful command".
+    #[cfg(feature = "fingerprint")]
+    fingerprint_enrollment_status: EnrollmentStatus,
 }
 
 impl<E: Env> CtapState<E> {
@@ -568,6 +573,8 @@ impl<E: Env> CtapState<E> {
             #[cfg(feature = "with_ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
             stateful_command_permission,
+            #[cfg(feature = "fingerprint")]
+            fingerprint_enrollment_status: EnrollmentStatus::default(),
         }
     }
 
@@ -697,9 +704,12 @@ impl<E: Env> CtapState<E> {
             }
             Command::AuthenticatorReset => self.process_reset(env, channel),
             #[cfg(feature = "fingerprint")]
-            Command::AuthenticatorBioEnrollment(params) => {
-                process_bio_enrollment(env, &mut self.client_pin, params)
-            }
+            Command::AuthenticatorBioEnrollment(params) => process_bio_enrollment(
+                env,
+                &mut self.client_pin,
+                params,
+                &mut self.fingerprint_enrollment_status,
+            ),
             Command::AuthenticatorCredentialManagement(params) => process_credential_management(
                 env,
                 &mut self.stateful_command_permission,

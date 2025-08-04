@@ -3490,7 +3490,7 @@ mod test {
         // This TestEnv always returns successful user_presence checks.
         let mut env = TestEnv::default();
         let response = check_user_presence(&mut env, DUMMY_CHANNEL);
-        assert!(matches!(response, Ok(_)));
+        assert!(response.is_ok());
     }
 
     #[test]

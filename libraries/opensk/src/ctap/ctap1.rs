@@ -78,11 +78,7 @@ impl TryFrom<&[u8]> for U2fCommand {
     type Error = Ctap1StatusCode;
 
     fn try_from(message: &[u8]) -> Result<Self, Ctap1StatusCode> {
-        let apdu: Apdu = match Apdu::try_from(message) {
-            Ok(apdu) => apdu,
-            Err(apdu_status_code) => return Err(apdu_status_code),
-        };
-
+        let apdu = Apdu::try_from(message)?;
         let lc = apdu.lc as usize;
 
         // ISO7816 APDU Header format. Each cell is 1 byte. Note that the CTAP flavor always

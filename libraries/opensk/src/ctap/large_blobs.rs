@@ -478,7 +478,7 @@ mod test {
 
         let large_blobs_params = AuthenticatorLargeBlobsParameters {
             get: None,
-            set: Some(large_blob.to_vec()),
+            set: Some(large_blob),
             offset: 0,
             length: Some(BLOB_LEN),
             pin_uv_auth_param: None,

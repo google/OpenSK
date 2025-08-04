@@ -483,8 +483,8 @@ pub fn wink_leds<S: Syscalls>(pattern_seed: usize) {
     // * *
     let count = Leds::<S>::count().unwrap() as usize;
     let a = (pattern_seed / 2) % count;
-    let b = ((pattern_seed + 1) / 2) % count;
-    let c = ((pattern_seed + 3) / 2) % count;
+    let b = pattern_seed.div_ceil(2) % count;
+    let c = (pattern_seed.div_ceil(2) + 1) % count;
 
     for l in 0..count {
         // On nRF52840-DK, logically swap LEDs 3 and 4 so that the order of LEDs form a circle.

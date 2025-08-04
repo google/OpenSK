@@ -1260,18 +1260,12 @@ mod test {
 
     #[test]
     fn test_extract_unsigned_limits() {
+        assert_eq!(extract_unsigned(cbor_unsigned!(u64::MAX)), Ok(u64::MAX));
         assert_eq!(
-            extract_unsigned(cbor_unsigned!(std::u64::MAX)),
-            Ok(std::u64::MAX)
+            extract_unsigned(cbor_unsigned!((i64::MAX as u64) + 1)),
+            Ok((i64::MAX as u64) + 1)
         );
-        assert_eq!(
-            extract_unsigned(cbor_unsigned!((std::i64::MAX as u64) + 1)),
-            Ok((std::i64::MAX as u64) + 1)
-        );
-        assert_eq!(
-            extract_unsigned(cbor_int!(std::i64::MAX)),
-            Ok(std::i64::MAX as u64)
-        );
+        assert_eq!(extract_unsigned(cbor_int!(i64::MAX)), Ok(i64::MAX as u64));
         assert_eq!(extract_unsigned(cbor_int!(123)), Ok(123));
         assert_eq!(extract_unsigned(cbor_int!(1)), Ok(1));
         assert_eq!(extract_unsigned(cbor_int!(0)), Ok(0));
@@ -1284,7 +1278,7 @@ mod test {
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            extract_unsigned(cbor_int!(std::i64::MIN)),
+            extract_unsigned(cbor_int!(i64::MIN)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }
@@ -1318,20 +1312,20 @@ mod test {
     #[test]
     fn test_extract_integer_limits() {
         assert_eq!(
-            extract_integer(cbor_unsigned!(std::u64::MAX)),
+            extract_integer(cbor_unsigned!(u64::MAX)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
         assert_eq!(
-            extract_integer(cbor_unsigned!((std::i64::MAX as u64) + 1)),
+            extract_integer(cbor_unsigned!((i64::MAX as u64) + 1)),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
-        assert_eq!(extract_integer(cbor_int!(std::i64::MAX)), Ok(std::i64::MAX));
+        assert_eq!(extract_integer(cbor_int!(i64::MAX)), Ok(i64::MAX));
         assert_eq!(extract_integer(cbor_int!(123)), Ok(123));
         assert_eq!(extract_integer(cbor_int!(1)), Ok(1));
         assert_eq!(extract_integer(cbor_int!(0)), Ok(0));
         assert_eq!(extract_integer(cbor_int!(-1)), Ok(-1));
         assert_eq!(extract_integer(cbor_int!(-123)), Ok(-123));
-        assert_eq!(extract_integer(cbor_int!(std::i64::MIN)), Ok(std::i64::MIN));
+        assert_eq!(extract_integer(cbor_int!(i64::MIN)), Ok(i64::MIN));
     }
 
     #[test]

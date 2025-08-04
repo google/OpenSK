@@ -24,6 +24,8 @@ use crate::api::key_store;
 use crate::api::persist::{Persist, PersistIter};
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceWaitResult};
+#[cfg(feature = "fingerprint")]
+use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::status_code::CtapResult;
 use crate::env::Env;
 use customization::TestCustomization;
@@ -101,6 +103,7 @@ pub struct TestFingerprint {
     // TODO more complete fake
     template_ids: Vec<Vec<u8>>,
     template_counter: usize,
+    progress: Option<usize>,
 }
 
 pub struct TestWrite;
@@ -196,6 +199,22 @@ impl TestEnv {
     pub fn set_boots_after_soft_reset(&mut self, value: bool) {
         self.soft_reset = value;
     }
+
+    #[cfg(feature = "fingerprint")]
+    pub fn create_fingerprint(&mut self) -> CtapResult<Vec<u8>> {
+        self.fingerprint().prepare_enrollment()?;
+        let mut template_id = None;
+        for _ in 0..self.fingerprint().max_capture_samples_required_for_enroll() {
+            let (_, remaining_samples, hardware_id) = self.fingerprint().capture_sample(None)?;
+            template_id = template_id.or(hardware_id);
+            if remaining_samples == 0 {
+                break;
+            }
+        }
+        let template_id = template_id.unwrap();
+        self.persist().store_template_id(template_id.clone())?;
+        Ok(template_id)
+    }
 }
 
 impl TestUserPresence {
@@ -218,22 +237,33 @@ impl UserPresence for TestUserPresence {
 
 #[cfg(feature = "fingerprint")]
 impl Fingerprint for TestFingerprint {
-    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>> {
-        self.template_counter += 1;
-        let template_id = Vec::from(&self.template_counter.to_be_bytes());
-        self.template_ids.push(template_id.clone());
-        Ok(template_id)
+    fn prepare_enrollment(&mut self) -> CtapResult<()> {
+        self.progress = Some(0);
+        Ok(())
     }
 
     fn capture_sample(
         &mut self,
-        _template_id: &[u8],
         _timeout_ms: Option<usize>,
-    ) -> CtapResult<(Ctap2EnrollFeedback, usize)> {
-        Ok((Ctap2EnrollFeedback::FpGood, 0))
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize, Option<Vec<u8>>)> {
+        if let Some(progress) = self.progress {
+            if progress == 0 {
+                self.progress = Some(1);
+                Ok((Ctap2EnrollFeedback::FpPoorQuality, 1, None))
+            } else {
+                self.template_counter += 1;
+                let template_id = Vec::from(&self.template_counter.to_be_bytes());
+                self.template_ids.push(template_id.clone());
+                self.progress = None;
+                Ok((Ctap2EnrollFeedback::FpGood, 0, Some(template_id)))
+            }
+        } else {
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        }
     }
 
     fn cancel_enrollment(&mut self) -> CtapResult<()> {
+        self.progress = None;
         Ok(())
     }
 
@@ -261,7 +291,7 @@ impl Fingerprint for TestFingerprint {
     }
 
     fn max_capture_samples_required_for_enroll(&self) -> usize {
-        1
+        2
     }
 }
 

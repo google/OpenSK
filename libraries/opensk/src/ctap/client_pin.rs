@@ -700,8 +700,6 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crate::api::crypto::HASH_SIZE;
-    #[cfg(feature = "fingerprint")]
-    use crate::api::fingerprint::Fingerprint;
     use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
     use alloc::vec;
@@ -1181,8 +1179,7 @@ mod test {
             .unwrap();
         let mut env = TestEnv::default();
         set_standard_pin(&mut env);
-        let template_id = env.fingerprint().prepare_enrollment().unwrap();
-        let _ = env.fingerprint().capture_sample(&template_id, Some(30_000));
+        assert!(env.create_fingerprint().is_ok());
 
         let response = client_pin
             .process_command(&mut env, params.clone(), DUMMY_CHANNEL)

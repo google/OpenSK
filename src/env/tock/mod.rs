@@ -347,17 +347,16 @@ where
     S: Syscalls,
     C: platform::subscribe::Config + platform::allow_ro::Config,
 {
-    // This is a placeholder implementation, WIP.
-    fn prepare_enrollment(&mut self) -> CtapResult<Vec<u8>> {
-        Ok(Vec::new())
+    // This is a placeholder implementation to make the project compile.
+    fn prepare_enrollment(&mut self) -> CtapResult<()> {
+        Ok(())
     }
 
     fn capture_sample(
         &mut self,
-        _template_id: &[u8],
         _timeout_ms: Option<usize>,
-    ) -> CtapResult<(Ctap2EnrollFeedback, usize)> {
-        Ok((Ctap2EnrollFeedback::FpGood, 0))
+    ) -> CtapResult<(Ctap2EnrollFeedback, usize, Option<Vec<u8>>)> {
+        Ok((Ctap2EnrollFeedback::FpGood, 0, None))
     }
 
     fn cancel_enrollment(&mut self) -> CtapResult<()> {

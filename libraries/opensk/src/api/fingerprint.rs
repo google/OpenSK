@@ -72,10 +72,6 @@ pub trait Fingerprint {
     ) -> CtapResult<(Ctap2EnrollFeedback, usize, Option<Vec<u8>>)>;
 
     /// Cancel a fingerprint enrollment.
-    ///
-    /// Returns the newly assigned hardware template ID. This is not to be
-    /// confused with FIDO's template ID that the CTAP command returns when we
-    /// being enrollment.
     fn cancel_enrollment(&mut self) -> CtapResult<()>;
 
     /// Delete the fingerprint matching the given template ID.

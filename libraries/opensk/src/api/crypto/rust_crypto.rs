@@ -44,7 +44,7 @@ use std::sync::{Mutex, MutexGuard};
 static BUSY: Mutex<()> = Mutex::new(());
 #[cfg(test)]
 thread_local! {
-    static BUSY_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = RefCell::new(None);
+    static BUSY_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = const { RefCell::new(None) };
 }
 
 pub struct SoftwareCrypto;

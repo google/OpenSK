@@ -71,7 +71,7 @@ impl<'a> Reader<'a> {
         &mut self,
         remaining_depth: Option<i8>,
     ) -> Result<Value, DecoderError> {
-        if remaining_depth.map_or(false, |d| d < 0) {
+        if remaining_depth.is_some_and(|d| d < 0) {
             return Err(DecoderError::TooMuchNesting);
         }
 

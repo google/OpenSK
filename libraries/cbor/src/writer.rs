@@ -57,7 +57,7 @@ impl<'a> Writer<'a> {
         value: Value,
         remaining_depth: Option<i8>,
     ) -> Result<(), EncoderError> {
-        if remaining_depth.map_or(false, |d| d < 0) {
+        if remaining_depth.is_some_and(|d| d < 0) {
             return Err(EncoderError::TooMuchNesting);
         }
         let type_label = value.0.type_label();

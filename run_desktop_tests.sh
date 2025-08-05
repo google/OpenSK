@@ -61,7 +61,7 @@ cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -
 # Uncomment when persistent store is fixed:
 # (cd libraries/persistent_store && cargo clippy --features std -- -D warnings)
 
-echo "Checking that fuzz targets..."
+echo "Checking fuzz targets..."
 (cd libraries/opensk && cargo fuzz check)
 (cd libraries/cbor && cargo fuzz check)
 (cd libraries/persistent_store && cargo fuzz check)

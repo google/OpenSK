@@ -567,6 +567,7 @@ impl<E: Env> ClientPin<E> {
     /// - verified with the shared secret and salt_auth,
     /// - decrypted with the shared secret,
     /// - HMAC'ed with cred_random.
+    ///
     /// The length of the output matches salt_enc and has to be 1 or 2 blocks of
     /// 32 byte.
     pub fn process_hmac_secret(

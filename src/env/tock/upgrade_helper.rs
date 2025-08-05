@@ -32,10 +32,12 @@ pub const METADATA_SIGN_OFFSET: usize = 0x800;
 ///
 /// The metadata is a page starting with:
 /// - 32 B upgrade hash (SHA256)
-/// - 64 B signature,
+/// - 64 B signature
+///
 /// that are not signed over. The second part is included in the signature with
 /// -  8 B version and
 /// -  4 B partition address in little endian encoding
+///
 /// written at METADATA_SIGN_OFFSET.
 ///
 /// Checks signature correctness against the hash, and whether the partition offset matches.

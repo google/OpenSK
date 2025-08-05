@@ -57,10 +57,14 @@ pub trait Fingerprint {
     ///
     /// This function returns:
     /// - The `Ctap2EnrollFeedback` contains expected errors from the
-    /// fingerprint capture process.
+    ///   fingerprint capture process.
     /// - The expected number of remaining samples.
-    /// If the sensor finished template creation, return a hardware ID for this
-    /// template. This ID is different from the FIDO template ID, but they are
+    /// - Eventually, a hardware ID for this template.
+    ///
+    /// The template ID must be returned until remaining samples is 0.
+    /// When or how often it is returned is up to the implementation, but it
+    /// needs to be consistent if returned more than once.
+    /// This ID is different from the FIDO template ID, but they are
     /// mapped to each other in OpenSK. This should happen exactly when the
     /// returned number of `remainingSamples` is 0.
     ///

@@ -145,9 +145,9 @@ pub fn perform_built_in_uv<E: Env>(
     if storage::uv_retries(env)? == 0 {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
     }
-    env.fingerprint().check_fingerprint_init();
+    env.fingerprint().check_fingerprint_init()?;
     let result = check_fingerprint_loop(env, channel, internal_retry);
-    env.fingerprint().check_fingerprint_complete();
+    env.fingerprint().check_fingerprint_complete()?;
     result
 }
 

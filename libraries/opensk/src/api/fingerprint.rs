@@ -89,7 +89,7 @@ pub trait Fingerprint {
     /// Called before [`check_fingerprint`].
     /// Useful for starting any operation that needs to happen before
     /// potentially repeated fingerprint checks, such as blinking LEDs.
-    fn check_fingerprint_init(&mut self);
+    fn check_fingerprint_init(&mut self) -> CtapResult<()>;
 
     /// Collects a fingerprint from the user and verifies it.
     ///
@@ -100,7 +100,7 @@ pub trait Fingerprint {
     /// Deinitilize hardware after a fingerprint check.
     ///
     /// Called after [`check_fingerprint`] is finished.
-    fn check_fingerprint_complete(&mut self);
+    fn check_fingerprint_complete(&mut self) -> CtapResult<()>;
 
     /// The kind of fingerprint sensor.
     fn fingerprint_kind(&self) -> FingerprintKind;

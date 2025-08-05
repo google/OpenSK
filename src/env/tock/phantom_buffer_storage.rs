@@ -97,7 +97,7 @@ where
         self.storage.max_page_erases()
     }
 
-    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<[u8]>> {
+    fn read_slice(&self, index: StorageIndex, length: usize) -> StorageResult<Cow<'_, [u8]>> {
         self.storage.read_slice(index, length)
     }
 

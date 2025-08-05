@@ -37,6 +37,7 @@ pub struct PinUvAuthTokenState<E: Env> {
     permissions_set: u8,
     permissions_rp_id: Option<String>,
     usage_timer: <E::Clock as Clock>::Timer,
+    user_present: bool,
     user_verified: bool,
     in_use: bool,
 }
@@ -48,6 +49,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
             permissions_set: 0,
             permissions_rp_id: None,
             usage_timer: <E::Clock as Clock>::Timer::default(),
+            user_present: false,
             user_verified: false,
             in_use: false,
         }
@@ -110,7 +112,8 @@ impl<E: Env> PinUvAuthTokenState<E> {
     }
 
     /// Starts the timer for pinUvAuthToken usage.
-    pub fn begin_using_pin_uv_auth_token(&mut self, env: &mut E) {
+    pub fn begin_using_pin_uv_auth_token(&mut self, env: &mut E, user_is_present: bool) {
+        self.user_present = user_is_present;
         self.user_verified = true;
         self.usage_timer = env.clock().make_timer(INITIAL_USAGE_TIME_LIMIT_MS);
         self.in_use = true;
@@ -126,9 +129,19 @@ impl<E: Env> PinUvAuthTokenState<E> {
         }
     }
 
+    /// Returns whether the user is present.
+    pub fn get_user_present_flag_value(&self) -> bool {
+        self.in_use && self.user_present
+    }
+
     /// Returns whether the user is verified.
     pub fn get_user_verified_flag_value(&self) -> bool {
         self.in_use && self.user_verified
+    }
+
+    /// Consumes the user presence.
+    pub fn clear_user_present_flag(&mut self) {
+        self.user_present = false;
     }
 
     /// Consumes the user verification.
@@ -146,6 +159,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
         self.permissions_rp_id = None;
         self.permissions_set = 0;
         self.usage_timer = <E::Clock as Clock>::Timer::default();
+        self.user_present = false;
         self.user_verified = false;
         self.in_use = false;
     }
@@ -161,7 +175,7 @@ mod test {
     fn test_observer() {
         let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        token_state.begin_using_pin_uv_auth_token(&mut env);
+        token_state.begin_using_pin_uv_auth_token(&mut env, false);
         assert!(token_state.is_in_use());
         env.clock().advance(100);
         token_state.pin_uv_auth_token_usage_timer_observer(&mut env);
@@ -175,7 +189,7 @@ mod test {
     fn test_stop() {
         let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
-        token_state.begin_using_pin_uv_auth_token(&mut env);
+        token_state.begin_using_pin_uv_auth_token(&mut env, false);
         assert!(token_state.is_in_use());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.is_in_use());
@@ -258,15 +272,32 @@ mod test {
     }
 
     #[test]
+    fn test_user_present_flag() {
+        let mut env = TestEnv::default();
+        let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
+        assert!(!token_state.get_user_present_flag_value());
+        token_state.begin_using_pin_uv_auth_token(&mut env, false);
+        assert!(!token_state.get_user_present_flag_value());
+        token_state.begin_using_pin_uv_auth_token(&mut env, true);
+        assert!(token_state.get_user_present_flag_value());
+        token_state.clear_user_present_flag();
+        assert!(!token_state.get_user_present_flag_value());
+        token_state.begin_using_pin_uv_auth_token(&mut env, true);
+        assert!(token_state.get_user_present_flag_value());
+        token_state.stop_using_pin_uv_auth_token();
+        assert!(!token_state.get_user_present_flag_value());
+    }
+
+    #[test]
     fn test_user_verified_flag() {
         let mut env = TestEnv::default();
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(&mut env);
+        token_state.begin_using_pin_uv_auth_token(&mut env, false);
         assert!(token_state.get_user_verified_flag_value());
         token_state.clear_user_verified_flag();
         assert!(!token_state.get_user_verified_flag_value());
-        token_state.begin_using_pin_uv_auth_token(&mut env);
+        token_state.begin_using_pin_uv_auth_token(&mut env, false);
         assert!(token_state.get_user_verified_flag_value());
         token_state.stop_using_pin_uv_auth_token();
         assert!(!token_state.get_user_verified_flag_value());

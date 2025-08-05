@@ -763,6 +763,14 @@ impl<E: Env> CtapState<E> {
         Ok(())
     }
 
+    fn has_valid_up(&mut self, has_pin_uv_auth_param: bool, has_uv_option: bool) -> bool {
+        if has_pin_uv_auth_param {
+            self.client_pin.get_user_present_flag()
+        } else {
+            has_uv_option
+        }
+    }
+
     fn process_make_credential(
         &mut self,
         env: &mut E,
@@ -812,9 +820,7 @@ impl<E: Env> CtapState<E> {
             false
         };
 
-        let has_uv = pin_uv_auth_param.is_some() || options.uv;
-        // User presence is implicitly granted through internal UV.
-        let finished_up = pin_uv_auth_param.is_none() && options.uv;
+        let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
@@ -863,6 +869,7 @@ impl<E: Env> CtapState<E> {
         // The ED flag is added later, if applicable.
         flags |= UP_FLAG | AT_FLAG;
 
+        let has_uv = has_pin_uv_auth_param || options.uv;
         let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
@@ -886,7 +893,7 @@ impl<E: Env> CtapState<E> {
             }
         }
 
-        if !finished_up {
+        if !self.has_valid_up(has_pin_uv_auth_param, options.uv) {
             check_user_presence(env, channel)?;
         }
         self.client_pin.clear_token_flags();
@@ -1194,9 +1201,7 @@ impl<E: Env> CtapState<E> {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION);
         }
 
-        let has_uv = pin_uv_auth_param.is_some() || options.uv;
-        // User presence is implicitly granted through internal UV.
-        let finished_up = pin_uv_auth_param.is_none() && options.uv;
+        let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
@@ -1243,6 +1248,7 @@ impl<E: Env> CtapState<E> {
             flags |= ED_FLAG;
         }
 
+        let has_uv = has_pin_uv_auth_param || options.uv;
         let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         let (credential, next_credential_keys) = if let Some(allow_list) = allow_list {
             (
@@ -1283,7 +1289,7 @@ impl<E: Env> CtapState<E> {
         let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
-        if options.up && !finished_up {
+        if options.up && !self.has_valid_up(has_pin_uv_auth_param, options.uv) {
             check_user_presence(env, channel)?;
             self.client_pin.clear_token_flags();
         }
@@ -2394,6 +2400,39 @@ mod test {
             make_credential_response,
             Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL)
         );
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_make_credential_cached_up() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x88; 32];
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V2;
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        env.create_fingerprint().unwrap();
+        ctap_state.client_pin = client_pin;
+
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        let client_data_hash = [0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
+        make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
+        assert!(ctap_state
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+            .is_ok());
     }
 
     fn check_assertion_response_with_user(

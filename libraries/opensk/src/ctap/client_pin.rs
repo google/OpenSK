@@ -339,7 +339,7 @@ impl<E: Env> ClientPin<E> {
         self.pin_protocol_v1.reset_pin_uv_auth_token(env);
         self.pin_protocol_v2.reset_pin_uv_auth_token(env);
         self.pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(env);
+            .begin_using_pin_uv_auth_token(env, false);
         self.pin_uv_auth_token_state.set_default_permissions();
         let pin_uv_auth_token = shared_secret.encrypt(
             env,
@@ -402,7 +402,7 @@ impl<E: Env> ClientPin<E> {
         self.pin_protocol_v1.reset_pin_uv_auth_token(env);
         self.pin_protocol_v2.reset_pin_uv_auth_token(env);
         self.pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(env);
+            .begin_using_pin_uv_auth_token(env, true);
         let pin_uv_auth_token = shared_secret.encrypt(
             env,
             self.get_pin_protocol(pin_uv_auth_protocol)
@@ -609,6 +609,7 @@ impl<E: Env> ClientPin<E> {
 
     /// Consumes flags and permissions related to the pinUvAuthToken.
     pub fn clear_token_flags(&mut self) {
+        self.pin_uv_auth_token_state.clear_user_present_flag();
         self.pin_uv_auth_token_state.clear_user_verified_flag();
         self.pin_uv_auth_token_state
             .clear_pin_uv_auth_token_permissions_except_lbw();
@@ -618,6 +619,11 @@ impl<E: Env> ClientPin<E> {
     pub fn update_timeouts(&mut self, env: &mut E) {
         self.pin_uv_auth_token_state
             .pin_uv_auth_token_usage_timer_observer(env);
+    }
+
+    /// Returns if user presence is cached for use of the pinUvAuthToken.
+    pub fn get_user_present_flag(&mut self) -> bool {
+        self.pin_uv_auth_token_state.get_user_present_flag_value()
     }
 
     /// Checks if user verification is cached for use of the pinUvAuthToken.
@@ -686,7 +692,7 @@ impl<E: Env> ClientPin<E> {
         };
         let mut pin_uv_auth_token_state = PinUvAuthTokenState::new();
         pin_uv_auth_token_state.set_permissions(0xFF);
-        pin_uv_auth_token_state.begin_using_pin_uv_auth_token(env);
+        pin_uv_auth_token_state.begin_using_pin_uv_auth_token(env, true);
         Self {
             pin_protocol_v1: PinProtocol::new_test(key_agreement_key_v1, pin_uv_auth_token),
             pin_protocol_v2: PinProtocol::new_test(key_agreement_key_v2, pin_uv_auth_token),
@@ -1727,7 +1733,7 @@ mod test {
         assert!(!client_pin.has_token(&mut env));
         client_pin
             .pin_uv_auth_token_state
-            .begin_using_pin_uv_auth_token(&mut env);
+            .begin_using_pin_uv_auth_token(&mut env, false);
         assert!(client_pin.has_token(&mut env));
 
         let pin_uv_auth_token_v1 = client_pin

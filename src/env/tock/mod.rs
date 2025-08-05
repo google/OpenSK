@@ -367,13 +367,17 @@ where
         Ok(())
     }
 
-    fn check_fingerprint_init(&mut self) {}
+    fn check_fingerprint_init(&mut self) -> CtapResult<()> {
+        Ok(())
+    }
 
     fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<(), FingerprintCheckError> {
         Ok(())
     }
 
-    fn check_fingerprint_complete(&mut self) {}
+    fn check_fingerprint_complete(&mut self) -> CtapResult<()> {
+        Ok(())
+    }
 
     fn fingerprint_kind(&self) -> FingerprintKind {
         FingerprintKind::Touch

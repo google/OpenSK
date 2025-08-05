@@ -812,10 +812,9 @@ impl<E: Env> CtapState<E> {
             false
         };
 
-        // MakeCredential always requires user presence.
-        // User verification depends on the PIN auth inputs, which are checked here.
-        // The ED flag is added later, if applicable.
-        let has_uv = pin_uv_auth_param.is_some();
+        let has_uv = pin_uv_auth_param.is_some() || options.uv;
+        // User presence is implicitly granted through internal UV.
+        let finished_up = pin_uv_auth_param.is_none() && options.uv;
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
@@ -860,6 +859,8 @@ impl<E: Env> CtapState<E> {
                 }
             }
         };
+        // MakeCredential always requires user presence.
+        // The ED flag is added later, if applicable.
         flags |= UP_FLAG | AT_FLAG;
 
         let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
@@ -885,7 +886,9 @@ impl<E: Env> CtapState<E> {
             }
         }
 
-        check_user_presence(env, channel)?;
+        if !finished_up {
+            check_user_presence(env, channel)?;
+        }
         self.client_pin.clear_token_flags();
 
         let default_cred_protect = env.customization().default_cred_protect();
@@ -1191,9 +1194,9 @@ impl<E: Env> CtapState<E> {
             return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_OPTION);
         }
 
-        // The user verification bit depends on the existance of PIN auth, since we do
-        // not support internal UV. User presence is requested as an option.
-        let has_uv = pin_uv_auth_param.is_some();
+        let has_uv = pin_uv_auth_param.is_some() || options.uv;
+        // User presence is implicitly granted through internal UV.
+        let finished_up = pin_uv_auth_param.is_none() && options.uv;
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
@@ -1280,7 +1283,7 @@ impl<E: Env> CtapState<E> {
         let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
-        if options.up {
+        if options.up && !finished_up {
             check_user_presence(env, channel)?;
             self.client_pin.clear_token_flags();
         }
@@ -2499,6 +2502,107 @@ mod test {
             ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL);
         let signature_counter = env.persist().global_signature_counter().unwrap();
         check_assertion_response(get_assertion_response, vec![0x1D], signature_counter, None);
+    }
+
+    #[test]
+    fn test_process_get_assertion_cancelled() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        let make_credential_params = create_minimal_make_credential_parameters();
+        assert!(ctap_state
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+            .is_ok());
+
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: true,
+                uv: false,
+            },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL);
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_get_assertion_up_through_fingerprint() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        let make_credential_params = create_minimal_make_credential_parameters();
+        assert!(ctap_state
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+            .is_ok());
+
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        env.create_fingerprint().unwrap();
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions { up: true, uv: true },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL);
+        let expected_user = PublicKeyCredentialUserEntity {
+            user_id: vec![0x1D],
+            user_name: None,
+            user_display_name: None,
+            user_icon: None,
+        };
+        let signature_counter = env.persist().global_signature_counter().unwrap();
+        check_assertion_response_with_user(
+            get_assertion_response,
+            Some(expected_user),
+            0x05,
+            signature_counter,
+            None,
+            &[],
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "fingerprint"))]
+    fn test_process_get_assertion_no_uv_from_fingerprint() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        let make_credential_params = create_minimal_make_credential_parameters();
+        assert!(ctap_state
+            .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+            .is_ok());
+
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions { up: true, uv: true },
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL);
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION)
+        );
     }
 
     fn get_assertion_hmac_secret_params(

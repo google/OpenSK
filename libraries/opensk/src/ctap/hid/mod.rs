@@ -383,7 +383,7 @@ impl<E: Env> CtapHid<E> {
     }
 
     /// Helper function to parse a raw packet.
-    pub fn process_single_packet(packet: &HidPacket) -> (ChannelID, ProcessedPacket) {
+    pub fn process_single_packet(packet: &HidPacket) -> (ChannelID, ProcessedPacket<'_>) {
         let (&cid, rest) = array_refs![packet, 4, 60];
         if rest[0] & PACKET_TYPE_MASK != 0 {
             let cmd = rest[0] & !PACKET_TYPE_MASK;

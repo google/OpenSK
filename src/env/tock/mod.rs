@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use alloc::boxed::Box;
+#[cfg(feature = "fingerprint")]
+use alloc::vec;
 use alloc::vec::Vec;
 use clock::TockClock;
 use core::convert::TryFrom;
@@ -356,7 +358,7 @@ where
         &mut self,
         _timeout_ms: Option<usize>,
     ) -> CtapResult<(Ctap2EnrollFeedback, usize, Option<Vec<u8>>)> {
-        Ok((Ctap2EnrollFeedback::FpGood, 0, None))
+        Ok((Ctap2EnrollFeedback::FpGood, 0, Some(vec![0xF9])))
     }
 
     fn cancel_enrollment(&mut self) -> CtapResult<()> {
@@ -384,7 +386,7 @@ where
     }
 
     fn max_capture_samples_required_for_enroll(&self) -> usize {
-        6
+        1
     }
 }
 

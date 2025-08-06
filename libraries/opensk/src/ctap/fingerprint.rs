@@ -686,27 +686,31 @@ mod test {
     #[test]
     fn test_cancel_enrollment() {
         let mut env = TestEnv::default();
+        let mut enrollment_status = EnrollmentStatus::default();
         let sub_command_params = BioEnrollmentSubCommandParams {
             template_id: None,
             template_friendly_name: None,
             timeout_milliseconds: Some(10_000),
         };
-        let response = call_subcommand(
+        let response = call_subcommand_with_status(
             &mut env,
             BioEnrollmentSubCommand::EnrollBegin,
             Some(sub_command_params),
             true,
+            &mut enrollment_status,
         );
         assert!(response.is_ok());
 
         // Cancel is a no-op if the call before succeeds immediately.
-        let response = call_subcommand(
+        let response = call_subcommand_with_status(
             &mut env,
             BioEnrollmentSubCommand::CancelCurrentEnrollment,
             None,
             false,
+            &mut enrollment_status,
         );
         assert!(response.is_ok());
+        assert_eq!(enrollment_status, EnrollmentStatus::default());
     }
 
     #[test]

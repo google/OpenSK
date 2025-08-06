@@ -60,11 +60,6 @@ impl EnrollmentStatus {
         self.hardware_id.clone()
     }
 
-    /// Returns the preferred choice for the template ID returned to CTAP.
-    pub fn external_id(&self) -> Option<Vec<u8>> {
-        self.temporary_id.clone().or(self.hardware_id.clone())
-    }
-
     /// Checks whether the incoming template ID form CTAP is plausible.
     pub fn check_template_id(&self, template_id: &[u8]) -> bool {
         if let Some(existing_id) = &self.temporary_id {
@@ -204,6 +199,20 @@ fn check_fingerprint_loop<E: Env>(
     Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
 }
 
+/// Helper function to move the template ID into persistent storage.
+fn finish_enrollment<E: Env>(
+    env: &mut E,
+    enrollment_status: &mut EnrollmentStatus,
+) -> CtapResult<()> {
+    if let Some(template_id) = enrollment_status.internal_id() {
+        env.persist().store_template_id(template_id)?;
+    } else {
+        return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+    }
+    enrollment_status.clear();
+    Ok(())
+}
+
 /// Logic for the enrollBegin subcommand.
 fn enroll_begin<E: Env>(
     env: &mut E,
@@ -216,13 +225,19 @@ fn enroll_begin<E: Env>(
     let (sample_status, remaining_samples, hardware_id) =
         env.fingerprint().capture_sample(timeout_ms)?;
     // We need to remember if this is a fake ID or hardware ID to overwrite it later.
-    if let Some(template_id) = hardware_id {
+    let template_id = if let Some(template_id) = hardware_id {
         enrollment_status.insert_hardware_id(&template_id)?;
+        template_id
     } else {
-        enrollment_status.insert_temporary_id(&env.rng().gen_uniform_u8x32())?;
+        let random_id = env.rng().gen_uniform_u8x32().to_vec();
+        enrollment_status.insert_temporary_id(&random_id)?;
+        random_id
+    };
+    if remaining_samples == 0 {
+        finish_enrollment(env, enrollment_status)?;
     }
     let response = AuthenticatorBioEnrollmentResponse {
-        template_id: enrollment_status.external_id(),
+        template_id: Some(template_id),
         last_enroll_sample_status: Some(sample_status),
         remaining_samples: Some(remaining_samples as u64),
         ..Default::default()
@@ -248,12 +263,7 @@ fn enroll_capture_next_sample<E: Env>(
         enrollment_status.insert_hardware_id(&template_id)?;
     }
     if remaining_samples == 0 {
-        if let Some(template_id) = enrollment_status.internal_id() {
-            env.persist().store_template_id(template_id)?;
-        } else {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-        }
-        enrollment_status.clear();
+        finish_enrollment(env, enrollment_status)?;
     }
     let response = AuthenticatorBioEnrollmentResponse {
         last_enroll_sample_status: Some(sample_status),
@@ -501,11 +511,12 @@ mod test {
         };
     }
 
-    fn call_subcommand(
+    fn call_subcommand_with_status(
         env: &mut TestEnv,
         sub_command: BioEnrollmentSubCommand,
         sub_command_params: Option<BioEnrollmentSubCommandParams>,
         use_pin_uv: bool,
+        enrollment_status: &mut EnrollmentStatus,
     ) -> CtapResult<ResponseData> {
         let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
         let pin_uv_auth_token = [0x55; 32];
@@ -539,12 +550,167 @@ mod test {
             pin_uv_auth_param,
             get_modality: None,
         };
-        process_bio_enrollment(
+        process_bio_enrollment(env, &mut client_pin, params, enrollment_status)
+    }
+
+    fn call_subcommand(
+        env: &mut TestEnv,
+        sub_command: BioEnrollmentSubCommand,
+        sub_command_params: Option<BioEnrollmentSubCommandParams>,
+        use_pin_uv: bool,
+    ) -> CtapResult<ResponseData> {
+        call_subcommand_with_status(
             env,
-            &mut client_pin,
-            params,
+            sub_command,
+            sub_command_params,
+            use_pin_uv,
             &mut EnrollmentStatus::default(),
         )
+    }
+
+    #[test]
+    fn test_enrollment_cycle() {
+        let mut env = TestEnv::default();
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: None,
+            template_friendly_name: None,
+            timeout_milliseconds: Some(10_000),
+        };
+        let mut enrollment_status = EnrollmentStatus::default();
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollBegin,
+            Some(sub_command_params),
+            true,
+            &mut enrollment_status,
+        );
+        let (template_id, mut remaining_samples) = match response.unwrap() {
+            ResponseData::AuthenticatorBioEnrollment(Some(response)) => (
+                response.template_id.unwrap(),
+                response.remaining_samples.unwrap(),
+            ),
+            _ => panic!("Invalid response type"),
+        };
+
+        while remaining_samples > 0 {
+            let sub_command_params = BioEnrollmentSubCommandParams {
+                template_id: Some(template_id.clone()),
+                template_friendly_name: None,
+                timeout_milliseconds: Some(10_000),
+            };
+            let response = call_subcommand_with_status(
+                &mut env,
+                BioEnrollmentSubCommand::EnrollCaptureNextSample,
+                Some(sub_command_params),
+                true,
+                &mut enrollment_status,
+            );
+            match response.unwrap() {
+                ResponseData::AuthenticatorBioEnrollment(Some(response)) => {
+                    remaining_samples = response.remaining_samples.unwrap()
+                }
+                _ => panic!("Invalid response type"),
+            };
+        }
+        assert_eq!(enrollment_status, EnrollmentStatus::default());
+
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::EnumerateEnrollments,
+            None,
+            true,
+        );
+        // This is the actual hardware template ID that we stored.
+        let template_id = match response.unwrap() {
+            ResponseData::AuthenticatorBioEnrollment(Some(response)) => {
+                response.template_infos.unwrap().pop().unwrap().template_id
+            }
+            _ => panic!("Invalid response type"),
+        };
+
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(template_id.clone()),
+            template_friendly_name: Some(String::from("Name")),
+            timeout_milliseconds: None,
+        };
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::SetFriendlyName,
+            Some(sub_command_params),
+            true,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorBioEnrollment(None)));
+
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::EnumerateEnrollments,
+            None,
+            true,
+        );
+        match response.unwrap() {
+            ResponseData::AuthenticatorBioEnrollment(Some(response)) => {
+                let expected = AuthenticatorBioEnrollmentResponse {
+                    template_infos: Some(vec![TemplateInfo {
+                        template_id: template_id.clone(),
+                        template_friendly_name: Some(String::from("Name")),
+                    }]),
+                    ..Default::default()
+                };
+                assert_eq!(response, expected);
+            }
+            _ => panic!("Invalid response type"),
+        };
+
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(template_id),
+            template_friendly_name: None,
+            timeout_milliseconds: None,
+        };
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::RemoveEnrollment,
+            Some(sub_command_params),
+            true,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorBioEnrollment(None)));
+
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::EnumerateEnrollments,
+            None,
+            true,
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION));
+    }
+
+    #[test]
+    fn test_cancel_enrollment() {
+        let mut env = TestEnv::default();
+        let mut enrollment_status = EnrollmentStatus::default();
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: None,
+            template_friendly_name: None,
+            timeout_milliseconds: Some(10_000),
+        };
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollBegin,
+            Some(sub_command_params),
+            true,
+            &mut enrollment_status,
+        );
+        assert!(response.is_ok());
+
+        // Cancel is a no-op if the call before succeeds immediately.
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::CancelCurrentEnrollment,
+            None,
+            false,
+            &mut enrollment_status,
+        );
+        assert!(response.is_ok());
+        assert_eq!(enrollment_status, EnrollmentStatus::default());
     }
 
     #[test]
@@ -643,7 +809,6 @@ mod test {
         let mut status = EnrollmentStatus::default();
         status.insert_hardware_id(&[0x01]).unwrap();
         assert_eq!(status.internal_id(), Some(vec![0x01]));
-        assert_eq!(status.external_id(), Some(vec![0x01]));
         assert!(status.check_template_id(&[0x01]));
         assert!(!status.check_template_id(&[0x02]));
     }
@@ -654,7 +819,6 @@ mod test {
         status.insert_temporary_id(&[0x02]).unwrap();
         status.insert_hardware_id(&[0x01]).unwrap();
         assert_eq!(status.internal_id(), Some(vec![0x01]));
-        assert_eq!(status.external_id(), Some(vec![0x02]));
         assert!(!status.check_template_id(&[0x01]));
         assert!(status.check_template_id(&[0x02]));
     }
@@ -679,7 +843,6 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
         assert_eq!(status.internal_id(), Some(vec![0x01]));
-        assert_eq!(status.external_id(), Some(vec![0x01]));
         assert!(status.check_template_id(&[0x01]));
         assert!(!status.check_template_id(&[0x02]));
     }

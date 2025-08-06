@@ -129,3 +129,46 @@ impl From<persistent_store::StoreError> for Ctap2StatusCode {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_key_store_no_leak() {
+        let error1 = Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER;
+        let error2 = Ctap2StatusCode::CTAP2_ERR_INVALID_CBOR;
+        let error1 = Ctap2StatusCode::from(key_store::Error::from(error1));
+        let error2 = Ctap2StatusCode::from(key_store::Error::from(error2));
+        assert_eq!(error1, error2);
+    }
+
+    #[test]
+    #[cfg(feature = "persistent_store")]
+    fn test_persistent_store_errors() {
+        for (store_error, ctap_error) in [
+            (
+                persistent_store::StoreError::NoCapacity,
+                Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            ),
+            (
+                persistent_store::StoreError::NoLifetime,
+                Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
+            ),
+            (
+                persistent_store::StoreError::InvalidArgument,
+                Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+            ),
+            (
+                persistent_store::StoreError::InvalidStorage,
+                Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
+            ),
+            (
+                persistent_store::StoreError::StorageError,
+                Ctap2StatusCode::CTAP1_ERR_OTHER,
+            ),
+        ] {
+            assert_eq!(Ctap2StatusCode::from(store_error), ctap_error);
+        }
+    }
+}

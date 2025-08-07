@@ -24,8 +24,12 @@ enclosure!
 
 <img src="docs/img/enclosure.jpg" alt="OpenSK Enclosure" width="200"/>
 
-You can run OpenSK as a [Tock OS](https://tockos.org) application, or use the
-library to bring OpenSK to your own hardware.
+You can run OpenSK:
+
+- as a [Wasefire](https://github.com/google/wasefire/blob/main/examples/rust/opensk/README.md)
+  applet,
+- as a [Tock OS](https://tockos.org) application, or
+- as a library.
 
 You are viewing the branch for developers. New features are developed here.
 Go to the default branch for a more stable version of OpenSK.

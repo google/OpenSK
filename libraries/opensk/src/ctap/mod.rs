@@ -265,7 +265,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 
 // For MakeCredential and GetAssertion, the specification says:
 // If the uvRetries counter is 0, return CTAP2_ERR_PIN_BLOCKED. See:
-// https://github.com/fido-alliance/fido-2-specs/issues/1672
+// https://github.com/fido-alliance/fido-2-specs/issues/1672 (private)
 #[cfg(feature = "fingerprint")]
 fn map_uv_block_error(result: CtapResult<()>) -> CtapResult<()> {
     result.map_err(|e| match e {
@@ -856,10 +856,6 @@ impl<E: Env> CtapState<E> {
                 if options.uv {
                     #[cfg(not(feature = "fingerprint"))]
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-                    // The specification says:
-                    // If the uvRetries counter is 0, return CTAP2_ERR_PIN_BLOCKED.
-                    // But I assume this is a typo and should be UV_BLOCKED instead.
-                    // https://github.com/fido-alliance/fido-2-specs/issues/1672
                     #[cfg(feature = "fingerprint")]
                     map_uv_block_error(perform_built_in_uv(env, channel, true))?;
                     #[cfg(feature = "fingerprint")]
@@ -1237,8 +1233,6 @@ impl<E: Env> CtapState<E> {
                 if options.uv {
                     #[cfg(not(feature = "fingerprint"))]
                     return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-                    // Same error code ambiguity as in MakeCredential.
-                    // https://github.com/fido-alliance/fido-2-specs/issues/1672
                     #[cfg(feature = "fingerprint")]
                     map_uv_block_error(perform_built_in_uv(env, channel, true))?;
                     #[cfg(feature = "fingerprint")]

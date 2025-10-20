@@ -345,7 +345,7 @@ pub fn process_bio_enrollment<E: Env>(
     enrollment_status: &mut EnrollmentStatus,
 ) -> CtapResult<ResponseData> {
     // Enforcing modaility is not explicitly mentioned in the specification.
-    // https://github.com/fido-alliance/fido-2-specs/issues/1673
+    // https://github.com/fido-alliance/fido-2-specs/issues/1673 (private)
     // Let's be strict until we know which is correct.
     if params.sub_command.is_some() {
         let modality = ok_or_missing(params.modality)?;

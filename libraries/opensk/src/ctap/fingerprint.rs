@@ -138,7 +138,7 @@ pub fn perform_built_in_uv<E: Env>(
     internal_retry: bool,
 ) -> CtapResult<()> {
     if storage::uv_retries(env)? == 0 {
-        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
+        return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
     }
     env.fingerprint().check_fingerprint_init()?;
     let result = check_fingerprint_loop(env, channel, internal_retry);
@@ -180,7 +180,7 @@ fn check_fingerprint_loop<E: Env>(
                     FingerprintCheckError::NoMatch | FingerprintCheckError::Other => {
                         storage::decr_uv_retries(env)?;
                         if storage::uv_retries(env)? == 0 {
-                            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
+                            return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
                         }
                         retries -= 1;
                         if retries == 0 {
@@ -446,7 +446,7 @@ mod test {
         {
             assert_eq!(
                 perform_built_in_uv(&mut env, DUMMY_CHANNEL, true),
-                Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED)
+                Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
             );
         } else {
             assert_eq!(

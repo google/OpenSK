@@ -268,12 +268,9 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 // https://github.com/fido-alliance/fido-2-specs/issues/1672
 #[cfg(feature = "fingerprint")]
 fn map_uv_block_error(result: CtapResult<()>) -> CtapResult<()> {
-    result.map_err(|e| {
-        if e == Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED {
-            Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED
-        } else {
-            e
-        }
+    result.map_err(|e| match e {
+        Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED => Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED,
+        other => other,
     })
 }
 

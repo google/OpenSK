@@ -188,7 +188,7 @@ impl Partition {
         for range in &self.ranges {
             if offset < range.length() {
                 return if range.length() - offset >= length {
-                    Some(range.start() + offset)
+                    range.start().checked_add(offset)
                 } else {
                     None
                 };
@@ -377,5 +377,12 @@ mod tests {
         assert_eq!(&second_range, &all_ranges[1..]);
         let partial_range = partition.ranges_from(0x30000);
         assert_eq!(partial_range[0], ModRange::new(0x30000, 0x30000));
+    }
+
+    #[test]
+    fn partition_find_address_overflow() {
+        let mut partition = Partition::default();
+        partition.append(ModRange::new(usize::MAX - 100, 200));
+        assert_eq!(partition.find_address(150, 1), None);
     }
 }

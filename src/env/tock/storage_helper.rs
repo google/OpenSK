@@ -188,7 +188,7 @@ impl Partition {
         for range in &self.ranges {
             if offset < range.length() {
                 return if range.length() - offset >= length {
-                    range.start().checked_add(offset)
+                    Some(range.start().strict_add(offset))
                 } else {
                     None
                 };
@@ -380,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn partition_find_address_overflow() {
         let mut partition = Partition::default();
         partition.append(ModRange::new(usize::MAX - 100, 200));

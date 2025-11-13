@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(strict_overflow_ops)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

@@ -19,12 +19,6 @@ pub trait Aes256 {
     /// Creates a new key from its bytes.
     fn new(key: &[u8; AES_KEY_SIZE]) -> Self;
 
-    /// Encrypts a block in place.
-    fn encrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]);
-
-    /// Decrypts a block in place.
-    fn decrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]);
-
     /// Encrypts a message in place using CBC mode.
     ///
     /// # Panics

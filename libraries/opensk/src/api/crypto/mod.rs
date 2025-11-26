@@ -227,15 +227,6 @@ mod test {
     }
 
     #[test]
-    fn test_aes_encrypt_decrypt_block() {
-        let mut block = [0x55; AES_BLOCK_SIZE];
-        let aes = SoftwareAes256::new(&[0xAA; AES_KEY_SIZE]);
-        aes.encrypt_block(&mut block);
-        aes.decrypt_block(&mut block);
-        assert_eq!(block, [0x55; AES_BLOCK_SIZE]);
-    }
-
-    #[test]
     fn test_aes_encrypt_decrypt_cbc() {
         let mut message = [0x55; 2 * AES_BLOCK_SIZE];
         let iv = [0x11; AES_BLOCK_SIZE];

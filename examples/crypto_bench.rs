@@ -60,13 +60,6 @@ fn main() {
     });
     let aes_key = AesKey::<TockEnv<Syscalls>>::new(&[0; 32]);
 
-    bench(&mut console, &timer, "Aes256::encrypt_block", || {
-        aes_key.encrypt_block(&mut [0; 16]);
-    });
-    bench(&mut console, &timer, "Aes256::decrypt_block", || {
-        aes_key.decrypt_block(&mut [0; 16]);
-    });
-
     // CBC
     let mut blocks = Vec::new();
     for i in 0..6 {

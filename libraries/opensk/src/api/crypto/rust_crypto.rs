@@ -22,9 +22,7 @@ use crate::api::crypto::{
 };
 use crate::api::rng::Rng;
 use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{
-    BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, KeyInit, KeyIvInit,
-};
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use alloc::vec::Vec;
 #[cfg(test)]
 use core::cell::RefCell;
@@ -335,16 +333,6 @@ pub struct SoftwareAes256 {
 impl Aes256 for SoftwareAes256 {
     fn new(key: &[u8; AES_KEY_SIZE]) -> Self {
         SoftwareAes256 { key: *key }
-    }
-
-    fn encrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]) {
-        let cipher = aes::Aes256::new_from_slice(&self.key).unwrap();
-        cipher.encrypt_block(block.into());
-    }
-
-    fn decrypt_block(&self, block: &mut [u8; AES_BLOCK_SIZE]) {
-        let cipher = aes::Aes256::new_from_slice(&self.key).unwrap();
-        cipher.decrypt_block(block.into());
     }
 
     fn encrypt_cbc(&self, iv: &[u8; AES_BLOCK_SIZE], plaintext: &mut [u8]) {

@@ -22,8 +22,13 @@ customize it.
 You need `nrfutil` version 6. The [install manual](../install.md) has
 setup instructions.
 
-To flash the firmware, run:
+It is highly recommended you use --erase_storage first, especially if you have installed any other software onto your dongle.
 
+```shell
+./deploy.py --board=nrf52840_dongle_dfu --erase_storage
+```
+
+Then to flash the firmware:
 ```shell
 ./deploy.py --board=nrf52840_dongle_dfu --opensk --programmer=nordicdfu
 ```

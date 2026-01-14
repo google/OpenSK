@@ -16,7 +16,7 @@ use alloc::borrow::Cow;
 use core::marker::PhantomData;
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
-use persistent_store::{
+use wasefire_store::{
     BufferCorruptFunction, BufferOptions, BufferStorage, Storage, StorageIndex, StorageResult,
 };
 

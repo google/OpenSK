@@ -13,7 +13,6 @@ rust-version = "1.80"
 
 [dependencies]
 sk-cbor = { path = "../cbor" }
-persistent_store = { path = "../persistent_store", optional = true }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
@@ -27,6 +26,7 @@ hkdf = { version = "0.12.3", default-features = false, optional = true }
 aes = { version = "0.8.2", default-features = false, optional = true }
 cbc = { version = "0.1.2", default-features = false, optional = true }
 zeroize = { version = "1.5.7", features = ["derive"] }
+wasefire-store = { version = "=0.2.4", optional = true }
 
 [dependencies.p256]
 version = "0.13.0"
@@ -38,7 +38,7 @@ optional = true
 default = ["config_command", "with_ctap1"]
 config_command = []
 debug_ctap = []
-std = ["persistent_store/std", "rand?/std_rng", "config_command", "software_crypto"]
+std = ["wasefire-store/std", "rand?/std_rng", "config_command", "software_crypto"]
 with_ctap1 = []
 vendor_hid = []
 fuzz = ["arbitrary", "std"]

@@ -17,8 +17,8 @@ use alloc::boxed::Box;
 use core::marker::PhantomData;
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
-use persistent_store::{StorageError, StorageResult};
 use platform::DefaultConfig;
+use wasefire_store::{StorageError, StorageResult};
 
 const PARTITION_LENGTH: usize = 0x41000;
 const METADATA_LENGTH: usize = 0x1000;

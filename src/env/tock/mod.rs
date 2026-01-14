@@ -44,11 +44,11 @@ use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceWa
 use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use opensk::ctap::Channel;
 use opensk::env::Env;
-#[cfg(feature = "std")]
-use persistent_store::BufferOptions;
-use persistent_store::{StorageResult, Store};
 use platform::DefaultConfig;
 use rand_core::{impls, CryptoRng, Error, RngCore};
+#[cfg(feature = "std")]
+use wasefire_store::BufferOptions;
+use wasefire_store::{StorageResult, Store};
 
 #[cfg(feature = "std")]
 mod buffer_upgrade_storage;

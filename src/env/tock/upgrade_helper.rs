@@ -24,7 +24,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use libtock_platform as platform;
 use libtock_platform::Syscalls;
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
-use persistent_store::{StorageError, StorageResult};
+use wasefire_store::{StorageError, StorageResult};
 
 pub const METADATA_SIGN_OFFSET: usize = 0x800;
 

@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 use core::iter::Iterator;
-use persistent_store::{StorageError, StorageResult};
+use wasefire_store::{StorageError, StorageResult};
 
 /// Reads a slice from a list of slices.
 ///

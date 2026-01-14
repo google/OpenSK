@@ -24,8 +24,8 @@ use libtock_drivers::result::FlexUnwrap;
 use libtock_leds::Leds;
 use libtock_platform as platform;
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-use persistent_store::{Storage, StorageIndex};
 use platform::DefaultConfig;
+use wasefire_store::{Storage, StorageIndex};
 
 stack_size! {0x800}
 set_main! {main}

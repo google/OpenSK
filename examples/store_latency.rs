@@ -28,7 +28,7 @@ use libtock_drivers::result::FlexUnwrap;
 use libtock_drivers::timer::{self, Duration, Timer, Timestamp};
 use libtock_platform::DefaultConfig;
 use libtock_runtime::{set_main, stack_size, TockSyscalls};
-use persistent_store::{Storage as _, Store};
+use wasefire_store::{Storage as _, Store};
 
 stack_size! {0x800}
 set_main! {main}

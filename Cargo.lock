@@ -142,10 +142,10 @@ dependencies = [
  "opensk",
  "openssl",
  "p256",
- "persistent_store",
  "rand_core",
  "sk-cbor",
  "uuid",
+ "wasefire-store",
 ]
 
 [[package]]
@@ -424,13 +424,13 @@ dependencies = [
  "hmac",
  "openssl",
  "p256",
- "persistent_store",
  "rand",
  "rand_core",
  "sha2",
  "sk-cbor",
  "subtle",
  "uuid",
+ "wasefire-store",
  "zeroize",
 ]
 
@@ -483,10 +483,6 @@ dependencies = [
  "primeorder",
  "sha2",
 ]
-
-[[package]]
-name = "persistent_store"
-version = "0.1.0"
 
 [[package]]
 name = "pkcs8"
@@ -711,6 +707,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "wasefire-store"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49afdab5206771f6d7ad85b556fcd6255004485b704f0f5c084335c5fae3238"
 
 [[package]]
 name = "wasi"

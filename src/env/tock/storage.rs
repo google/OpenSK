@@ -26,7 +26,7 @@ use libtock_platform as platform;
 use libtock_platform::Syscalls;
 use opensk::api::crypto::sha256::Sha256;
 use opensk::env::Sha;
-use persistent_store::{Storage, StorageError, StorageIndex, StorageResult};
+use wasefire_store::{Storage, StorageError, StorageIndex, StorageResult};
 
 const UPGRADE_PUBLIC_KEY: &[u8; 65] =
     include_bytes!(concat!(env!("OUT_DIR"), "/opensk_upgrade_pubkey.bin"));

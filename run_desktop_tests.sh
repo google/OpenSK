@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2019-2023 Google LLC
+# Copyright 2019-2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,8 +44,6 @@ cargo fmt --manifest-path libraries/opensk/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/cbor/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
-cargo fmt --manifest-path libraries/persistent_store/Cargo.toml -- --check
-cargo fmt --manifest-path libraries/persistent_store/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path bootloader/Cargo.toml -- --check
 
 echo "Checking Python formatting..."
@@ -58,13 +56,10 @@ cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -
 (cd libraries/opensk && cargo clippy --features std -- -D warnings)
 (cd libraries/opensk && cargo clippy --all-features -- -D warnings)
 (cd libraries/cbor && cargo clippy -- -D warnings)
-# Uncomment when persistent store is fixed:
-# (cd libraries/persistent_store && cargo clippy --features std -- -D warnings)
 
 echo "Checking fuzz targets..."
 (cd libraries/opensk && cargo fuzz check)
 (cd libraries/cbor && cargo fuzz check)
-(cd libraries/persistent_store && cargo fuzz check)
 
 echo "Building sha256sum tool..."
 cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
@@ -84,7 +79,6 @@ echo "Running other unit tests..."
 cargo test --lib --tests --bins --benches --features std
 cargo test --lib --tests --bins --benches --all-features
 cargo test --manifest-path libraries/cbor/Cargo.toml
-cargo test --manifest-path libraries/persistent_store/Cargo.toml --features std
 
 echo "Checking that boards build properly..."
 make -C third_party/tock/boards/nordic/nrf52840dk_opensk

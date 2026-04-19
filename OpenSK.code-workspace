@@ -3,18 +3,6 @@
                 {
                         "name": "OpenSK",
                         "path": "."
-                },
-                {
-                        "name": "tock",
-                        "path": "third_party/tock"
-                },
-                {
-                        "name": "libtock-rs",
-                        "path": "third_party/libtock-rs"
-                },
-                {
-                        "name": "libtock-drivers",
-                        "path": "third_party/libtock-drivers"
                 }
         ],
         "settings": {

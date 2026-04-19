@@ -16,27 +16,19 @@
 # Ensure the script doesn't fail on Github workflows
 export TERM=${TERM:-vt100}
 done_text="$(tput bold)DONE.$(tput sgr0)"
-PY_VENV_NAME=py_virtual_env
-PYTHON="$PY_VENV_NAME"/bin/python
-PIP="$PY_VENV_NAME"/bin/pip
 
 set -e
-
-# Ensure the submodules are pulled and up-to-date, and apply patches
-./setup-submodules.sh
 
 # Check that rustup and pip3 are installed
 check_command () {
   if ! which "$1" >/dev/null
   then
-    echo "Missing $1 command.$2"
+    echo "Missing $1 command. Follow the steps under $2 to install it."
     exit 1
   fi
 }
-check_command rustup " Follow the steps under https://rustup.rs/ to install it."
-python3 -m venv "$PY_VENV_NAME"
-"$PYTHON" -m pip install --upgrade pip setuptools wheel
-check_command "$PIP"
+check_command rustup "https://rustup.rs/"
+check_command uv "https://docs.astral.sh/uv/getting-started/installation/"
 
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh
@@ -47,10 +39,5 @@ then
 fi
 
 rustup show
-"$PIP" install --upgrade -r requirements.txt
-
-# Install dependency to create applications.
-mkdir -p elf2tab
 rustup install stable
 cargo +stable install cargo-audit
-cargo +stable install elf2tab --version 0.10.2 --root elf2tab/

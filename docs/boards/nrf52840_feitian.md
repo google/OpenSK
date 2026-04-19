@@ -2,7 +2,7 @@
 
 ## Feitian OpenSK USB Dongle
 
-### Flashing using DFU
+### Flashing
 
 This board is similar in hardware to the Nordic nRF52840 Dongle. You can use DFU
 to flash it, instructions to enter DFU mode depend on the version of your
@@ -13,8 +13,8 @@ hardware. See
 *   In V2, push and hold the user button for more than 10 seconds after
     connecting your device.
 
-Afterwards, you can flash your Feitian OpenSK using DFU following the
-[instructions for the Nordic nRF52840 Dongle](nrf52840_dongle.md#Flashing-using-DFU).
+Afterwards, you can flash your Feitian OpenSK following the
+[instructions for the Nordic nRF52840 Dongle](nrf52840_dongle.md#Flashing).
 
 ### Buttons and LEDs
 

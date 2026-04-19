@@ -144,27 +144,27 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "persistent_store")]
-    fn test_persistent_store_errors() {
+    #[cfg(feature = "wasefire-store")]
+    fn test_wasefire_store_errors() -> () {
         for (store_error, ctap_error) in [
             (
-                persistent_store::StoreError::NoCapacity,
+                wasefire_store::StoreError::NoCapacity,
                 Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
             ),
             (
-                persistent_store::StoreError::NoLifetime,
+                wasefire_store::StoreError::NoLifetime,
                 Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL,
             ),
             (
-                persistent_store::StoreError::InvalidArgument,
+                wasefire_store::StoreError::InvalidArgument,
                 Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
             ),
             (
-                persistent_store::StoreError::InvalidStorage,
+                wasefire_store::StoreError::InvalidStorage,
                 Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
             ),
             (
-                persistent_store::StoreError::StorageError,
+                wasefire_store::StoreError::StorageError,
                 Ctap2StatusCode::CTAP1_ERR_OTHER,
             ),
         ] {

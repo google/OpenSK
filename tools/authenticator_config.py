@@ -26,29 +26,29 @@ from tools.configure import fatal, get_opensk_devices, info
 
 
 def main(args):
-  colorama.init()
+    colorama.init()
 
-  devices = get_opensk_devices(False)
-  if not devices:
-    fatal("No devices found.")
+    devices = get_opensk_devices(False)
+    if not devices:
+        fatal("No devices found.")
 
-  for authenticator in devices:
-    if authenticator.device.capabilities & hid.CAPABILITY.WINK:
-      authenticator.device.wink()
-    aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
-    info(f"Config of device AAGUID {aaguid} ({authenticator.device}).")
+    for authenticator in devices:
+        if authenticator.device.capabilities & hid.CAPABILITY.WINK:
+            authenticator.device.wink()
+        aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
+        info(f"Config of device AAGUID {aaguid} ({authenticator.device}).")
 
-    config = Config(authenticator)
-    if args.ep:
-      info("Enable EP...")
-      config.enable_enterprise_attestation()
-    if args.always_uv:
-      info("Toggle AlwaysUv...")
-      config.toggle_always_uv()
+        config = Config(authenticator)
+        if args.ep:
+            info("Enable EP...")
+            config.enable_enterprise_attestation()
+        if args.always_uv:
+            info("Toggle AlwaysUv...")
+            config.toggle_always_uv()
 
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("--ep", action=argparse.BooleanOptionalAction)
-  parser.add_argument("--always-uv", action=argparse.BooleanOptionalAction)
-  main(parser.parse_args())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ep", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--always-uv", action=argparse.BooleanOptionalAction)
+    main(parser.parse_args())

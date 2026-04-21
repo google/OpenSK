@@ -11,16 +11,19 @@ jobs:
   coveralls:
     name: OpenSK code coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: "true"
-      - name: Install Rust toolchain
-        run: rustup show
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - name: Set up OpenSK
         run: ./setup.sh
       - name: Install llvm tools

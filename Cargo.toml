@@ -37,7 +37,6 @@ path = "libraries/opensk"
 default-features = false
 
 [features]
-default = ["config-command", "ctap1"]
 config-command = ["opensk/config_command"]
 ctap1 = ["opensk/with_ctap1"]
 debug = ["opensk/debug_ctap"]

@@ -1,4 +1,3 @@
-#!py_virtual_env/bin/python3
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -87,47 +86,41 @@ def get_private_key(data, password=None):
 
 def main(args):
     colorama.init()
-    # We need either both the certificate and the key or none
-    if bool(args.priv_key) ^ bool(args.certificate):
-        fatal("Certificate and private key must be set together or both omitted.")
 
-    cbor_data = {1: args.lock}
+    priv_key = get_private_key(args.priv_key.read())
+    if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
+        fatal("Private key must be an Elliptic Curve one.")
+    if not isinstance(priv_key.curve, ec.SECP256R1):
+        fatal("Private key must use Secp256r1 curve.")
+    if priv_key.key_size != 256:
+        fatal("Private key must be 256 bits long.")
+    info("Private key is valid.")
 
-    if args.priv_key:
-        cbor_data[1] = args.lock
-        priv_key = get_private_key(args.priv_key.read())
-        if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
-            fatal("Private key must be an Elliptic Curve one.")
-        if not isinstance(priv_key.curve, ec.SECP256R1):
-            fatal("Private key must use Secp256r1 curve.")
-        if priv_key.key_size != 256:
-            fatal("Private key must be 256 bits long.")
-        info("Private key is valid.")
+    cert = x509.load_pem_x509_certificate(args.certificate.read())
+    # Some sanity/validity checks
+    now = datetime.datetime.utcnow()
+    if cert.not_valid_before > now:
+        fatal("Certificate validity starts in the future.")
+    if cert.not_valid_after <= now:
+        fatal("Certificate expired.")
+    pub_key = cert.public_key()
+    if not isinstance(pub_key, ec.EllipticCurvePublicKey):
+        fatal("Certificate public key must be an Elliptic Curve one.")
+    if not isinstance(pub_key.curve, ec.SECP256R1):
+        fatal("Certificate public key must use Secp256r1 curve.")
+    if pub_key.key_size != 256:
+        fatal("Certificate public key must be 256 bits long.")
+    if pub_key.public_numbers() != priv_key.public_key().public_numbers():
+        fatal("Certificate public doesn't match with the private key.")
+    info("Certificate is valid.")
 
-        cert = x509.load_pem_x509_certificate(args.certificate.read())
-        # Some sanity/validity checks
-        now = datetime.datetime.utcnow()
-        if cert.not_valid_before > now:
-            fatal("Certificate validity starts in the future.")
-        if cert.not_valid_after <= now:
-            fatal("Certificate expired.")
-        pub_key = cert.public_key()
-        if not isinstance(pub_key, ec.EllipticCurvePublicKey):
-            fatal("Certificate public key must be an Elliptic Curve one.")
-        if not isinstance(pub_key.curve, ec.SECP256R1):
-            fatal("Certificate public key must use Secp256r1 curve.")
-        if pub_key.key_size != 256:
-            fatal("Certificate public key must be 256 bits long.")
-        if pub_key.public_numbers() != priv_key.public_key().public_numbers():
-            fatal("Certificate public doesn't match with the private key.")
-        info("Certificate is valid.")
-
-        cbor_data[2] = {
-            1: cert.public_bytes(serialization.Encoding.DER),
-            2: priv_key.private_numbers().private_value.to_bytes(
-                length=32, byteorder="big", signed=False
-            ),
-        }
+    cbor_data = {}
+    cbor_data[2] = {
+        1: cert.public_bytes(serialization.Encoding.DER),
+        2: priv_key.private_numbers().private_value.to_bytes(
+            length=32, byteorder="big", signed=False
+        ),
+    }
 
     patcher = None
     if args.use_vendor_hid:
@@ -148,7 +141,7 @@ def main(args):
             authenticator.device.wink()
         aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
         info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
-        if args.lock or args.priv_key:
+        if args.priv_key:
             info("Please touch the device to confirm...")
         try:
             result = authenticator.send_cbor(
@@ -159,8 +152,6 @@ def main(args):
             responses.append(status)
             info(f"Certificate: {'Present' if result[1] else 'Missing'}")
             info(f"Private Key: {'Present' if result[2] else 'Missing'}")
-            if args.lock:
-                info("Device is now locked down!")
         except ctap.CtapError as ex:
             if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
                 error("Failed to configure OpenSK (unsupported command).")
@@ -198,7 +189,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--certificate",
         type=argparse.FileType("rb"),
-        default=None,
+        required=True,
         metavar="PEM_FILE",
         dest="certificate",
         help=(
@@ -209,21 +200,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--private-key",
         type=argparse.FileType("rb"),
-        default=None,
+        required=True,
         metavar="PEM_FILE",
         dest="priv_key",
         help=("PEM file containing the private key associated with the certificate."),
-    )
-    parser.add_argument(
-        "--lock-device",
-        default=False,
-        action="store_true",
-        dest="lock",
-        help=(
-            "Locks the device (i.e. bootloader and JTAG access). "
-            "This command can fail if the certificate or the private key "
-            "haven't been both programmed yet."
-        ),
     )
     parser.add_argument(
         "--vendor-hid",

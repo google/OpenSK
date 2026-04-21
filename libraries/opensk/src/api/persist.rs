@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod keys;
+pub mod keys;
 
 use crate::ctap::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{extract_byte_string, extract_map, ok_or_missing};

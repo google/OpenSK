@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opensk::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
+use opensk::api::customization::{AAGUID_LENGTH, CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use opensk::ctap::status_code::Ctap2StatusCode;
 use opensk::env::Env;
 use wasefire::Error;
@@ -28,11 +28,13 @@ mod rng;
 mod user_presence;
 mod write;
 
+pub const AAGUID: &[u8; AAGUID_LENGTH] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
+
 pub(crate) fn init() -> WasefireEnv {
     WasefireEnv {
         customization: CustomizationImpl {
-            #[cfg(feature = "ctap1")]
-            use_batch_attestation: true,
+            aaguid: AAGUID,
             ..DEFAULT_CUSTOMIZATION
         },
         user_presence: user_presence::init(),

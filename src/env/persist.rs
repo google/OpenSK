@@ -15,40 +15,13 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use opensk::api::persist::{Persist, PersistIter};
+use opensk::api::persist;
+use opensk::api::persist::{Attestation, AttestationId, Persist, PersistIter};
 use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
+use wasefire::crypto::ecdsa::{P256, Private};
 use wasefire::error::{Code, Error, Space};
 
 use crate::env::WasefireEnv;
-
-#[cfg(feature = "ctap1")]
-pub(crate) fn init(ctap: &mut opensk::Ctap<WasefireEnv>) {
-    use opensk::api::persist::Attestation;
-    use opensk::api::persist::AttestationId::Batch;
-    use opensk::env::Env;
-    use wasefire::crypto::ecdsa::{P256, Private};
-
-    if ctap
-        .env()
-        .persist()
-        .get_attestation(Batch)
-        .unwrap()
-        .is_some()
-    {
-        return;
-    }
-    let private = Private::<P256>::generate().unwrap();
-    let wrapped_private_key = private.export().unwrap().into_vec();
-    // It seems like nobody checks the certificate.
-    let attestation = Attestation {
-        wrapped_private_key,
-        certificate: Vec::new(),
-    };
-    ctap.env()
-        .persist()
-        .set_attestation(Batch, Some(&attestation))
-        .unwrap();
-}
 
 impl Persist for WasefireEnv {
     fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>> {
@@ -68,6 +41,41 @@ impl Persist for WasefireEnv {
     fn iter(&self) -> CtapResult<PersistIter<'_>> {
         let keys = wasefire::store::keys().map_err(convert)?;
         Ok(Box::new(keys.into_iter().map(|x| Ok(x as usize))))
+    }
+
+    fn get_attestation(&self, id: AttestationId) -> CtapResult<Option<Attestation>> {
+        let stored_id_bytes = self.find(persist::keys::ATTESTATION_ID)?;
+        if let Some(bytes) = stored_id_bytes {
+            if bytes.len() != 1 {
+                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+            }
+            if id != AttestationId::try_from(bytes[0])? {
+                return Ok(None);
+            }
+        } else {
+            // Return a random batch attestation key when none was set.
+            if id == AttestationId::Batch {
+                let private = Private::<P256>::generate().unwrap();
+                let wrapped_private_key = private.export().unwrap().into_vec();
+                // Parties that don't check the batch key seem to ignore the certificate.
+                let attestation = Attestation {
+                    wrapped_private_key,
+                    certificate: Vec::new(),
+                };
+                return Ok(Some(attestation));
+            }
+        }
+        let wrapped_private_key = self.find(persist::keys::ATTESTATION_PRIVATE_KEY)?;
+        let certificate = self.find(persist::keys::ATTESTATION_CERTIFICATE)?;
+        let (wrapped_private_key, certificate) = match (wrapped_private_key, certificate) {
+            (Some(x), Some(y)) => (x, y),
+            (None, None) => return Ok(None),
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        };
+        Ok(Some(Attestation {
+            wrapped_private_key,
+            certificate,
+        }))
     }
 }
 

@@ -1,7 +1,6 @@
 __pycache__
 target/
 /build/
-/py_virtual_env/
 
 # Prevent people from commiting sensitive files.
 /crypto_data/

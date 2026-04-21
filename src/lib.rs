@@ -34,8 +34,6 @@ fn main() -> ! {
     let mut wink: Option<blink::Blink> = None;
     #[cfg(feature = "ctap1")]
     let mut u2f: Option<touch::Touch> = None;
-    #[cfg(feature = "ctap1")]
-    env::persist::init(&mut opensk_ctap);
     debug!("OpenSK initialized");
     loop {
         match (wink.is_some(), opensk_ctap.should_wink()) {

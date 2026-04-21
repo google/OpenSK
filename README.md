@@ -27,12 +27,11 @@ enclosure!
 You can run OpenSK:
 
 - as a [Wasefire](https://github.com/google/wasefire/blob/main/examples/rust/opensk/README.md)
-  applet,
-- as a [Tock OS](https://tockos.org) application, or
+  applet, or
 - as a library.
 
 You are viewing the branch for developers. New features are developed here.
-Go to the default branch for a more stable version of OpenSK.
+The numbered branches are older CTAP versions.
 
 ### FIDO2
 
@@ -63,23 +62,18 @@ In the meantime, we use [RustCrypto](https://github.com/RustCrypto).
 
 You will need one the following supported boards:
 
-*   [Nordic nRF52840-DK](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-DK)
-    development kit. This board is more convenient for development and debug
-    scenarios as the JTAG probe is already on the board.
-*   [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
-    to have a more practical form factor.
-*   [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
-*   [Feitian OpenSK dongle](https://feitiantech.github.io/OpenSK_USB/).
+- [Nordic nRF52840-DK](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-DK)
+  development kit. This board is more convenient for development and debug
+  scenarios as the JTAG probe is already on the board.
+- [Nordic nRF52840 Dongle](https://www.nordicsemi.com/Software-and-tools/Development-Kits/nRF52840-Dongle)
+  to have a more practical form factor.
+- [Makerdiary nRF52840-MDK USB dongle](https://wiki.makerdiary.com/nrf52840-mdk/).
+- [Feitian OpenSK dongle](https://feitiantech.github.io/OpenSK_USB/).
 
 ## Installation
 
-To install OpenSK,
-1.  follow the [general setup steps](docs/install.md),
-1.  then continue with the instructions for your specific hardware:
-	* [Nordic nRF52840-DK](docs/boards/nrf52840dk.md)
-	* [Nordic nRF52840 Dongle](docs/boards/nrf52840_dongle.md)
-	* [Makerdiary nRF52840-MDK USB dongle](docs/boards/nrf52840_mdk.md)
-	* [Feitian OpenSK dongle](docs/boards/nrf52840_feitian.md)
+To install OpenSK first follow the [general setup steps](docs/install.md).
+It links specific instructions for the hardware you want to use at the end.
 
 To test whether the installation was successful, visit a
 [demo website](https://webauthn.io/) and try to register and login.
@@ -97,7 +91,7 @@ Secure Cryptographic Implementation workshop 2023 and won the best paper award.
 <details>
 <summary>Bibtex reference</summary>
 
-```
+```bibtex
 @InProceedings{Ghinea2023hybrid,
     author= {Diana Ghinea and Fabian Kaczmarczyck and Jennifer Pullman and Julien Cretin and Rafael Misoczki and Stefan Kölbl and Luca Invernizzi and Elie Bursztein and Jean-Michel Picod},
     title=  {{Hybrid Post-Quantum Signatures in Hardware Security Keys}},

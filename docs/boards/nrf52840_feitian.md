@@ -9,9 +9,9 @@ to flash it, instructions to enter DFU mode depend on the version of your
 hardware. See
 [Feitian's instructions](https://feitiantech.github.io/OpenSK_USB/). In short:
 
-*   In V1, use a paperclip to press the Reset button through the tiny hole.
-*   In V2, push and hold the user button for more than 10 seconds after
-    connecting your device.
+- In V1, use a paperclip to press the Reset button through the tiny hole.
+- In V2, push and hold the user button for more than 10 seconds after
+  connecting your device.
 
 Afterwards, you can flash your Feitian OpenSK following the
 [instructions for the Nordic nRF52840 Dongle](nrf52840_dongle.md#Flashing).

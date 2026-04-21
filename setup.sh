@@ -30,6 +30,10 @@ check_command () {
 check_command rustup "https://rustup.rs/"
 check_command uv "https://docs.astral.sh/uv/getting-started/installation/"
 
+git submodule update --init
+
+(cd third_party/wasefire/ && ./scripts/setup.sh)
+
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh
 generate_pki N

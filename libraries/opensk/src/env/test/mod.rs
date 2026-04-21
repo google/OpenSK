@@ -29,8 +29,8 @@ use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::status_code::CtapResult;
 use crate::env::Env;
 use customization::TestCustomization;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::sync::{Arc, Mutex};
 use wasefire_store::{BufferOptions, BufferStorage, Store};
 

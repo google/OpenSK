@@ -16,12 +16,12 @@ use super::cbor_read;
 #[cfg(feature = "fingerprint")]
 use super::data_formats::extract_bool;
 use super::data_formats::{
-    extract_array, extract_byte_string, extract_map, extract_text_string, extract_unsigned,
-    ok_or_missing, ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
+    ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
     CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
     MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialUserEntity,
+    PublicKeyCredentialUserEntity, extract_array, extract_byte_string, extract_map,
+    extract_text_string, extract_unsigned, ok_or_missing,
 };
 #[cfg(feature = "config_command")]
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
@@ -661,11 +661,11 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
 
 #[cfg(test)]
 mod test {
+    use super::super::ES256_CRED_PARAM;
     use super::super::data_formats::{
         AuthenticatorTransport, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
         PublicKeyCredentialUserEntity,
     };
-    use super::super::ES256_CRED_PARAM;
     use super::*;
     #[cfg(feature = "fingerprint")]
     use cbor::cbor_int;

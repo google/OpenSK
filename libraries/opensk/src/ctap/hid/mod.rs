@@ -23,9 +23,9 @@ use self::receive::MessageAssembler;
 pub use self::send::HidPacketIterator;
 use super::status_code::Ctap2StatusCode;
 use crate::api::clock::Clock;
+use crate::env::Env;
 #[cfg(test)]
 use crate::env::test::TestEnv;
-use crate::env::Env;
 use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};

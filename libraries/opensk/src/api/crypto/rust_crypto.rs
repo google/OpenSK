@@ -17,8 +17,8 @@ use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::hmac256::Hmac256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::crypto::{
-    ec_signing, ecdh, Crypto, AES_BLOCK_SIZE, AES_KEY_SIZE, EC_FIELD_SIZE, HASH_SIZE,
-    HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE,
+    AES_BLOCK_SIZE, AES_KEY_SIZE, Crypto, EC_FIELD_SIZE, HASH_SIZE, HMAC_KEY_SIZE,
+    TRUNCATED_HMAC_SIZE, ec_signing, ecdh,
 };
 use crate::api::rng::Rng;
 use aes::cipher::generic_array::GenericArray;
@@ -26,8 +26,8 @@ use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use alloc::vec::Vec;
 #[cfg(test)]
 use core::cell::RefCell;
-use hmac::digest::FixedOutput;
 use hmac::Mac;
+use hmac::digest::FixedOutput;
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer as _};
 use p256::elliptic_curve::sec1::ToEncodedPoint;

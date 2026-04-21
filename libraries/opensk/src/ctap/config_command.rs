@@ -127,8 +127,8 @@ mod test {
     use crate::api::customization::Customization;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
-    use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn test_process_enable_enterprise_attestation() {

@@ -359,16 +359,16 @@ pub fn process_credential_management<E: Env>(
 
 #[cfg(test)]
 mod test {
+    use super::super::CtapState;
     use super::super::data_formats::{PinUvAuthProtocol, PublicKeyCredentialType};
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
-    use super::super::CtapState;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::persist::Persist;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
-    use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+    use crate::env::test::TestEnv;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 

@@ -8,8 +8,7 @@ authors = [
   "Julien Cretin <cretin@google.com>",
 ]
 license = "Apache-2.0"
-edition = "2018"
-rust-version = "1.80"
+edition = "2024"
 
 [dependencies]
 sk-cbor = { path = "../cbor" }

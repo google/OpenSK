@@ -14,16 +14,16 @@
 
 use super::command::AuthenticatorClientPinParameters;
 use super::data_formats::{
-    ok_or_missing, ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, PinUvAuthProtocol,
+    ClientPinSubCommand, CoseKey, GetAssertionHmacSecretInput, PinUvAuthProtocol, ok_or_missing,
 };
 #[cfg(feature = "fingerprint")]
 use super::fingerprint::perform_built_in_uv;
-use super::pin_protocol::{verify_pin_uv_auth_token, PinProtocol, SharedSecret};
+use super::pin_protocol::{PinProtocol, SharedSecret, verify_pin_uv_auth_token};
 use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::secret::Secret;
 use super::status_code::{Ctap2StatusCode, CtapResult};
 use super::token_state::PinUvAuthTokenState;
-use super::{storage, Channel};
+use super::{Channel, storage};
 #[cfg(test)]
 use crate::api::crypto::ecdh::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
@@ -707,8 +707,8 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crate::api::crypto::HASH_SIZE;
-    use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+    use crate::env::test::TestEnv;
     use alloc::vec;
 
     // Dummy channel to send keepalives on.
@@ -1865,9 +1865,11 @@ mod test {
         set_standard_pin(&mut env);
         params.permissions = Some(0xFF);
 
-        assert!(client_pin
-            .process_command(&mut env, params, DUMMY_CHANNEL)
-            .is_ok());
+        assert!(
+            client_pin
+                .process_command(&mut env, params, DUMMY_CHANNEL)
+                .is_ok()
+        );
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(
                 client_pin
@@ -1919,9 +1921,11 @@ mod test {
                 .map(|p| p & !(PinPermission::AuthenticatorConfiguration as u8));
         }
 
-        assert!(client_pin
-            .process_command(&mut env, params, DUMMY_CHANNEL)
-            .is_ok());
+        assert!(
+            client_pin
+                .process_command(&mut env, params, DUMMY_CHANNEL)
+                .is_ok()
+        );
         for permission in PinPermission::into_enum_iter() {
             assert_eq!(
                 client_pin

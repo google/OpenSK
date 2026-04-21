@@ -14,11 +14,11 @@
 
 use crate::api::clock::Clock;
 use crate::api::connection::HidConnection;
+use crate::api::crypto::Crypto;
 use crate::api::crypto::ec_signing::Ecdsa;
 #[cfg(feature = "ed25519")]
 use crate::api::crypto::ec_signing::Ed25519;
 use crate::api::crypto::ecdh::Ecdh;
-use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
 #[cfg(feature = "fingerprint")]
 use crate::api::fingerprint::Fingerprint;

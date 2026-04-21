@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::HASH_SIZE;
 use crate::api::crypto::aes256::Aes256;
 use crate::api::crypto::hmac256::Hmac256;
-use crate::api::crypto::HASH_SIZE;
 use crate::api::persist::Persist;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
@@ -194,10 +194,10 @@ impl<T: Helper> KeyStore for T {
             _ => return Ok(None),
         };
 
-        if let Some(credential_source) = &credential_source {
-            if rp_id_hash != credential_source.rp_id_hash {
-                return Ok(None);
-            }
+        if let Some(credential_source) = &credential_source
+            && rp_id_hash != credential_source.rp_id_hash
+        {
+            return Ok(None);
         }
         Ok(credential_source)
     }
@@ -266,7 +266,7 @@ fn add_padding(data: &mut Vec<u8>) -> Result<(), Error> {
         return Err(Error);
     }
     let pad_length = MAX_PADDING_LENGTH - (data.len() as u8 - 1);
-    data.extend(core::iter::repeat(pad_length).take(pad_length as usize));
+    data.extend(core::iter::repeat_n(pad_length, pad_length as usize));
     Ok(())
 }
 

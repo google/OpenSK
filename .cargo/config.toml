@@ -1,0 +1,2 @@
+[unstable]
+panic-immediate-abort = true

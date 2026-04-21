@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use super::status_code::Ctap2StatusCode;
+use crate::api::crypto::EC_FIELD_SIZE;
 use crate::api::crypto::ec_signing::EcPublicKey;
 #[cfg(feature = "ed25519")]
 use crate::api::crypto::ec_signing::EdPublicKey;
 use crate::api::crypto::ecdh::PublicKey as _;
-use crate::api::crypto::EC_FIELD_SIZE;
 use crate::ctap::status_code::CtapResult;
 #[cfg(feature = "ed25519")]
 use crate::env::Ed25519Pk;
@@ -317,10 +317,10 @@ impl TryFrom<cbor::Value> for MakeCredentialExtensions {
         let min_pin_length = min_pin_length.map_or(Ok(false), extract_bool)?;
         let cred_blob = cred_blob.map(extract_byte_string).transpose()?;
         let large_blob_key = large_blob_key.map(extract_bool).transpose()?;
-        if let Some(large_blob_key) = large_blob_key {
-            if !large_blob_key {
-                return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-            }
+        if let Some(large_blob_key) = large_blob_key
+            && !large_blob_key
+        {
+            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
         }
         Ok(Self {
             hmac_secret,
@@ -357,10 +357,10 @@ impl TryFrom<cbor::Value> for GetAssertionExtensions {
             .transpose()?;
         let cred_blob = cred_blob.map_or(Ok(false), extract_bool)?;
         let large_blob_key = large_blob_key.map(extract_bool).transpose()?;
-        if let Some(large_blob_key) = large_blob_key {
-            if !large_blob_key {
-                return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-            }
+        if let Some(large_blob_key) = large_blob_key
+            && !large_blob_key
+        {
+            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
         }
         Ok(Self {
             hmac_secret,
@@ -431,10 +431,10 @@ impl TryFrom<cbor::Value> for MakeCredentialOptions {
             None => false,
         };
         // In CTAP2.0, the up option is supposed to always fail when present.
-        if let Some(options_entry) = up {
-            if !extract_bool(options_entry)? {
-                return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
-            }
+        if let Some(options_entry) = up
+            && !extract_bool(options_entry)?
+        {
+            return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
         }
         let uv = match uv {
             Some(options_entry) => extract_bool(options_entry)?,
@@ -1224,9 +1224,9 @@ mod test {
     use crate::api::crypto::ec_signing::EdSecretKey;
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
-    use crate::env::test::TestEnv;
     #[cfg(feature = "ed25519")]
     use crate::env::Ed25519Sk;
+    use crate::env::test::TestEnv;
     use crate::env::{EcdsaSk, Env};
     use cbor::{
         cbor_array, cbor_bool, cbor_bytes, cbor_bytes_lit, cbor_false, cbor_int, cbor_map,

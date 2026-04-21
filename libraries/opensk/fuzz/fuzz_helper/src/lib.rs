@@ -24,10 +24,10 @@ use opensk::ctap::data_formats::EnterpriseAttestationMode;
 use opensk::ctap::hid::{
     ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
-use opensk::ctap::{cbor_read, Channel, CtapState};
-use opensk::env::test::customization::TestCustomization;
+use opensk::ctap::{Channel, CtapState, cbor_read};
 use opensk::env::test::TestEnv;
-use opensk::{test_helpers, Ctap, Transport};
+use opensk::env::test::customization::TestCustomization;
+use opensk::{Ctap, Transport, test_helpers};
 
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
 

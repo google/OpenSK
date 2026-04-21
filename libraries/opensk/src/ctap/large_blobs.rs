@@ -185,8 +185,8 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
-    use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+    use crate::env::test::TestEnv;
 
     fn commit_chunk(
         env: &mut TestEnv,

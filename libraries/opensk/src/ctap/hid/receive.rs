@@ -81,10 +81,10 @@ impl<E: Env> MessageAssembler<E> {
         locked_cid: Option<ChannelID>,
     ) -> Result<Option<Message>, (ChannelID, CtapHidError)> {
         let (cid, processed_packet) = CtapHid::<E>::process_single_packet(packet);
-        if let Some(locked_cid) = locked_cid {
-            if locked_cid != cid {
-                return Err((cid, CtapHidError::ChannelBusy));
-            }
+        if let Some(locked_cid) = locked_cid
+            && locked_cid != cid
+        {
+            return Err((cid, CtapHidError::ChannelBusy));
         }
 
         if !self.idle && env.clock().is_elapsed(&self.timer) {

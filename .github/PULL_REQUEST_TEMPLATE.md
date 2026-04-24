@@ -5,7 +5,6 @@ Fixes #<issue_number_goes_here>
 -   [ ] Local tests pass (running `run_desktop_tests.sh`)
 -   [ ] Tested against boards
     -   [ ] Nordic nRF52840 DK
-    -   [ ] Nordic nRF52840 Dongle (JTAG programmed)
-    -   [ ] Nordic nRF52840 Dongle (DFU programmed)
+    -   [ ] Nordic nRF52840 Dongle
     -   [ ] Makerdiary nRF52840 MDK USB Dongle
 -   [ ] Appropriate changes to README are included in PR

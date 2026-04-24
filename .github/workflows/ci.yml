@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   runtests:
+    name: Continuous Integration
     runs-on: ubuntu-latest
     permissions:
       contents: read

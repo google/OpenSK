@@ -351,8 +351,8 @@ impl From<AuthenticatorCredentialManagementResponse> for cbor::Value {
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::{PackedAttestationStatement, PublicKeyCredentialType};
     use super::super::ES256_CRED_PARAM;
+    use super::super::data_formats::{PackedAttestationStatement, PublicKeyCredentialType};
     use super::*;
     use cbor::{cbor_array, cbor_bytes, cbor_map};
 

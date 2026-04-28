@@ -506,10 +506,10 @@ pub fn is_valid(customization: &impl Customization) -> bool {
     }
 
     // Max credential count in list should be positive if exists.
-    if let Some(count) = customization.max_credential_count_in_list() {
-        if count < 1 {
-            return false;
-        }
+    if let Some(count) = customization.max_credential_count_in_list()
+        && count < 1
+    {
+        return false;
     }
 
     // Max large blob array size should not be less than 1024.

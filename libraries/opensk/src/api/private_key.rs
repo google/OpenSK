@@ -15,7 +15,7 @@
 use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
 #[cfg(feature = "ed25519")]
 use crate::api::crypto::ec_signing::{EdSecretKey, EdSignature};
-use crate::ctap::data_formats::{extract_array, extract_byte_string, CoseKey, SignatureAlgorithm};
+use crate::ctap::data_formats::{CoseKey, SignatureAlgorithm, extract_array, extract_byte_string};
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 #[cfg(feature = "ed25519")]
 use crate::env::Ed25519Sk;

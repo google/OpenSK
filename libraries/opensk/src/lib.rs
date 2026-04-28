@@ -18,12 +18,12 @@ extern crate alloc;
 #[macro_use]
 extern crate arrayref;
 
+use crate::ctap::CtapState;
+pub use crate::ctap::Transport;
 use crate::ctap::hid::{HidPacket, HidPacketIterator};
 use crate::ctap::main_hid::MainHid;
 #[cfg(feature = "vendor_hid")]
 use crate::ctap::vendor_hid::VendorHid;
-use crate::ctap::CtapState;
-pub use crate::ctap::Transport;
 use crate::env::Env;
 
 // Those macros should eventually be split into trace, debug, info, warn, and error macros when

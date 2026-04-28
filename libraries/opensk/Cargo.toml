@@ -8,8 +8,7 @@ authors = [
   "Julien Cretin <cretin@google.com>",
 ]
 license = "Apache-2.0"
-edition = "2018"
-rust-version = "1.80"
+edition = "2024"
 
 [dependencies]
 sk-cbor = { path = "../cbor" }
@@ -38,7 +37,7 @@ optional = true
 default = ["config_command", "with_ctap1"]
 config_command = []
 debug_ctap = []
-std = ["wasefire-store/std", "rand?/std_rng", "config_command", "software_crypto"]
+std = ["wasefire-store/std", "rand?/std_rng", "config_command", "software_crypto", "ed25519-compact"]
 with_ctap1 = []
 vendor_hid = []
 fuzz = ["arbitrary", "std"]

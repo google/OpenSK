@@ -1,15 +1,6 @@
+__pycache__
 target/
 /build/
-/py_virtual_env/
-
-# Local installation of elf2tab.
-/elf2tab/
 
 # Prevent people from commiting sensitive files.
 /crypto_data/
-
-# Temporary files.
-/reproducible/binaries.sha256sum
-/reproducible/elf2tab.txt
-/reproducible/reproduced.tar
-__pycache__

@@ -16,27 +16,27 @@
 set -ex
 
 ./fuzzing_setup.sh
-# Excludes std
-MOST_FEATURES=config_command,debug_allocations,debug_ctap,panic_console,verbose,with_ctap1,vendor_hid,ed25519,fingerprint
+
+MOST_FEATURES=config-command,ctap1,debug,ed25519,fingerprint
 
 echo "Checking that OpenSK builds properly..."
-cargo check --release --manifest-path libraries/opensk/Cargo.toml
-cargo check --release --target=thumbv7em-none-eabi --manifest-path libraries/opensk/Cargo.toml
-cargo check --release --target=thumbv7em-none-eabi
-cargo check --release --target=thumbv7em-none-eabi --features config_command
-cargo check --release --target=thumbv7em-none-eabi --features debug_allocations
-cargo check --release --target=thumbv7em-none-eabi --features debug_ctap
-cargo check --release --target=thumbv7em-none-eabi --features panic_console
-cargo check --release --target=thumbv7em-none-eabi --features verbose
-cargo check --release --target=thumbv7em-none-eabi --features with_ctap1
-cargo check --release --target=thumbv7em-none-eabi --features with_nfc
-cargo check --release --target=thumbv7em-none-eabi --features vendor_hid
-cargo check --release --target=thumbv7em-none-eabi --features ed25519
-cargo check --release --target=thumbv7em-none-eabi --features fingerprint
-cargo check --release --target=thumbv7em-none-eabi --features "$MOST_FEATURES"
-cargo check --release --target=thumbv7em-none-eabi --examples
-cargo check --release --target=thumbv7em-none-eabi --examples --features with_nfc,ed25519
-cargo check --release --target=thumbv7em-none-eabi --manifest-path bootloader/Cargo.toml
+cargo check --lib --target=thumbv7em-none-eabi
+cargo check --lib --target=thumbv7em-none-eabi --features=config-command
+cargo check --lib --target=thumbv7em-none-eabi --features=ctap1
+cargo check --lib --target=thumbv7em-none-eabi --features=debug
+cargo check --lib --target=thumbv7em-none-eabi --features=ed25519
+cargo check --lib --target=thumbv7em-none-eabi --features=fingerprint
+cargo check --lib --target=thumbv7em-none-eabi --features=led-1
+cargo check --lib --target=thumbv7em-none-eabi --features="$MOST_FEATURES"
+cargo check --manifest-path=libraries/opensk/Cargo.toml
+cargo check --manifest-path=libraries/opensk/Cargo.toml --target=thumbv7em-none-eabi
+
+echo "Checking fuzz targets..."
+(cd libraries/opensk && cargo fuzz check)
+(cd libraries/cbor && cargo fuzz check)
+
+echo "Checking that CTAP2 builds and links properly..."
+cargo build --release --target=thumbv7em-none-eabi --features=config-command,ctap1
 
 echo "Checking Rust formatting..."
 cargo fmt -- --check
@@ -44,62 +44,27 @@ cargo fmt --manifest-path libraries/opensk/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/opensk/fuzz/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/cbor/Cargo.toml -- --check
 cargo fmt --manifest-path libraries/cbor/fuzz/Cargo.toml -- --check
-cargo fmt --manifest-path bootloader/Cargo.toml -- --check
 
 echo "Checking Python formatting..."
-py_virtual_env/bin/pylint --score=n `git ls-files --deduplicate --exclude-standard --full-name '*.py'`
-py_virtual_env/bin/yapf --style=yapf --recursive --exclude py_virtual_env --exclude third_party --diff .
+uv run ruff check
+uv run ruff format --check
 
 echo "Running Clippy lints..."
-cargo clippy --lib --tests --bins --benches --features std -- -D warnings
-cargo clippy --lib --tests --bins --benches --features std,"$MOST_FEATURES" -- -D warnings
-(cd libraries/opensk && cargo clippy --features std -- -D warnings)
+cargo clippy --lib --tests --bins --benches --features=test -- -D warnings
+cargo clippy --lib --tests --bins --benches --features=test,"$MOST_FEATURES" -- -D warnings
+(cd libraries/opensk && cargo clippy --features=std -- -D warnings)
 (cd libraries/opensk && cargo clippy --all-features -- -D warnings)
 (cd libraries/cbor && cargo clippy -- -D warnings)
 
-echo "Checking fuzz targets..."
-(cd libraries/opensk && cargo fuzz check)
-(cd libraries/cbor && cargo fuzz check)
-
-echo "Building sha256sum tool..."
-cargo build --manifest-path third_party/tock/tools/sha256sum/Cargo.toml
-
-echo "Checking that CTAP2 builds and links properly (1 set of features)..."
-cargo build --release --target=thumbv7em-none-eabi --features config_command,with_ctap1
-./third_party/tock/tools/sha256sum/target/debug/sha256sum target/thumbv7em-none-eabi/release/ctap2
-
 echo "Running OpenSK library unit tests..."
 cd libraries/opensk
-cargo test --no-default-features --features std
-cargo test --features std,config_command,with_ctap1
+cargo test --no-default-features --features=std
+cargo test --features=std,config_command,with_ctap1
 cargo test --all-features
 cd ../..
 
 echo "Running other unit tests..."
-cargo test --lib --tests --bins --benches --features std
-cargo test --lib --tests --bins --benches --all-features
-cargo test --manifest-path libraries/cbor/Cargo.toml
-
-echo "Checking that boards build properly..."
-make -C third_party/tock/boards/nordic/nrf52840dk_opensk
-make -C third_party/tock/boards/nordic/nrf52840_dongle_opensk
-make -C third_party/tock/boards/nordic/nrf52840_dongle_dfu
-make -C third_party/tock/boards/nordic/nrf52840_mdk_dfu
-
-echo "Checking deployment of boards..."
-./deploy.py --board=nrf52840dk_opensk --no-app --programmer=none
-./deploy.py --board=nrf52840_dongle_opensk --no-app --programmer=none
-./deploy.py --board=nrf52840_dongle_dfu --no-app --programmer=none
-./deploy.py --board=nrf52840_mdk_dfu --no-app --programmer=none
-
-echo "Check app deployment"
-./deploy.py --board=nrf52840dk_opensk --programmer=none --opensk
-./deploy.py --board=nrf52840dk_opensk --programmer=none --crypto_bench
-./deploy.py --board=nrf52840dk_opensk --programmer=none --store_latency
-./deploy.py --board=nrf52840dk_opensk --programmer=none --erase_storage
-./deploy.py --board=nrf52840dk_opensk --programmer=none --panic_test
-./deploy.py --board=nrf52840dk_opensk --programmer=none --oom_test
-./deploy.py --board=nrf52840dk_opensk --programmer=none --console_test
-./deploy.py --board=nrf52840dk_opensk --programmer=none --nfct_test --nfc
+cargo test --lib --features=test
+cargo test --manifest-path=libraries/cbor/Cargo.toml
 
 cargo audit

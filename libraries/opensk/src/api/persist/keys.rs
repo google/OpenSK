@@ -158,8 +158,8 @@ make_partition! {
 mod test {
     use super::*;
     use crate::api::customization::Customization;
-    use crate::env::test::TestEnv;
     use crate::env::Env;
+    use crate::env::test::TestEnv;
 
     #[test]
     fn enough_credentials() {

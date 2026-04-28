@@ -72,8 +72,8 @@ mod test {
     #[cfg(feature = "ed25519")]
     use crate::api::crypto::ec_signing::{EdSecretKey, EdSignature};
     use crate::api::crypto::ecdh::{PublicKey as _, SecretKey as _, SharedSecret};
-    use crate::env::test::TestEnv;
     use crate::env::Env;
+    use crate::env::test::TestEnv;
     use core::convert::TryFrom;
 
     #[test]

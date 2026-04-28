@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2019-2023 Google LLC
+# Copyright 2019-2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,11 +26,6 @@ generate_pki () {
   # Signing CA key pair and certificate
   local signing_ca_priv_key=crypto_data/ca/signing-ca/private/signing-ca.key
   local signing_ca_cert_name=crypto_data/ca/signing-ca
-
-  # The upgrade private key is used for signing, the corresponding public key
-  # will be COSE encoded and embedded into the firmware.
-  local opensk_upgrade=crypto_data/opensk_upgrade.key
-  local opensk_upgrade_pub=crypto_data/opensk_upgrade_pub.pem
 
   # Allow invoker to override the command with a full path.
   local openssl=${OPENSSL:-$(which openssl)}
@@ -149,18 +144,6 @@ generate_pki () {
       -in "${signing_ca_cert_name}.csr" \
       -out "${signing_ca_cert_name}.pem" \
       -extensions signing_ca_ext
-  fi
-
-  # Create firmware update key pair
-  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade}" ]
-  then
-    "${openssl}" ecparam -genkey -name prime256v1 -out "${opensk_upgrade}"
-    rm -f "${opensk_upgrade_pub}"
-  fi
-
-  if [ "${force_generate}" = "Y" -o ! -f "${opensk_upgrade_pub}" ]
-  then
-    "${openssl}" ec -in "${opensk_upgrade}" -pubout -out "${opensk_upgrade_pub}"
   fi
 }
 

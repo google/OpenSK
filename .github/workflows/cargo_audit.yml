@@ -6,6 +6,8 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.repository == 'google/OpenSK'
     steps:
       - uses: actions/checkout@v4
@@ -13,7 +15,10 @@ jobs:
           submodules: "true"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - name: Set up OpenSK
         run: ./setup.sh
       - uses: actions-rs/audit-check@v1

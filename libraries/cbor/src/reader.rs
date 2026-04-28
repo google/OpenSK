@@ -186,10 +186,10 @@ impl<'a> Reader<'a> {
         let mut value_map = Vec::<(Value, Value)>::new();
         for _ in 0..size_value {
             let key = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
-            if let Some(last_item) = value_map.last() {
-                if last_item.0 >= key {
-                    return Err(DecoderError::OutOfOrderKey);
-                }
+            if let Some(last_item) = value_map.last()
+                && last_item.0 >= key
+            {
+                return Err(DecoderError::OutOfOrderKey);
             }
             value_map.push((
                 key,

@@ -26,7 +26,7 @@ pub fn aes256_cbc_encrypt<E: Env>(
     plaintext: &[u8],
     embeds_iv: bool,
 ) -> CtapResult<Vec<u8>> {
-    if plaintext.len() % 16 != 0 {
+    if !plaintext.len().is_multiple_of(16) {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
     let mut ciphertext = Vec::with_capacity(plaintext.len() + 16 * embeds_iv as usize);
@@ -49,7 +49,7 @@ pub fn aes256_cbc_decrypt<E: Env>(
     ciphertext: &[u8],
     embeds_iv: bool,
 ) -> CtapResult<Secret<[u8]>> {
-    if ciphertext.len() % 16 != 0 || (embeds_iv && ciphertext.is_empty()) {
+    if !ciphertext.len().is_multiple_of(16) || (embeds_iv && ciphertext.is_empty()) {
         return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
     }
     let (iv, ciphertext) = if embeds_iv {

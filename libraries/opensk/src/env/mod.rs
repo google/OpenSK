@@ -14,11 +14,11 @@
 
 use crate::api::clock::Clock;
 use crate::api::connection::HidConnection;
+use crate::api::crypto::Crypto;
 use crate::api::crypto::ec_signing::Ecdsa;
 #[cfg(feature = "ed25519")]
 use crate::api::crypto::ec_signing::Ed25519;
 use crate::api::crypto::ecdh::Ecdh;
-use crate::api::crypto::Crypto;
 use crate::api::customization::Customization;
 #[cfg(feature = "fingerprint")]
 use crate::api::fingerprint::Fingerprint;
@@ -72,10 +72,9 @@ pub trait Env {
 
     /// Creates a write instance for debugging.
     ///
-    /// This API doesn't return a reference such that drop may flush. This matches the Tock
-    /// environment. Non-Tock embedded environments should use the defmt feature (to be implemented
-    /// using the defmt crate) and ignore this API. Non-embedded environments may either use this
-    /// API or use the log feature (to be implemented using the log crate).
+    /// This API doesn't return a reference such that drop may flush.
+    /// You may implement write using the defmt or log crate, depending on your
+    /// platform.
     fn write(&mut self) -> Self::Write;
 
     fn customization(&self) -> &Self::Customization;

@@ -1,4 +1,3 @@
-#!py_virtual_env/bin/python3
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -42,180 +41,175 @@ OPENSK_VENDOR_CONFIGURE = 0x40
 
 
 def fatal(msg):
-  tqdm.write(f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
-             f"{colorama.Style.RESET_ALL} {msg}")
-  sys.exit(1)
+    tqdm.write(
+        f"{colorama.Fore.RED + colorama.Style.BRIGHT}fatal:"
+        f"{colorama.Style.RESET_ALL} {msg}"
+    )
+    sys.exit(1)
 
 
 def error(msg):
-  tqdm.write(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
+    tqdm.write(f"{colorama.Fore.RED}error:{colorama.Style.RESET_ALL} {msg}")
 
 
 def info(msg):
-  tqdm.write(f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
-             f"{colorama.Style.RESET_ALL} {msg}")
+    tqdm.write(
+        f"{colorama.Fore.GREEN + colorama.Style.BRIGHT}info:"
+        f"{colorama.Style.RESET_ALL} {msg}"
+    )
 
 
 def get_opensk_devices(batch_mode):
-  devices = []
-  for dev in hid.CtapHidDevice.list_devices():
-    if (dev.descriptor.vid, dev.descriptor.pid) == OPENSK_VID_PID:
-      if dev.capabilities & hid.CAPABILITY.CBOR:
-        if batch_mode:
-          devices.append(ctap2.Ctap2(dev))
-        else:
-          return [ctap2.Ctap2(dev)]
-  return devices
+    devices = []
+    for dev in hid.CtapHidDevice.list_devices():
+        if (dev.descriptor.vid, dev.descriptor.pid) == OPENSK_VID_PID:
+            if dev.capabilities & hid.CAPABILITY.CBOR:
+                if batch_mode:
+                    devices.append(ctap2.Ctap2(dev))
+                else:
+                    return [ctap2.Ctap2(dev)]
+    return devices
 
 
 def get_private_key(data, password=None):
-  # First we try without password.
-  try:
-    return serialization.load_pem_private_key(data, password=None)
-  except TypeError:
-    # Maybe we need a password then.
-    if sys.stdin.isatty():
-      password = getpass.getpass(prompt="Private key password: ")
-    else:
-      password = sys.stdin.readline().rstrip()
-    return get_private_key(data, password=password.encode(sys.stdin.encoding))
+    # First we try without password.
+    try:
+        return serialization.load_pem_private_key(data, password=None)
+    except TypeError:
+        # Maybe we need a password then.
+        if sys.stdin.isatty():
+            password = getpass.getpass(prompt="Private key password: ")
+        else:
+            password = sys.stdin.readline().rstrip()
+        return get_private_key(data, password=password.encode(sys.stdin.encoding))
 
 
 def main(args):
-  colorama.init()
-  # We need either both the certificate and the key or none
-  if bool(args.priv_key) ^ bool(args.certificate):
-    fatal("Certificate and private key must be set together or both omitted.")
+    colorama.init()
 
-  cbor_data = {1: args.lock}
-
-  if args.priv_key:
-    cbor_data[1] = args.lock
     priv_key = get_private_key(args.priv_key.read())
     if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
-      fatal("Private key must be an Elliptic Curve one.")
+        fatal("Private key must be an Elliptic Curve one.")
     if not isinstance(priv_key.curve, ec.SECP256R1):
-      fatal("Private key must use Secp256r1 curve.")
+        fatal("Private key must use Secp256r1 curve.")
     if priv_key.key_size != 256:
-      fatal("Private key must be 256 bits long.")
+        fatal("Private key must be 256 bits long.")
     info("Private key is valid.")
 
     cert = x509.load_pem_x509_certificate(args.certificate.read())
     # Some sanity/validity checks
     now = datetime.datetime.utcnow()
     if cert.not_valid_before > now:
-      fatal("Certificate validity starts in the future.")
+        fatal("Certificate validity starts in the future.")
     if cert.not_valid_after <= now:
-      fatal("Certificate expired.")
+        fatal("Certificate expired.")
     pub_key = cert.public_key()
     if not isinstance(pub_key, ec.EllipticCurvePublicKey):
-      fatal("Certificate public key must be an Elliptic Curve one.")
+        fatal("Certificate public key must be an Elliptic Curve one.")
     if not isinstance(pub_key.curve, ec.SECP256R1):
-      fatal("Certificate public key must use Secp256r1 curve.")
+        fatal("Certificate public key must use Secp256r1 curve.")
     if pub_key.key_size != 256:
-      fatal("Certificate public key must be 256 bits long.")
+        fatal("Certificate public key must be 256 bits long.")
     if pub_key.public_numbers() != priv_key.public_key().public_numbers():
-      fatal("Certificate public doesn't match with the private key.")
+        fatal("Certificate public doesn't match with the private key.")
     info("Certificate is valid.")
 
+    cbor_data = {}
     cbor_data[2] = {
-        1:
-            cert.public_bytes(serialization.Encoding.DER),
-        2:
-            priv_key.private_numbers().private_value.to_bytes(
-                length=32, byteorder="big", signed=False)
+        1: cert.public_bytes(serialization.Encoding.DER),
+        2: priv_key.private_numbers().private_value.to_bytes(
+            length=32, byteorder="big", signed=False
+        ),
     }
 
-  patcher = None
-  if args.use_vendor_hid:
-    patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
-    patcher.start()
-    info("Using the Vendor HID interface")
+    patcher = None
+    if args.use_vendor_hid:
+        patcher = patch.object(hid.base, "FIDO_USAGE_PAGE", 0xFF00)
+        patcher.start()
+        info("Using the Vendor HID interface")
 
-  devices = get_opensk_devices(args.batch)
-  if patcher:
-    patcher.stop()
-  responses = []
-  if not devices:
-    fatal("No devices found.")
-  for authenticator in tqdm(devices):
-    # If the device supports it, wink to show which device
-    # we're going to program.
-    if authenticator.device.capabilities & hid.CAPABILITY.WINK:
-      authenticator.device.wink()
-    aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
-    info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
-    if args.lock or args.priv_key:
-      info("Please touch the device to confirm...")
-    try:
-      result = authenticator.send_cbor(
-          OPENSK_VENDOR_CONFIGURE,
-          data=cbor_data,
-      )
-      status = {"cert": result[1], "pkey": result[2]}
-      responses.append(status)
-      info(f'Certificate: {"Present" if result[1] else "Missing"}')
-      info(f'Private Key: {"Present" if result[2] else "Missing"}')
-      if args.lock:
-        info("Device is now locked down!")
-    except ctap.CtapError as ex:
-      if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
-        error("Failed to configure OpenSK (unsupported command).")
-      elif ex.code.value == 0xF2:  # VENDOR_INTERNAL_ERROR
-        error(("Failed to configure OpenSK (lockdown conditions not met "
-               "or hardware error)."))
-      elif ex.code.value == ctap.CtapError.ERR.INVALID_PARAMETER:
-        error(
-            ("Failed to configure OpenSK (device is partially programmed but "
-             "the given cert/key don't match the ones currently programmed)."))
-      else:
-        error(f"Failed to configure OpenSK (unknown error: {ex})")
-  return responses
+    devices = get_opensk_devices(args.batch)
+    if patcher:
+        patcher.stop()
+    responses = []
+    if not devices:
+        fatal("No devices found.")
+    for authenticator in tqdm(devices):
+        # If the device supports it, wink to show which device
+        # we're going to program.
+        if authenticator.device.capabilities & hid.CAPABILITY.WINK:
+            authenticator.device.wink()
+        aaguid = uuid.UUID(bytes=authenticator.get_info().aaguid)
+        info(f"Programming OpenSK device AAGUID {aaguid} ({authenticator.device}).")
+        if args.priv_key:
+            info("Please touch the device to confirm...")
+        try:
+            result = authenticator.send_cbor(
+                OPENSK_VENDOR_CONFIGURE,
+                data=cbor_data,
+            )
+            status = {"cert": result[1], "pkey": result[2]}
+            responses.append(status)
+            info(f"Certificate: {'Present' if result[1] else 'Missing'}")
+            info(f"Private Key: {'Present' if result[2] else 'Missing'}")
+        except ctap.CtapError as ex:
+            if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
+                error("Failed to configure OpenSK (unsupported command).")
+            elif ex.code.value == 0xF2:  # VENDOR_INTERNAL_ERROR
+                error(
+                    (
+                        "Failed to configure OpenSK (lockdown conditions not met "
+                        "or hardware error)."
+                    )
+                )
+            elif ex.code.value == ctap.CtapError.ERR.INVALID_PARAMETER:
+                error(
+                    (
+                        "Failed to configure OpenSK (device is partially programmed but "
+                        "the given cert/key don't match the ones currently programmed)."
+                    )
+                )
+            else:
+                error(f"Failed to configure OpenSK (unknown error: {ex})")
+    return responses
 
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument(
-      "--batch",
-      default=False,
-      action="store_true",
-      help=(
-          "When batch processing is used, all plugged OpenSK devices will "
-          "be programmed the same way. Otherwise (default) only the first seen "
-          "device will be programmed."),
-  )
-  parser.add_argument(
-      "--certificate",
-      type=argparse.FileType("rb"),
-      default=None,
-      metavar="PEM_FILE",
-      dest="certificate",
-      help=("PEM file containing the certificate to inject into "
-            "the OpenSK authenticator."),
-  )
-  parser.add_argument(
-      "--private-key",
-      type=argparse.FileType("rb"),
-      default=None,
-      metavar="PEM_FILE",
-      dest="priv_key",
-      help=("PEM file containing the private key associated "
-            "with the certificate."),
-  )
-  parser.add_argument(
-      "--lock-device",
-      default=False,
-      action="store_true",
-      dest="lock",
-      help=("Locks the device (i.e. bootloader and JTAG access). "
-            "This command can fail if the certificate or the private key "
-            "haven't been both programmed yet."),
-  )
-  parser.add_argument(
-      "--vendor-hid",
-      default=False,
-      action="store_true",
-      dest="use_vendor_hid",
-      help=("Whether to configure the device using the Vendor HID interface."),
-  )
-  main(parser.parse_args())
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--batch",
+        default=False,
+        action="store_true",
+        help=(
+            "When batch processing is used, all plugged OpenSK devices will "
+            "be programmed the same way. Otherwise (default) only the first seen "
+            "device will be programmed."
+        ),
+    )
+    parser.add_argument(
+        "--certificate",
+        type=argparse.FileType("rb"),
+        required=True,
+        metavar="PEM_FILE",
+        dest="certificate",
+        help=(
+            "PEM file containing the certificate to inject into "
+            "the OpenSK authenticator."
+        ),
+    )
+    parser.add_argument(
+        "--private-key",
+        type=argparse.FileType("rb"),
+        required=True,
+        metavar="PEM_FILE",
+        dest="priv_key",
+        help=("PEM file containing the private key associated with the certificate."),
+    )
+    parser.add_argument(
+        "--vendor-hid",
+        default=False,
+        action="store_true",
+        dest="use_vendor_hid",
+        help=("Whether to configure the device using the Vendor HID interface."),
+    )
+    main(parser.parse_args())

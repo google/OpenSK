@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::customization::{Customization, CustomizationImpl, AAGUID_LENGTH};
+use crate::api::customization::{AAGUID_LENGTH, Customization, CustomizationImpl};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -229,7 +229,7 @@ impl From<CustomizationImpl> for TestCustomization {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::customization::{is_valid, DEFAULT_CUSTOMIZATION};
+    use crate::api::customization::{DEFAULT_CUSTOMIZATION, is_valid};
 
     #[test]
     fn test_invariants() {

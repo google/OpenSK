@@ -225,9 +225,7 @@ macro_rules! cbor_map_options {
 /// Creates a CBOR Value of type Map from a Vec<(Value, Value)>.
 #[macro_export]
 macro_rules! cbor_map_collection {
-    ( $tree:expr ) => {{
-        $crate::values::Value::map($tree)
-    }};
+    ( $tree:expr ) => {{ $crate::values::Value::map($tree) }};
 }
 
 /// Creates a CBOR Value of type Array with the given elements.

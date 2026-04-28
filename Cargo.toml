@@ -1,6 +1,6 @@
 [package]
-name = "ctap2"
-version = "1.0.0"
+name = "opensk-wasefire"
+version = "0.1.0"
 authors = [
   "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
   "Guillaume Endignoux <guillaumee@google.com>",
@@ -8,65 +8,42 @@ authors = [
   "Julien Cretin <cretin@google.com>",
 ]
 license = "Apache-2.0"
-edition = "2018"
-
-[target.'cfg(any(target_arch = "arm", target_arch = "riscv32"))'.dependencies.libtock_runtime]
-path = "third_party/libtock-rs/runtime"
-default-features = false
-features = ["no_auto_layout", "no_debug_memop"]
+edition = "2024"
 
 [dependencies]
-libtock_buttons = { path = "third_party/libtock-rs/apis/buttons" }
-libtock_platform = { path = "third_party/libtock-rs/platform" }
-libtock_drivers = { path = "third_party/libtock-drivers" }
-libtock_alarm = { path = "third_party/libtock-rs/apis/alarm" }
-libtock_console = { path = "third_party/libtock-rs/apis/console" }
-libtock_leds = { path = "third_party/libtock-rs/apis/leds" }
-lang_items = { path = "third_party/lang-items" }
-sk-cbor = { path = "libraries/cbor" }
-libtock_unittest = { path = "third_party/libtock-rs/unittest", optional = true }
-byteorder = { version = "1", default-features = false }
-arrayref = "0.3.6"
-rand_core = "0.6.4"
-wasefire-store = "=0.2.4"
+portable-atomic-util = { version = "0.2.6", default-features = false, features = ["alloc"] }
+wasefire-common = { version = "0.1.0", optional = true }
 
-[dependencies.p256]
-version = "0.13.0"
+[dependencies.wasefire]
+version = "0.8.1"
 default-features = false
-features = ["ecdsa"]
+features = [
+  "api-button",
+  "api-clock",
+  "api-crypto-cbc",
+  "api-crypto-ecdh",
+  "api-crypto-ecdsa",
+  "api-crypto-hash",
+  "api-crypto-hkdf",
+  "api-led",
+  "api-rng",
+  "api-store",
+  "api-timer",
+  "api-usb-ctap",
+]
 
 [dependencies.opensk]
 path = "libraries/opensk"
 default-features = false
-features = ["software_crypto", "wasefire-store"]
 
 [features]
-config_command = ["opensk/config_command"]
-debug_allocations = ["lang_items/debug_allocations"]
-debug_ctap = ["libtock_drivers/debug_ctap", "opensk/debug_ctap"]
-panic_console = ["lang_items/panic_console"]
-std = ["lang_items/std", "wasefire-store/std", "opensk/std", "libtock_unittest"]
-verbose = ["debug_ctap", "libtock_drivers/verbose_usb"]
-with_ctap1 = ["opensk/with_ctap1"]
-with_nfc = ["libtock_drivers/with_nfc"]
-vendor_hid = ["opensk/vendor_hid"]
-ed25519 = ["opensk/software_crypto_ed25519"]
-fingerprint = ["opensk/fingerprint"]
-
-[dev-dependencies]
-enum-iterator = "0.6.0"
+config-command = ["opensk/config_command"]
+ctap1 = ["opensk/with_ctap1"]
+debug = ["opensk/debug_ctap"]
+ed25519 = ["opensk/ed25519", "wasefire/api-crypto-ed25519"]
+fingerprint = ["dep:wasefire-common", "opensk/fingerprint", "wasefire/api-fingerprint-matcher"]
+led-1 = []
+test = ["opensk/std", "wasefire/test"]
 
 [build-dependencies]
-sk-cbor = { path = "libraries/cbor" }
 uuid = { version = "0.8", features = ["v4"] }
-openssl = "0.10.55"
-
-[profile.dev]
-panic = "abort"
-lto = true # Link Time Optimization usually reduces size of binaries and static libraries
-
-[profile.release]
-panic = "abort"
-lto = true # Link Time Optimization usually reduces size of binaries and static libraries
-opt-level = "z"
-codegen-units = 1

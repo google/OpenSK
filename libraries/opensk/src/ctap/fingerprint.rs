@@ -19,14 +19,14 @@ use super::command::{
 use super::data_formats::{extract_byte_string, extract_map, extract_text_string, ok_or_missing};
 use super::response::{AuthenticatorBioEnrollmentResponse, ResponseData};
 use super::status_code::{Ctap2StatusCode, CtapResult};
-use super::{send_packets, storage, Channel, CtapHid, KeepaliveStatus};
+use super::{Channel, CtapHid, KeepaliveStatus, send_packets, storage};
+use crate::Transport;
 use crate::api::customization::Customization;
 use crate::api::fingerprint::{Fingerprint, FingerprintCheckError};
 use crate::api::persist::Persist;
 use crate::api::rng::Rng;
 use crate::ctap::cbor_write;
 use crate::env::Env;
-use crate::Transport;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -415,8 +415,8 @@ mod test {
     use crate::api::crypto::ecdh::SecretKey;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
-    use crate::env::test::TestEnv;
     use crate::env::EcdhSk;
+    use crate::env::test::TestEnv;
     use sk_cbor::cbor_map;
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);

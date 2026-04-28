@@ -16,7 +16,7 @@ use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::{Persist, PersistCredentialIter};
 use crate::ctap::data_formats::{
-    extract_array, extract_text_string, PublicKeyCredentialSource, PublicKeyCredentialUserEntity,
+    PublicKeyCredentialSource, PublicKeyCredentialUserEntity, extract_array, extract_text_string,
 };
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::Env;
@@ -538,12 +538,16 @@ mod test {
         assert!(store_credential(&mut env, credential_source0).is_ok());
         assert!(store_credential(&mut env, credential_source1).is_ok());
         assert_eq!(count_credentials(&mut env).unwrap(), 1);
-        assert!(find_credential(&mut env, "example.com", &credential_id0)
-            .unwrap()
-            .is_none());
-        assert!(find_credential(&mut env, "example.com", &credential_id1)
-            .unwrap()
-            .is_some());
+        assert!(
+            find_credential(&mut env, "example.com", &credential_id0)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            find_credential(&mut env, "example.com", &credential_id1)
+                .unwrap()
+                .is_some()
+        );
 
         reset(&mut env).unwrap();
         let max_supported_resident_keys = env.customization().max_supported_resident_keys();

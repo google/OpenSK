@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::apdu::{Apdu, ApduStatusCode};
-use super::{filter_listed_credential, CtapState};
-use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
+use super::{CtapState, filter_listed_credential};
 use crate::api::crypto::EC_FIELD_SIZE;
+use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
@@ -357,15 +357,15 @@ impl Ctap1Command {
 
 #[cfg(test)]
 mod test {
-    use super::super::data_formats::CredentialProtectionPolicy;
     use super::super::TOUCH_TIMEOUT_MS;
+    use super::super::data_formats::CredentialProtectionPolicy;
     use super::*;
     use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::storage;
-    use crate::env::test::TestEnv;
     use crate::env::Sha;
+    use crate::env::test::TestEnv;
 
     fn create_register_message(application: &[u8; 32]) -> Vec<u8> {
         let mut message = vec![

@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod keys;
+pub mod keys;
 
+use crate::ctap::PIN_AUTH_LENGTH;
 use crate::ctap::data_formats::{extract_byte_string, extract_map, ok_or_missing};
 #[cfg(feature = "fingerprint")]
 use crate::ctap::fingerprint::TemplateInfo;
 use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
-use crate::ctap::PIN_AUTH_LENGTH;
 #[cfg(feature = "fingerprint")]
 use crate::ctap::{cbor_read, cbor_write};
 use alloc::borrow::Cow;
@@ -655,8 +655,8 @@ mod test {
     use super::*;
     use crate::api::customization::Customization;
     use crate::api::rng::Rng;
-    use crate::env::test::TestEnv;
     use crate::env::Env;
+    use crate::env::test::TestEnv;
     use sk_cbor::cbor_map;
 
     #[test]

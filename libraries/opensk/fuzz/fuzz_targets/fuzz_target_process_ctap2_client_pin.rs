@@ -1,6 +1,6 @@
 #![no_main]
 
-use fuzz_helper::{process_ctap_specific_type, InputType};
+use fuzz_helper::{InputType, process_ctap_specific_type};
 use libfuzzer_sys::fuzz_target;
 
 // Fuzz inputs as CTAP2 client pin command parameters encoded in cbor.

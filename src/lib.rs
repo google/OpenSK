@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Example applet running OpenSK.
-//!
-//! See the [README] for more information.
-//!
-//! [README]: https://github.com/google/wasefire/blob/main/examples/rust/opensk/README.md
+//! Wasefire applet running OpenSK.
 
+#![allow(dead_code)]
 #![no_std]
 wasefire::applet!();
 

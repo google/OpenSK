@@ -47,6 +47,3 @@ test = ["opensk/std", "wasefire/test"]
 
 [build-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
-
-[lints]
-rust.dead_code = "allow"

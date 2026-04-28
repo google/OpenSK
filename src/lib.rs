@@ -14,7 +14,6 @@
 
 //! Wasefire applet running OpenSK.
 
-#![allow(dead_code)]
 #![no_std]
 wasefire::applet!();
 
@@ -26,6 +25,7 @@ mod blink;
 mod env;
 mod touch;
 
+#[allow(dead_code)]
 fn main() -> ! {
     let mut opensk_ctap = opensk::Ctap::new(env::init());
     let mut wink: Option<blink::Blink> = None;

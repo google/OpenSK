@@ -20,14 +20,14 @@ set -ex
 MOST_FEATURES=config-command,ctap1,debug,ed25519,fingerprint
 
 echo "Checking that OpenSK builds properly..."
-cargo check --lib --target=wasm32-unknown-unknown
-cargo check --lib --target=wasm32-unknown-unknown --features=config-command
-cargo check --lib --target=wasm32-unknown-unknown --features=ctap1
-cargo check --lib --target=wasm32-unknown-unknown --features=debug
-cargo check --lib --target=wasm32-unknown-unknown --features=ed25519
-cargo check --lib --target=wasm32-unknown-unknown --features=fingerprint
-cargo check --lib --target=wasm32-unknown-unknown --features=led-1
-cargo check --lib --target=wasm32-unknown-unknown --features="$MOST_FEATURES"
+cargo check --lib --target=thumbv7em-none-eabi
+cargo check --lib --target=thumbv7em-none-eabi --features=config-command
+cargo check --lib --target=thumbv7em-none-eabi --features=ctap1
+cargo check --lib --target=thumbv7em-none-eabi --features=debug
+cargo check --lib --target=thumbv7em-none-eabi --features=ed25519
+cargo check --lib --target=thumbv7em-none-eabi --features=fingerprint
+cargo check --lib --target=thumbv7em-none-eabi --features=led-1
+cargo check --lib --target=thumbv7em-none-eabi --features="$MOST_FEATURES"
 cargo check --manifest-path=libraries/opensk/Cargo.toml
 cargo check --manifest-path=libraries/opensk/Cargo.toml --target=thumbv7em-none-eabi
 

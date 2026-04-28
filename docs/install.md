@@ -125,9 +125,8 @@ For more details on the boards, see:
 
 ### OpenTitan
 
-The applet feature `ed25519` is supported and needs the `software-ed25519`
-platform feature. Once the OpenTitan crypto library implements Ed25519, it will
-be possible to enable the `ed25519` platform feature instead.
+The applet feature `ed25519` is supported and needs the `ed25519`
+platform feature.
 
 The applet feature `fingerprint` is not supported.
 

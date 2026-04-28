@@ -17,8 +17,9 @@ cd "$(dirname "$0")"
 
 # New output file is $1
 # Old output file is $2
-TMP=comment.md
-WARNING="Note: numbers above are a result of guesswork. They are not 100% correct and never will be."
+# Optional output file is $3
+TMP="${3:-bloat_comment.md}"
+WARNING="never will be"
 NEW_SIZE=$(cat "$1" | sed -nr 's/.*100.0% (.*)KiB .text.*/\1/p')
 OLD_SIZE=$(cat "$2" | sed -nr 's/.*100.0% (.*)KiB .text.*/\1/p')
 
@@ -32,15 +33,15 @@ Output of cargo bloat
 " >> "$TMP"
 
 echo "Including PR" >> "$TMP"
-cat "$1" >> "$TMP"
+sed -n '/File  .text/,$p' "$1" | grep -v "$WARNING" >> "$TMP"
 echo "Base branch" >> "$TMP"
-cat "$2" >> "$TMP"
+sed -n '/File  .text/,$p' "$2" | grep -v "$WARNING" >> "$TMP"
 
-COMMENT="$(cat $TMP | sed "s/$WARNING//g" | sed 's/%/%25/g' | sed -z 's/\n/%0A/g')"
+COMMENT=$(cat "$TMP" | sed 's/%/%25/g' | sed -z 's/\n/%0A/g')
 # No output for equality is intentional.
 if (( $(echo "$NEW_SIZE > $OLD_SIZE" | bc -l) )); then
-  echo "::warning file=.github/workflows/cargo_bloat.yml,title=Binary size::$COMMENT"
+  echo "::warning file=.github/workflows/cargo_bloat.yml,line=1,title=Binary size::$COMMENT"
 fi
 if (( $(echo "$NEW_SIZE < $OLD_SIZE" | bc -l) )); then
-  echo "::notice file=.github/workflows/cargo_bloat.yml,title=Binary size::$COMMENT"
+  echo "::notice file=.github/workflows/cargo_bloat.yml,line=1,title=Binary size::$COMMENT"
 fi

@@ -19,6 +19,12 @@ done_text="$(tput bold)DONE.$(tput sgr0)"
 
 set -e
 
+# Installs uv for OSS-Fuzz
+if [[ -n "${CI}" ]] && ! command -v uv &> /dev/null; then
+    curl -LsSf "https://astral.sh/uv/install.sh" | sh
+    export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+fi
+
 # Check that rustup and pip3 are installed
 check_command () {
   if ! which "$1" >/dev/null

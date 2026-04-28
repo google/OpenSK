@@ -1,5 +1,5 @@
 name: Binary size report
-on: workflow_dispatch  # Not working at the moment, disabled
+on: pull_request
 
 jobs:
   cargo_bloat:
@@ -26,9 +26,10 @@ jobs:
       - name: Set up OpenSK
         run: ./setup.sh
       - name: Run bloat on the PR
-        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=config-command,ctap1 --crates >> .github/workflows/bloat_output_new.txt
+        working-directory: ./third_party/wasefire
+        run: cargo xtask --release --native applet rust ../.. --opt-level=z --features=ctap1,config-command runner nordic --opt-level=z --features=usb-ctap --features=software-crypto-aes256-cbc,software-crypto-hmac-sha256 --features=software-crypto-p256-ecdh,software-crypto-p256-ecdsa --measure-bloat >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_new.txt"
 
-      # Second run: PR
+      # Second run: HEAD
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -38,8 +39,11 @@ jobs:
         working-directory: ./OpenSK_base
         run: ./setup.sh
       - name: Run bloat on base
-        working-directory: ./OpenSK_base
-        run: RUSTFLAGS="-C link-arg=-icf=all -C force-frame-pointers=no" cargo bloat --release --target=thumbv7em-none-eabi --features=config-command,ctap1 --crates >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
+        working-directory: ./OpenSK_base/third_party/wasefire
+        run: cargo xtask --release --native applet rust ../.. --opt-level=z --features=ctap1,config-command runner nordic --opt-level=z --features=usb-ctap --features=software-crypto-aes256-cbc,software-crypto-hmac-sha256 --features=software-crypto-p256-ecdh,software-crypto-p256-ecdsa --measure-bloat >> "$GITHUB_WORKSPACE/.github/workflows/bloat_output_old.txt"
 
       - name: Run output formatter to echo workflow command
-        run: ./.github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt bloat_comment.md
+        run: .github/workflows/bloat_formatter.sh bloat_output_new.txt bloat_output_old.txt bloat_comment.md
+
+      - name: Add summary
+        run: cat .github/workflows/bloat_comment.md >> $GITHUB_STEP_SUMMARY

@@ -530,18 +530,10 @@ pub trait Persist {
 
     fn get_attestation(&self, id: AttestationId) -> CtapResult<Option<Attestation>> {
         let stored_id_bytes = self.find(keys::ATTESTATION_ID)?;
-        if let Some(bytes) = stored_id_bytes {
-            if bytes.len() != 1 {
-                return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
-            }
-            if id != AttestationId::try_from(bytes[0])? {
-                return Ok(None);
-            }
-        } else {
-            // This is for backwards compatibility. No ID stored implies batch.
-            if id != AttestationId::Batch {
-                return Ok(None);
-            }
+        match stored_id_bytes.as_deref() {
+            Some([byte]) if AttestationId::try_from(*byte)? == id => (),
+            Some([_]) | None => return Ok(None),
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         let wrapped_private_key = self.find(keys::ATTESTATION_PRIVATE_KEY)?;
         let certificate = self.find(keys::ATTESTATION_CERTIFICATE)?;

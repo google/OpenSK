@@ -109,7 +109,7 @@ impl From<Ctap2StatusCode> for key_store::Error {
     }
 }
 
-#[cfg(feature = "wasefire-store")]
+#[cfg(feature = "std")]
 impl From<wasefire_store::StoreError> for Ctap2StatusCode {
     fn from(error: wasefire_store::StoreError) -> Ctap2StatusCode {
         use wasefire_store::StoreError;
@@ -144,7 +144,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "wasefire-store")]
+    #[cfg(feature = "std")]
     fn test_wasefire_store_errors() -> () {
         for (store_error, ctap_error) in [
             (

@@ -13,11 +13,10 @@ In order to compile and flash a working OpenSK firmware, you will need the
 following:
 
 - rustup (can be installed with [Rustup](https://rustup.rs/))
-- uv (can be installed with
-  [uv](https://docs.astral.sh/uv/getting-started/installation/))
-- python3 and pip (can be installed with the `python3-pip` package on Debian)
 - the OpenSSL command line tool (can be installed and configured with the
   `libssl-dev` and `pkg-config` packages on Debian)
+- uv and python3 (optional, for sending CTAP commands for configuration, can be
+  installed with [uv](https://docs.astral.sh/uv/getting-started/installation/))
 
 ## Setup
 

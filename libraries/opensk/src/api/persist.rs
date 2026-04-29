@@ -554,8 +554,11 @@ pub trait Persist {
         attestation: Option<&Attestation>,
     ) -> CtapResult<()> {
         // To overwrite, first call with None, then call again, to avoid mistakes.
-        if self.find(keys::ATTESTATION_ID)?.is_some() {
-            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        let stored_id_bytes = self.find(keys::ATTESTATION_ID)?;
+        match (stored_id_bytes.as_deref(), attestation) {
+            (None, _) => (),
+            (Some([byte]), None) if AttestationId::try_from(*byte)? == id => (),
+            _ => return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
         }
         // We set attestation storage in 3 transactions. If that gets interrupted halfway,
         // Register and MakeCredential will error when being called. Needs to be redone then.
@@ -792,6 +795,67 @@ mod test {
         );
         assert_eq!(persist.remove_template_id(&[0x00]), Ok(()));
         assert_eq!(persist.get_friendly_name(&[0x00]).unwrap(), None);
+    }
+
+    #[test]
+    fn test_get_set_no_overwrite_attestation() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        assert_eq!(persist.get_attestation(AttestationId::Batch), Ok(None));
+        let attestation = Attestation {
+            wrapped_private_key: vec![0x55],
+            certificate: vec![0xCC],
+        };
+        assert_eq!(
+            persist.set_attestation(AttestationId::Batch, Some(&attestation)),
+            Ok(())
+        );
+        assert_eq!(
+            persist.get_attestation(AttestationId::Batch),
+            Ok(Some(attestation.clone()))
+        );
+        // Neither directly overwriting nor deleting the wrong ID works.
+        assert_eq!(
+            persist.set_attestation(AttestationId::Batch, Some(&attestation)),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        assert_eq!(
+            persist.set_attestation(AttestationId::Enterprise, None),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+    }
+
+    #[test]
+    fn test_overwrite_attestation() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        let attestation1 = Attestation {
+            wrapped_private_key: vec![0x55],
+            certificate: vec![0xCC],
+        };
+        assert_eq!(
+            persist.set_attestation(AttestationId::Batch, Some(&attestation1)),
+            Ok(())
+        );
+        assert_eq!(
+            persist.set_attestation(AttestationId::Enterprise, None),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        assert_eq!(persist.set_attestation(AttestationId::Batch, None), Ok(()));
+        let attestation2 = Attestation {
+            wrapped_private_key: vec![0x66],
+            certificate: vec![0xDD],
+        };
+        assert_eq!(
+            persist.set_attestation(AttestationId::Enterprise, Some(&attestation2)),
+            Ok(())
+        );
+        assert_eq!(
+            persist.get_attestation(AttestationId::Enterprise),
+            Ok(Some(attestation2))
+        );
     }
 
     #[test]

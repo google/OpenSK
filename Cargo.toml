@@ -12,10 +12,10 @@ edition = "2024"
 
 [dependencies]
 portable-atomic-util = { version = "0.2.6", default-features = false, features = ["alloc"] }
-wasefire-common = { version = "0.1.0", optional = true }
+wasefire-common = { path = "third_party/wasefire/crates/common", optional = true }
 
 [dependencies.wasefire]
-version = "0.8.1"
+path = "third_party/wasefire/crates/prelude"
 default-features = false
 features = [
   "api-button",

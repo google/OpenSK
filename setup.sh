@@ -19,22 +19,16 @@ done_text="$(tput bold)DONE.$(tput sgr0)"
 
 set -e
 
-# Installs uv for OSS-Fuzz
-if [[ -n "${CI}" ]] && ! command -v uv &> /dev/null; then
-    curl -LsSf "https://astral.sh/uv/install.sh" | sh
-    export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+if ! command -v rustup &> /dev/null; then
+  echo "❌ Missing rustup command."
+  echo "Please follow the steps at https://rustup.rs/ to install it."
+  exit 1
 fi
 
-# Check that rustup and pip3 are installed
-check_command () {
-  if ! which "$1" >/dev/null
-  then
-    echo "Missing $1 command. Follow the steps under $2 to install it."
-    exit 1
-  fi
-}
-check_command rustup "https://rustup.rs/"
-check_command uv "https://docs.astral.sh/uv/getting-started/installation/"
+if ! command -v uv &> /dev/null; then
+  echo "uv command not found, optional for device configuration. "
+  echo "Install with: https://docs.astral.sh/uv/getting-started/installation/"
+fi
 
 git submodule update --init
 

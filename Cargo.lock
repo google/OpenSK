@@ -670,8 +670,6 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "wasefire"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfbe54fbf773c9c03e73b1554e76a1ef4f1ba30e05dc6d97480cdf02e5a72cf0"
 dependencies = [
  "bytemuck",
  "wasefire-applet-api",
@@ -684,8 +682,6 @@ dependencies = [
 [[package]]
 name = "wasefire-applet-api"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2f05586ec4c4bd997b32dd973bd9fab5ded523ded392967d7c2bdcd6eb04546"
 dependencies = [
  "bytemuck",
  "wasefire-applet-api-macro",
@@ -696,8 +692,6 @@ dependencies = [
 [[package]]
 name = "wasefire-applet-api-desc"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4eabf7c07b26549731d5bb30e061ef4cc1b377ebb7036a71168efb08175985e"
 dependencies = [
  "data-encoding",
  "data-encoding-macro",
@@ -709,8 +703,6 @@ dependencies = [
 [[package]]
 name = "wasefire-applet-api-macro"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70becd38c1a18a9ace5477deebe62c4105ff739b4c5f60d3af6d0b28d8df018e"
 dependencies = [
  "wasefire-applet-api-desc",
 ]
@@ -718,8 +710,6 @@ dependencies = [
 [[package]]
 name = "wasefire-common"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49a4aad51188c34722b5e36f1b1058b503f9c86cda9b593c16cee0d26456a900"
 dependencies = [
  "wasefire-error",
  "wasefire-sync",
@@ -728,8 +718,6 @@ dependencies = [
 [[package]]
 name = "wasefire-error"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5798addec7fb9e601994b2e74778b295b430d692ec2ec234899ac9f9b9a16f0a"
 dependencies = [
  "num_enum",
 ]
@@ -737,8 +725,6 @@ dependencies = [
 [[package]]
 name = "wasefire-one-of"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bf9167149e9d56bd27c62666289fc12bb2df3d02aa51a7702283c63a9912500"
 
 [[package]]
 name = "wasefire-store"
@@ -749,8 +735,6 @@ checksum = "f49afdab5206771f6d7ad85b556fcd6255004485b704f0f5c084335c5fae3238"
 [[package]]
 name = "wasefire-sync"
 version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014bb0d34c696e98305c50466e475c9e17b8d6884c02800a387f2198f402cf02"
 dependencies = [
  "portable-atomic",
  "spin",

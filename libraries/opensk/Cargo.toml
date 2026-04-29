@@ -25,7 +25,7 @@ hkdf = { version = "0.12.3", default-features = false, optional = true }
 aes = { version = "0.8.2", default-features = false, optional = true }
 cbc = { version = "0.1.2", default-features = false, optional = true }
 zeroize = { version = "1.5.7", features = ["derive"] }
-wasefire-store = { version = "=0.2.4", optional = true }
+wasefire-store = { version = "0.2.4", optional = true }
 
 [dependencies.p256]
 version = "0.13.0"

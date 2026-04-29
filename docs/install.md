@@ -117,10 +117,10 @@ using the same platform feature.
 
 For more details on the boards, see:
 
-- [Nordic nRF52840-DK](docs/boards/nrf52840dk.md)
-- [Nordic nRF52840 Dongle](docs/boards/nrf52840_dongle.md)
-- [Makerdiary nRF52840-MDK USB dongle](docs/boards/nrf52840_mdk.md)
-- [Feitian OpenSK dongle](docs/boards/nrf52840_feitian.md)
+- [Nordic nRF52840-DK](boards/nrf52840dk.md)
+- [Nordic nRF52840 Dongle](boards/nrf52840_dongle.md)
+- [Makerdiary nRF52840-MDK USB dongle](boards/nrf52840_mdk.md)
+- [Feitian OpenSK dongle](boards/nrf52840_feitian.md)
 
 ### OpenTitan
 

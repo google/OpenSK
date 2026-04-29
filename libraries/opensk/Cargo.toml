@@ -18,7 +18,7 @@ subtle = { version = "2.2", default-features = false, features = ["nightly"] }
 arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 rand_core = "0.6.4"
-rand = { version = "0.8.5", default-features = false, optional = true }
+rand = { version = "0.8.6", default-features = false, optional = true }
 sha2 = { version = "0.10.6", default-features = false, optional = true }
 hmac = { version = "0.12.1", default-features = false, optional = true }
 hkdf = { version = "0.12.3", default-features = false, optional = true }
@@ -52,4 +52,4 @@ enum-iterator = "0.6.0"
 [build-dependencies]
 sk-cbor = { path = "../cbor" }
 uuid = { version = "0.8", features = ["v4"] }
-openssl = "0.10.36"
+openssl = "0.10.78"

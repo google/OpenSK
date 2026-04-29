@@ -32,7 +32,10 @@ fi
 
 git submodule update --init
 
-(cd third_party/wasefire/ && ./scripts/setup.sh)
+# Wasefire fails in an OSS-Fuzz environment, and we only fuzz the libraries
+if [ -z "$FUZZING_ENGINE" ]; then
+  (cd third_party/wasefire/ && ./scripts/setup.sh)
+fi
 
 # Ensure we have certificates, keys, etc. so that the tests can run
 source tools/gen_key_materials.sh

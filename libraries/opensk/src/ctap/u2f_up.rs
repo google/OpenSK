@@ -64,7 +64,7 @@ impl<E: Env> U2fUserPresenceState<E> {
     }
 }
 
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 #[cfg(test)]
 mod test {
     use super::*;

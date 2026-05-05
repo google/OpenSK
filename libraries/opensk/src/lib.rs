@@ -120,12 +120,12 @@ impl<E: Env> Ctap<E> {
         !self.should_wink() && self.state.can_sleep(&mut self.env)
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub fn u2f_grant_user_presence(&mut self) {
         self.state.u2f_grant_user_presence(&mut self.env)
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub fn u2f_needs_user_presence(&mut self) -> bool {
         self.state.u2f_needs_user_presence(&mut self.env)
     }
@@ -277,7 +277,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     fn test_ctap1_initial_state() {
         let env = TestEnv::default();
         let mut ctap = Ctap::<TestEnv>::new(env);

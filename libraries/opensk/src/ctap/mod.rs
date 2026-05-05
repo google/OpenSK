@@ -19,7 +19,7 @@ pub mod command;
 mod config_command;
 mod credential_management;
 pub mod crypto_wrapper;
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 mod ctap1;
 pub mod data_formats;
 #[cfg(feature = "fingerprint")]
@@ -33,7 +33,7 @@ pub mod secret;
 pub mod status_code;
 mod storage;
 mod token_state;
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 mod u2f_up;
 #[cfg(feature = "vendor_hid")]
 pub mod vendor_hid;
@@ -64,7 +64,7 @@ use self::response::{
 };
 use self::secret::Secret;
 use self::status_code::{Ctap2StatusCode, CtapResult};
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
@@ -109,7 +109,7 @@ const RESET_TIMEOUT_DURATION_MS: usize = 10000;
 const STATEFUL_COMMAND_TIMEOUT_DURATION_MS: usize = 30000;
 
 pub const FIDO2_VERSION_STRING: &str = "FIDO_2_0";
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 pub const U2F_VERSION_STRING: &str = "U2F_V2";
 pub const FIDO2_1_VERSION_STRING: &str = "FIDO_2_1";
 
@@ -559,7 +559,7 @@ impl<E: Env> StatefulPermission<E> {
 // in the persistent store field.
 pub struct CtapState<E: Env> {
     client_pin: ClientPin<E>,
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub(crate) u2f_up_state: U2fUserPresenceState<E>,
     // The state initializes to Reset and its timeout, and never goes back to Reset.
     stateful_command_permission: StatefulPermission<E>,
@@ -581,7 +581,7 @@ impl<E: Env> CtapState<E> {
         };
         CtapState {
             client_pin,
-            #[cfg(feature = "with_ctap1")]
+            #[cfg(feature = "ctap1")]
             u2f_up_state: U2fUserPresenceState::new(),
             stateful_command_permission,
             #[cfg(feature = "fingerprint")]
@@ -600,14 +600,14 @@ impl<E: Env> CtapState<E> {
     // Returns whether CTAP1 commands are currently supported.
     // If alwaysUv is enabled and the authenticator does not support internal UV,
     // CTAP1 needs to be disabled.
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub fn allows_ctap1(&self, env: &mut E) -> CtapResult<bool> {
         Ok(!storage::has_always_uv(env)?)
     }
 
     fn clear_other_channels(&mut self, channel: Channel) {
         // Correct behavior between CTAP1 and CTAP2 isn't defined yet. Just a guess.
-        #[cfg(feature = "with_ctap1")]
+        #[cfg(feature = "ctap1")]
         {
             // We create a block statement to wrap this assignment expression, because attributes
             // (like #[cfg]) are not supported on expressions.
@@ -1338,12 +1338,12 @@ impl<E: Env> CtapState<E> {
 
     fn process_get_info(&self, env: &mut E) -> CtapResult<ResponseData> {
         let has_always_uv = storage::has_always_uv(env)?;
-        #[cfg_attr(not(feature = "with_ctap1"), allow(unused_mut))]
+        #[cfg_attr(not(feature = "ctap1"), allow(unused_mut))]
         let mut versions = vec![
             String::from(FIDO2_VERSION_STRING),
             String::from(FIDO2_1_VERSION_STRING),
         ];
-        #[cfg(feature = "with_ctap1")]
+        #[cfg(feature = "ctap1")]
         if !has_always_uv {
             versions.insert(0, String::from(U2F_VERSION_STRING))
         }
@@ -1454,7 +1454,7 @@ impl<E: Env> CtapState<E> {
             }
         }
 
-        #[cfg(feature = "with_ctap1")]
+        #[cfg(feature = "ctap1")]
         {
             // We create a block statement to wrap this assignment expression, because attributes
             // (like #[cfg]) are not supported on expressions.
@@ -1488,12 +1488,12 @@ impl<E: Env> CtapState<E> {
         Ok(auth_data)
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub fn u2f_grant_user_presence(&mut self, env: &mut E) {
         self.u2f_up_state.grant_up(env)
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     pub fn u2f_needs_user_presence(&mut self, env: &mut E) -> bool {
         self.u2f_up_state.is_up_needed(env)
     }
@@ -1584,7 +1584,7 @@ mod test {
         #[allow(clippy::unnecessary_to_owned)]
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
-                    #[cfg(feature = "with_ctap1")]
+                    #[cfg(feature = "ctap1")]
                     String::from(U2F_VERSION_STRING),
                     String::from(FIDO2_VERSION_STRING),
                     String::from(FIDO2_1_VERSION_STRING),
@@ -1650,7 +1650,7 @@ mod test {
         #[allow(clippy::unnecessary_to_owned)]
         let expected_cbor = cbor_map_options! {
              0x01 => cbor_array_vec![vec![
-                    #[cfg(feature = "with_ctap1")]
+                    #[cfg(feature = "ctap1")]
                     String::from(U2F_VERSION_STRING),
                     String::from(FIDO2_VERSION_STRING),
                     String::from(FIDO2_1_VERSION_STRING),

@@ -59,7 +59,7 @@ cargo clippy --lib --tests --bins --benches --features=test,"$MOST_FEATURES" -- 
 echo "Running OpenSK library unit tests..."
 cd libraries/opensk
 cargo test --no-default-features --features=std
-cargo test --features=std,config_command,with_ctap1
+cargo test --features=std,config_command,ctap1
 cargo test --all-features
 cd ../..
 

@@ -38,7 +38,7 @@ default-features = false
 
 [features]
 config-command = ["opensk/config_command"]
-ctap1 = ["opensk/with_ctap1"]
+ctap1 = ["opensk/ctap1"]
 debug = ["opensk/debug_ctap"]
 ed25519 = ["opensk/ed25519", "wasefire/api-crypto-ed25519"]
 fingerprint = ["dep:wasefire-common", "opensk/fingerprint", "wasefire/api-fingerprint-matcher"]

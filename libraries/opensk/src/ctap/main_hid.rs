@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use crate::api::clock::Clock;
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 use crate::ctap::ctap1;
-#[cfg(feature = "with_ctap1")]
+#[cfg(feature = "ctap1")]
 use crate::ctap::hid::ChannelID;
 use crate::ctap::hid::{
     CtapHid, CtapHidCommand, CtapHidError, HidPacket, HidPacketIterator, Message,
@@ -34,9 +34,9 @@ pub struct MainHid<E: Env> {
 impl<E: Env> Default for MainHid<E> {
     /// Instantiates a HID handler for CTAP1, CTAP2 and Wink.
     fn default() -> Self {
-        #[cfg(feature = "with_ctap1")]
+        #[cfg(feature = "ctap1")]
         let capabilities = CtapHid::<E>::CAPABILITY_WINK | CtapHid::<E>::CAPABILITY_CBOR;
-        #[cfg(not(feature = "with_ctap1"))]
+        #[cfg(not(feature = "ctap1"))]
         let capabilities = CtapHid::<E>::CAPABILITY_WINK
             | CtapHid::<E>::CAPABILITY_CBOR
             | CtapHid::<E>::CAPABILITY_NMSG;
@@ -83,10 +83,10 @@ impl<E: Env> MainHid<E> {
             // CTAP 2.1 from 2021-06-15, section 11.2.9.1.1.
             CtapHidCommand::Msg => {
                 // If we don't have CTAP1 backward compatibilty, this command is invalid.
-                #[cfg(not(feature = "with_ctap1"))]
+                #[cfg(not(feature = "ctap1"))]
                 return CtapHid::<E>::error_message(cid, CtapHidError::InvalidCmd);
 
-                #[cfg(feature = "with_ctap1")]
+                #[cfg(feature = "ctap1")]
                 match ctap1::Ctap1Command::process_command(env, &message.payload, ctap_state) {
                     Ok(payload) => Self::ctap1_success_message(cid, &payload),
                     Err(ctap1_status_code) => Self::ctap1_error_message(cid, ctap1_status_code),
@@ -130,7 +130,7 @@ impl<E: Env> MainHid<E> {
         !env.clock().is_elapsed(&self.wink_permission)
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     fn ctap1_error_message(cid: ChannelID, error_code: ctap1::Ctap1StatusCode) -> Message {
         let code: u16 = error_code.into();
         Message {
@@ -140,7 +140,7 @@ impl<E: Env> MainHid<E> {
         }
     }
 
-    #[cfg(feature = "with_ctap1")]
+    #[cfg(feature = "ctap1")]
     fn ctap1_success_message(cid: ChannelID, payload: &[u8]) -> Message {
         let mut response = payload.to_vec();
         let code: u16 = ctap1::Ctap1StatusCode::SW_SUCCESS.into();

@@ -194,7 +194,7 @@ pub struct CtapHid<E: Env> {
 impl<E: Env> CtapHid<E> {
     pub const CAPABILITY_WINK: u8 = 0x01;
     pub const CAPABILITY_CBOR: u8 = 0x04;
-    #[cfg(any(not(feature = "with_ctap1"), feature = "vendor_hid"))]
+    #[cfg(any(not(feature = "ctap1"), feature = "vendor_hid"))]
     pub const CAPABILITY_NMSG: u8 = 0x08;
 
     /// Creates a new CTAP HID packet parser.

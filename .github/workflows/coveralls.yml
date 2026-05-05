@@ -35,7 +35,7 @@ jobs:
         with:
           toolchain: nightly
           command: test
-          args: --manifest-path libraries/opensk/Cargo.toml --features "std,with_ctap1,vendor_hid,software_crypto_ed25519,fingerprint" --no-fail-fast
+          args: --manifest-path libraries/opensk/Cargo.toml --features "std,ctap1,vendor_hid,software_crypto_ed25519,fingerprint" --no-fail-fast
         env:
           RUSTFLAGS: "-Cinstrument-coverage"
           LLVM_PROFILE_FILE: "opensk-%p-%m.profraw"

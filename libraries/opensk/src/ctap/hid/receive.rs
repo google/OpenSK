@@ -95,7 +95,9 @@ impl<E: Env> MessageAssembler<E> {
 
             // If the packet is from the timed-out channel, send back a timeout error.
             // Otherwise, proceed with processing the packet.
-            if cid == current_cid {
+            if cid == current_cid
+                && matches!(processed_packet, ProcessedPacket::ContinuationPacket { .. })
+            {
                 return Err((cid, CtapHidError::MsgTimeout));
             }
         }
@@ -595,6 +597,41 @@ mod test {
                 None
             ),
             Err(([0x12, 0x34, 0x56, 0x78], CtapHidError::MsgTimeout))
+        );
+    }
+
+    #[test]
+    fn test_timed_out_new_init() {
+        let mut env = TestEnv::default();
+        let mut assembler = MessageAssembler::default();
+        assert_eq!(
+            assembler.parse_packet(
+                &mut env,
+                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
+                None,
+            ),
+            Ok(None)
+        );
+        env.clock().advance(TIMEOUT_DURATION_MS);
+        assert_eq!(
+            assembler.parse_packet(
+                &mut env,
+                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x81, 0x00, 0x40]),
+                None
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            assembler.parse_packet(
+                &mut env,
+                &zero_extend(&[0x12, 0x34, 0x56, 0x78, 0x00]),
+                None
+            ),
+            Ok(Some(Message {
+                cid: [0x12, 0x34, 0x56, 0x78],
+                cmd: CtapHidCommand::Ping,
+                payload: vec![0x00; 0x40]
+            }))
         );
     }
 

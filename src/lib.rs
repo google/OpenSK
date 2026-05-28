@@ -36,13 +36,15 @@ fn main() -> ! {
         update_state(&mut wink, opensk_ctap.should_wink(), || {
             blink::Blink::new_ms(100)
         });
-        let mut packet = Some([0; 64]);
-        let mut timeout = None;
-        timeout = timeout.or(wink.is_some().then_some(500));
+        let mut recv_packet = Some([0; 64]);
+        let mut timeout = false;
+        timeout |= wink.is_some();
         #[cfg(feature = "ctap1")]
-        (timeout = timeout.or(u2f.is_some().then_some(1000)));
-        match env::hid_connection::recv(packet.as_mut().unwrap(), timeout).unwrap() {
-            RecvStatus::Timeout => packet = None,
+        (timeout |= u2f.is_some());
+        match env::hid_connection::recv(recv_packet.as_mut().unwrap(), timeout.then_some(500))
+            .unwrap()
+        {
+            RecvStatus::Timeout => recv_packet = None,
             RecvStatus::Received(endpoint) => assert_eq!(endpoint, UsbEndpoint::MainHid),
         }
         #[cfg(feature = "ctap1")]
@@ -50,12 +52,12 @@ fn main() -> ! {
             u2f = None;
             opensk_ctap.u2f_grant_user_presence();
         }
-        if let Some(packet) = packet {
-            for packet in opensk_ctap.process_hid_packet(&packet, Transport::MainHid) {
+        if let Some(recv_packet) = recv_packet {
+            for send_packet in opensk_ctap.process_hid_packet(&recv_packet, Transport::MainHid) {
                 opensk_ctap
                     .env()
                     .hid_connection()
-                    .send(&packet, UsbEndpoint::MainHid)
+                    .send(&send_packet, UsbEndpoint::MainHid)
                     .unwrap();
             }
         }

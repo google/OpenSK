@@ -37,6 +37,15 @@ impl Touch {
     }
 }
 
+impl Drop for Touch {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.touched) == 2 {
+            // We're the last object, so we can stop listening.
+            *STATE.lock() = None;
+        }
+    }
+}
+
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 struct State {

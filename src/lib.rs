@@ -33,15 +33,18 @@ fn main() -> ! {
     let mut u2f: Option<touch::Touch> = None;
     debug!("OpenSK initialized");
     loop {
-        match (wink.is_some(), opensk_ctap.should_wink()) {
-            (true, true) | (false, false) => (),
-            (false, true) => wink = Some(blink::Blink::new_ms(100)),
-            (true, false) => wink = None,
-        }
-        let mut packet = [0; 64];
-        let timeout = wink.is_some().then_some(500);
-        match env::hid_connection::recv(&mut packet, timeout).unwrap() {
-            RecvStatus::Timeout => continue,
+        update_state(&mut wink, opensk_ctap.should_wink(), || {
+            blink::Blink::new_ms(100)
+        });
+        let mut recv_packet = Some([0; 64]);
+        let mut timeout = false;
+        timeout |= wink.is_some();
+        #[cfg(feature = "ctap1")]
+        (timeout |= u2f.is_some());
+        match env::hid_connection::recv(recv_packet.as_mut().unwrap(), timeout.then_some(500))
+            .unwrap()
+        {
+            RecvStatus::Timeout => recv_packet = None,
             RecvStatus::Received(endpoint) => assert_eq!(endpoint, UsbEndpoint::MainHid),
         }
         #[cfg(feature = "ctap1")]
@@ -49,16 +52,28 @@ fn main() -> ! {
             u2f = None;
             opensk_ctap.u2f_grant_user_presence();
         }
-        for packet in opensk_ctap.process_hid_packet(&packet, Transport::MainHid) {
-            opensk_ctap
-                .env()
-                .hid_connection()
-                .send(&packet, UsbEndpoint::MainHid)
-                .unwrap();
+        if let Some(recv_packet) = recv_packet {
+            for send_packet in opensk_ctap.process_hid_packet(&recv_packet, Transport::MainHid) {
+                opensk_ctap
+                    .env()
+                    .hid_connection()
+                    .send(&send_packet, UsbEndpoint::MainHid)
+                    .unwrap();
+            }
         }
         #[cfg(feature = "ctap1")]
-        if opensk_ctap.u2f_needs_user_presence() && u2f.is_none() {
-            u2f = Some(touch::Touch::new());
-        }
+        update_state(
+            &mut u2f,
+            opensk_ctap.u2f_needs_user_presence(),
+            touch::Touch::new,
+        );
+    }
+}
+
+fn update_state<T>(state: &mut Option<T>, target: bool, build: impl FnOnce() -> T) {
+    *state = match (state.is_some(), target) {
+        (true, true) | (false, false) => return,
+        (true, false) => None,
+        (false, true) => Some(build()),
     }
 }

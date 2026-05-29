@@ -58,8 +58,14 @@ The applet provides a few customization features (all disabled by default):
 - `ed25519` enables support for Ed25519 (the applet always implements ECDSA P-256)
 - `fingerprint` enables support for fingerprints (requires a sensor)
 
-The hardware specific commands below to flash a firmware contain the default
-argument `--features=ctap1,config-command`. Add or remove features there.
+We provide a `flash.sh` script to flash the OpenSK applet for each platform.
+To customize features, use `--features`. For example, to enable debug prints:
+
+```sh
+./flash.sh --features=ctap1,config-command,debug <target>
+```
+
+The available targets are listed below.
 
 ## Platforms
 
@@ -80,15 +86,10 @@ The applet needs the platform to implement the following features of the board A
 - `api-timer`
 - `api-usb-ctap`
 
-Run commands below from the directory `third_party/wasefire/`.
-They contain the necessary platform features. If you want to use applet
-features like `fingerprint`, you may need to add the corresponding platform
-feature. Set them using `--features=` prefix for the `runner`.
 Some applet features only work for some targets, special notes will indicate
 when a feature is not supported, or extra steps need to be taken.
 
-In the following sections, we provide instructions to flash an OpenSK applet for
-each platform provided by this repository.
+In the following sections, we describe platforms that support OpenSK.
 
 ### Host
 
@@ -97,8 +98,7 @@ The applet feature `fingerprint` is not supported.
 To install, run:
 
 ```sh
-cargo xtask --native applet rust ../.. --features=ctap1,config-command \
-  runner host flash --usb-ctap --interface=web
+./flash.sh host
 ```
 
 ### nRF52840
@@ -117,10 +117,10 @@ using the same platform feature.
 
 For more details on the boards, see:
 
-- [Nordic nRF52840-DK](boards/nrf52840dk.md)
-- [Nordic nRF52840 Dongle](boards/nrf52840_dongle.md)
-- [Makerdiary nRF52840-MDK USB dongle](boards/nrf52840_mdk.md)
-- [Feitian OpenSK dongle](boards/nrf52840_feitian.md)
+- [Nordic nRF52840-DK](boards/nrf52840dk.md) - target: `nrf52840dk`
+- [Nordic nRF52840 Dongle](boards/nrf52840_dongle.md) - target: `nrf52840_dongle`
+- [Makerdiary nRF52840-MDK USB dongle](boards/nrf52840_mdk.md) - target: `nrf52840_mdk`
+- [Feitian OpenSK dongle](boards/nrf52840_feitian.md) - target: `nrf52840_dongle`
 
 ### OpenTitan
 
@@ -135,8 +135,5 @@ A LED (active high) needs to be connected to R10. A capacitive touch needs to be
 connected to R13.
 
 ```sh
-cargo xtask --release --native \
-  applet rust ../.. --opt-level=z --features=ctap1,config-command \
-  runner opentitan --opt-level=z --features=usb-ctap \
-  flash
+./flash.sh opentitan
 ```

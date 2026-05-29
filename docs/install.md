@@ -44,9 +44,7 @@ sudo udevadm control --reload
 
 OpenSK stores data in the devices flash storage, for example your credentials.
 When you flash Wasefire, you will erase that storage.
-
-If you flash Wasefire and OpenSK for the second time, and want to keep your
-storage, replace `flash` in the below commands with `update --both`.
+To keep your storage, use the `--update` flag with the below flash script.
 
 ## Features
 

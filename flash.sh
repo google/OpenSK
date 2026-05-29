@@ -22,6 +22,7 @@ usage() {
   echo ""
   echo "Options:"
   echo "  --features=<features>  Comma-separated list of features to enable (default: $FEATURES)"
+  echo "  --update               Update instead of flashing (preserves storage)"
   echo ""
   echo "Targets:"
   echo "  host               Simulated device on host"
@@ -32,10 +33,16 @@ usage() {
   exit 1
 }
 
+CMD=(flash)
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --features=*)
       FEATURES="${1#*=}"
+      shift
+      ;;
+    --update)
+      CMD=(update --both)
       shift
       ;;
     -h|--help)
@@ -81,25 +88,30 @@ SOFTWARE_CRYPTO_FEATURES+=",software-crypto-p256-ecdsa"
 
 case $TARGET in
   host)
-    cargo xtask --native applet rust ../.. --features="$FEATURES" \
-      runner host flash --usb-ctap --interface=web
+    if [ "${CMD[0]}" = "update" ]; then
+      cargo xtask --native applet rust ../.. --features="$FEATURES" \
+        runner host "${CMD[@]}"
+    else
+      cargo xtask --native applet rust ../.. --features="$FEATURES" \
+        runner host flash --usb-ctap --interface=web
+    fi
     ;;
   opentitan)
     cargo xtask --release --native applet rust ../.. --opt-level=z --features="$FEATURES" \
       runner opentitan --opt-level=z --features=usb-ctap \
-      flash
+      "${CMD[@]}"
     ;;
   nrf52840dk)
     cargo xtask --release --native applet rust ../.. --opt-level=z --features="$FEATURES" \
       runner nordic --opt-level=z --features=usb-ctap \
         --features="$SOFTWARE_CRYPTO_FEATURES" \
-      flash
+      "${CMD[@]}"
     ;;
   nrf52840_dongle)
     cargo xtask --release --native applet rust ../.. --opt-level=z --features="$FEATURES" \
       runner nordic --board=dongle --opt-level=z --features=usb-ctap \
         --features="$SOFTWARE_CRYPTO_FEATURES" \
-      flash
+      "${CMD[@]}"
     ;;
   nrf52840_mdk)
     # Ensure led-1 is included for MDK
@@ -110,7 +122,7 @@ case $TARGET in
     cargo xtask --release --native applet rust ../.. --opt-level=z --features="$MDK_FEATURES" \
       runner nordic --board=makerdiary --opt-level=z --features=usb-ctap \
         --features="$SOFTWARE_CRYPTO_FEATURES" \
-      flash
+      "${CMD[@]}"
     ;;
   *)
     echo "Error: Unknown target $TARGET"

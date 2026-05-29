@@ -9,12 +9,7 @@ Also make sure the USB mass storage device class is mounted. It should appear as
 UF2BOOT.
 
 ```sh
-cargo xtask --release --native \
-  applet rust ../.. --opt-level=z --features=ctap1,config-command,led-1 \
-  runner nordic --board=makerdiary --opt-level=z --features=usb-ctap \
-    --features=software-crypto-aes256-cbc,software-crypto-hmac-sha256 \
-    --features=software-crypto-p256-ecdsa,software-crypto-p256-ecdh \
-  flash
+./flash.sh nrf52840_mdk
 ```
 
 ### Buttons and LEDs

@@ -13,8 +13,13 @@ hardware. See
 - In V2, push and hold the user button for more than 10 seconds after
   connecting your device.
 
-Afterwards, you can flash your Feitian OpenSK following the
-[instructions for the Nordic nRF52840 Dongle](nrf52840_dongle.md#Flashing).
+Afterwards, you can flash your Feitian OpenSK by running:
+
+```sh
+./flash.sh nrf52840_dongle
+```
+
+Note: Using `nrf52840_dongle` is not a typo. They use similar hardware.
 
 ### Buttons and LEDs
 

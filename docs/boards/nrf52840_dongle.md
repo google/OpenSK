@@ -23,12 +23,7 @@ Make sure the dongle is in DFU mode by plugging it while holding the reset butto
 The device indicates DFU mode with a slowly blinking red LED.
 
 ```sh
-cargo xtask --release --native \
-  applet rust ../.. --opt-level=z --features=ctap1,config-command \
-  runner nordic --board=dongle --opt-level=z --features=usb-ctap \
-    --features=software-crypto-aes256-cbc,software-crypto-hmac-sha256 \
-    --features=software-crypto-p256-ecdsa,software-crypto-p256-ecdh \
-  flash
+./flash.sh nrf52840_dongle
 ```
 
 This command will eventually pause and instruct you to enter DFU mode again (by

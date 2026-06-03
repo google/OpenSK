@@ -978,7 +978,7 @@ impl<E: Env> CtapState<E> {
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
-        auth_data.extend(env.customization().aaguid());
+        auth_data.extend(env.persist().aaguid()?);
         // The length is fixed to 0x20 or 0x80 and fits one byte.
         if credential_id.len() > 0xFF {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
@@ -1390,7 +1390,7 @@ impl<E: Env> CtapState<E> {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ]),
-                aaguid: *env.customization().aaguid(),
+                aaguid: env.persist().aaguid()?,
                 options: Some(options),
                 max_msg_size: Some(env.customization().max_msg_size() as u64),
                 // The order implies preference. We favor the new V2.
@@ -1536,7 +1536,7 @@ mod test {
         expected_credential_id_size: u8,
         expected_extension_cbor: &[u8],
     ) {
-        let expected_aaguid = env.customization().aaguid();
+        let expected_aaguid = env.persist().aaguid().unwrap();
         let signature_counter = env.persist().global_signature_counter().unwrap();
         match make_credential_response.as_ref().unwrap() {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
@@ -1577,6 +1577,7 @@ mod test {
     #[cfg(feature = "fingerprint")]
     fn test_get_info() {
         let mut env = TestEnv::default();
+        let aaguid = env.persist().aaguid().unwrap();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
 
@@ -1596,7 +1597,7 @@ mod test {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ],
-            0x03 => env.customization().aaguid(),
+            0x03 => &aaguid[..],
             0x04 => cbor_map_options! {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
@@ -1643,6 +1644,7 @@ mod test {
     #[cfg(not(feature = "fingerprint"))]
     fn test_get_info() {
         let mut env = TestEnv::default();
+        let aaguid = env.persist().aaguid().unwrap();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
 
@@ -1662,7 +1664,7 @@ mod test {
                     String::from("credBlob"),
                     String::from("largeBlobKey"),
                 ],
-            0x03 => env.customization().aaguid(),
+            0x03 => &aaguid[..],
             0x04 => cbor_map_options! {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
@@ -1783,7 +1785,7 @@ mod test {
         match make_credential_response {
             ResponseData::AuthenticatorMakeCredential(make_credential_response) => {
                 let auth_data = make_credential_response.auth_data;
-                let offset = 37 + env.customization().aaguid().len();
+                let offset = 37 + env.persist().aaguid().unwrap().len();
                 assert_eq!(auth_data[offset], 0x00);
                 assert_eq!(auth_data[offset + 1] as usize, CBOR_CREDENTIAL_ID_SIZE);
                 auth_data[offset + 2..offset + 2 + CBOR_CREDENTIAL_ID_SIZE].to_vec()

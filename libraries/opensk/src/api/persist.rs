@@ -34,6 +34,8 @@ use enum_iterator::IntoEnumIterator;
 use sk_cbor as cbor;
 use sk_cbor::destructure_cbor_map;
 
+pub const AAGUID_LENGTH: usize = 16;
+
 pub type PersistIter<'a> = Box<dyn Iterator<Item = CtapResult<usize>> + 'a>;
 pub type PersistCredentialIter<'a> = Box<dyn Iterator<Item = CtapResult<(usize, Vec<u8>)>> + 'a>;
 pub type LargeBlobBuffer = Vec<u8>;
@@ -581,6 +583,24 @@ pub trait Persist {
         Ok(())
     }
 
+    /// Returns the programmed AAGUID, defaulting to all zeros if not set.
+    fn aaguid(&self) -> CtapResult<[u8; AAGUID_LENGTH]> {
+        match self.find(keys::AAGUID)? {
+            None => Ok([0; AAGUID_LENGTH]),
+            Some(value) if value.len() == AAGUID_LENGTH => {
+                let mut aaguid = [0; AAGUID_LENGTH];
+                aaguid.copy_from_slice(&value);
+                Ok(aaguid)
+            }
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Sets the AAGUID.
+    fn set_aaguid(&mut self, aaguid: &[u8; AAGUID_LENGTH]) -> CtapResult<()> {
+        self.insert(keys::AAGUID, aaguid)
+    }
+
     fn key_store_bytes(&self) -> CtapResult<Option<Secret<[u8]>>> {
         let bytes = self.find(keys::KEY_STORE)?;
         Ok(bytes.map(|b| {
@@ -870,5 +890,17 @@ mod test {
             certificate: vec![0xCC],
         };
         assert_eq!(returned_attestation, expected_attestation);
+    }
+
+    #[test]
+    fn test_aaguid() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        assert_eq!(persist.aaguid(), Ok([0; AAGUID_LENGTH]));
+
+        let test_aaguid = [1; AAGUID_LENGTH];
+        assert_eq!(persist.set_aaguid(&test_aaguid), Ok(()));
+        assert_eq!(persist.aaguid(), Ok(test_aaguid));
     }
 }

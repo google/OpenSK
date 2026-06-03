@@ -21,12 +21,7 @@ use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestatio
 use alloc::string::String;
 use alloc::vec::Vec;
 
-pub const AAGUID_LENGTH: usize = 16;
-
 pub trait Customization {
-    /// Authenticator Attestation Global Unique Identifier
-    fn aaguid(&self) -> &'static [u8; AAGUID_LENGTH];
-
     // ###########################################################################
     // Constants for adjusting privacy and protection levels.
     // ###########################################################################
@@ -298,7 +293,6 @@ pub trait Customization {
 
 #[derive(Clone)]
 pub struct CustomizationImpl {
-    pub aaguid: &'static [u8; AAGUID_LENGTH],
     pub allows_pin_protocol_v1: bool,
     pub default_cred_protect: Option<CredentialProtectionPolicy>,
     pub default_min_pin_length: u8,
@@ -326,7 +320,6 @@ pub struct CustomizationImpl {
 }
 
 pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
-    aaguid: &[0; AAGUID_LENGTH],
     allows_pin_protocol_v1: true,
     default_cred_protect: None,
     default_min_pin_length: 4,
@@ -354,10 +347,6 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
 };
 
 impl Customization for CustomizationImpl {
-    fn aaguid(&self) -> &'static [u8; AAGUID_LENGTH] {
-        self.aaguid
-    }
-
     fn allows_pin_protocol_v1(&self) -> bool {
         self.allows_pin_protocol_v1
     }
@@ -565,7 +554,6 @@ mod test {
     #[test]
     fn test_accessors() {
         let customization = CustomizationImpl {
-            aaguid: &[0; AAGUID_LENGTH],
             allows_pin_protocol_v1: true,
             default_cred_protect: None,
             default_min_pin_length: 4,
@@ -591,7 +579,6 @@ mod test {
             #[cfg(feature = "fingerprint")]
             max_template_friendly_name: 64,
         };
-        assert_eq!(customization.aaguid(), &[0; AAGUID_LENGTH]);
         assert!(customization.allows_pin_protocol_v1());
         assert!(customization.default_cred_protect().is_none());
         assert_eq!(customization.default_min_pin_length(), 4);

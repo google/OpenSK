@@ -36,7 +36,7 @@ from fido2 import ctap
 from fido2 import ctap2
 from fido2 import hid
 
-OPENSK_VID_PID = (0x1915, 0x521F)
+OPENSK_VID_PID = (0x18D1, 0x0239)
 OPENSK_VENDOR_CONFIGURE = 0x40
 
 
@@ -114,7 +114,16 @@ def main(args):
         fatal("Certificate public doesn't match with the private key.")
     info("Certificate is valid.")
 
+    aaguid_str = args.aaguid_file.read().strip()
+    try:
+        aaguid_obj = uuid.UUID(aaguid_str)
+    except ValueError:
+        fatal("Invalid AAGUID UUID format.")
+    aaguid_bytes = aaguid_obj.bytes
+    info(f"AAGUID to program: {aaguid_obj}")
+
     cbor_data = {}
+    cbor_data[1] = aaguid_bytes
     cbor_data[2] = {
         1: cert.public_bytes(serialization.Encoding.DER),
         2: priv_key.private_numbers().private_value.to_bytes(
@@ -148,10 +157,11 @@ def main(args):
                 OPENSK_VENDOR_CONFIGURE,
                 data=cbor_data,
             )
-            status = {"cert": result[1], "pkey": result[2]}
+            status = {"cert": result[1], "pkey": result[2], "aaguid": result[3]}
             responses.append(status)
             info(f"Certificate: {'Present' if result[1] else 'Missing'}")
             info(f"Private Key: {'Present' if result[2] else 'Missing'}")
+            info(f"AAGUID:      {'Present' if result[3] else 'Missing'}")
         except ctap.CtapError as ex:
             if ex.code.value == ctap.CtapError.ERR.INVALID_COMMAND:
                 error("Failed to configure OpenSK (unsupported command).")
@@ -204,6 +214,14 @@ if __name__ == "__main__":
         metavar="PEM_FILE",
         dest="priv_key",
         help=("PEM file containing the private key associated with the certificate."),
+    )
+    parser.add_argument(
+        "--aaguid",
+        type=argparse.FileType("r"),
+        required=True,
+        metavar="AAGUID_TXT_FILE",
+        dest="aaguid_file",
+        help="Path to aaguid.txt containing the UUID string.",
     )
     parser.add_argument(
         "--vendor-hid",

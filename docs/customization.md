@@ -48,7 +48,7 @@ carefully if you want to take the privacy risk of using the configure tool.
 
 The default randomly generated, ephemeral batch attestation keys, are helpful in
 practise: Without a key, U2F does not work. Also a few more relying parties
-accept OpenSK responses because of this trick. It is not meant to proof any
+accept OpenSK responses because of this trick. It is not meant to prove any
 hardware security properties.
 
 To inject your own batch attestation key and AAGUID into the firmware, run:

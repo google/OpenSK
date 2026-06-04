@@ -135,3 +135,11 @@ connected to R13.
 ```sh
 ./flash.sh opentitan
 ```
+
+## Configuring the firmware
+
+After flashing the firmware, you can configure it.
+You can use a custom AAGUID, batch attestation key and certificate.
+Only perform this step if you understand the privacy implications. Read the
+[certificate section in Customization](customization.md#Certificate-considerations)
+to find the necessary command.

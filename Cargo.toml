@@ -36,6 +36,9 @@ features = [
 path = "libraries/opensk"
 default-features = false
 
+[dependencies.sk-cbor]
+path = "libraries/cbor"
+
 [features]
 config-command = ["opensk/config_command"]
 ctap1 = ["opensk/ctap1"]
@@ -44,6 +47,3 @@ ed25519 = ["opensk/ed25519", "wasefire/api-crypto-ed25519"]
 fingerprint = ["dep:wasefire-common", "opensk/fingerprint", "wasefire/api-fingerprint-matcher"]
 led-1 = []
 test = ["opensk/std", "wasefire/test"]
-
-[build-dependencies]
-uuid = { version = "0.8", features = ["v4"] }

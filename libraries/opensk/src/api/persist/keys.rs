@@ -73,8 +73,8 @@ make_partition! {
     /// Type of attestation used.
     ATTESTATION_ID = 4;
 
-    /// Used for the AAGUID before, but deprecated.
-    _AAGUID = 3;
+    /// Authenticator Attestation Global Unique Identifier.
+    AAGUID = 3;
 
     // This is the persistent key limit:
     // - When adding a (persistent) key above this message, make sure its value is smaller than

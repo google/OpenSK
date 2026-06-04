@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opensk::api::customization::{AAGUID_LENGTH, CustomizationImpl, DEFAULT_CUSTOMIZATION};
+use opensk::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
 use opensk::ctap::status_code::Ctap2StatusCode;
 use opensk::env::Env;
 use wasefire::Error;
@@ -26,17 +26,12 @@ pub(crate) mod hid_connection;
 pub(crate) mod persist;
 mod rng;
 mod user_presence;
+mod vendor;
 mod write;
-
-pub const AAGUID: &[u8; AAGUID_LENGTH] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/opensk_aaguid.bin"));
 
 pub(crate) fn init() -> WasefireEnv {
     WasefireEnv {
-        customization: CustomizationImpl {
-            aaguid: AAGUID,
-            ..DEFAULT_CUSTOMIZATION
-        },
+        customization: DEFAULT_CUSTOMIZATION,
         user_presence: user_presence::init(),
         #[cfg(feature = "fingerprint")]
         fingerprint: fingerprint::init(),
@@ -103,6 +98,14 @@ impl Env for WasefireEnv {
     fn boots_after_soft_reset(&self) -> bool {
         // TODO: The applet needs to know if the platform did a cold boot.
         false
+    }
+
+    fn process_vendor_command(
+        &mut self,
+        bytes: &[u8],
+        channel: opensk::ctap::Channel,
+    ) -> Option<alloc::vec::Vec<u8>> {
+        vendor::process_vendor_command(self, bytes, channel)
     }
 }
 

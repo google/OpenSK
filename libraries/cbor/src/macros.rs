@@ -93,21 +93,17 @@ pub fn destructure_cbor_map_peek_value(
     needle: Value,
 ) -> Option<Value> {
     loop {
-        match it.peek() {
-            None => return None,
-            Some(item) => {
-                let key: &Value = &item.0;
-                match key.cmp(&needle) {
-                    Ordering::Less => {
-                        it.next();
-                    }
-                    Ordering::Equal => {
-                        let value: Value = it.next().unwrap().1;
-                        return Some(value);
-                    }
-                    Ordering::Greater => return None,
-                }
+        let item = it.peek()?;
+        let key: &Value = &item.0;
+        match key.cmp(&needle) {
+            Ordering::Less => {
+                it.next();
             }
+            Ordering::Equal => {
+                let value: Value = it.next().unwrap().1;
+                return Some(value);
+            }
+            Ordering::Greater => return None,
         }
     }
 }

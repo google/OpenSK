@@ -4,8 +4,15 @@
 
 ### Inspecting USB
 
-To check whether your operating system identifies OpenSK over USB, try `lsusb`
-or `dmesg`.
+To check whether your operating system identifies OpenSK over USB:
+
+On Linux, try `lsusb` or `dmesg`.
+
+On macOS, use the `ioreg` tool:
+
+```sh
+ioreg -p IOUSB
+```
 
 ### Debug console
 

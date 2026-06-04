@@ -2,7 +2,8 @@
 
 ## Installation guide
 
-This document lists required steps to start build your own OpenSK.
+This document lists required steps to start building your own OpenSK.
+OpenSK installation is supported and tested under Linux and macOS.
 
 OpenSK is installed as a native [Wasefire](https://github.com/google/wasefire)
 applet.

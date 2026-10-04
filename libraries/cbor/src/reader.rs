@@ -149,14 +149,20 @@ impl<'a> Reader<'a> {
     }
 
     fn read_byte_string_content(&mut self, size_value: u64) -> Result<Value, DecoderError> {
-        match self.read_bytes(size_value as usize) {
+        // Casting a u64 length to usize would silently truncate it on 32-bit
+        // platforms, so a string that long could be accepted with a shorter
+        // length than announced. Reject it as incomplete data instead, which is
+        // what a 64-bit platform returns for the same input.
+        let length = usize::try_from(size_value).map_err(|_| DecoderError::IncompleteCborData)?;
+        match self.read_bytes(length) {
             Some(bytes) => Ok(cbor_bytes_lit!(bytes)),
             None => Err(DecoderError::IncompleteCborData),
         }
     }
 
     fn read_text_string_content(&mut self, size_value: u64) -> Result<Value, DecoderError> {
-        match self.read_bytes(size_value as usize) {
+        let length = usize::try_from(size_value).map_err(|_| DecoderError::IncompleteCborData)?;
+        match self.read_bytes(length) {
             Some(bytes) => match str::from_utf8(bytes) {
                 Ok(s) => Ok(cbor_text!(s)),
                 Err(_) => Err(DecoderError::InvalidUtf8),
@@ -344,6 +350,17 @@ mod test {
     }
 
     #[test]
+    fn test_read_byte_string_with_length_beyond_usize() {
+        // A byte string announcing more than usize::MAX bytes cannot be read on a
+        // 32-bit platform. The input must be rejected instead of being truncated
+        // to a shorter string, so that all platforms agree on the result.
+        let cbor = vec![
+            0x5B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, // 2^32 bytes
+        ];
+        assert_eq!(read(&cbor), Err(DecoderError::IncompleteCborData));
+    }
+
+    #[test]
     fn test_read_text_string() {
         let unicode_3byte = vec![0xE6, 0xB0, 0xB4];
         let cases = vec![
@@ -363,6 +380,15 @@ mod test {
             cbor.push(0x01);
             assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
+    }
+
+    #[test]
+    fn test_read_text_string_with_length_beyond_usize() {
+        // Same as the byte string case above, for text strings.
+        let cbor = vec![
+            0x7B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, // 2^32 bytes
+        ];
+        assert_eq!(read(&cbor), Err(DecoderError::IncompleteCborData));
     }
 
     #[test]

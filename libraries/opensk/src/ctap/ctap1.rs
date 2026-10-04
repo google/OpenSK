@@ -358,6 +358,7 @@ impl Ctap1Command {
 #[cfg(test)]
 mod test {
     use super::super::TOUCH_TIMEOUT_MS;
+    use super::super::U2F_VERSION_STRING;
     use super::super::data_formats::CredentialProtectionPolicy;
     use super::*;
     use crate::api::crypto::sha256::Sha256;
@@ -507,6 +508,29 @@ mod test {
     }
 
     #[test]
+    fn test_process_version() {
+        let mut env = TestEnv::default();
+        env.user_presence()
+            .set(|| panic!("Unexpected user presence check in CTAP1"));
+        let mut ctap_state = CtapState::new(&mut env);
+
+        // U2F VERSION is the only U2F command without command data, so on an
+        // ISO 7816 transport it is sent as a case 2E request: an extended Le
+        // with no Lc.
+        let message = [
+            Ctap1Command::CTAP1_CLA,
+            Ctap1Command::U2F_VERSION,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x02,
+        ];
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
+        assert_eq!(response, Ok(Vec::<u8>::from(U2F_VERSION_STRING)));
+    }
+
+    #[test]
     fn test_process_authenticate_check_only() {
         let mut env = TestEnv::default();
         env.user_presence()
@@ -557,9 +581,11 @@ mod test {
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert!(response.is_ok());
 
+        // A 3-byte Le after the command data is not decodable: the 0x00 marker
+        // of the extended Le is only allowed when Lc is absent (#565).
         message.push(0x00);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
-        assert!(response.is_ok());
+        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_LENGTH));
 
         message.push(0x00);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);

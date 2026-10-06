@@ -55,8 +55,8 @@ impl Persist for WasefireEnv {
         } else {
             // Return a random batch attestation key when none was set.
             if id == AttestationId::Batch {
-                let private = Private::<P256>::generate().unwrap();
-                let wrapped_private_key = private.export().unwrap().into_vec();
+                let private = Private::<P256>::generate().map_err(convert)?;
+                let wrapped_private_key = private.export().map_err(convert)?.into_vec();
                 // Parties that don't check the batch key seem to ignore the certificate.
                 let attestation = Attestation {
                     wrapped_private_key,

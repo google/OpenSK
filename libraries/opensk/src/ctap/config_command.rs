@@ -24,6 +24,13 @@ use crate::ctap::storage;
 use crate::env::Env;
 use alloc::vec;
 
+/// The maximum length of a PIN, in bytes.
+///
+/// A PIN is padded with at least one zero byte to 64 bytes, so it can be at most 63 bytes long.
+/// A minimum PIN length above that value would make it impossible to ever set or change the
+/// PIN again, and thus permanently lock out PIN-based user verification.
+const MAX_PIN_LENGTH: u8 = 63;
+
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
 fn process_enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<ResponseData> {
     if env.customization().enterprise_attestation_mode().is_some() {
@@ -52,7 +59,7 @@ fn process_set_min_pin_length(
     } = params;
     let store_min_pin_length = storage::min_pin_length(env)?;
     let new_min_pin_length = new_min_pin_length.unwrap_or(store_min_pin_length);
-    if new_min_pin_length < store_min_pin_length {
+    if new_min_pin_length < store_min_pin_length || new_min_pin_length > MAX_PIN_LENGTH {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let mut force_change_pin = force_change_pin.unwrap_or(false);
@@ -320,6 +327,34 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
         assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+    }
+
+    #[test]
+    fn test_process_set_min_pin_length_too_long() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+
+        // Increasing the minimum PIN length up to 63 is fine (no PIN is set, so no auth needed).
+        let config_params = create_min_pin_config_params(63, None);
+        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert_eq!(storage::min_pin_length(&mut env), Ok(63));
+
+        // Larger values are rejected because a PIN is at most 63 bytes long.
+        let config_params = create_min_pin_config_params(64, None);
+        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        assert_eq!(
+            config_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
+        );
+        assert_eq!(storage::min_pin_length(&mut env), Ok(63));
     }
 
     #[test]

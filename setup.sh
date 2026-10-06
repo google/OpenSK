@@ -47,4 +47,6 @@ fi
 
 rustup show
 rustup install stable
-cargo +stable install cargo-audit
+if [ -z "$FUZZING_ENGINE" ]; then
+  cargo +stable install cargo-audit
+fi

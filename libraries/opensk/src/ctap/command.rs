@@ -153,6 +153,11 @@ impl Command {
     }
 }
 
+/// The maximum length of a user handle, in bytes.
+///
+/// The WebAuthn level 2 specification limits user handles to 64 bytes, and rejects empty ones.
+const MAX_USER_HANDLE_LENGTH: usize = 64;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub struct AuthenticatorMakeCredentialParameters {
@@ -192,6 +197,12 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
         let client_data_hash = extract_byte_string(ok_or_missing(client_data_hash)?)?;
         let rp = PublicKeyCredentialRpEntity::try_from(ok_or_missing(rp)?)?;
         let user = PublicKeyCredentialUserEntity::try_from(ok_or_missing(user)?)?;
+        // WebAuthn requires the user handle to be between 1 and 64 bytes long. Browsers check
+        // this on their side, but nothing prevents other software from talking to us directly
+        // with an oversized handle, which would only fail later, when storing the credential.
+        if user.user_id.is_empty() || user.user_id.len() > MAX_USER_HANDLE_LENGTH {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
 
         let cred_param_vec = extract_array(ok_or_missing(cred_param_vec)?)?;
         let pub_key_cred_params = cred_param_vec
@@ -721,6 +732,44 @@ mod test {
         assert_eq!(
             returned_make_credential_parameters,
             expected_make_credential_parameters
+        );
+    }
+
+    #[test]
+    fn test_from_cbor_make_credential_parameters_user_handle_too_long() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
+                "id" => "example.com",
+            },
+            0x03 => cbor_map! {
+                "id" => vec![0x1D; MAX_USER_HANDLE_LENGTH + 1],
+                "name" => "foo",
+            },
+            0x04 => cbor_array![ES256_CRED_PARAM],
+        };
+        assert_eq!(
+            AuthenticatorMakeCredentialParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
+    fn test_from_cbor_make_credential_parameters_empty_user_handle() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
+                "id" => "example.com",
+            },
+            0x03 => cbor_map! {
+                "id" => Vec::<u8>::new(),
+                "name" => "foo",
+            },
+            0x04 => cbor_array![ES256_CRED_PARAM],
+        };
+        assert_eq!(
+            AuthenticatorMakeCredentialParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
     }
 

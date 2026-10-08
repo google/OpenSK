@@ -70,22 +70,24 @@ impl LargeBlobState {
             if set.len() > max_fragment_size {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_LENGTH);
             }
-            if offset == 0 {
-                self.expected_length =
-                    length.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-                if self.expected_length > env.customization().max_large_blob_array_size() {
+            let expected_length = if offset == 0 {
+                let length = length.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+                if length > env.customization().max_large_blob_array_size() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
                 }
-                if self.expected_length <= TRUNCATED_HASH_LEN {
+                if length <= TRUNCATED_HASH_LEN {
                     return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
                 }
-                self.expected_next_offset = 0;
-            } else if length.is_some() {
-                return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-            }
-            if offset != self.expected_next_offset {
-                return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
-            }
+                length
+            } else {
+                if length.is_some() {
+                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                }
+                if offset != self.expected_next_offset {
+                    return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ);
+                }
+                self.expected_length
+            };
             if env.persist().pin_hash()?.is_some() || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
@@ -104,25 +106,31 @@ impl LargeBlobState {
                 )?;
                 client_pin.has_permission(PinPermission::LargeBlobWrite)?;
             }
-            if offset.saturating_add(set.len()) > self.expected_length {
+            if offset.saturating_add(set.len()) > expected_length {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
             if offset == 0 {
-                self.buffer = env.persist().init_large_blob(self.expected_length)?;
+                self.buffer = env.persist().init_large_blob(expected_length)?;
+                self.expected_length = expected_length;
+                self.expected_next_offset = 0;
             }
             let received_length = set.len();
             env.persist()
                 .write_large_blob_chunk(offset, &set, &mut self.buffer)?;
             self.expected_next_offset += received_length;
             if self.expected_next_offset == self.expected_length {
+                let buffer = core::mem::take(&mut self.buffer);
+                let expected_length = self.expected_length;
+                self.expected_length = 0;
+                self.expected_next_offset = 0;
                 const CHUNK_SIZE: usize = 1024;
                 let mut hash = Sha::<E>::new();
-                let buffer_hash_index = self.expected_length.saturating_sub(TRUNCATED_HASH_LEN);
+                let buffer_hash_index = expected_length.saturating_sub(TRUNCATED_HASH_LEN);
                 for i in (0..buffer_hash_index).step_by(CHUNK_SIZE) {
                     let byte_count = cmp::min(buffer_hash_index - i, CHUNK_SIZE);
                     let chunk = env
                         .persist()
-                        .get_large_blob(i, byte_count, Some(&self.buffer))?
+                        .get_large_blob(i, byte_count, Some(&buffer))?
                         .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                     hash.update(&chunk);
                 }
@@ -130,15 +138,12 @@ impl LargeBlobState {
                 hash.finalize(&mut computed_hash);
                 let written_hash = env
                     .persist()
-                    .get_large_blob(buffer_hash_index, TRUNCATED_HASH_LEN, Some(&self.buffer))?
+                    .get_large_blob(buffer_hash_index, TRUNCATED_HASH_LEN, Some(&buffer))?
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 if computed_hash[..TRUNCATED_HASH_LEN] != written_hash[..] {
                     return Err(Ctap2StatusCode::CTAP2_ERR_INTEGRITY_FAILURE);
                 }
-                env.persist().commit_large_blob_array(&self.buffer)?;
-                self.buffer = Vec::new();
-                self.expected_length = 0;
-                self.expected_next_offset = 0;
+                env.persist().commit_large_blob_array(&buffer)?;
             }
             return Ok(ResponseData::AuthenticatorLargeBlobs(None));
         }
@@ -701,5 +706,49 @@ mod test {
             ),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
+    }
+
+    #[test]
+    fn test_invalid_first_chunk_does_not_corrupt_state() {
+        let mut env = TestEnv::default();
+        let mut large_blobs = LargeBlobState::default();
+
+        let mut data = vec![0x01, 0x02, 0x03];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+
+        commit_valid_chunk(&mut env, &mut large_blobs, &data[0..1], 0, Some(data.len()));
+
+        // A rejected offset == 0 request with length > max_large_blob_array_size() must not
+        // overwrite expected_length and allow subsequent chunks to exceed the original length.
+        let oversized_len = env.customization().max_large_blob_array_size() + 1;
+        assert_eq!(
+            commit_chunk(
+                &mut env,
+                &mut large_blobs,
+                &data[0..1],
+                0,
+                Some(oversized_len)
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
+        );
+        assert_eq!(
+            commit_chunk(&mut env, &mut large_blobs, &[0x00; 32], 1, None),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        // A rejected offset == 0 request with set.len() > length must not reset
+        // expected_next_offset while preserving the existing buffer.
+        assert_eq!(
+            commit_chunk(
+                &mut env,
+                &mut large_blobs,
+                &data,
+                0,
+                Some(2 + TRUNCATED_HASH_LEN)
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        commit_valid_chunk(&mut env, &mut large_blobs, &data[1..], 1, None);
+        assert_eq!(get_large_blob_array(&mut env, 0, data.len()).unwrap(), data);
     }
 }

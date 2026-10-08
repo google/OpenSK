@@ -39,6 +39,11 @@ use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 use sk_cbor::destructure_cbor_map;
 
+/// The maximum length of a user handle, in bytes.
+///
+/// The WebAuthn level 2 specification limits user handles to 64 bytes, and rejects empty ones.
+const MAX_USER_HANDLE_LENGTH: usize = 64;
+
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
@@ -152,11 +157,6 @@ impl Command {
         }
     }
 }
-
-/// The maximum length of a user handle, in bytes.
-///
-/// The WebAuthn level 2 specification limits user handles to 64 bytes, and rejects empty ones.
-const MAX_USER_HANDLE_LENGTH: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]

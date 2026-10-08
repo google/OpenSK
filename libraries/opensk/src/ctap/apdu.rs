@@ -72,14 +72,26 @@ impl From<&[u8; APDU_HEADER_LEN]> for ApduHeader {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// The APDU cases
+/// The structure of the length fields of a command APDU. The variants follow
+/// the cases of ISO 7816-3:2006 section 12.1.3, and their names describe the
+/// fields: for example, `Lc3DataLe2` is a 3-byte Lc, followed by the command
+/// data and a 2-byte Le.
 pub enum Case {
+    /// Case 2S: no command data, 1-byte Le.
     Le1,
+    /// Case 3S: 1-byte Lc, command data, no Le.
     Lc1Data,
+    /// Case 4S: 1-byte Lc, command data, 1-byte Le.
     Lc1DataLe1,
+    /// Case 3E: 3-byte Lc, command data, no Le.
     Lc3Data,
+    /// Not encodable per ISO 7816-3: an extended Lc must be followed by a
+    /// 2-byte Le. This form is tolerated for backwards compatibility with
+    /// clients that append a short Le after an extended Lc.
     Lc3DataLe1,
+    /// Case 4E: 3-byte Lc, command data, 2-byte Le.
     Lc3DataLe2,
+    /// Case 2E: no command data, 3-byte Le.
     Le3,
 }
 
@@ -104,6 +116,23 @@ pub struct Apdu {
 impl TryFrom<&[u8]> for Apdu {
     type Error = ApduStatusCode;
 
+    /// Parses a command APDU, following the case table of ISO 7816-3:2006
+    /// section 12.1.3:
+    ///
+    /// Case | Lc field | Le field | Total length
+    /// -----|----------|----------|-------------------------
+    /// 1    | none     | none     | 4 bytes
+    /// 2S   | none     | 1 byte   | 5 bytes
+    /// 2E   | none     | 3 bytes  | 7 bytes
+    /// 3S   | 1 byte   | none     | 5 + Lc bytes
+    /// 3E   | 3 bytes  | none     | 7 + Lc bytes
+    /// 4S   | 1 byte   | 1 byte   | 6 + Lc bytes
+    /// 4E   | 3 bytes  | 2 bytes  | 9 + Lc bytes
+    ///
+    /// In the extended form, Lc and Le are big-endian 16-bit values and the
+    /// leading 0x00 of their 3-byte field is a marker. A Le of 0 means the
+    /// maximum expected length: 256 in the short form, 65536 in the extended
+    /// form.
     fn try_from(frame: &[u8]) -> Result<Self, ApduStatusCode> {
         if frame.len() < APDU_HEADER_LEN {
             return Err(ApduStatusCode::SW_WRONG_DATA);
@@ -112,24 +141,25 @@ impl TryFrom<&[u8]> for Apdu {
         // header | CLA | INS | P1 | P2 |
         //        +-----+-----+----+----+
         let (header, payload) = frame.split_at(APDU_HEADER_LEN);
+        let header: ApduHeader = array_ref!(header, 0, APDU_HEADER_LEN).into();
 
         if payload.is_empty() {
-            // Lc is zero-bytes in length
+            // Case 1: there is no Lc nor Le.
             return Ok(Apdu {
-                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                header,
                 lc: 0x00,
                 data: Vec::new(),
                 le: 0x00,
                 case_type: ApduType::Instruction,
             });
         }
-        // Lc is not zero-bytes in length, let's figure out how long it is
         let byte_0 = payload[0];
+
         if payload.len() == 1 {
-            // There is only one byte in the payload, that byte cannot be Lc because that would
-            // entail at *least* one another byte in the payload (for the command data)
+            // With a single byte after the header, that byte is necessarily a
+            // short Le: there is no room for command data (case 2S).
             return Ok(Apdu {
-                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
+                header,
                 lc: 0x00,
                 data: Vec::new(),
                 le: if byte_0 == 0x00 {
@@ -141,97 +171,122 @@ impl TryFrom<&[u8]> for Apdu {
                 case_type: ApduType::Short(Case::Le1),
             });
         }
-        if payload.len() == 1 + (byte_0 as usize) && byte_0 != 0 {
-            // Lc is one-byte long and since the size specified by Lc covers the rest of the
-            // payload there's no Le at the end
-            return Ok(Apdu {
-                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                lc: byte_0.into(),
-                data: payload[1..].to_vec(),
-                case_type: ApduType::Short(Case::Lc1Data),
-                le: 0,
-            });
-        }
-        if payload.len() == 2 + (byte_0 as usize) && byte_0 != 0 {
-            // Lc is one-byte long and since the size specified by Lc covers the rest of the
-            // payload with ONE additional byte that byte must be Le
-            let last_byte: u32 = (*payload.last().unwrap()).into();
-            return Ok(Apdu {
-                header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                lc: byte_0.into(),
-                data: payload[1..(payload.len() - 1)].to_vec(),
-                le: if last_byte == 0x00 { 0x100 } else { last_byte },
-                case_type: ApduType::Short(Case::Lc1DataLe1),
-            });
-        }
-        if payload.len() > 2 {
-            // Lc is possibly three-bytes long
-            let extended_apdu_lc = BigEndian::read_u16(&payload[1..3]) as usize;
-            if payload.len() < extended_apdu_lc + 3 {
-                return Err(ApduStatusCode::SW_WRONG_LENGTH);
-            }
 
-            let extended_apdu_le_len: usize = payload
-                .len()
-                .checked_sub(extended_apdu_lc + 3)
-                .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
-            if extended_apdu_le_len > 3 {
-                return Err(ApduStatusCode::SW_WRONG_LENGTH);
-            }
-
-            if byte_0 == 0 && extended_apdu_le_len <= 3 {
-                // If first byte is zero AND the next two bytes can be parsed as a big-endian
-                // length that covers the rest of the block (plus few additional bytes for Le), we
-                // have an extended-length APDU
-                let last_byte: u32 = (*payload.last().unwrap()).into();
+        if byte_0 != 0x00 {
+            // The short form: byte_0 holds the length of the command data.
+            let lc = byte_0 as usize;
+            if payload.len() == 1 + lc {
+                // Case 3S: Lc covers the rest of the payload, so there is no Le.
                 return Ok(Apdu {
-                    header: array_ref!(header, 0, APDU_HEADER_LEN).into(),
-                    lc: extended_apdu_lc as u16,
-                    data: payload[3..(payload.len() - extended_apdu_le_len)].to_vec(),
-                    le: match extended_apdu_le_len {
-                        0 => 0,
-                        1 => {
-                            if last_byte == 0x00 {
-                                0x100
-                            } else {
-                                last_byte
-                            }
-                        }
-                        2 => {
-                            let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
-                            if le_parsed == 0x00 {
-                                0x10000
-                            } else {
-                                le_parsed as u32
-                            }
-                        }
-                        3 => {
-                            let le_first_byte: u32 =
-                                (*payload.get(payload.len() - 3).unwrap()).into();
-                            if le_first_byte != 0x00 {
-                                return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION);
-                            }
-                            let le_parsed = BigEndian::read_u16(&payload[payload.len() - 2..]);
-                            if le_parsed == 0x00 {
-                                0x10000
-                            } else {
-                                le_parsed as u32
-                            }
-                        }
-                        _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
-                    },
-                    case_type: ApduType::Extended(match extended_apdu_le_len {
-                        0 => Case::Lc3Data,
-                        1 => Case::Lc3DataLe1,
-                        2 => Case::Lc3DataLe2,
-                        3 => Case::Le3,
-                        _ => return Err(ApduStatusCode::SW_INTERNAL_EXCEPTION),
-                    }),
+                    header,
+                    lc: byte_0.into(),
+                    data: payload[1..].to_vec(),
+                    le: 0x00,
+                    case_type: ApduType::Short(Case::Lc1Data),
                 });
             }
+            if payload.len() == 2 + lc {
+                // Case 4S: one byte of Le follows the command data.
+                let last_byte = payload[payload.len() - 1];
+                return Ok(Apdu {
+                    header,
+                    lc: byte_0.into(),
+                    data: payload[1..payload.len() - 1].to_vec(),
+                    le: if last_byte == 0x00 {
+                        // Ne = 256
+                        0x100
+                    } else {
+                        last_byte.into()
+                    },
+                    case_type: ApduType::Short(Case::Lc1DataLe1),
+                });
+            }
+            // The command data is truncated, or the payload has trailing bytes
+            // that cannot be decoded.
+            return Err(ApduStatusCode::SW_WRONG_LENGTH);
         }
 
-        Err(ApduStatusCode::SW_INTERNAL_EXCEPTION)
+        if payload.len() < 3 {
+            // The payload starts with the 0x00 marker of an extended field,
+            // but is too short to hold one.
+            return Err(ApduStatusCode::SW_WRONG_LENGTH);
+        }
+        let extended_field = BigEndian::read_u16(&payload[1..3]) as usize;
+        if payload.len() == 3 {
+            // Case 2E: the 3-byte field is an extended Le and there is no
+            // command data.
+            return Ok(Apdu {
+                header,
+                lc: 0x00,
+                data: Vec::new(),
+                le: if extended_field == 0x00 {
+                    // Ne = 65536
+                    0x10000
+                } else {
+                    extended_field as u32
+                },
+                case_type: ApduType::Extended(Case::Le3),
+            });
+        }
+
+        // The 3-byte field is an extended Lc: `0x00 Lc1 Lc2` followed by the
+        // command data, possibly followed by a 2-byte Le (cases 3E and 4E).
+        if payload.len() < 3 + extended_field {
+            // The command data is truncated.
+            return Err(ApduStatusCode::SW_WRONG_LENGTH);
+        }
+        let le_len = payload
+            .len()
+            .checked_sub(3 + extended_field)
+            .ok_or(ApduStatusCode::SW_WRONG_LENGTH)?;
+        match le_len {
+            0 => Ok(Apdu {
+                // Case 3E: Lc covers the rest of the payload.
+                header,
+                lc: extended_field as u16,
+                data: payload[3..].to_vec(),
+                le: 0x00,
+                case_type: ApduType::Extended(Case::Lc3Data),
+            }),
+            1 => {
+                // Not encodable per ISO 7816-3: an extended Lc must be followed
+                // by a 2-byte Le. Tolerated for backwards compatibility with
+                // clients that append a short Le after an extended Lc.
+                let last_byte = payload[payload.len() - 1];
+                Ok(Apdu {
+                    header,
+                    lc: extended_field as u16,
+                    data: payload[3..payload.len() - 1].to_vec(),
+                    le: if last_byte == 0x00 {
+                        // Ne = 256
+                        0x100
+                    } else {
+                        last_byte.into()
+                    },
+                    case_type: ApduType::Extended(Case::Lc3DataLe1),
+                })
+            }
+            2 => {
+                // Case 4E: an extended Le follows the command data.
+                let le = BigEndian::read_u16(&payload[payload.len() - 2..]);
+                Ok(Apdu {
+                    header,
+                    lc: extended_field as u16,
+                    data: payload[3..payload.len() - 2].to_vec(),
+                    le: if le == 0x00 {
+                        // Ne = 65536
+                        0x10000
+                    } else {
+                        le as u32
+                    },
+                    case_type: ApduType::Extended(Case::Lc3DataLe2),
+                })
+            }
+            // A 3-byte Le after command data is not encodable either: the
+            // 0x00 marker of the extended Le is only allowed when Lc is
+            // absent, i.e. in case 2E.
+            _ => Err(ApduStatusCode::SW_WRONG_LENGTH),
+        }
     }
 }
 
@@ -432,5 +487,109 @@ mod test {
             case_type: ApduType::Extended(Case::Lc3DataLe2),
         };
         assert_eq!(Ok(expected), response);
+    }
+
+    #[test]
+    fn test_case_type_2_extended() {
+        // An extended Le with no command data (case 2E), as reported in #565.
+        let frame: [u8; 7] = [0x00, 0xb0, 0x00, 0x00, 0x00, 0x12, 0x34];
+        let response = pass_frame(&frame);
+        let expected = Apdu {
+            header: ApduHeader {
+                cla: 0x00,
+                ins: 0xb0,
+                p1: 0x00,
+                p2: 0x00,
+            },
+            lc: 0x00,
+            data: Vec::new(),
+            le: 0x1234,
+            case_type: ApduType::Extended(Case::Le3),
+        };
+        assert_eq!(Ok(expected), response);
+    }
+
+    #[test]
+    fn test_case_type_2_extended_le() {
+        // A zero extended Le means the maximum expected length of 65536 bytes.
+        let frame: [u8; 7] = [0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let response = pass_frame(&frame);
+        let expected = Apdu {
+            header: ApduHeader {
+                cla: 0x00,
+                ins: 0xb0,
+                p1: 0x00,
+                p2: 0x00,
+            },
+            lc: 0x00,
+            data: Vec::new(),
+            le: 0x10000,
+            case_type: ApduType::Extended(Case::Le3),
+        };
+        assert_eq!(Ok(expected), response);
+    }
+
+    #[test]
+    fn test_case_type_3_extended() {
+        // An extended Lc covering the rest of the payload (case 3E), with no Le.
+        let frame: [u8; 9] = [0x00, 0xa4, 0x00, 0x0c, 0x00, 0x00, 0x02, 0xe1, 0x04];
+        let response = pass_frame(&frame);
+        let expected = Apdu {
+            header: ApduHeader {
+                cla: 0x00,
+                ins: 0xa4,
+                p1: 0x00,
+                p2: 0x0c,
+            },
+            lc: 0x02,
+            data: vec![0xe1, 0x04],
+            le: 0x00,
+            case_type: ApduType::Extended(Case::Lc3Data),
+        };
+        assert_eq!(Ok(expected), response);
+    }
+
+    #[test]
+    fn test_malformed_extended_le_after_data() {
+        // A 3-byte Le after command data is not encodable per ISO 7816-3: the
+        // 0x00 marker of the extended Le is only allowed when Lc is absent
+        // (case 2E). See #565.
+        let frame: [u8; 14] = [
+            0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x04, 0xd1, 0xd2, 0xd3, 0xd4, 0x00, 0x00, 0x40,
+        ];
+        let response = pass_frame(&frame);
+        assert_eq!(Err(ApduStatusCode::SW_WRONG_LENGTH), response);
+    }
+
+    #[test]
+    fn test_extended_form_truncated_command_data() {
+        // The extended Lc announces 0x10 bytes of command data, but only 4
+        // bytes are present.
+        let frame: [u8; 11] = [
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x10, 0xd1, 0xd2, 0xd3, 0xd4,
+        ];
+        let response = pass_frame(&frame);
+        assert_eq!(Err(ApduStatusCode::SW_WRONG_LENGTH), response);
+    }
+
+    #[test]
+    fn test_short_form_truncated_command_data() {
+        // The short Lc announces 0x40 bytes of command data, but only 0x0A
+        // bytes are present.
+        let frame: [u8; 15] = [
+            0x00, 0xa4, 0x00, 0x0c, 0x40, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9,
+            0xda,
+        ];
+        let response = pass_frame(&frame);
+        assert_eq!(Err(ApduStatusCode::SW_WRONG_LENGTH), response);
+    }
+
+    #[test]
+    fn test_incomplete_extended_le() {
+        // The 0x00 marker announces a 3-byte extended field, but only 2 bytes
+        // are present.
+        let frame: [u8; 6] = [0x00, 0xb0, 0x00, 0x00, 0x00, 0x12];
+        let response = pass_frame(&frame);
+        assert_eq!(Err(ApduStatusCode::SW_WRONG_LENGTH), response);
     }
 }

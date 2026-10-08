@@ -21,7 +21,7 @@ use super::data_formats::{
     MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
     PublicKeyCredentialUserEntity, extract_array, extract_byte_string, extract_map,
-    extract_text_string, extract_unsigned, ok_or_missing,
+    extract_text_string, extract_unsigned, extract_usize, ok_or_missing,
 };
 #[cfg(feature = "config_command")]
 use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
@@ -488,12 +488,7 @@ impl TryFrom<cbor::Value> for BioEnrollmentSubCommandParams {
         let template_friendly_name = template_friendly_name
             .map(extract_text_string)
             .transpose()?;
-        let timeout_milliseconds = timeout_milliseconds
-            .map(extract_unsigned)
-            .transpose()?
-            .map(usize::try_from)
-            .transpose()
-            .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let timeout_milliseconds = timeout_milliseconds.map(extract_usize).transpose()?;
 
         Ok(BioEnrollmentSubCommandParams {
             template_id,
@@ -540,14 +535,10 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
         }
 
         // careful: some missing parameters here are CTAP1_ERR_INVALID_PARAMETER
-        let get = get.map(extract_unsigned).transpose()?.map(|u| u as usize);
+        let get = get.map(extract_usize).transpose()?;
         let set = set.map(extract_byte_string).transpose()?;
-        let offset =
-            extract_unsigned(offset.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?)? as usize;
-        let length = length
-            .map(extract_unsigned)
-            .transpose()?
-            .map(|u| u as usize);
+        let offset = extract_usize(offset.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?)?;
+        let length = length.map(extract_usize).transpose()?;
         let pin_uv_auth_param = pin_uv_auth_param.map(extract_byte_string).transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
@@ -992,6 +983,27 @@ mod test {
             get: Some(2),
             set: None,
             offset: 4,
+            length: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        assert_eq!(
+            returned_large_blobs_parameters,
+            expected_large_blobs_parameters
+        );
+
+        // successful get with large values that fit a 32-bit usize; values beyond
+        // that are rejected instead of being truncated to a smaller size
+        let cbor_value = cbor_map! {
+            0x01 => u32::MAX as u64,
+            0x03 => u32::MAX as u64,
+        };
+        let returned_large_blobs_parameters =
+            AuthenticatorLargeBlobsParameters::try_from(cbor_value).unwrap();
+        let expected_large_blobs_parameters = AuthenticatorLargeBlobsParameters {
+            get: Some(u32::MAX as usize),
+            set: None,
+            offset: u32::MAX as usize,
             length: None,
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: None,

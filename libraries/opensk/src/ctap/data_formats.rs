@@ -1185,6 +1185,15 @@ pub fn extract_unsigned(cbor_value: cbor::Value) -> CtapResult<u64> {
     ok_or_cbor_type(cbor_value.extract_unsigned())
 }
 
+/// Extracts an unsigned integer that must fit in a usize.
+///
+/// Values that are too large would be silently truncated by a cast on platforms
+/// with a smaller pointer width, so they are rejected instead.
+pub fn extract_usize(cbor_value: cbor::Value) -> CtapResult<usize> {
+    usize::try_from(extract_unsigned(cbor_value)?)
+        .map_err(|_| Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+}
+
 pub fn extract_integer(cbor_value: cbor::Value) -> CtapResult<i64> {
     ok_or_cbor_type(cbor_value.extract_integer())
 }
@@ -1279,6 +1288,29 @@ mod test {
         );
         assert_eq!(
             extract_unsigned(cbor_int!(i64::MIN)),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+    }
+
+    #[test]
+    fn test_extract_usize() {
+        assert_eq!(extract_usize(cbor_int!(123)), Ok(123));
+        assert_eq!(extract_usize(cbor_int!(0)), Ok(0));
+        // The largest value that fits a 32-bit usize is still accepted.
+        assert_eq!(
+            extract_usize(cbor_int!(u32::MAX as i64)),
+            Ok(u32::MAX as usize)
+        );
+        assert_eq!(
+            extract_usize(cbor_int!(-1)),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(
+            extract_usize(cbor_bool!(true)),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
+        assert_eq!(
+            extract_usize(cbor_text!("foo")),
             Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
         );
     }

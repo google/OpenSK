@@ -61,7 +61,7 @@ pub const PIN_TOKEN_LENGTH: usize = 32;
 ///
 /// The code assumes that this value is a multiple of the AES block length. It
 /// is fixed since CTAP2.1.
-const PIN_PADDED_LENGTH: usize = 64;
+pub(crate) const PIN_PADDED_LENGTH: usize = 64;
 
 /// Decrypts the new_pin_enc and outputs the found PIN.
 fn decrypt_pin<E: Env>(

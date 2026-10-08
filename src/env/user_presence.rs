@@ -17,6 +17,8 @@ use opensk::api::user_presence::{UserPresence, UserPresenceError, UserPresenceWa
 use opensk::ctap::status_code::Ctap2StatusCode;
 use wasefire::{scheduling, timer, usb};
 
+use crate::env::convert_error;
+
 pub(crate) fn init() -> Impl {
     Impl(None)
 }
@@ -44,7 +46,7 @@ impl UserPresence for Impl {
         };
         let timeout = timer::Timeout::new_ms(timeout_ms);
         let mut listener = usb::ctap::Listener::new(usb::ctap::Event::Read);
-        while !usb::ctap::read(packet).unwrap() {
+        while !usb::ctap::read(packet).map_err(convert_error)? {
             scheduling::wait_until(|| {
                 touch.is_present() || timeout.is_over() || listener.is_notified()
             });

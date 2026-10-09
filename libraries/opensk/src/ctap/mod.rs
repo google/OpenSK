@@ -195,6 +195,16 @@ pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> CtapResult<
 
 /// Resets the all state for a CTAP Reset command.
 pub fn reset(env: &mut impl Env) -> CtapResult<()> {
+    #[cfg(feature = "fingerprint")]
+    {
+        let template_infos = env.persist().template_infos()?;
+        for template_info in template_infos {
+            env.fingerprint()
+                .remove_enrollment(&template_info.template_id)?;
+            env.persist()
+                .remove_template_id(&template_info.template_id)?;
+        }
+    }
     env.persist().reset()?;
     env.key_store().reset()?;
     storage::init(env)
@@ -1444,15 +1454,7 @@ impl<E: Env> CtapState<E> {
         self.client_pin.reset(env);
 
         #[cfg(feature = "fingerprint")]
-        {
-            let template_infos = env.persist().template_infos()?;
-            for template_info in template_infos {
-                env.fingerprint()
-                    .remove_enrollment(&template_info.template_id)?;
-                env.persist()
-                    .remove_template_id(&template_info.template_id)?;
-            }
-        }
+        self.fingerprint_enrollment_status.clear();
 
         #[cfg(feature = "ctap1")]
         {
@@ -3570,6 +3572,25 @@ mod test {
         let response =
             ctap_state.process_parsed_command(&mut env, Command::AuthenticatorReset, DUMMY_CHANNEL);
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED));
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_reset_removes_fingerprints() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        env.create_fingerprint().unwrap();
+        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
+
+        let response =
+            ctap_state.process_parsed_command(&mut env, Command::AuthenticatorReset, DUMMY_CHANNEL);
+        assert_eq!(response, Ok(ResponseData::AuthenticatorReset));
+        assert_eq!(env.persist().template_infos(), Ok(vec![]));
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
     }
 
     #[test]

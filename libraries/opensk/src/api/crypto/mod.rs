@@ -200,6 +200,17 @@ mod test {
             &data,
             truncated_mac
         ));
+
+        let mut bad_mac = mac;
+        bad_mac[HASH_SIZE - 1] ^= 0x01;
+        assert!(!SoftwareHmac256::verify(&key, &data, &bad_mac));
+        let mut bad_truncated_mac = *truncated_mac;
+        bad_truncated_mac[TRUNCATED_HMAC_SIZE - 1] ^= 0x01;
+        assert!(!SoftwareHmac256::verify_truncated_left(
+            &key,
+            &data,
+            &bad_truncated_mac
+        ));
     }
 
     #[test]

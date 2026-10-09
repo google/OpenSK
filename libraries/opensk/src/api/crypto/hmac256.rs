@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{HASH_SIZE, HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE};
+use subtle::ConstantTimeEq;
 
 /// For a given hash function, computes and verifies the HMAC.
 pub trait Hmac256 {
@@ -23,7 +24,11 @@ pub trait Hmac256 {
     ///
     /// This function does best effort to not leak information about the key through side-channels
     /// (e.g. usage of constant time comparison).
-    fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool;
+    fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
+        let mut output = [0; HASH_SIZE];
+        Self::mac(key, data, &mut output);
+        output.ct_eq(mac).into()
+    }
 
     /// Verifies the first bytes of an HMAC.
     ///
@@ -33,5 +38,9 @@ pub trait Hmac256 {
         key: &[u8; HMAC_KEY_SIZE],
         data: &[u8],
         mac: &[u8; TRUNCATED_HMAC_SIZE],
-    ) -> bool;
+    ) -> bool {
+        let mut output = [0; HASH_SIZE];
+        Self::mac(key, data, &mut output);
+        output[..TRUNCATED_HMAC_SIZE].ct_eq(mac).into()
+    }
 }

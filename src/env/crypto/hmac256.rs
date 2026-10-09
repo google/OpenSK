@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use opensk::api::crypto::hmac256::Hmac256;
-use opensk::api::crypto::{HASH_SIZE, HMAC_KEY_SIZE, TRUNCATED_HMAC_SIZE};
+use opensk::api::crypto::{HASH_SIZE, HMAC_KEY_SIZE};
 use wasefire::crypto::hash::hmac_sha256;
 
 use crate::env::WasefireEnv;
@@ -21,17 +21,5 @@ use crate::env::WasefireEnv;
 impl Hmac256 for WasefireEnv {
     fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8], output: &mut [u8; HASH_SIZE]) {
         *output = hmac_sha256(key, data).unwrap();
-    }
-
-    fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
-        *mac == hmac_sha256(key, data).unwrap()
-    }
-
-    fn verify_truncated_left(
-        key: &[u8; HMAC_KEY_SIZE],
-        data: &[u8],
-        mac: &[u8; TRUNCATED_HMAC_SIZE],
-    ) -> bool {
-        *mac == hmac_sha256(key, data).unwrap()[..TRUNCATED_HMAC_SIZE]
     }
 }

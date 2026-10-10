@@ -171,7 +171,8 @@ impl Ctap1Command {
     const CTAP1_CLA: u8 = 0;
     // This byte is used in Register, but only serves backwards compatibility.
     const LEGACY_BYTE: u8 = 0x05;
-    // This byte is hardcoded into the specification of Authenticate.
+    // User presence indicator bytes as defined in Section 5.4 of the U2F specification.
+    const NO_USER_PRESENCE_BYTE: u8 = 0x00;
     const USER_PRESENCE_INDICATOR_BYTE: u8 = 0x01;
 
     // CTAP1/U2F commands
@@ -335,12 +336,13 @@ impl Ctap1Command {
         ctap_state
             .increment_global_signature_counter(env)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
+        let user_presence = if flags == Ctap1Flags::EnforceUpAndSign {
+            Ctap1Command::USER_PRESENCE_INDICATOR_BYTE
+        } else {
+            Ctap1Command::NO_USER_PRESENCE_BYTE
+        };
         let mut signature_data = ctap_state
-            .generate_auth_data(
-                env,
-                &application,
-                Ctap1Command::USER_PRESENCE_INDICATOR_BYTE,
-            )
+            .generate_auth_data(env, &application, user_presence)
             .map_err(|_| Ctap1StatusCode::SW_WRONG_DATA)?;
         signature_data.extend(&challenge);
         let private_key = PrivateKey::<E>::from_cbor(credential_source.wrapped_private_key)
@@ -687,7 +689,7 @@ mod test {
 
         env.clock().advance(TOUCH_TIMEOUT_MS);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
-        assert_eq!(response[0], 0x01);
+        assert_eq!(response[0], 0x00);
         let global_signature_counter = env.persist().global_signature_counter().unwrap();
         check_signature_counter(
             &mut env,

@@ -1304,8 +1304,10 @@ impl<E: Env> CtapState<E> {
         let credential = credential.ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
 
         // This check comes before CTAP2_ERR_NO_CREDENTIALS in CTAP 2.0.
-        if options.up && !self.has_valid_up(has_pin_uv_auth_param, options.uv) {
-            check_user_presence(env, channel)?;
+        if options.up {
+            if !self.has_valid_up(has_pin_uv_auth_param, options.uv) {
+                check_user_presence(env, channel)?;
+            }
             self.client_pin.clear_token_flags();
         }
 
@@ -2629,6 +2631,73 @@ mod test {
             signature_counter,
             None,
             &[],
+        );
+    }
+
+    #[test]
+    fn test_process_get_assertion_cached_up() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x88; 32];
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V2;
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        let make_credential_params = create_minimal_make_credential_parameters();
+        assert!(
+            ctap_state
+                .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+                .is_ok()
+        );
+        ctap_state.client_pin = client_pin;
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
+
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        let client_data_hash = vec![0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
+        let make_get_assertion_params = || AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: client_data_hash.clone(),
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: true,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(pin_uv_auth_param.clone()),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, make_get_assertion_params(), DUMMY_CHANNEL);
+        let expected_user = PublicKeyCredentialUserEntity {
+            user_id: vec![0x1D],
+            user_name: None,
+            user_display_name: None,
+            user_icon: None,
+        };
+        let signature_counter = env.persist().global_signature_counter().unwrap();
+        check_assertion_response_with_user(
+            get_assertion_response,
+            Some(expected_user),
+            0x05,
+            signature_counter,
+            None,
+            &[],
+        );
+
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, make_get_assertion_params(), DUMMY_CHANNEL);
+        assert_eq!(
+            get_assertion_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
     }
 

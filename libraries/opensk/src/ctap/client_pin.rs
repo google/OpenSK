@@ -194,11 +194,11 @@ impl<E: Env> ClientPin<E> {
                 }
                 storage::decr_pin_retries(env)?;
                 let pin_hash = env.key_store().decrypt_pin_hash(&pin_hash)?;
-                let pin_hash_dec = shared_secret
+                let is_valid = shared_secret
                     .decrypt(&pin_hash_enc)
-                    .map_err(|_| Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)?;
+                    .is_ok_and(|pin_hash_dec| bool::from(pin_hash.ct_eq(&pin_hash_dec)));
 
-                if !bool::from(pin_hash.ct_eq(&pin_hash_dec)) {
+                if !is_valid {
                     self.get_mut_pin_protocol(pin_uv_auth_protocol)
                         .regenerate(env);
                     if storage::pin_retries(env)? == 0 {
@@ -911,6 +911,17 @@ mod test {
                 pin_hash_enc
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+
+        let pin_hash_enc = vec![0x77; PIN_AUTH_LENGTH - 1];
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(
+                &mut env,
+                pin_uv_auth_protocol,
+                &shared_secret,
+                pin_hash_enc
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED)
         );
     }
 

@@ -735,4 +735,19 @@ mod test {
         assert!(cbor_array![] < cbor_bool!(false));
         assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_bool!(false));
     }
+
+    #[test]
+    fn test_value_ordering_array_tail() {
+        assert!(cbor_array![0, 1] < cbor_array![0, 2]);
+    }
+
+    #[test]
+    fn test_value_ordering_map_tail() {
+        assert!(cbor_map! {0 => 0, 1 => 1} < cbor_map! {0 => 0, 1 => 2});
+    }
+
+    #[test]
+    fn test_value_ordering_tag_content() {
+        assert!(cbor_tagged!(1, cbor_unsigned!(0)) < cbor_tagged!(1, cbor_unsigned!(1)));
+    }
 }

@@ -272,6 +272,15 @@ mod test {
     }
 
     #[test]
+    fn test_read_unsigned_max() {
+        // RFC 8949 Appendix A: 18446744073709551615.
+        assert_eq!(
+            read(&[0x1B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+            Ok(cbor_unsigned!(u64::MAX))
+        );
+    }
+
+    #[test]
     fn test_read_unsigned_non_minimum_byte_length() {
         let encodings = vec![
             // Uint 23 encoded with 1 byte.
@@ -623,6 +632,19 @@ mod test {
     }
 
     #[test]
+    fn test_read_tagged_nesting_limit() {
+        // tag 0 containing 0
+        assert_eq!(
+            read_nested(&[0xc0, 0x00], Some(0)),
+            Err(DecoderError::TooMuchNesting)
+        );
+        assert_eq!(
+            read_nested(&[0xc0, 0x00], Some(1)),
+            Ok(cbor_tagged!(0, cbor_int!(0)))
+        );
+    }
+
+    #[test]
     fn test_read_integer_out_of_range() {
         let cases = vec![
             // The positive case is impossible since we support u64.
@@ -730,6 +752,26 @@ mod test {
         );
         reader = Reader::new(&map_cbor);
         assert!(reader.decode_complete_data_item(Some(2)).is_ok());
+    }
+
+    #[test]
+    fn test_read_default_nesting_boundary() {
+        let mut bytes = vec![0x81; 127]; // 127 nested one-element arrays
+        bytes.push(0x00); // 0
+        assert!(read(&bytes).is_ok());
+        bytes.insert(0, 0x81); // one more one-element array
+        assert_eq!(read(&bytes), Err(DecoderError::TooMuchNesting));
+    }
+
+    #[test]
+    fn test_read_nested_unlimited() {
+        let mut value = cbor_int!(0);
+        for _ in 0..128 {
+            value = cbor_array![value];
+        }
+        let mut bytes = vec![0x81; 128]; // 128 nested one-element arrays
+        bytes.push(0x00); // 0
+        assert_eq!(read_nested(&bytes, None), Ok(value));
     }
 
     #[test]

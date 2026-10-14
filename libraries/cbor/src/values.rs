@@ -691,6 +691,7 @@ mod test {
         assert!(cbor_array![cbor_array![]] < cbor_array![cbor_map! {}]);
         assert!(cbor_array![cbor_map! {}] < cbor_array![false]);
         assert!(cbor_array![false] < cbor_array![0, 0]);
+        assert!(cbor_array![0, 1] < cbor_array![0, 2]);
         assert!(cbor_array![0, 0] < cbor_map! {});
         assert!(cbor_map! {} < cbor_map! {0 => 0});
         assert!(cbor_map! {0 => 0} < cbor_map! {0 => 1});
@@ -702,12 +703,14 @@ mod test {
         assert!(cbor_map! {cbor_array![] => 0} < cbor_map! {cbor_map!{} => 0});
         assert!(cbor_map! {cbor_map!{} => 0} < cbor_map! {false => 0});
         assert!(cbor_map! {false => 0} < cbor_map! {0 => 0, 1 => 0});
+        assert!(cbor_map! {0 => 0, 1 => 1} < cbor_map! {0 => 0, 1 => 2});
         assert!(cbor_map! {0 => 0} < cbor_tagged!(2, cbor_int!(0)));
         assert!(cbor_map! {0 => 0, 1 => 0} < cbor_bool!(false));
         assert!(cbor_bool!(false) < cbor_bool!(true));
         assert!(cbor_bool!(true) < cbor_null!());
         assert!(cbor_null!() < cbor_undefined!());
         assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_tagged!(2, cbor_int!(0)));
+        assert!(cbor_tagged!(1, cbor_unsigned!(0)) < cbor_tagged!(1, cbor_unsigned!(1)));
         assert!(cbor_int!(1) < cbor_int!(-1));
         assert!(cbor_int!(1) < cbor_bytes!(vec![0x00]));
         assert!(cbor_int!(1) < cbor_text!("s"));
@@ -734,20 +737,5 @@ mod test {
         assert!(cbor_array![] < cbor_tagged!(2, cbor_int!(0)));
         assert!(cbor_array![] < cbor_bool!(false));
         assert!(cbor_tagged!(1, cbor_text!("s")) < cbor_bool!(false));
-    }
-
-    #[test]
-    fn test_value_ordering_array_tail() {
-        assert!(cbor_array![0, 1] < cbor_array![0, 2]);
-    }
-
-    #[test]
-    fn test_value_ordering_map_tail() {
-        assert!(cbor_map! {0 => 0, 1 => 1} < cbor_map! {0 => 0, 1 => 2});
-    }
-
-    #[test]
-    fn test_value_ordering_tag_content() {
-        assert!(cbor_tagged!(1, cbor_unsigned!(0)) < cbor_tagged!(1, cbor_unsigned!(1)));
     }
 }

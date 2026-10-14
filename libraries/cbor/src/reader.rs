@@ -260,24 +260,19 @@ mod test {
                 vec![0x1B, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
             ),
             (
-                core::i64::MAX,
+                core::i64::MAX as u64,
                 vec![0x1B, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            ),
+            (
+                u64::MAX,
+                vec![0x1B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
             ),
         ];
         for (unsigned, mut cbor) in cases {
-            assert_eq!(read(&cbor), Ok(cbor_int!(unsigned)));
+            assert_eq!(read(&cbor), Ok(cbor_unsigned!(unsigned)));
             cbor.push(0x01);
             assert_eq!(read(&cbor), Err(DecoderError::ExtraneousData));
         }
-    }
-
-    #[test]
-    fn test_read_unsigned_max() {
-        // RFC 8949 Appendix A: 18446744073709551615.
-        assert_eq!(
-            read(&[0x1B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
-            Ok(cbor_unsigned!(u64::MAX))
-        );
     }
 
     #[test]
@@ -633,7 +628,6 @@ mod test {
 
     #[test]
     fn test_read_tagged_nesting_limit() {
-        // tag 0 containing 0
         assert_eq!(
             read_nested(&[0xc0, 0x00], Some(0)),
             Err(DecoderError::TooMuchNesting)

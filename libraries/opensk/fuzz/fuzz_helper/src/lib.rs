@@ -22,7 +22,7 @@ use opensk::ctap::command::{
 };
 use opensk::ctap::data_formats::EnterpriseAttestationMode;
 use opensk::ctap::hid::{
-    ChannelID, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
+    ChannelID, CtapHid, CtapHidCommand, HidPacket, HidPacketIterator, Message, MessageAssembler,
 };
 use opensk::ctap::{Channel, CtapState, cbor_read};
 use opensk::env::test::TestEnv;
@@ -85,7 +85,8 @@ fn initialize(ctap: &mut Ctap<TestEnv>) -> ChannelID {
     let mut result_cid: ChannelID = Default::default();
     for pkt_request in HidPacketIterator::new(message).unwrap() {
         for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
-            if let Ok(Some(result)) = assembler_reply.parse_packet(ctap.env(), &pkt_reply, None) {
+            let (cid, processed_pkt) = CtapHid::<TestEnv>::process_single_packet(&pkt_reply);
+            if let Ok(Some(result)) = assembler_reply.parse_packet(ctap.env(), cid, processed_pkt) {
                 result_cid.copy_from_slice(&result.payload[8..12]);
             }
         }
@@ -124,7 +125,8 @@ fn process_message(data: &[u8], ctap: &mut Ctap<TestEnv>) {
         for pkt_request in hid_packet_iterator {
             for pkt_reply in ctap.process_hid_packet(&pkt_request, Transport::MainHid) {
                 // Only checks for assembling crashes, not for semantics.
-                let _ = assembler_reply.parse_packet(ctap.env(), &pkt_reply, None);
+                let (cid, processed_pkt) = CtapHid::<TestEnv>::process_single_packet(&pkt_reply);
+                let _ = assembler_reply.parse_packet(ctap.env(), cid, processed_pkt);
             }
         }
     }
@@ -264,10 +266,15 @@ pub fn split_assemble_hid_packets(data: &[u8]) -> arbitrary::Result<()> {
         let packets: Vec<HidPacket> = hid_packet_iterator.collect();
         if let Some((last_packet, first_packets)) = packets.split_last() {
             for packet in first_packets {
-                assert_eq!(assembler.parse_packet(&mut env, packet, None), Ok(None));
+                let (cid, processed_pkt) = CtapHid::<TestEnv>::process_single_packet(packet);
+                assert_eq!(
+                    assembler.parse_packet(&mut env, cid, processed_pkt),
+                    Ok(None)
+                );
             }
+            let (cid, processed_pkt) = CtapHid::<TestEnv>::process_single_packet(last_packet);
             assert_eq!(
-                assembler.parse_packet(&mut env, last_packet, None),
+                assembler.parse_packet(&mut env, cid, processed_pkt),
                 Ok(Some(message))
             );
         }

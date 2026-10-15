@@ -36,6 +36,7 @@ use enum_iterator::IntoEnumIterator;
 // 11.2. USB Human Interface Device (USB HID)
 const CHANNEL_RESERVED: ChannelID = [0, 0, 0, 0];
 const CHANNEL_BROADCAST: ChannelID = [0xFF, 0xFF, 0xFF, 0xFF];
+const MAX_CID: u32 = u32::from_be_bytes(CHANNEL_BROADCAST) - 1;
 const PACKET_TYPE_MASK: u8 = 0x80;
 
 // See section 11.2.9.1.3. CTAPHID_INIT (0x06).
@@ -184,8 +185,7 @@ pub struct CtapHid<E: Env> {
     // allocated.
     // In packets, the ID encoding is Big Endian to match what is used throughout CTAP (with the
     // u32::to/from_be_bytes methods).
-    // TODO(kaczmarczyck) We might want to limit or timeout open channels.
-    allocated_cids: usize,
+    allocated_cids: u32,
     capabilities: u8,
     locked_cid: Option<ChannelID>,
     lock_timer: <E::Clock as Clock>::Timer,
@@ -247,14 +247,23 @@ impl<E: Env> CtapHid<E> {
         packet: &HidPacket,
         is_transport_disabled: bool,
     ) -> Option<Message> {
-        let locked_cid = if is_transport_disabled {
-            // We use the reserved channel ID to block all valid channels. If we also think we hold
-            // a lock, we wait and rely on timeouts to resolve the deadlock.
-            Some(CHANNEL_RESERVED)
-        } else {
-            self.locked_channel(env)
-        };
-        match self.assembler.parse_packet(env, packet, locked_cid) {
+        let (cid, processed_packet) = Self::process_single_packet(packet);
+        if !self.has_valid_channel(cid, &processed_packet) {
+            return match processed_packet {
+                ProcessedPacket::InitPacket { .. } => {
+                    Some(Self::error_message(cid, CtapHidError::InvalidChannel))
+                }
+                ProcessedPacket::ContinuationPacket { .. } => None,
+            };
+        }
+        if is_transport_disabled
+            || self
+                .locked_channel(env)
+                .is_some_and(|locked_cid| locked_cid != cid)
+        {
+            return Some(Self::error_message(cid, CtapHidError::ChannelBusy));
+        }
+        match self.assembler.parse_packet(env, cid, processed_packet) {
             Ok(Some(message)) => {
                 debug_ctap!(env, "Received message: {:02x?}", message);
                 self.preprocess_message(env, message)
@@ -263,15 +272,8 @@ impl<E: Env> CtapHid<E> {
                 // Waiting for more packets to assemble the message, nothing to send for now.
                 None
             }
-            Err((cid, error)) => {
-                if matches!(error, CtapHidError::UnexpectedContinuation) {
-                    None
-                } else if !self.is_allocated_channel(cid) {
-                    Some(Self::error_message(cid, CtapHidError::InvalidChannel))
-                } else {
-                    Some(Self::error_message(cid, error))
-                }
-            }
+            Err(CtapHidError::UnexpectedContinuation) => None,
+            Err(error) => Some(Self::error_message(cid, error)),
         }
     }
 
@@ -285,9 +287,6 @@ impl<E: Env> CtapHid<E> {
     /// - Unknown and unexpected commands like KEEPALIVE
     fn preprocess_message(&mut self, env: &mut E, message: Message) -> Option<Message> {
         let cid = message.cid;
-        if !self.has_valid_channel(&message) {
-            return Some(Self::error_message(cid, CtapHidError::InvalidChannel));
-        }
 
         match message.cmd {
             CtapHidCommand::Msg => Some(message),
@@ -299,9 +298,11 @@ impl<E: Env> CtapHid<E> {
                 }
 
                 let new_cid = if cid == CHANNEL_BROADCAST {
-                    // TODO: Prevent allocating 2^32 channels.
+                    if self.allocated_cids == MAX_CID {
+                        self.allocated_cids = 0;
+                    }
                     self.allocated_cids += 1;
-                    (self.allocated_cids as u32).to_be_bytes()
+                    self.allocated_cids.to_be_bytes()
                 } else {
                     // Sync the channel and discard the current transaction.
                     cid
@@ -361,17 +362,22 @@ impl<E: Env> CtapHid<E> {
         }
     }
 
-    fn has_valid_channel(&self, message: &Message) -> bool {
-        match message.cid {
+    fn has_valid_channel(&self, cid: ChannelID, packet: &ProcessedPacket) -> bool {
+        match cid {
             // Only INIT commands use the broadcast channel.
-            CHANNEL_BROADCAST => message.cmd == CtapHidCommand::Init,
+            CHANNEL_BROADCAST => match packet {
+                ProcessedPacket::InitPacket { cmd, .. } => {
+                    CtapHidCommand::from(*cmd) == CtapHidCommand::Init
+                }
+                ProcessedPacket::ContinuationPacket { .. } => false,
+            },
             // Check that the channel is allocated.
-            _ => self.is_allocated_channel(message.cid),
+            _ => self.is_allocated_channel(cid),
         }
     }
 
     fn is_allocated_channel(&self, cid: ChannelID) -> bool {
-        cid != CHANNEL_RESERVED && u32::from_be_bytes(cid) as usize <= self.allocated_cids
+        cid != CHANNEL_RESERVED && u32::from_be_bytes(cid) <= self.allocated_cids
     }
 
     pub fn error_message(cid: ChannelID, error_code: CtapHidError) -> Message {
@@ -477,7 +483,8 @@ mod test {
             let mut messages = Vec::new();
             let mut assembler = MessageAssembler::<TestEnv>::default();
             for packet in HidPacketIterator::new(message.clone()).unwrap() {
-                match assembler.parse_packet(&mut env, &packet, None) {
+                let (cid, processed_packet) = CtapHid::<TestEnv>::process_single_packet(&packet);
+                match assembler.parse_packet(&mut env, cid, processed_packet) {
                     Ok(Some(msg)) => messages.push(msg),
                     Ok(None) => (),
                     Err(_) => panic!("Couldn't assemble packet: {:02x?}", &packet as &[u8]),
@@ -491,11 +498,22 @@ mod test {
     #[test]
     fn test_spurious_continuation_packet() {
         let mut env = TestEnv::default();
-        let mut ctap_hid = CtapHid::<TestEnv>::new(0x0D);
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+
         let mut packet = [0x00; 64];
-        packet[0..7].copy_from_slice(&[0xC1, 0xC1, 0xC1, 0xC1, 0x00, 0x51, 0x51]);
-        // Continuation packets are silently ignored.
+        packet[0..4].copy_from_slice(&cid);
+        packet[4..7].copy_from_slice(&[0x00, 0x51, 0x51]);
+        // Continuation packets are silently ignored on allocated channels.
         assert_eq!(ctap_hid.parse_packet(&mut env, &packet, false), None);
+
+        let mut unallocated_packet = [0x00; 64];
+        unallocated_packet[0..4].copy_from_slice(&MAX_CID.to_be_bytes());
+        unallocated_packet[4..7].copy_from_slice(&[0x00, 0x51, 0x51]);
+        // Continuation packets are also silently ignored on unallocated channels.
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &unallocated_packet, false),
+            None
+        );
     }
 
     #[test]
@@ -741,6 +759,7 @@ mod test {
         let mut env = TestEnv::default();
         let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
 
+        // Allocated channels don't work
         let mut ping_packet = [0x00; 64];
         ping_packet[..4].copy_from_slice(&cid);
         ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
@@ -749,7 +768,22 @@ mod test {
             Some(Message {
                 cid,
                 cmd: CtapHidCommand::Error,
-                payload: vec![0x06]
+                payload: vec![CtapHidError::ChannelBusy as u8],
+            })
+        );
+
+        // Broadcasts don't work
+        let mut init_packet = [0x00; 64];
+        init_packet[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        init_packet[4..15].copy_from_slice(&[
+            0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+        ]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &init_packet, true),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::ChannelBusy as u8],
             })
         );
     }
@@ -842,5 +876,174 @@ mod test {
             })
         );
         assert!(!ctap_hid.has_channel_lock(&mut env));
+    }
+
+    #[test]
+    fn test_unallocated_channel() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut bad_packet = [0x00; 64];
+        bad_packet[..4].copy_from_slice(&MAX_CID.to_be_bytes());
+        bad_packet[4..7].copy_from_slice(&[0x81, 0x01, 0x00]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &bad_packet, false),
+            Some(Message {
+                cid: MAX_CID.to_be_bytes(),
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidChannel as u8],
+            })
+        );
+
+        // The ignored packet should not affect channel allocation.
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&cid);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &ping_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Ping,
+                payload: vec![0x99, 0x99],
+            })
+        );
+    }
+
+    #[test]
+    fn test_reserved_channel() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, _cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&CHANNEL_RESERVED);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &ping_packet, false),
+            Some(Message {
+                cid: CHANNEL_RESERVED,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidChannel as u8],
+            })
+        );
+    }
+
+    #[test]
+    fn test_broadcast_invalid_command() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, _cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut ping_packet = [0x00; 64];
+        ping_packet[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        ping_packet[4..9].copy_from_slice(&[0x81, 0x00, 0x02, 0x99, 0x99]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &ping_packet, false),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidChannel as u8],
+            })
+        );
+
+        let mut continuation_packet = [0x00; 64];
+        continuation_packet[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &continuation_packet, false),
+            None
+        );
+    }
+
+    #[test]
+    fn test_allocated_invalid_command() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, cid) = CtapHid::<TestEnv>::new_initialized();
+
+        // 0x3E is an unassigned CTAPHID command.
+        let mut unknown_cmd_packet = [0x00; 64];
+        unknown_cmd_packet[..4].copy_from_slice(&cid);
+        unknown_cmd_packet[4..7].copy_from_slice(&[0x80 | 0x3E, 0x00, 0x00]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &unknown_cmd_packet, false),
+            Some(Message {
+                cid,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidCmd as u8],
+            })
+        );
+    }
+
+    #[test]
+    fn test_init_invalid_len() {
+        let mut env = TestEnv::default();
+        let (mut ctap_hid, _cid) = CtapHid::<TestEnv>::new_initialized();
+
+        let mut short_init = [0x00; 64];
+        short_init[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        short_init[4..14]
+            .copy_from_slice(&[0x86, 0x00, 0x07, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &short_init, false),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidLen as u8],
+            })
+        );
+
+        let mut oversized_init = [0x00; 64];
+        oversized_init[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        oversized_init[4..7].copy_from_slice(&[0x86, 0xFF, 0xFF]);
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &oversized_init, false),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Error,
+                payload: vec![CtapHidError::InvalidLen as u8],
+            })
+        );
+    }
+
+    #[test]
+    fn test_channel_allocation_exhaustion() {
+        let mut env = TestEnv::default();
+        let mut ctap_hid = CtapHid::<TestEnv>::new(0x0D);
+        ctap_hid.allocated_cids = MAX_CID - 1;
+
+        let mut init_packet = [0x00; 64];
+        init_packet[..4].copy_from_slice(&CHANNEL_BROADCAST);
+        init_packet[4..15].copy_from_slice(&[
+            0x86, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+        ]);
+
+        // Allocating MAX_CID (0xFFFFFFFE) succeeds.
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &init_packet, false),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Init,
+                payload: vec![
+                    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, // Nonce
+                    0xFF, 0xFF, 0xFF, 0xFE, // Allocated CID
+                    0x02, // Protocol version
+                    0x01, 0x00, 0x00, // Device version
+                    0x0D, // Capabilities
+                ],
+            })
+        );
+
+        // Further allocation wraps around to 1 instead of allocating CHANNEL_BROADCAST.
+        assert_eq!(
+            ctap_hid.parse_packet(&mut env, &init_packet, false),
+            Some(Message {
+                cid: CHANNEL_BROADCAST,
+                cmd: CtapHidCommand::Init,
+                payload: vec![
+                    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, // Nonce
+                    0x00, 0x00, 0x00, 0x01, // Allocated CID
+                    0x02, // Protocol version
+                    0x01, 0x00, 0x00, // Device version
+                    0x0D, // Capabilities
+                ],
+            })
+        );
     }
 }

@@ -137,7 +137,12 @@ pub fn perform_built_in_uv<E: Env>(
     channel: Channel,
     internal_retry: bool,
 ) -> CtapResult<()> {
-    if storage::uv_retries(env)? == 0 {
+    if env.persist().template_infos()?.is_empty() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
+    }
+    if (env.persist().pin_hash()?.is_some() && storage::pin_retries(env)? == 0)
+        || storage::uv_retries(env)? == 0
+    {
         return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
     }
     env.fingerprint().check_fingerprint_init()?;
@@ -439,6 +444,11 @@ mod test {
         let mut env = TestEnv::default();
         assert_eq!(
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+        env.persist().store_template_id(vec![0x00]).unwrap();
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
         );
     }
@@ -446,6 +456,7 @@ mod test {
     #[test]
     fn test_perform_built_in_uv_unenrolled_internal_retry() {
         let mut env = TestEnv::default();
+        env.persist().store_template_id(vec![0x00]).unwrap();
         if env.customization().max_uv_attempts_for_internal_retries()
             == env.customization().max_uv_retries()
         {
@@ -850,5 +861,20 @@ mod test {
         assert_eq!(status.internal_id(), Some(vec![0x01]));
         assert!(status.check_template_id(&[0x01]));
         assert!(!status.check_template_id(&[0x02]));
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_pin_blocked() {
+        let mut env = TestEnv::default();
+        env.create_fingerprint().unwrap();
+        env.persist().set_pin(&[0x88; 16], 4).unwrap();
+        while storage::pin_retries(&mut env).unwrap() > 0 {
+            storage::decr_pin_retries(&mut env).unwrap();
+        }
+        assert!(storage::uv_retries(&mut env).unwrap() > 0);
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
+        );
     }
 }

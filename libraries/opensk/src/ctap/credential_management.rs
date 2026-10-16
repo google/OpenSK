@@ -314,6 +314,7 @@ pub fn process_credential_management<E: Env>(
                 super::cbor_write(sub_command_params.into(), &mut management_data)?;
             }
             client_pin.verify_pin_uv_auth_token(
+                env,
                 &management_data,
                 &pin_uv_auth_param,
                 pin_uv_auth_protocol,

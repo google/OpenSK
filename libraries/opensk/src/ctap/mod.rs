@@ -907,7 +907,12 @@ impl<E: Env> CtapState<E> {
                 {
                     // Perform this check, so bad actors can't brute force exclude_list
                     // without user interaction.
-                    let _ = check_user_presence(env, channel);
+                    if !self.has_valid_up(has_pin_uv_auth_param, options.uv) {
+                        match check_user_presence(env, channel) {
+                            Ok(()) | Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT) => {}
+                            Err(status) => return Err(status),
+                        }
+                    }
                     return Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED);
                 }
             }
@@ -1866,7 +1871,7 @@ mod test {
             create_make_credential_parameters_with_exclude_list(&excluded_credential_id);
         let excluded_credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
-            credential_id: excluded_credential_id,
+            credential_id: excluded_credential_id.clone(),
             wrapped_private_key,
             rp_id: String::from("example.com"),
             user_handle: vec![],
@@ -1880,6 +1885,62 @@ mod test {
         };
         assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
 
+        let make_credential_response = ctap_state.process_make_credential(
+            &mut env,
+            make_credential_params.clone(),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        // Timeout waiting for user presence still returns CTAP2_ERR_CREDENTIAL_EXCLUDED.
+        let clock = env.clock().clone();
+        env.user_presence().set(move || {
+            clock.advance(100);
+            Err(UserPresenceError::Timeout)
+        });
+        let make_credential_response = ctap_state.process_make_credential(
+            &mut env,
+            make_credential_params.clone(),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_CREDENTIAL_EXCLUDED)
+        );
+
+        // Cancellation while waiting for user presence propagates CTAP2_ERR_KEEPALIVE_CANCEL.
+        env.user_presence().set(|| Err(UserPresenceError::Canceled));
+        let make_credential_response = ctap_state.process_make_credential(
+            &mut env,
+            make_credential_params.clone(),
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL)
+        );
+
+        // When pinUvAuthToken already has userPresent = true, excludeList does not wait for UP.
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x88; 32];
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V2;
+        ctap_state.client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
+        let mut make_credential_params = make_credential_params;
+        make_credential_params.pin_uv_auth_param = Some(authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &make_credential_params.client_data_hash,
+            pin_uv_auth_protocol,
+        ));
+        make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         assert_eq!(

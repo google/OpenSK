@@ -890,6 +890,9 @@ impl<E: Env> CtapState<E> {
         let rp_id_hash = Sha::<E>::digest(rp_id.as_bytes());
         if let Some(exclude_list) = exclude_list {
             for cred_desc in exclude_list {
+                if cred_desc.key_type != PublicKeyCredentialType::PublicKey {
+                    continue;
+                }
                 if filter_listed_resident_credential(
                     storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
                     has_uv,
@@ -1176,6 +1179,9 @@ impl<E: Env> CtapState<E> {
         has_uv: bool,
     ) -> CtapResult<Option<PublicKeyCredentialSource>> {
         for allowed_credential in allow_list {
+            if allowed_credential.key_type != PublicKeyCredentialType::PublicKey {
+                continue;
+            }
             let credential = filter_listed_resident_credential(
                 storage::find_credential(env, rp_id, &allowed_credential.key_id)?,
                 has_uv,
@@ -2729,6 +2735,56 @@ mod test {
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION)
+        );
+    }
+
+    #[test]
+    fn test_unknown_credential_descriptor_type_ignored() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        let excluded_credential_id = vec![0x01, 0x23, 0x45, 0x67];
+        let excluded_credential_source = PublicKeyCredentialSource {
+            key_type: PublicKeyCredentialType::PublicKey,
+            credential_id: excluded_credential_id.clone(),
+            wrapped_private_key: PrivateKey::new_ecdsa(&mut env).to_cbor(),
+            rp_id: String::from("example.com"),
+            user_handle: vec![0x01],
+            user_display_name: None,
+            cred_protect_policy: None,
+            creation_order: 0,
+            user_name: None,
+            user_icon: None,
+            cred_blob: None,
+            large_blob_key: None,
+        };
+        storage::store_credential(&mut env, excluded_credential_source).unwrap();
+
+        let unknown_descriptor = PublicKeyCredentialDescriptor {
+            key_type: PublicKeyCredentialType::Unknown,
+            key_id: excluded_credential_id,
+            transports: None,
+        };
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.exclude_list = Some(vec![unknown_descriptor.clone()]);
+        assert!(
+            ctap_state
+                .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+                .is_ok()
+        );
+
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: Some(vec![unknown_descriptor]),
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions::default(),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        assert_eq!(
+            ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL),
+            Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)
         );
     }
 

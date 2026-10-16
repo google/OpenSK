@@ -17,7 +17,7 @@ use super::command::AuthenticatorCredentialManagementParameters;
 use super::data_formats::{
     CredentialManagementSubCommand, CredentialManagementSubCommandParameters,
     PublicKeyCredentialDescriptor, PublicKeyCredentialRpEntity, PublicKeyCredentialSource,
-    PublicKeyCredentialUserEntity,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity,
 };
 use super::response::{AuthenticatorCredentialManagementResponse, ResponseData};
 use super::status_code::Ctap2StatusCode;
@@ -231,10 +231,12 @@ fn process_delete_credential<E: Env>(
 ) -> CtapResult<()> {
     let credential_id = sub_command_params
         .credential_id
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
-        .key_id;
-    check_rp_id_permissions(env, client_pin, &credential_id)?;
-    storage::delete_credential(env, &credential_id)
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
+    if credential_id.key_type != PublicKeyCredentialType::PublicKey {
+        return Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS);
+    }
+    check_rp_id_permissions(env, client_pin, &credential_id.key_id)?;
+    storage::delete_credential(env, &credential_id.key_id)
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
@@ -245,13 +247,15 @@ fn process_update_user_information<E: Env>(
 ) -> CtapResult<()> {
     let credential_id = sub_command_params
         .credential_id
-        .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?
-        .key_id;
+        .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
     let user = sub_command_params
         .user
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-    check_rp_id_permissions(env, client_pin, &credential_id)?;
-    storage::update_credential(env, &credential_id, user)
+    if credential_id.key_type != PublicKeyCredentialType::PublicKey {
+        return Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS);
+    }
+    check_rp_id_permissions(env, client_pin, &credential_id.key_id)?;
+    storage::update_credential(env, &credential_id.key_id, user)
 }
 
 /// Processes the CredentialManagement command and all its subcommands.

@@ -44,6 +44,12 @@ use sk_cbor::destructure_cbor_map;
 /// The WebAuthn level 2 specification limits user handles to 64 bytes, and rejects empty ones.
 const MAX_USER_HANDLE_LENGTH: usize = 64;
 
+/// The maximum length of a Relying Party ID, in bytes.
+///
+/// The WebAuthn level 3 specification requires the RP ID to be a valid domain string, which
+/// RFC 1035 limits to 255 octets on the wire (or 253 bytes in presentation format).
+const MAX_RP_ID_LENGTH: usize = 253;
+
 // CTAP specification (version 20190130) section 6.1
 #[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
@@ -196,6 +202,13 @@ impl TryFrom<cbor::Value> for AuthenticatorMakeCredentialParameters {
 
         let client_data_hash = extract_byte_string(ok_or_missing(client_data_hash)?)?;
         let rp = PublicKeyCredentialRpEntity::try_from(ok_or_missing(rp)?)?;
+        // An empty or longer RP ID is not a valid domain string, so WebAuthn rejects it
+        // before the request reaches us. Nothing enforces that limit for software that talks
+        // CTAP directly over USB HID, and storing such an oversized ID in a discoverable
+        // credential would push it past the maximum value size of the persistent store.
+        if rp.rp_id.is_empty() || rp.rp_id.len() > MAX_RP_ID_LENGTH {
+            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+        }
         let user = PublicKeyCredentialUserEntity::try_from(ok_or_missing(user)?)?;
         // WebAuthn requires the user handle to be between 1 and 64 bytes long. Browsers check
         // this on their side, but nothing prevents other software from talking to us directly
@@ -771,6 +784,61 @@ mod test {
             AuthenticatorMakeCredentialParameters::try_from(cbor_value),
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
+    }
+
+    #[test]
+    fn test_from_cbor_make_credential_parameters_empty_rp_id() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
+                "id" => "",
+            },
+            0x03 => cbor_map! {
+                "id" => vec![0x1D],
+                "name" => "foo",
+            },
+            0x04 => cbor_array![ES256_CRED_PARAM],
+        };
+        assert_eq!(
+            AuthenticatorMakeCredentialParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
+    fn test_from_cbor_make_credential_parameters_rp_id_too_long() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
+                "id" => "r".repeat(MAX_RP_ID_LENGTH + 1),
+            },
+            0x03 => cbor_map! {
+                "id" => vec![0x1D],
+                "name" => "foo",
+            },
+            0x04 => cbor_array![ES256_CRED_PARAM],
+        };
+        assert_eq!(
+            AuthenticatorMakeCredentialParameters::try_from(cbor_value),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
+    fn test_from_cbor_make_credential_parameters_longest_rp_id() {
+        let cbor_value = cbor_map! {
+            0x01 => vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F],
+            0x02 => cbor_map! {
+                "id" => "r".repeat(MAX_RP_ID_LENGTH),
+            },
+            0x03 => cbor_map! {
+                "id" => vec![0x1D],
+                "name" => "foo",
+            },
+            0x04 => cbor_array![ES256_CRED_PARAM],
+        };
+        let parsed = AuthenticatorMakeCredentialParameters::try_from(cbor_value).unwrap();
+        assert_eq!(parsed.rp.rp_id.len(), MAX_RP_ID_LENGTH);
     }
 
     #[test]

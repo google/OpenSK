@@ -37,6 +37,13 @@ pub const ES256_ALGORITHM: i64 = -7;
 #[cfg(any(test, feature = "ed25519"))]
 pub const EDDSA_ALGORITHM: i64 = -8;
 
+/// The maximum length of an RP ID listed by the setMinPINLength parameters, in bytes.
+///
+/// The CTAP 2.1 specification defines the entries of minPinLengthRPIDs as fully qualified
+/// domain names, which RFC 1035 caps at 255 octets on the wire, or 253 bytes in presentation
+/// format.
+const MAX_MIN_PIN_LENGTH_RP_ID_LENGTH: usize = 253;
+
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
@@ -1048,7 +1055,17 @@ impl TryFrom<cbor::Value> for SetMinPinLengthParams {
             Some(entry) => Some(
                 extract_array(entry)?
                     .into_iter()
-                    .map(extract_text_string)
+                    .map(|entry| {
+                        let rp_id = extract_text_string(entry)?;
+                        // A longer entry is not a valid domain name, so compliant platforms
+                        // never send one. Such an input is only rejected later, when storing
+                        // the list fails because the serialized value is too large for the
+                        // persistent store.
+                        if rp_id.len() > MAX_MIN_PIN_LENGTH_RP_ID_LENGTH {
+                            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+                        }
+                        Ok(rp_id)
+                    })
                     .collect::<CtapResult<Vec<String>>>()?,
             ),
             None => None,
@@ -2122,6 +2139,33 @@ mod test {
         assert_eq!(cbor::Value::from(params.clone()), cbor_params);
         let reconstructed_params = SetMinPinLengthParams::try_from(cbor_params);
         assert_eq!(reconstructed_params, Ok(params));
+    }
+
+    #[test]
+    fn test_from_set_min_pin_length_params_rp_id_too_long() {
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array!("r".repeat(MAX_MIN_PIN_LENGTH_RP_ID_LENGTH + 1)),
+            0x03 => true,
+        };
+        assert_eq!(
+            SetMinPinLengthParams::try_from(cbor_params),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
+        );
+    }
+
+    #[test]
+    fn test_from_set_min_pin_length_params_longest_rp_id() {
+        let params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["r".repeat(MAX_MIN_PIN_LENGTH_RP_ID_LENGTH)]),
+            force_change_pin: None,
+        };
+        let cbor_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array!("r".repeat(MAX_MIN_PIN_LENGTH_RP_ID_LENGTH)),
+        };
+        assert_eq!(SetMinPinLengthParams::try_from(cbor_params), Ok(params));
     }
 
     #[test]

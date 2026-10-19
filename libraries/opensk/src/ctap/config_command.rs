@@ -70,13 +70,16 @@ fn process_set_min_pin_length(
     if let Some(old_length) = env.persist().pin_code_point_length()? {
         force_change_pin |= new_min_pin_length > old_length;
     }
+    // Write the RP IDs first: this is the only step that can fail because of its
+    // input, so doing it before the other writes avoids leaving the minimum PIN
+    // length or the force-change flag updated when the command ends up failing.
+    if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
+        storage::set_min_pin_length_rp_ids(env, min_pin_length_rp_ids)?;
+    }
     if force_change_pin {
         env.persist().force_pin_change()?;
     }
     storage::set_min_pin_length(env, new_min_pin_length)?;
-    if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
-        storage::set_min_pin_length_rp_ids(env, min_pin_length_rp_ids)?;
-    }
     Ok(ResponseData::AuthenticatorConfig)
 }
 
@@ -328,6 +331,32 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
         assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+    }
+
+    #[test]
+    fn test_process_set_min_pin_length_rp_ids_failure_keeps_state() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+
+        // The serialized list is bigger than what a persistent store value can
+        // hold, so writing the RP IDs fails after the parameters were parsed.
+        let oversized_rp_ids = Some(vec!["r".repeat(500), "s".repeat(500), "t".repeat(500)]);
+        let config_params = create_min_pin_config_params(6, oversized_rp_ids);
+        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        assert!(config_response.is_err());
+
+        // The minimum PIN length is not updated by the failed command.
+        assert_eq!(
+            storage::min_pin_length(&mut env),
+            Ok(env.customization().default_min_pin_length())
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ impl Clock for WasefireEnv {
     }
 
     fn is_elapsed(&mut self, deadline: &Self::Timer) -> bool {
-        *deadline < now_us()
+        *deadline <= now_us()
     }
 
     #[cfg(feature = "debug")]

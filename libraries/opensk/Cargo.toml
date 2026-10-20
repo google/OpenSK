@@ -1,16 +1,9 @@
 [package]
 name = "opensk"
 version = "1.0.0"
-authors = [
-  "Fabian Kaczmarczyck <kaczmarczyck@google.com>",
-  "Guillaume Endignoux <guillaumee@google.com>",
-  "Jean-Michel Picod <jmichel@google.com>",
-  "Julien Cretin <cretin@google.com>",
-]
 license = "Apache-2.0"
 edition = "2024"
 description = "OpenSK's CTAP2 (FIDO2) authenticator, as a library"
-homepage = "https://github.com/google/OpenSK"
 repository = "https://github.com/google/OpenSK"
 readme = "README.md"
 keywords = ["fido2", "ctap2", "webauthn", "authenticator", "no_std"]

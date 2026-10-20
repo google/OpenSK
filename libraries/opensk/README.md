@@ -1,8 +1,8 @@
 # OpenSK library
 
-[![crates.io](https://img.shields.io/crates/v/opensk.svg)](https://crates.io/crates/opensk)
-[![docs.rs](https://docs.rs/opensk/badge.svg)](https://docs.rs/opensk)
-[![License](https://img.shields.io/crates/l/opensk.svg)](https://crates.io/crates/opensk)
+[![Crate]][crates.io]
+[![Documentation]][docs.rs]
+[![License]][LICENSE-APACHE]
 
 The CTAP2 (FIDO2) authenticator of [OpenSK](https://github.com/google/OpenSK),
 as a library: the protocol logic, independent of any board.
@@ -25,4 +25,11 @@ for its status.
 
 ## License
 
-Apache-2.0.
+[Apache-2.0][LICENSE-APACHE].
+
+[crates.io]: https://crates.io/crates/opensk
+[Crate]: https://img.shields.io/crates/v/opensk
+[docs.rs]: https://docs.rs/opensk
+[Documentation]: https://docs.rs/opensk/badge.svg
+[License]: https://img.shields.io/crates/l/opensk
+[LICENSE-APACHE]: https://github.com/google/OpenSK/blob/develop/LICENSE

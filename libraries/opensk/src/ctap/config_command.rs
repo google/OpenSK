@@ -49,8 +49,9 @@ fn process_toggle_always_uv(env: &mut impl Env) -> CtapResult<ResponseData> {
 }
 
 /// Processes the subcommand setMinPINLength for AuthenticatorConfig.
-fn process_set_min_pin_length(
-    env: &mut impl Env,
+fn process_set_min_pin_length<E: Env>(
+    env: &mut E,
+    client_pin: &mut ClientPin<E>,
     params: SetMinPinLengthParams,
 ) -> CtapResult<ResponseData> {
     let SetMinPinLengthParams {
@@ -78,6 +79,9 @@ fn process_set_min_pin_length(
     }
     if force_change_pin {
         env.persist().force_pin_change()?;
+    }
+    if env.persist().has_force_pin_change()? {
+        client_pin.reset_pin_uv_auth_token(env);
     }
     storage::set_min_pin_length(env, new_min_pin_length)?;
     Ok(ResponseData::AuthenticatorConfig)
@@ -122,7 +126,7 @@ pub fn process_config<E: Env>(
         ConfigSubCommand::ToggleAlwaysUv => process_toggle_always_uv(env),
         ConfigSubCommand::SetMinPinLength => {
             if let Some(ConfigSubCommandParams::SetMinPinLength(params)) = sub_command_params {
-                process_set_min_pin_length(env, params)
+                process_set_min_pin_length(env, client_pin, params)
             } else {
                 Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
             }
@@ -493,6 +497,7 @@ mod test {
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(env.persist().has_force_pin_change(), Ok(true));
+        assert!(!client_pin.has_token(&mut env));
     }
 
     #[test]
@@ -528,6 +533,7 @@ mod test {
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
         assert_eq!(env.persist().has_force_pin_change(), Ok(true));
+        assert!(!client_pin.has_token(&mut env));
     }
 
     #[test]

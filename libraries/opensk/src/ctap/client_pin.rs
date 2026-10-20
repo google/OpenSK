@@ -102,9 +102,16 @@ fn check_and_store_new_pin<E: Env>(
     }
     let mut pin_hash = Secret::default();
     Sha::<E>::digest_mut(&pin, &mut pin_hash);
-    let pin_hash = env
-        .key_store()
-        .encrypt_pin_hash(array_ref![pin_hash, 0, PIN_AUTH_LENGTH])?;
+    let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
+    if env.persist().has_force_pin_change()?
+        && let Some(old_pin_hash) = env.persist().pin_hash()?
+    {
+        let old_pin_hash = env.key_store().decrypt_pin_hash(&old_pin_hash)?;
+        if bool::from(old_pin_hash.ct_eq(new_pin_hash)) {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
+        }
+    }
+    let pin_hash = env.key_store().encrypt_pin_hash(new_pin_hash)?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
     env.persist()
         .set_pin(array_ref!(pin_hash, 0, PIN_AUTH_LENGTH), pin_length as u8)?;
@@ -303,8 +310,7 @@ impl<E: Env> ClientPin<E> {
         self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
 
         check_and_store_new_pin(env, &shared_secret, new_pin_enc)?;
-        self.pin_protocol_v1.reset_pin_uv_auth_token(env);
-        self.pin_protocol_v2.reset_pin_uv_auth_token(env);
+        self.reset_pin_uv_auth_token(env);
         Ok(())
     }
 
@@ -551,14 +557,19 @@ impl<E: Env> ClientPin<E> {
         )
     }
 
+    /// Resets the pinUvAuthToken for all protocols and stops using it.
+    pub fn reset_pin_uv_auth_token(&mut self, env: &mut E) {
+        self.pin_protocol_v1.reset_pin_uv_auth_token(env);
+        self.pin_protocol_v2.reset_pin_uv_auth_token(env);
+        self.pin_uv_auth_token_state.stop_using_pin_uv_auth_token();
+    }
+
     /// Resets all held state.
     pub fn reset(&mut self, env: &mut E) {
         self.pin_protocol_v1.regenerate(env);
-        self.pin_protocol_v1.reset_pin_uv_auth_token(env);
         self.pin_protocol_v2.regenerate(env);
-        self.pin_protocol_v2.reset_pin_uv_auth_token(env);
         self.consecutive_pin_mismatches = 0;
-        self.pin_uv_auth_token_state.stop_using_pin_uv_auth_token();
+        self.reset_pin_uv_auth_token(env);
     }
 
     /// Verifies, computes and encrypts the HMAC-secret outputs.
@@ -716,10 +727,8 @@ mod test {
 
     /// Stores a PIN hash corresponding to the dummy PIN "1234".
     fn set_standard_pin(env: &mut TestEnv) {
-        let mut pin = [0u8; 64];
-        pin[..4].copy_from_slice(b"1234");
         let mut pin_hash = [0u8; 16];
-        pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(&pin[..])[..16]);
+        pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(b"1234")[..16]);
         env.persist().set_pin(&pin_hash, 4).unwrap();
     }
 
@@ -772,7 +781,7 @@ mod test {
         let pin = b"1234";
         let mut padded_pin = [0u8; 64];
         padded_pin[..pin.len()].copy_from_slice(&pin[..]);
-        let pin_hash = Sha::<TestEnv>::digest(&padded_pin);
+        let pin_hash = Sha::<TestEnv>::digest(pin);
         let new_pin_enc = shared_secret.encrypt(&mut env, &padded_pin).unwrap();
         let pin_uv_auth_param = shared_secret.authenticate(&new_pin_enc);
         let pin_hash_enc = shared_secret.encrypt(&mut env, &pin_hash[..16]).unwrap();
@@ -1086,6 +1095,55 @@ mod test {
     #[test]
     fn test_process_change_pin_v2() {
         test_helper_process_change_pin(PinUvAuthProtocol::V2);
+    }
+
+    fn test_helper_process_change_pin_force_pin_change(pin_uv_auth_protocol: PinUvAuthProtocol) {
+        let (mut client_pin, mut params) =
+            create_client_pin_and_parameters(pin_uv_auth_protocol, ClientPinSubCommand::ChangePin);
+        let shared_secret = client_pin
+            .get_pin_protocol(pin_uv_auth_protocol)
+            .decapsulate(
+                params.key_agreement.clone().unwrap(),
+                params.pin_uv_auth_protocol,
+            )
+            .unwrap();
+        let mut env = TestEnv::default();
+        set_standard_pin(&mut env);
+        assert_eq!(env.persist().force_pin_change(), Ok(()));
+
+        // Changing to the same PIN must fail when force_pin_change is set.
+        let mut auth_param_data = params.new_pin_enc.clone().unwrap();
+        auth_param_data.extend(params.pin_hash_enc.as_ref().unwrap());
+        params.pin_uv_auth_param = Some(shared_secret.authenticate(&auth_param_data));
+        assert_eq!(
+            client_pin.process_command(&mut env, params.clone(), DUMMY_CHANNEL),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
+        );
+        assert_eq!(env.persist().has_force_pin_change(), Ok(true));
+        assert!(client_pin.has_token(&mut env));
+
+        // Changing to a different PIN succeeds, clears force_pin_change, and resets the token.
+        let new_pin_enc = encrypt_pin(&shared_secret, b"5678".to_vec());
+        let mut auth_param_data = new_pin_enc.clone();
+        auth_param_data.extend(params.pin_hash_enc.as_ref().unwrap());
+        params.new_pin_enc = Some(new_pin_enc);
+        params.pin_uv_auth_param = Some(shared_secret.authenticate(&auth_param_data));
+        assert_eq!(
+            client_pin.process_command(&mut env, params, DUMMY_CHANNEL),
+            Ok(ResponseData::AuthenticatorClientPin(None))
+        );
+        assert_eq!(env.persist().has_force_pin_change(), Ok(false));
+        assert!(!client_pin.has_token(&mut env));
+    }
+
+    #[test]
+    fn test_process_change_pin_force_pin_change_v1() {
+        test_helper_process_change_pin_force_pin_change(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_process_change_pin_force_pin_change_v2() {
+        test_helper_process_change_pin_force_pin_change(PinUvAuthProtocol::V2);
     }
 
     fn test_helper_process_get_pin_token(pin_uv_auth_protocol: PinUvAuthProtocol) {

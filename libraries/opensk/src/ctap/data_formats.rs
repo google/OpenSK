@@ -203,6 +203,7 @@ pub enum AuthenticatorTransport {
     Usb,
     Nfc,
     Ble,
+    Hybrid,
     Internal,
 }
 
@@ -212,6 +213,7 @@ impl From<AuthenticatorTransport> for cbor::Value {
             AuthenticatorTransport::Usb => "usb",
             AuthenticatorTransport::Nfc => "nfc",
             AuthenticatorTransport::Ble => "ble",
+            AuthenticatorTransport::Hybrid => "hybrid",
             AuthenticatorTransport::Internal => "internal",
         }
         .into()
@@ -227,6 +229,7 @@ impl TryFrom<cbor::Value> for AuthenticatorTransport {
             "usb" => Ok(AuthenticatorTransport::Usb),
             "nfc" => Ok(AuthenticatorTransport::Nfc),
             "ble" => Ok(AuthenticatorTransport::Ble),
+            "hybrid" => Ok(AuthenticatorTransport::Hybrid),
             "internal" => Ok(AuthenticatorTransport::Internal),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE),
         }
@@ -259,10 +262,15 @@ impl TryFrom<cbor::Value> for PublicKeyCredentialDescriptor {
         let transports = match transports {
             Some(exclude_entry) => {
                 let transport_vec = extract_array(exclude_entry)?;
-                let transports = transport_vec
-                    .into_iter()
-                    .map(AuthenticatorTransport::try_from)
-                    .collect::<CtapResult<Vec<AuthenticatorTransport>>>()?;
+                let mut transports = Vec::new();
+                for entry in transport_vec {
+                    let transport_string = extract_text_string(entry)?;
+                    if let Ok(transport) =
+                        AuthenticatorTransport::try_from(cbor::Value::from(transport_string))
+                    {
+                        transports.push(transport);
+                    }
+                }
                 Some(transports)
             }
             None => None,
@@ -1721,6 +1729,33 @@ mod test {
         assert_eq!(credential_descriptor, Ok(expected_credential_descriptor));
         let created_cbor: cbor::Value = credential_descriptor.unwrap().into();
         assert_eq!(created_cbor, cbor_credential_descriptor);
+
+        let cbor_unknown_transport_descriptor = cbor_map! {
+            "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+            "type" => "public-key",
+            "transports" => cbor_array!["usb", "hybrid", "unknown-transport"],
+        };
+        assert_eq!(
+            PublicKeyCredentialDescriptor::try_from(cbor_unknown_transport_descriptor),
+            Ok(PublicKeyCredentialDescriptor {
+                key_type: PublicKeyCredentialType::PublicKey,
+                key_id: vec![0x2D, 0x2D, 0x2D, 0x2D],
+                transports: Some(vec![
+                    AuthenticatorTransport::Usb,
+                    AuthenticatorTransport::Hybrid,
+                ]),
+            })
+        );
+
+        let cbor_invalid_transport_descriptor = cbor_map! {
+            "id" => vec![0x2D, 0x2D, 0x2D, 0x2D],
+            "type" => "public-key",
+            "transports" => cbor_array![123],
+        };
+        assert_eq!(
+            PublicKeyCredentialDescriptor::try_from(cbor_invalid_transport_descriptor),
+            Err(CTAP2_ERR_CBOR_UNEXPECTED_TYPE)
+        );
     }
 
     #[test]

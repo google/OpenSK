@@ -9,9 +9,15 @@ authors = [
 ]
 license = "Apache-2.0"
 edition = "2024"
+description = "OpenSK's CTAP2 (FIDO2) authenticator, as a library"
+homepage = "https://github.com/google/OpenSK"
+repository = "https://github.com/google/OpenSK"
+readme = "README.md"
+keywords = ["fido2", "ctap2", "webauthn", "authenticator", "no_std"]
+categories = ["authentication", "cryptography", "embedded", "no-std"]
 
 [dependencies]
-sk-cbor = { path = "../cbor" }
+sk-cbor = { path = "../cbor", version = "0.2.0" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
@@ -48,8 +54,3 @@ fingerprint = []
 
 [dev-dependencies]
 enum-iterator = "0.6.0"
-
-[build-dependencies]
-sk-cbor = { path = "../cbor" }
-uuid = { version = "0.8", features = ["v4"] }
-openssl = "0.10.80"

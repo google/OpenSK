@@ -946,7 +946,10 @@ impl<E: Env> CtapState<E> {
         };
         let large_blob_key = match (options.rk, extensions.large_blob_key) {
             (true, Some(true)) => Some(env.rng().gen_uniform_u8x32().to_vec()),
-            _ => None,
+            (false, Some(true)) | (_, Some(false)) => {
+                return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+            }
+            (_, None) => None,
         };
 
         // We decide on the algorithm early, but delay key creation since it takes time.
@@ -2150,6 +2153,12 @@ mod test {
         };
         let mut make_credential_params = create_minimal_make_credential_parameters();
         make_credential_params.extensions = extensions;
+        let mut non_rk_params = make_credential_params.clone();
+        non_rk_params.options.rk = false;
+        assert_eq!(
+            ctap_state.process_make_credential(&mut env, non_rk_params, DUMMY_CHANNEL),
+            Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION)
+        );
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
         let large_blob_key = match make_credential_response.unwrap() {

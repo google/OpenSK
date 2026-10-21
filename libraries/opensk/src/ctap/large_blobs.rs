@@ -100,6 +100,7 @@ impl LargeBlobState {
                 large_blob_data.extend(&offset_bytes);
                 large_blob_data.extend(&Sha::<E>::digest(set.as_slice()));
                 client_pin.verify_pin_uv_auth_token(
+                    env,
                     &large_blob_data,
                     &pin_uv_auth_param,
                     pin_uv_auth_protocol,

@@ -114,6 +114,7 @@ pub fn process_config<E: Env>(
             super::cbor_write(sub_command_params.into(), &mut config_data)?;
         }
         client_pin.verify_pin_uv_auth_token(
+            env,
             &config_data,
             &pin_uv_auth_param,
             pin_uv_auth_protocol,

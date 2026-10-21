@@ -384,7 +384,12 @@ pub fn process_bio_enrollment<E: Env>(
     if let Some(sub_command_params) = params.sub_command_params.clone() {
         cbor_write(sub_command_params.into(), &mut command_data)?;
     }
-    client_pin.verify_pin_uv_auth_token(&command_data, &pin_uv_auth_param, pin_uv_auth_protocol)?;
+    client_pin.verify_pin_uv_auth_token(
+        env,
+        &command_data,
+        &pin_uv_auth_param,
+        pin_uv_auth_protocol,
+    )?;
     client_pin.has_permission(PinPermission::BioEnrollment)?;
     // Now we process all other subcommands that need PIN UV authentication.
     match sub_command {

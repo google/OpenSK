@@ -118,6 +118,18 @@ fn check_and_store_new_pin<E: Env>(
     Ok(())
 }
 
+pub(crate) fn check_pin_uv_auth_protocol(
+    env: &impl Env,
+    pin_uv_auth_protocol: PinUvAuthProtocol,
+) -> CtapResult<()> {
+    if !env.customization().allows_pin_protocol_v1()
+        && pin_uv_auth_protocol == PinUvAuthProtocol::V1
+    {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    Ok(())
+}
+
 #[cfg_attr(test, derive(IntoEnumIterator))]
 pub enum PinPermission {
     // All variants should use integers with a single bit set.
@@ -499,11 +511,7 @@ impl<E: Env> ClientPin<E> {
         client_pin_params: AuthenticatorClientPinParameters,
         channel: Channel,
     ) -> CtapResult<ResponseData> {
-        if !env.customization().allows_pin_protocol_v1()
-            && client_pin_params.pin_uv_auth_protocol == PinUvAuthProtocol::V1
-        {
-            return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
-        }
+        check_pin_uv_auth_protocol(env, client_pin_params.pin_uv_auth_protocol)?;
         let response = match client_pin_params.sub_command {
             ClientPinSubCommand::GetPinRetries => Some(self.process_get_pin_retries(env)?),
             ClientPinSubCommand::GetKeyAgreement => {
@@ -541,10 +549,12 @@ impl<E: Env> ClientPin<E> {
     /// Verifies the HMAC for the pinUvAuthToken of the given version.
     pub fn verify_pin_uv_auth_token(
         &self,
+        env: &E,
         hmac_contents: &[u8],
         pin_uv_auth_param: &[u8],
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> CtapResult<()> {
+        check_pin_uv_auth_protocol(env, pin_uv_auth_protocol)?;
         if !self.pin_uv_auth_token_state.is_in_use() {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
@@ -593,6 +603,7 @@ impl<E: Env> ClientPin<E> {
             salt_auth,
             pin_uv_auth_protocol,
         } = hmac_secret_input;
+        check_pin_uv_auth_protocol(env, pin_uv_auth_protocol)?;
         let shared_secret = self
             .get_pin_protocol(pin_uv_auth_protocol)
             .decapsulate(key_agreement, pin_uv_auth_protocol)?;
@@ -1702,6 +1713,30 @@ mod test {
     }
 
     #[test]
+    fn test_process_hmac_secret_v1_not_allowed() {
+        let mut env = TestEnv::default();
+        env.customization_mut().set_allows_pin_protocol_v1(false);
+        let (client_pin, shared_secret) =
+            create_client_pin_and_shared_secret(PinUvAuthProtocol::V1);
+        let cred_random = [0xC9; 32];
+        let salt = vec![0x01; 32];
+        let salt_enc = shared_secret.encrypt(&mut env, &salt).unwrap();
+        let salt_auth = shared_secret.authenticate(&salt_enc);
+        let hmac_secret_input = GetAssertionHmacSecretInput {
+            key_agreement: client_pin
+                .get_pin_protocol(PinUvAuthProtocol::V1)
+                .get_public_key(),
+            salt_enc,
+            salt_auth,
+            pin_uv_auth_protocol: PinUvAuthProtocol::V1,
+        };
+        assert_eq!(
+            client_pin.process_hmac_secret(&mut env, hmac_secret_input, &cred_random),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+    }
+
+    #[test]
     fn test_has_permission() {
         let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
@@ -1822,6 +1857,7 @@ mod test {
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v1,
                 PinUvAuthProtocol::V1
@@ -1830,6 +1866,7 @@ mod test {
         );
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v2,
                 PinUvAuthProtocol::V2
@@ -1838,6 +1875,7 @@ mod test {
         );
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v1,
                 PinUvAuthProtocol::V2
@@ -1846,6 +1884,7 @@ mod test {
         );
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v2,
                 PinUvAuthProtocol::V1
@@ -1854,6 +1893,7 @@ mod test {
         );
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v1_from_v2_token,
                 PinUvAuthProtocol::V1
@@ -1862,11 +1902,22 @@ mod test {
         );
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v2_from_v1_token,
                 PinUvAuthProtocol::V2
             ),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
+        );
+        env.customization_mut().set_allows_pin_protocol_v1(false);
+        assert_eq!(
+            client_pin.verify_pin_uv_auth_token(
+                &env,
+                &message,
+                &pin_uv_auth_param_v1,
+                PinUvAuthProtocol::V1
+            ),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
     }
 
@@ -1884,6 +1935,7 @@ mod test {
 
         assert_eq!(
             client_pin.verify_pin_uv_auth_token(
+                &env,
                 &message,
                 &pin_uv_auth_param_v1,
                 PinUvAuthProtocol::V1

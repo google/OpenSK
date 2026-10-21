@@ -39,7 +39,7 @@ mod u2f_up;
 pub mod vendor_hid;
 
 pub use self::client_pin::PIN_AUTH_LENGTH;
-use self::client_pin::{ClientPin, PinPermission};
+use self::client_pin::{ClientPin, PinPermission, check_pin_uv_auth_protocol};
 use self::command::{
     AuthenticatorGetAssertionParameters, AuthenticatorMakeCredentialParameters, Command,
 };
@@ -781,6 +781,9 @@ impl<E: Env> CtapState<E> {
             }
             pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
         }
+        if let Some(pin_uv_auth_protocol) = pin_uv_auth_protocol {
+            check_pin_uv_auth_protocol(env, pin_uv_auth_protocol)?;
+        }
         Ok(())
     }
 
@@ -849,6 +852,7 @@ impl<E: Env> CtapState<E> {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
+                    env,
                     &client_data_hash,
                     &pin_uv_auth_param,
                     pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,
@@ -1240,6 +1244,7 @@ impl<E: Env> CtapState<E> {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
+                    env,
                     &client_data_hash,
                     &pin_uv_auth_param,
                     pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?,

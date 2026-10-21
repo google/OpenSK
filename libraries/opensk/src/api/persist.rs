@@ -312,21 +312,18 @@ pub trait Persist {
         }
         let mut result = Vec::with_capacity(byte_count);
         for key in keys::LARGE_BLOB_SHARDS {
-            if offset >= VALUE_LENGTH {
-                offset = offset.saturating_sub(VALUE_LENGTH);
-                continue;
-            }
-            let end = offset.saturating_add(byte_count - result.len());
-            let end = cmp::min(end, VALUE_LENGTH);
             let value = self.find(key)?.unwrap_or(Vec::new());
             if key == keys::LARGE_BLOB_SHARDS.start && value.is_empty() {
                 return Ok(None);
             }
-            let end = cmp::min(end, value.len());
-            if end < offset {
-                return Ok(Some(Cow::from(result)));
+            if offset < value.len() {
+                let end = offset.saturating_add(byte_count - result.len());
+                let end = cmp::min(end, value.len());
+                result.extend(&value[offset..end]);
             }
-            result.extend(&value[offset..end]);
+            if result.len() == byte_count || value.len() < VALUE_LENGTH {
+                break;
+            }
             offset = offset.saturating_sub(VALUE_LENGTH);
         }
         Ok(Some(Cow::from(result)))
@@ -902,5 +899,38 @@ mod test {
         let test_aaguid = [1; AAGUID_LENGTH];
         assert_eq!(persist.set_aaguid(&test_aaguid), Ok(()));
         assert_eq!(persist.aaguid(), Ok(test_aaguid));
+    }
+
+    #[test]
+    fn test_get_large_blob_shards() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        assert_eq!(persist.get_large_blob(0, 10, None), Ok(None));
+        assert_eq!(persist.get_large_blob(VALUE_LENGTH, 10, None), Ok(None));
+
+        let blob: Vec<u8> = (0..(VALUE_LENGTH + 100)).map(|i| (i % 251) as u8).collect();
+        assert_eq!(persist.commit_large_blob_array(&blob), Ok(()));
+        assert_eq!(
+            persist
+                .get_large_blob(VALUE_LENGTH - 10, 30, None)
+                .unwrap()
+                .as_deref(),
+            Some(&blob[(VALUE_LENGTH - 10)..(VALUE_LENGTH + 20)])
+        );
+        assert_eq!(
+            persist
+                .get_large_blob(VALUE_LENGTH + 50, 100, None)
+                .unwrap()
+                .as_deref(),
+            Some(&blob[(VALUE_LENGTH + 50)..])
+        );
+        assert_eq!(
+            persist
+                .get_large_blob(VALUE_LENGTH + 200, 10, None)
+                .unwrap()
+                .as_deref(),
+            Some(&[][..])
+        );
     }
 }

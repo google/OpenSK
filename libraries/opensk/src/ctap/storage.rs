@@ -144,9 +144,12 @@ pub fn update_credential<E: Env>(
     user: PublicKeyCredentialUserEntity,
 ) -> CtapResult<()> {
     let (key, mut credential) = find_credential_item(env, credential_id)?;
-    credential.user_name = user.user_name;
-    credential.user_display_name = user.user_display_name;
-    credential.user_icon = user.user_icon;
+    if user.user_id != credential.user_handle {
+        return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
+    }
+    credential.user_name = user.user_name.filter(|s| !s.is_empty());
+    credential.user_display_name = user.user_display_name.filter(|s| !s.is_empty());
+    credential.user_icon = user.user_icon.filter(|s| !s.is_empty());
     let value = serialize_credential(credential)?;
     env.persist().write_credential_bytes(key, &value)
 }
@@ -452,8 +455,7 @@ mod test {
     #[test]
     fn test_update_credential() {
         let mut env = TestEnv::default();
-        let user = PublicKeyCredentialUserEntity {
-            // User ID is ignored.
+        let mut user = PublicKeyCredentialUserEntity {
             user_id: vec![0x00],
             user_name: Some("name".to_string()),
             user_display_name: Some("display_name".to_string()),
@@ -473,6 +475,11 @@ mod test {
         assert_eq!(stored_credential.user_name, None);
         assert_eq!(stored_credential.user_display_name, None);
         assert_eq!(stored_credential.user_icon, None);
+        assert_eq!(
+            update_credential(&mut env, &credential_id, user.clone()),
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+        user.user_id = vec![0x1D];
         assert!(update_credential(&mut env, &credential_id, user.clone()).is_ok());
         let stored_credential = find_credential(&mut env, "example.com", &credential_id)
             .unwrap()

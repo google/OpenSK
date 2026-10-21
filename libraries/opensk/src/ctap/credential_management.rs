@@ -872,7 +872,7 @@ mod test {
             key_id: vec![0x1D; 32],
             transports: None, // You can set USB as a hint here.
         };
-        let new_user = PublicKeyCredentialUserEntity {
+        let mismatched_user = PublicKeyCredentialUserEntity {
             user_id: vec![0xFF],
             user_name: Some("new_name".to_string()),
             user_display_name: Some("new_display_name".to_string()),
@@ -880,9 +880,45 @@ mod test {
         };
         let sub_command_params = CredentialManagementSubCommandParameters {
             rp_id_hash: None,
+            credential_id: Some(credential_id.clone()),
+            user: Some(mismatched_user),
+        };
+        let cred_management_params = AuthenticatorCredentialManagementParameters {
+            sub_command: CredentialManagementSubCommand::UpdateUserInformation,
+            sub_command_params: Some(sub_command_params),
+            pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
+            pin_uv_auth_param,
+        };
+        let cred_management_response = process_credential_management(
+            &mut env,
+            &mut ctap_state.stateful_command_permission,
+            &mut ctap_state.client_pin,
+            cred_management_params,
+            DUMMY_CHANNEL,
+        );
+        assert_eq!(
+            cred_management_response,
+            Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+        );
+
+        let new_user = PublicKeyCredentialUserEntity {
+            user_id: vec![0x01],
+            user_name: Some("new_name".to_string()),
+            user_display_name: Some("new_display_name".to_string()),
+            user_icon: Some(String::new()),
+        };
+        let sub_command_params = CredentialManagementSubCommandParameters {
+            rp_id_hash: None,
             credential_id: Some(credential_id),
             user: Some(new_user),
         };
+        let mut auth_data = vec![CredentialManagementSubCommand::UpdateUserInformation as u8];
+        super::super::cbor_write(sub_command_params.clone().into(), &mut auth_data).unwrap();
+        let pin_uv_auth_param = Some(authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &auth_data,
+            PinUvAuthProtocol::V1,
+        ));
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::UpdateUserInformation,
             sub_command_params: Some(sub_command_params),
@@ -910,7 +946,7 @@ mod test {
             &updated_credential.user_display_name.unwrap(),
             "new_display_name"
         );
-        assert_eq!(&updated_credential.user_icon.unwrap(), "new_icon");
+        assert_eq!(updated_credential.user_icon, None);
     }
 
     #[test]
@@ -941,7 +977,7 @@ mod test {
         // The name is longer than the 64 bytes kept for storage, and the
         // display name crosses the limit in the middle of a 2-byte character.
         let new_user = PublicKeyCredentialUserEntity {
-            user_id: vec![0xFF],
+            user_id: vec![0x01],
             user_name: Some("n".repeat(100)),
             user_display_name: Some(format!("{}é", "d".repeat(63))),
             user_icon: None,

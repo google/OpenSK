@@ -118,7 +118,7 @@ fn check_and_store_new_pin<E: Env>(
     Ok(())
 }
 
-fn check_pin_uv_auth_protocol(
+pub(crate) fn check_pin_uv_auth_protocol(
     env: &impl Env,
     pin_uv_auth_protocol: PinUvAuthProtocol,
 ) -> CtapResult<()> {
@@ -1716,7 +1716,8 @@ mod test {
     fn test_process_hmac_secret_v1_not_allowed() {
         let mut env = TestEnv::default();
         env.customization_mut().set_allows_pin_protocol_v1(false);
-        let (client_pin, shared_secret) = create_client_pin_and_shared_secret(PinUvAuthProtocol::V1);
+        let (client_pin, shared_secret) =
+            create_client_pin_and_shared_secret(PinUvAuthProtocol::V1);
         let cred_random = [0xC9; 32];
         let salt = vec![0x01; 32];
         let salt_enc = shared_secret.encrypt(&mut env, &salt).unwrap();

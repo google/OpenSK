@@ -1266,6 +1266,10 @@ mod test {
             .unwrap();
         let mut env = TestEnv::default();
         set_standard_pin(&mut env);
+        assert_eq!(
+            client_pin.process_command(&mut env, params.clone(), DUMMY_CHANNEL),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
         assert!(env.create_fingerprint().is_ok());
 
         let response = client_pin

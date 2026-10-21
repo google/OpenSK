@@ -280,6 +280,7 @@ fn truncate_to_char_boundary(s: &str, mut max: usize) -> &str {
 fn map_uv_block_error(result: CtapResult<()>) -> CtapResult<()> {
     result.map_err(|e| match e {
         Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED => Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED,
+        Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED => Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION,
         other => other,
     })
 }
@@ -3787,6 +3788,11 @@ mod test {
             ctap_state.process_parsed_command(&mut env, Command::AuthenticatorReset, DUMMY_CHANNEL);
         assert_eq!(response, Ok(ResponseData::AuthenticatorReset));
         assert_eq!(env.persist().template_infos(), Ok(vec![]));
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+        env.persist().store_template_id(vec![0x00]).unwrap();
         assert_eq!(
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)

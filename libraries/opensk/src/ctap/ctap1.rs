@@ -211,21 +211,14 @@ impl Ctap1Command {
                 application,
                 key_handle,
                 flags,
-            } => {
-                // The order is important due to side effects of checking user presence.
-                if flags == Ctap1Flags::EnforceUpAndSign && !ctap_state.u2f_up_state.consume_up(env)
-                {
-                    return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
-                }
-                Ctap1Command::process_authenticate(
-                    env,
-                    challenge,
-                    application,
-                    key_handle,
-                    flags,
-                    ctap_state,
-                )
-            }
+            } => Ctap1Command::process_authenticate(
+                env,
+                challenge,
+                application,
+                key_handle,
+                flags,
+                ctap_state,
+            ),
 
             // U2F raw message format specification (version 20170411) section 6.3
             U2fCommand::Version => Ok(Vec::<u8>::from(super::U2F_VERSION_STRING)),
@@ -331,6 +324,10 @@ impl Ctap1Command {
         let credential_source = filter_listed_credential(credential_source, false)
             .ok_or(Ctap1StatusCode::SW_WRONG_DATA)?;
         if flags == Ctap1Flags::CheckOnly {
+            return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
+        }
+        // The order is important due to side effects of checking user presence.
+        if flags == Ctap1Flags::EnforceUpAndSign && !ctap_state.u2f_up_state.consume_up(env) {
             return Err(Ctap1StatusCode::SW_COND_USE_NOT_SATISFIED);
         }
         ctap_state
@@ -710,23 +707,29 @@ mod test {
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
 
+        // An invalid key handle should be rejected without requesting user presence.
+        let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
+        assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
+        assert!(!ctap_state.u2f_up_state.is_up_needed(&mut env));
+
+        // If user presence was already granted, an invalid key handle should not consume it.
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state);
         assert_eq!(response, Err(Ctap1StatusCode::SW_WRONG_DATA));
+        assert!(ctap_state.u2f_up_state.consume_up(&mut env));
     }
 
     #[test]
     fn test_process_authenticate_without_up() {
-        let application = [0x0A; 32];
-        let key_handle = vec![0x00; CBOR_CREDENTIAL_ID_SIZE];
-        let message =
-            create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
-
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
+
+        let (key_handle, application) = create_wrapped_credential(&mut env);
+        let message =
+            create_authenticate_message(&application, Ctap1Flags::EnforceUpAndSign, &key_handle);
 
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);

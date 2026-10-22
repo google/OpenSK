@@ -88,7 +88,7 @@ impl LargeBlobState {
                 }
                 self.expected_length
             };
-            if env.persist().pin_hash()?.is_some() || storage::has_always_uv(env)? {
+            if storage::has_user_verification(env)? || storage::has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =
@@ -551,6 +551,43 @@ mod test {
     #[test]
     fn test_process_command_commit_with_pin_v2() {
         test_helper_process_command_commit_with_pin(PinUvAuthProtocol::V2);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_command_commit_with_uv_method_without_token() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V2,
+        );
+        let mut large_blobs = LargeBlobState::default();
+        env.create_fingerprint().unwrap();
+
+        const BLOB_LEN: usize = 20;
+        const DATA_LEN: usize = BLOB_LEN - TRUNCATED_HASH_LEN;
+        let mut large_blob = vec![0x1B; DATA_LEN];
+        large_blob
+            .extend_from_slice(&Sha::<TestEnv>::digest(&large_blob[..])[..TRUNCATED_HASH_LEN]);
+
+        let large_blobs_params = AuthenticatorLargeBlobsParameters {
+            get: None,
+            set: Some(large_blob),
+            offset: 0,
+            length: Some(BLOB_LEN),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let large_blobs_response =
+            large_blobs.process_command(&mut env, &mut client_pin, large_blobs_params);
+        assert_eq!(
+            large_blobs_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
+        );
     }
 
     #[test]

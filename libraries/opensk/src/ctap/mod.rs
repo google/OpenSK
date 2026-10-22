@@ -788,21 +788,6 @@ impl<E: Env> CtapState<E> {
         Ok(())
     }
 
-    /// Whether some form of user verification is configured: a clientPIN, or
-    /// an enrolled built-in UV method. A pinUvAuthToken can be obtained with
-    /// either (getPinUvAuthTokenUsingPinWithPermissions or
-    /// getPinUvAuthTokenUsingUvWithPermissions).
-    fn has_user_verification(env: &mut E) -> CtapResult<bool> {
-        if env.persist().pin_hash()?.is_some() {
-            return Ok(true);
-        }
-        #[cfg(feature = "fingerprint")]
-        if !env.persist().template_infos()?.is_empty() {
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
     fn has_valid_up(&mut self, has_pin_uv_auth_param: bool, has_uv_option: bool) -> bool {
         if has_pin_uv_auth_param {
             self.client_pin.get_user_present_flag()
@@ -865,7 +850,7 @@ impl<E: Env> CtapState<E> {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
                 // extended to tokens obtained through built-in UV without a PIN.
-                if !Self::has_user_verification(env)? {
+                if !storage::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -896,7 +881,7 @@ impl<E: Env> CtapState<E> {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
                     // Corresponds to makeCredUvNotRqd set to true.
-                    if options.rk && env.persist().pin_hash()?.is_some() {
+                    if options.rk && storage::has_user_verification(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
                     0x00
@@ -1258,7 +1243,7 @@ impl<E: Env> CtapState<E> {
             Some(pin_uv_auth_param) => {
                 // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
                 // extended to tokens obtained through built-in UV without a PIN.
-                if !Self::has_user_verification(env)? {
+                if !storage::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -2339,6 +2324,22 @@ mod test {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         env.persist().set_pin(&[0x88; 16], 4).unwrap();
+
+        let make_credential_params = create_minimal_make_credential_parameters();
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_resident_process_make_credential_with_uv_method_without_pin() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        env.create_fingerprint().unwrap();
 
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =

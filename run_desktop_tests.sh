@@ -15,6 +15,8 @@
 
 set -ex
 
+export RUSTFLAGS="-D warnings"
+
 ./fuzzing_setup.sh
 
 MOST_FEATURES=config-command,ctap1,debug,ed25519,fingerprint
@@ -50,10 +52,11 @@ uv run ruff check
 uv run ruff format --check
 
 echo "Running Clippy lints..."
-cargo clippy --lib --tests --bins --benches --features=test -- -D warnings
-cargo clippy --lib --tests --bins --benches --features=test,"$MOST_FEATURES" -- -D warnings
-(cd libraries/opensk && cargo clippy --features=std -- -D warnings)
-(cd libraries/opensk && cargo clippy --all-features -- -D warnings)
+cargo clippy --all-targets --features=test -- -D warnings
+cargo clippy --all-targets --features=test,"$MOST_FEATURES" -- -D warnings
+(cd libraries/opensk && cargo clippy --all-targets --no-default-features --features=std -- -D warnings)
+(cd libraries/opensk && cargo clippy --all-targets --features=std -- -D warnings)
+(cd libraries/opensk && cargo clippy --all-targets --all-features -- -D warnings)
 (cd libraries/cbor && cargo clippy -- -D warnings)
 
 echo "Running OpenSK library unit tests..."

@@ -788,6 +788,21 @@ impl<E: Env> CtapState<E> {
         Ok(())
     }
 
+    /// Whether some form of user verification is configured: a clientPIN, or
+    /// an enrolled built-in UV method. A pinUvAuthToken can be obtained with
+    /// either (getPinUvAuthTokenUsingPinWithPermissions or
+    /// getPinUvAuthTokenUsingUvWithPermissions).
+    fn has_user_verification(env: &mut E) -> CtapResult<bool> {
+        if env.persist().pin_hash()?.is_some() {
+            return Ok(true);
+        }
+        #[cfg(feature = "fingerprint")]
+        if !env.persist().template_infos()?.is_empty() {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn has_valid_up(&mut self, has_pin_uv_auth_param: bool, has_uv_option: bool) -> bool {
         if has_pin_uv_auth_param {
             self.client_pin.get_user_present_flag()
@@ -848,8 +863,9 @@ impl<E: Env> CtapState<E> {
         let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
-                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
-                if env.persist().pin_hash()?.is_none() {
+                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
+                // extended to tokens obtained through built-in UV without a PIN.
+                if !Self::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -1240,8 +1256,9 @@ impl<E: Env> CtapState<E> {
         let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
-                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic.
-                if env.persist().pin_hash()?.is_none() {
+                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
+                // extended to tokens obtained through built-in UV without a PIN.
+                if !Self::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -2670,6 +2687,131 @@ mod test {
         assert_eq!(
             get_assertion_response,
             Err(Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL)
+        );
+    }
+
+    #[cfg(feature = "fingerprint")]
+    fn test_helper_process_make_credential_with_uv_token_without_pin(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        ctap_state.client_pin = client_pin;
+        // Built-in UV is enrolled, but no PIN is set: the token came from
+        // getPinUvAuthTokenUsingUvWithPermissions.
+        env.create_fingerprint().unwrap();
+        assert!(env.persist().pin_hash().unwrap().is_none());
+
+        let client_data_hash = [0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.pin_uv_auth_param = Some(pin_uv_auth_param);
+        make_credential_params.pin_uv_auth_protocol = Some(pin_uv_auth_protocol);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+
+        check_make_response(&mut env, &make_credential_response, 0x45, 0x20, &[]);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_make_credential_with_uv_token_without_pin_v1() {
+        test_helper_process_make_credential_with_uv_token_without_pin(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_make_credential_with_uv_token_without_pin_v2() {
+        test_helper_process_make_credential_with_uv_token_without_pin(PinUvAuthProtocol::V2);
+    }
+
+    #[cfg(feature = "fingerprint")]
+    fn test_helper_process_get_assertion_with_uv_token_without_pin(
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x91; PIN_TOKEN_LENGTH];
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+        let make_credential_params = create_minimal_make_credential_parameters();
+        assert!(
+            ctap_state
+                .process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL)
+                .is_ok()
+        );
+
+        ctap_state.client_pin = client_pin;
+        env.create_fingerprint().unwrap();
+        assert!(env.persist().pin_hash().unwrap().is_none());
+
+        let client_data_hash = vec![0xCD];
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &client_data_hash,
+            pin_uv_auth_protocol,
+        );
+        let get_assertion_params = AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash,
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions {
+                up: true,
+                uv: false,
+            },
+            pin_uv_auth_param: Some(pin_uv_auth_param),
+            pin_uv_auth_protocol: Some(pin_uv_auth_protocol),
+        };
+        let get_assertion_response =
+            ctap_state.process_get_assertion(&mut env, get_assertion_params, DUMMY_CHANNEL);
+        assert!(get_assertion_response.is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_get_assertion_with_uv_token_without_pin_v1() {
+        test_helper_process_get_assertion_with_uv_token_without_pin(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_get_assertion_with_uv_token_without_pin_v2() {
+        test_helper_process_get_assertion_with_uv_token_without_pin(PinUvAuthProtocol::V2);
+    }
+
+    #[test]
+    fn test_process_make_credential_with_token_without_uv_method() {
+        let mut env = TestEnv::default();
+        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
+
+        let mut make_credential_params = create_minimal_make_credential_parameters();
+        make_credential_params.pin_uv_auth_param = Some(vec![0xA4; 16]);
+        make_credential_params.pin_uv_auth_protocol = Some(PinUvAuthProtocol::V2);
+        let make_credential_response =
+            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+        assert_eq!(
+            make_credential_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET)
         );
     }
 

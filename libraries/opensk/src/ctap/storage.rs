@@ -292,11 +292,10 @@ pub fn enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<()> {
     env.persist().enable_enterprise_attestation()
 }
 
-/// Returns whether the authenticator is "protected by some form of user
-/// verification": a clientPIN is set, or a built-in user verification method
-/// is enrolled. A pinUvAuthToken can be obtained with either
-/// (getPinUvAuthTokenUsingPinWithPermissions or
-/// getPinUvAuthTokenUsingUvWithPermissions).
+/// Returns whether the authenticator is protected by some form of user verification.
+///
+/// That is the case if a PIN is set, or a built-in user verification method is enrolled. Both
+/// can provide a pinUvAuthToken, which OpenSK always supports.
 pub fn has_user_verification(env: &mut impl Env) -> CtapResult<bool> {
     if env.persist().pin_hash()?.is_some() {
         return Ok(true);

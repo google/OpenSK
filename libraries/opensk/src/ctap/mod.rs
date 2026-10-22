@@ -848,8 +848,8 @@ impl<E: Env> CtapState<E> {
         let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
-                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
-                // extended to tokens obtained through built-in UV without a PIN.
+                // CTAP2.1 only verifies pinUvAuthParam if the authenticator is protected by
+                // some form of user verification. Without one, keep the CTAP2.0 error.
                 if !storage::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
@@ -880,7 +880,9 @@ impl<E: Env> CtapState<E> {
                     if storage::has_always_uv(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
-                    // Corresponds to makeCredUvNotRqd set to true.
+                    // Corresponds to makeCredUvNotRqd set to true: only discoverable
+                    // credentials need user verification, if the authenticator is protected
+                    // by some form of user verification.
                     if options.rk && storage::has_user_verification(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
@@ -1241,8 +1243,8 @@ impl<E: Env> CtapState<E> {
         let has_pin_uv_auth_param = pin_uv_auth_param.is_some();
         let mut flags = match pin_uv_auth_param {
             Some(pin_uv_auth_param) => {
-                // This case is not mentioned in CTAP2.1, so we keep 2.0 logic,
-                // extended to tokens obtained through built-in UV without a PIN.
+                // CTAP2.1 only verifies pinUvAuthParam if the authenticator is protected by
+                // some form of user verification. Without one, keep the CTAP2.0 error.
                 if !storage::has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }

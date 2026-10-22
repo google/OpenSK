@@ -102,7 +102,7 @@ pub fn process_config<E: Env>(
 
     let enforce_uv =
         !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && storage::has_always_uv(env)?;
-    if env.persist().pin_hash()?.is_some() || enforce_uv {
+    if storage::has_user_verification(env)? || enforce_uv {
         let pin_uv_auth_param =
             pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
         let pin_uv_auth_protocol =
@@ -215,6 +215,34 @@ mod test {
             assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
             assert!(!storage::has_always_uv(&mut env).unwrap());
         }
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_process_toggle_always_uv_with_uv_method_without_token() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+        env.create_fingerprint().unwrap();
+
+        let config_params = AuthenticatorConfigParameters {
+            sub_command: ConfigSubCommand::ToggleAlwaysUv,
+            sub_command_params: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        assert_eq!(
+            config_response,
+            Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
+        );
+        assert!(!storage::has_always_uv(&mut env).unwrap());
     }
 
     fn test_helper_process_toggle_always_uv_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {

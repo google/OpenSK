@@ -41,7 +41,7 @@ pub const EDDSA_ALGORITHM: i64 = -8;
 ///
 /// The WebAuthn level 3 specification requires the RP ID to be a valid domain string, which
 /// RFC 1035 limits to 255 octets on the wire (or 253 bytes in presentation format).
-const MAX_RP_ID_LENGTH: usize = 253;
+pub(crate) const MAX_RP_ID_LENGTH: usize = 253;
 
 // https://www.w3.org/TR/webauthn/#dictdef-publickeycredentialrpentity
 #[derive(Clone, Debug, PartialEq, Eq)]

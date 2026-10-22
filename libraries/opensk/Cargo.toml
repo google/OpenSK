@@ -1,6 +1,6 @@
 [package]
 name = "opensk"
-version = "1.0.0"
+version = "0.1.0"
 license = "Apache-2.0"
 edition = "2024"
 description = "OpenSK's CTAP2 (FIDO2) authenticator, as a library"
@@ -8,6 +8,9 @@ repository = "https://github.com/google/OpenSK"
 readme = "README.md"
 keywords = ["fido2", "ctap2", "webauthn", "authenticator", "no_std"]
 categories = ["authentication", "cryptography", "embedded", "no-std"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 sk-cbor = { path = "../cbor", version = "0.2.0" }

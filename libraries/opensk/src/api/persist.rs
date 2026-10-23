@@ -497,7 +497,7 @@ pub trait Persist {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 let template_info = TemplateInfo::try_from(cbor_value)?;
-                if &template_info.template_id == template_id {
+                if template_info.template_id == template_id {
                     return Ok(template_info.template_friendly_name);
                 }
             }

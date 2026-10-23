@@ -145,7 +145,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "std")]
-    fn test_wasefire_store_errors() -> () {
+    fn test_wasefire_store_errors() {
         for (store_error, ctap_error) in [
             (
                 wasefire_store::StoreError::NoCapacity,

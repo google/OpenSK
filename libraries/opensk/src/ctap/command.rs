@@ -984,7 +984,7 @@ mod test {
         assert_eq!(created_cbor, cbor_sub_command);
 
         for command in BioEnrollmentSubCommand::into_enum_iter() {
-            let created_cbor: cbor::Value = command.clone().into();
+            let created_cbor: cbor::Value = command.into();
             let reconstructed = BioEnrollmentSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
         }

@@ -26,8 +26,7 @@ enclosure!
 
 You can run OpenSK:
 
-- as a [Wasefire](https://github.com/google/wasefire/blob/main/examples/rust/opensk/README.md)
-  applet, or
+- as a [Wasefire](https://github.com/google/wasefire) applet, or
 - as a library.
 
 You are viewing the branch for developers. New features are developed here.

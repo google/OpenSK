@@ -23,7 +23,7 @@ use crate::ctap::{cbor_read, cbor_write};
 use crate::env::{AesKey, Env, Hmac};
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
-use rand_core::RngCore;
+use rand_core::Rng as _;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
 

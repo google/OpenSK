@@ -87,7 +87,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{BigEndian, ByteOrder};
 use core::convert::TryFrom;
-use rand_core::RngCore;
+use rand_core::Rng as _;
 use sk_cbor as cbor;
 use sk_cbor::cbor_map_options;
 

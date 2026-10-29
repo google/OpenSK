@@ -33,7 +33,7 @@ use alloc::vec::Vec;
 use arbitrary::Arbitrary;
 use core::convert::TryFrom;
 #[cfg(all(test, feature = "fingerprint"))]
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{Sequence, all};
 use sk_cbor as cbor;
 #[cfg(feature = "fingerprint")]
 use sk_cbor::cbor_map_options;
@@ -444,7 +444,7 @@ impl TryFrom<cbor::Value> for AuthenticatorBioEnrollmentParameters {
 
 #[cfg(feature = "fingerprint")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum BioEnrollmentSubCommand {
     EnrollBegin = 0x01,
     EnrollCaptureNextSample = 0x02,
@@ -983,7 +983,7 @@ mod test {
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
 
-        for command in BioEnrollmentSubCommand::into_enum_iter() {
+        for command in all::<BioEnrollmentSubCommand>() {
             let created_cbor: cbor::Value = command.into();
             let reconstructed = BioEnrollmentSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);

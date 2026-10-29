@@ -169,7 +169,7 @@ impl<E: Env> PinUvAuthTokenState<E> {
 mod test {
     use super::*;
     use crate::env::test::TestEnv;
-    use enum_iterator::IntoEnumIterator;
+    use enum_iterator::all;
 
     #[test]
     fn test_observer() {
@@ -199,7 +199,7 @@ mod test {
     fn test_permissions() {
         let mut token_state = PinUvAuthTokenState::<TestEnv>::new();
         token_state.set_permissions(0xFF);
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(token_state.has_permission(permission), Ok(()));
         }
         token_state.clear_pin_uv_auth_token_permissions_except_lbw();
@@ -212,7 +212,7 @@ mod test {
             Ok(())
         );
         token_state.stop_using_pin_uv_auth_token();
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(
                 token_state.has_permission(permission),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)

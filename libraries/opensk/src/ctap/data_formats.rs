@@ -28,7 +28,7 @@ use alloc::vec::Vec;
 use arbitrary::Arbitrary;
 use core::convert::TryFrom;
 #[cfg(test)]
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{Sequence, all};
 use sk_cbor as cbor;
 use sk_cbor::{cbor_array_vec, cbor_map_options, destructure_cbor_map};
 
@@ -203,7 +203,7 @@ impl From<PublicKeyCredentialParameter> for cbor::Value {
 
 // https://www.w3.org/TR/webauthn/#enumdef-authenticatortransport
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum AuthenticatorTransport {
     Usb,
@@ -562,7 +562,7 @@ impl TryFrom<cbor::Value> for SignatureAlgorithm {
 
 /// The credProtect extension's policies for resident credentials.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 #[allow(clippy::enum_variant_names)]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum CredentialProtectionPolicy {
@@ -950,7 +950,7 @@ impl TryFrom<cbor::Value> for PinUvAuthProtocol {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 #[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 pub enum ClientPinSubCommand {
     GetPinRetries = 0x01,
@@ -989,7 +989,7 @@ impl TryFrom<cbor::Value> for ClientPinSubCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum ConfigSubCommand {
     EnableEnterpriseAttestation = 0x01,
     ToggleAlwaysUv = 0x02,
@@ -1122,7 +1122,7 @@ impl TryFrom<u64> for EnterpriseAttestationMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum CredentialManagementSubCommand {
     GetCredsMetadata = 0x01,
     EnumerateRpsBegin = 0x02,
@@ -1671,7 +1671,7 @@ mod test {
         let expected_error = Err(Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE);
         assert_eq!(policy_error, expected_error);
 
-        for policy in CredentialProtectionPolicy::into_enum_iter() {
+        for policy in all::<CredentialProtectionPolicy>() {
             let created_cbor: cbor::Value = policy.into();
             let reconstructed = CredentialProtectionPolicy::try_from(created_cbor).unwrap();
             assert_eq!(policy, reconstructed);
@@ -1691,7 +1691,7 @@ mod test {
         let created_cbor: cbor::Value = authenticator_transport.unwrap().into();
         assert_eq!(created_cbor, cbor_authenticator_transport);
 
-        for transport in AuthenticatorTransport::into_enum_iter() {
+        for transport in all::<AuthenticatorTransport>() {
             let created_cbor: cbor::Value = transport.clone().into();
             let reconstructed = AuthenticatorTransport::try_from(created_cbor).unwrap();
             assert_eq!(transport, reconstructed);
@@ -2135,7 +2135,7 @@ mod test {
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
 
-        for command in ClientPinSubCommand::into_enum_iter() {
+        for command in all::<ClientPinSubCommand>() {
             let created_cbor: cbor::Value = command.clone().into();
             let reconstructed = ClientPinSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
@@ -2151,7 +2151,7 @@ mod test {
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
 
-        for command in ConfigSubCommand::into_enum_iter() {
+        for command in all::<ConfigSubCommand>() {
             let created_cbor: cbor::Value = command.into();
             let reconstructed = ConfigSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);
@@ -2261,7 +2261,7 @@ mod test {
         let created_cbor: cbor::Value = sub_command.unwrap().into();
         assert_eq!(created_cbor, cbor_sub_command);
 
-        for command in CredentialManagementSubCommand::into_enum_iter() {
+        for command in all::<CredentialManagementSubCommand>() {
             let created_cbor: cbor::Value = command.into();
             let reconstructed = CredentialManagementSubCommand::try_from(created_cbor).unwrap();
             assert_eq!(command, reconstructed);

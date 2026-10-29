@@ -30,7 +30,7 @@ use alloc::vec::Vec;
 use core::cmp;
 use core::convert::TryFrom;
 #[cfg(test)]
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{Sequence, all};
 use sk_cbor as cbor;
 use sk_cbor::destructure_cbor_map;
 
@@ -616,7 +616,7 @@ const VALUE_LENGTH: usize = 1023;
 
 /// Identifies an attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum AttestationId {
     Batch = 0x01,
     Enterprise = 0x02,
@@ -683,7 +683,7 @@ mod test {
 
     #[test]
     fn test_from_into_attestation_id() {
-        for id in AttestationId::into_enum_iter() {
+        for id in all::<AttestationId>() {
             assert_eq!(id, AttestationId::try_from(id as u8).unwrap());
         }
         assert_eq!(

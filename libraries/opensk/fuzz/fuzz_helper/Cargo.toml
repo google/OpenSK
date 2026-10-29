@@ -9,4 +9,4 @@ edition = "2024"
 arrayref = "0.3.6"
 opensk = { path = "../..", features = ["fuzz"] }
 sk-cbor = { path = "../../../cbor" }
-arbitrary = { version = "0.4.7", features = ["derive"] }
+arbitrary = { version = "1.4.2", features = ["derive"] }

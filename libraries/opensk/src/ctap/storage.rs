@@ -738,9 +738,12 @@ mod test {
         );
 
         // Changes by the setter are reflected by the getter..
-        let new_min_pin_length = 8;
-        set_min_pin_length(&mut env, new_min_pin_length).unwrap();
-        assert_eq!(min_pin_length(&mut env).unwrap(), new_min_pin_length);
+        #[cfg(feature = "config_command")]
+        {
+            let new_min_pin_length = 8;
+            set_min_pin_length(&mut env, new_min_pin_length).unwrap();
+            assert_eq!(min_pin_length(&mut env).unwrap(), new_min_pin_length);
+        }
     }
 
     #[test]
@@ -754,17 +757,21 @@ mod test {
         );
 
         // Changes by the setter are reflected by the getter.
-        let mut rp_ids = vec![String::from("example.com")];
-        assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
-        for rp_id in env.customization().default_min_pin_length_rp_ids() {
-            if !rp_ids.contains(&rp_id) {
-                rp_ids.push(rp_id);
+        #[cfg(feature = "config_command")]
+        {
+            let mut rp_ids = vec![String::from("example.com")];
+            assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
+            for rp_id in env.customization().default_min_pin_length_rp_ids() {
+                if !rp_ids.contains(&rp_id) {
+                    rp_ids.push(rp_id);
+                }
             }
+            assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
         }
-        assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_enterprise_attestation() {
         let mut env = TestEnv::default();
 
@@ -789,16 +796,20 @@ mod test {
 
         if env.customization().enforce_always_uv() {
             assert!(has_always_uv(&mut env).unwrap());
+            #[cfg(feature = "config_command")]
             assert_eq!(
                 toggle_always_uv(&mut env),
                 Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
             );
         } else {
             assert!(!has_always_uv(&mut env).unwrap());
-            assert_eq!(toggle_always_uv(&mut env), Ok(()));
-            assert!(has_always_uv(&mut env).unwrap());
-            assert_eq!(toggle_always_uv(&mut env), Ok(()));
-            assert!(!has_always_uv(&mut env).unwrap());
+            #[cfg(feature = "config_command")]
+            {
+                assert_eq!(toggle_always_uv(&mut env), Ok(()));
+                assert!(has_always_uv(&mut env).unwrap());
+                assert_eq!(toggle_always_uv(&mut env), Ok(()));
+                assert!(!has_always_uv(&mut env).unwrap());
+            }
         }
     }
 
@@ -826,6 +837,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_serialize_deserialize_min_pin_length_rp_ids() {
         let rp_ids = vec![String::from("example.com")];
         let serialized = serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();

@@ -39,7 +39,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use arrayref::array_ref;
 #[cfg(test)]
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{Sequence, all};
 use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
@@ -130,7 +130,7 @@ pub(crate) fn check_pin_uv_auth_protocol(
     Ok(())
 }
 
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum PinPermission {
     // All variants should use integers with a single bit set.
     MakeCredential = 0x01,
@@ -1754,7 +1754,7 @@ mod test {
         let mut env = TestEnv::default();
         let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
         client_pin.pin_uv_auth_token_state.set_permissions(0x7F);
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(
                 client_pin
                     .pin_uv_auth_token_state
@@ -1763,7 +1763,7 @@ mod test {
             );
         }
         client_pin.pin_uv_auth_token_state.set_permissions(0x00);
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(
                 client_pin
                     .pin_uv_auth_token_state
@@ -1980,7 +1980,7 @@ mod test {
             &token_v2,
             client_pin.pin_protocol_v2.get_pin_uv_auth_token()
         );
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(
                 client_pin.has_permission(permission),
                 Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
@@ -2010,7 +2010,7 @@ mod test {
                 .process_command(&mut env, params, DUMMY_CHANNEL)
                 .is_ok()
         );
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             #[cfg(not(feature = "config_command"))]
             if matches!(permission, PinPermission::AuthenticatorConfiguration) {
                 continue;
@@ -2032,7 +2032,7 @@ mod test {
 
         env.clock().advance(30001);
         client_pin.update_timeouts(&mut env);
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             assert_eq!(
                 client_pin
                     .pin_uv_auth_token_state
@@ -2070,7 +2070,7 @@ mod test {
                 .process_command(&mut env, params, DUMMY_CHANNEL)
                 .is_ok()
         );
-        for permission in PinPermission::into_enum_iter() {
+        for permission in all::<PinPermission>() {
             #[cfg(not(feature = "config_command"))]
             if matches!(permission, PinPermission::AuthenticatorConfiguration) {
                 continue;

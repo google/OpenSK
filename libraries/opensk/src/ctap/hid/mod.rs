@@ -30,7 +30,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use arrayref::{array_ref, array_refs};
 #[cfg(test)]
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{Sequence, all};
 
 // We implement CTAP 2.1 from 2021-06-15. Please see section
 // 11.2. USB Human Interface Device (USB HID)
@@ -53,7 +53,7 @@ pub type ChannelID = [u8; 4];
 ///
 /// See section 11.2.9. of FIDO 2.1 (2021-06-15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(IntoEnumIterator))]
+#[cfg_attr(test, derive(Sequence))]
 pub enum CtapHidCommand {
     Ping = 0x01,
     Msg = 0x03,
@@ -695,7 +695,7 @@ mod test {
     fn test_from_ctap_hid_command() {
         // 0x3E is unassigned.
         assert_eq!(CtapHidCommand::from(0x3E), CtapHidCommand::Error);
-        for command in CtapHidCommand::into_enum_iter() {
+        for command in all::<CtapHidCommand>() {
             assert_eq!(CtapHidCommand::from(command as u8), command);
         }
     }

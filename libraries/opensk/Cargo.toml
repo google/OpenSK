@@ -17,7 +17,7 @@ sk-cbor = { path = "../cbor", version = "0.2.0" }
 byteorder = { version = "1", default-features = false }
 arrayref = "0.3.6"
 subtle = { version = "2.2", default-features = false, features = ["nightly"] }
-arbitrary = { version = "0.4.7", features = ["derive"], optional = true }
+arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
 ed25519-compact = { version = "1", default-features = false, optional = true }
 rand_core = "0.10.1"
 rand = { version = "0.10.1", default-features = false, optional = true }
@@ -49,4 +49,4 @@ software_crypto_ed25519 = ["software_crypto", "ed25519", "ed25519-compact"]
 fingerprint = []
 
 [dev-dependencies]
-enum-iterator = "0.6.0"
+enum-iterator = "2.3.0"

@@ -132,9 +132,9 @@ mod test {
         assert_eq!(ciphertext1.len(), 80);
         assert_eq!(ciphertext2.len(), 80);
         // The ciphertext should mutate in all blocks with a different IV.
-        let block_iter1 = ciphertext1.chunks_exact(16);
-        let block_iter2 = ciphertext2.chunks_exact(16);
-        for (block1, block2) in block_iter1.zip(block_iter2) {
+        let (blocks1, _) = ciphertext1.as_chunks::<16>();
+        let (blocks2, _) = ciphertext2.as_chunks::<16>();
+        for (block1, block2) in blocks1.iter().zip(blocks2) {
             assert_ne!(block1, block2);
         }
     }

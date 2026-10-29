@@ -489,22 +489,19 @@ mod test {
 
     #[test]
     fn test_extract_unsigned_limits() {
+        assert_eq!(cbor_unsigned!(u64::MAX).extract_unsigned(), Some(u64::MAX));
         assert_eq!(
-            cbor_unsigned!(core::u64::MAX).extract_unsigned(),
-            Some(core::u64::MAX)
+            cbor_unsigned!((i64::MAX as u64) + 1).extract_unsigned(),
+            Some((i64::MAX as u64) + 1)
         );
         assert_eq!(
-            cbor_unsigned!((core::i64::MAX as u64) + 1).extract_unsigned(),
-            Some((core::i64::MAX as u64) + 1)
-        );
-        assert_eq!(
-            cbor_int!(core::i64::MAX).extract_unsigned(),
-            Some(core::i64::MAX as u64)
+            cbor_int!(i64::MAX).extract_unsigned(),
+            Some(i64::MAX as u64)
         );
         assert_eq!(cbor_int!(123).extract_unsigned(), Some(123));
         assert_eq!(cbor_int!(0).extract_unsigned(), Some(0));
         assert_eq!(cbor_int!(-123).extract_unsigned(), None);
-        assert_eq!(cbor_int!(core::i64::MIN).extract_unsigned(), None);
+        assert_eq!(cbor_int!(i64::MIN).extract_unsigned(), None);
     }
 
     #[test]
@@ -521,22 +518,16 @@ mod test {
 
     #[test]
     fn test_extract_integer_limits() {
-        assert_eq!(cbor_unsigned!(core::u64::MAX).extract_integer(), None);
+        assert_eq!(cbor_unsigned!(u64::MAX).extract_integer(), None);
         assert_eq!(
-            cbor_unsigned!((core::i64::MAX as u64) + 1).extract_integer(),
+            cbor_unsigned!((i64::MAX as u64) + 1).extract_integer(),
             None
         );
-        assert_eq!(
-            cbor_int!(core::i64::MAX).extract_integer(),
-            Some(core::i64::MAX)
-        );
+        assert_eq!(cbor_int!(i64::MAX).extract_integer(), Some(i64::MAX));
         assert_eq!(cbor_int!(123).extract_integer(), Some(123));
         assert_eq!(cbor_int!(0).extract_integer(), Some(0));
         assert_eq!(cbor_int!(-123).extract_integer(), Some(-123));
-        assert_eq!(
-            cbor_int!(core::i64::MIN).extract_integer(),
-            Some(core::i64::MIN)
-        );
+        assert_eq!(cbor_int!(i64::MIN).extract_integer(), Some(i64::MIN));
     }
 
     #[test]
@@ -666,14 +657,14 @@ mod test {
         assert!(cbor_int!(23) < cbor_int!(24));
         assert!(cbor_int!(24) < cbor_int!(1000));
         assert!(cbor_int!(1000) < cbor_int!(1000000));
-        assert!(cbor_int!(1000000) < cbor_int!(core::i64::MAX));
-        assert!(cbor_int!(core::i64::MAX) < cbor_int!(-1));
+        assert!(cbor_int!(1000000) < cbor_int!(i64::MAX));
+        assert!(cbor_int!(i64::MAX) < cbor_int!(-1));
         assert!(cbor_int!(-1) < cbor_int!(-23));
         assert!(cbor_int!(-23) < cbor_int!(-24));
         assert!(cbor_int!(-24) < cbor_int!(-1000));
         assert!(cbor_int!(-1000) < cbor_int!(-1000000));
-        assert!(cbor_int!(-1000000) < cbor_int!(core::i64::MIN));
-        assert!(cbor_int!(core::i64::MIN) < cbor_bytes!(vec![]));
+        assert!(cbor_int!(-1000000) < cbor_int!(i64::MIN));
+        assert!(cbor_int!(i64::MIN) < cbor_bytes!(vec![]));
         assert!(cbor_bytes!(vec![]) < cbor_bytes!(vec![0x00]));
         assert!(cbor_bytes!(vec![0x00]) < cbor_bytes!(vec![0x01]));
         assert!(cbor_bytes!(vec![0x01]) < cbor_bytes!(vec![0xFF]));

@@ -297,14 +297,11 @@ pub fn enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<()> {
 /// That is the case if a PIN is set, or a built-in user verification method is enrolled. Both
 /// can provide a pinUvAuthToken, which OpenSK always supports.
 pub fn has_user_verification(env: &mut impl Env) -> CtapResult<bool> {
-    if env.persist().pin_hash()?.is_some() {
-        return Ok(true);
-    }
     #[cfg(feature = "fingerprint")]
     if !env.persist().template_infos()?.is_empty() {
         return Ok(true);
     }
-    Ok(false)
+    Ok(env.persist().pin_hash()?.is_some())
 }
 
 /// Returns whether alwaysUv is enabled.

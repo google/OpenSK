@@ -383,44 +383,41 @@ mod test {
         assert_eq!(cbor_int!(0), Value::from(0));
         assert_eq!(cbor_int!(1), Value::from(1));
         assert_eq!(cbor_int!(123456), Value::from(123456));
-        assert_eq!(
-            cbor_int!(core::i64::MAX),
-            Value::from(core::i64::MAX as u64)
-        );
+        assert_eq!(cbor_int!(i64::MAX), Value::from(i64::MAX as u64));
     }
 
     #[test]
     fn test_cbor_int_negative() {
         assert_eq!(cbor_int!(-1), Value::from(-1));
         assert_eq!(cbor_int!(-123456), Value::from(-123456));
-        assert_eq!(cbor_int!(core::i64::MIN), Value::from(core::i64::MIN));
+        assert_eq!(cbor_int!(i64::MIN), Value::from(i64::MIN));
     }
 
     #[test]
     fn test_cbor_int_literals() {
         let a = cbor_array![
-            core::i64::MIN,
-            core::i32::MIN,
+            i64::MIN,
+            i32::MIN,
             -123456,
             -1,
             0,
             1,
             123456,
-            core::i32::MAX,
-            core::i64::MAX,
-            core::u64::MAX,
+            i32::MAX,
+            i64::MAX,
+            u64::MAX,
         ];
         let b = Value::array(vec![
-            Value::from(core::i64::MIN),
-            Value::from(core::i32::MIN as i64),
+            Value::from(i64::MIN),
+            Value::from(i32::MIN as i64),
             Value::from(-123456),
             Value::from(-1),
             Value::from(0),
             Value::from(1),
             Value::from(123456),
-            Value::from(core::i32::MAX as u64),
-            Value::from(core::i64::MAX as u64),
-            Value::from(core::u64::MAX),
+            Value::from(i32::MAX as u64),
+            Value::from(i64::MAX as u64),
+            Value::from(u64::MAX),
         ]);
         assert_eq!(a, b);
     }

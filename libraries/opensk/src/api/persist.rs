@@ -706,6 +706,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_force_pin_change() {
         let mut env = TestEnv::default();
         let persist = env.persist();
@@ -725,6 +726,7 @@ mod test {
 
         // Pin hash is initially not set.
         assert!(persist.pin_hash().unwrap().is_none());
+        #[cfg(feature = "config_command")]
         assert!(persist.pin_code_point_length().unwrap().is_none());
 
         // Setting the pin sets the pin hash.
@@ -735,14 +737,17 @@ mod test {
         let pin_length_2 = 63;
         assert_eq!(persist.set_pin(&pin_hash_1, pin_length_1), Ok(()));
         assert_eq!(persist.pin_hash().unwrap(), Some(pin_hash_1));
+        #[cfg(feature = "config_command")]
         assert_eq!(persist.pin_code_point_length().unwrap(), Some(pin_length_1));
         assert_eq!(persist.set_pin(&pin_hash_2, pin_length_2), Ok(()));
         assert_eq!(persist.pin_hash().unwrap(), Some(pin_hash_2));
+        #[cfg(feature = "config_command")]
         assert_eq!(persist.pin_code_point_length().unwrap(), Some(pin_length_2));
 
         // Resetting the storage resets the pin hash.
         assert_eq!(persist.reset(), Ok(()));
         assert!(persist.pin_hash().unwrap().is_none());
+        #[cfg(feature = "config_command")]
         assert!(persist.pin_code_point_length().unwrap().is_none());
     }
 

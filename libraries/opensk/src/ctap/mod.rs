@@ -1541,11 +1541,13 @@ mod test {
     use super::pin_protocol::{PinProtocol, authenticate_pin_uv_auth_token};
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
+    #[cfg(feature = "config_command")]
     use crate::api::customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
     use crate::ctap::command::AuthenticatorLargeBlobsParameters;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
+    #[cfg(feature = "config_command")]
     use crate::test_helpers;
     use cbor::{cbor_array, cbor_array_vec, cbor_map};
 
@@ -1602,12 +1604,16 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "fingerprint")]
     fn test_get_info() {
         let mut env = TestEnv::default();
         let aaguid = env.persist().aaguid().unwrap();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
         let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
+
+        #[cfg(feature = "fingerprint")]
+        let uv_attempts = Some(env.customization().preferred_platform_uv_attempts() as u64);
+        #[cfg(not(feature = "fingerprint"))]
+        let uv_attempts: Option<u64> = None;
 
         // Fails when removing `to_vec` for `SUPPORTED_CRED_PARAMS` as linted.
         #[allow(clippy::unnecessary_to_owned)]
@@ -1630,20 +1636,16 @@ mod test {
                 "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
                 "rk" => true,
                 "up" => true,
-                "uv" => false,
-                #[cfg(feature = "config_command")]
-                "uvAcfg" => true,
-                #[cfg(feature = "config_command")]
+                "uv" => cfg!(feature = "fingerprint").then_some(false),
+                "uvAcfg" => cfg!(feature = "config_command").then_some(true),
                 "alwaysUv" => false,
                 "credMgmt" => true,
-                #[cfg(feature = "config_command")]
-                "authnrCfg" => true,
-                "bioEnroll" => false,
+                "authnrCfg" => cfg!(feature = "config_command").then_some(true),
+                "bioEnroll" => cfg!(feature = "fingerprint").then_some(false),
                 "clientPin" => false,
                 "largeBlobs" => true,
                 "pinUvAuthToken" => true,
-                #[cfg(feature = "config_command")]
-                "setMinPINLength" => true,
+                "setMinPINLength" => cfg!(feature = "config_command").then_some(true),
                 "makeCredUvNotRqd" => true,
             },
             0x05 => env.customization().max_msg_size() as u64,
@@ -1658,71 +1660,8 @@ mod test {
             0x0E => 0,
             0x0F => env.customization().max_cred_blob_length() as u64,
             0x10 => env.customization().max_rp_ids_length() as u64,
-            0x11 => env.customization().preferred_platform_uv_attempts() as u64,
-            0x12 => 0x02,
-            0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
-        };
-
-        let mut response_cbor = vec![0x00];
-        assert!(cbor_write(expected_cbor, &mut response_cbor).is_ok());
-        assert_eq!(info_reponse, response_cbor);
-    }
-
-    #[test]
-    #[cfg(not(feature = "fingerprint"))]
-    fn test_get_info() {
-        let mut env = TestEnv::default();
-        let aaguid = env.persist().aaguid().unwrap();
-        let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
-        let info_reponse = ctap_state.process_command(&mut env, &[0x04], DUMMY_CHANNEL);
-
-        // Fails when removing `to_vec` for `SUPPORTED_CRED_PARAMS` as linted.
-        #[allow(clippy::unnecessary_to_owned)]
-        let expected_cbor = cbor_map_options! {
-             0x01 => cbor_array_vec![vec![
-                    #[cfg(feature = "ctap1")]
-                    String::from(U2F_VERSION_STRING),
-                    String::from(FIDO2_VERSION_STRING),
-                    String::from(FIDO2_1_VERSION_STRING),
-                ]],
-            0x02 => cbor_array![
-                    String::from("hmac-secret"),
-                    String::from("credProtect"),
-                    String::from("minPinLength"),
-                    String::from("credBlob"),
-                    String::from("largeBlobKey"),
-                ],
-            0x03 => &aaguid[..],
-            0x04 => cbor_map_options! {
-                "ep" => env.customization().enterprise_attestation_mode().map(|_| false),
-                "rk" => true,
-                "up" => true,
-                #[cfg(feature = "config_command")]
-                "uvAcfg" => true,
-                #[cfg(feature = "config_command")]
-                "alwaysUv" => false,
-                "credMgmt" => true,
-                #[cfg(feature = "config_command")]
-                "authnrCfg" => true,
-                "clientPin" => false,
-                "largeBlobs" => true,
-                "pinUvAuthToken" => true,
-                #[cfg(feature = "config_command")]
-                "setMinPINLength" => true,
-                "makeCredUvNotRqd" => true,
-            },
-            0x05 => env.customization().max_msg_size() as u64,
-            0x06 => cbor_array![2, 1],
-            0x07 => env.customization().max_credential_count_in_list().map(|c| c as u64),
-            0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
-            0x09 => cbor_array!["usb"],
-            0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
-            0x0B => env.customization().max_large_blob_array_size() as u64,
-            0x0C => false,
-            0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
-            0x0E => 0,
-            0x0F => env.customization().max_cred_blob_length() as u64,
-            0x10 => env.customization().max_rp_ids_length() as u64,
+            0x11 => uv_attempts,
+            0x12 => cfg!(feature = "fingerprint").then_some(0x02),
             0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
         };
 
@@ -2123,30 +2062,33 @@ mod test {
         check_make_response(&mut env, &make_credential_response, 0x41, 0x20, &[]);
 
         // Second part: The extension is used.
-        assert_eq!(
-            storage::set_min_pin_length_rp_ids(&mut env, vec!["example.com".to_string()]),
-            Ok(())
-        );
+        #[cfg(feature = "config_command")]
+        {
+            assert_eq!(
+                storage::set_min_pin_length_rp_ids(&mut env, vec!["example.com".to_string()]),
+                Ok(())
+            );
 
-        let extensions = MakeCredentialExtensions {
-            min_pin_length: true,
-            ..Default::default()
-        };
-        let mut make_credential_params = create_minimal_make_credential_parameters();
-        make_credential_params.extensions = extensions;
-        let make_credential_response =
-            ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
-        let expected_extension_cbor = [
-            0xA1, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68,
-            0x04,
-        ];
-        check_make_response(
-            &mut env,
-            &make_credential_response,
-            0xC1,
-            0x20,
-            &expected_extension_cbor,
-        );
+            let extensions = MakeCredentialExtensions {
+                min_pin_length: true,
+                ..Default::default()
+            };
+            let mut make_credential_params = create_minimal_make_credential_parameters();
+            make_credential_params.extensions = extensions;
+            let make_credential_response =
+                ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
+            let expected_extension_cbor = [
+                0xA1, 0x6C, 0x6D, 0x69, 0x6E, 0x50, 0x69, 0x6E, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68,
+                0x04,
+            ];
+            check_make_response(
+                &mut env,
+                &make_credential_response,
+                0xC1,
+                0x20,
+                &expected_extension_cbor,
+            );
+        }
     }
 
     #[test]
@@ -2353,6 +2295,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_process_make_credential_with_pin_always_uv() {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -2378,6 +2321,7 @@ mod test {
         );
     }
 
+    #[cfg(feature = "config_command")]
     fn check_ep(make_credential_response: CtapResult<ResponseData>, has_ep: bool) {
         let ep_att = if has_ep { Some(true) } else { None };
         match make_credential_response.unwrap() {
@@ -2389,6 +2333,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_process_make_credential_with_enterprise_attestation_vendor_facilitated() {
         let mut env = TestEnv::default();
         env.customization_mut().setup_enterprise_attestation(
@@ -2435,6 +2380,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_process_make_credential_with_enterprise_attestation_platform_managed() {
         let mut env = TestEnv::default();
         env.customization_mut().setup_enterprise_attestation(
@@ -2471,6 +2417,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_process_make_credential_with_enterprise_attestation_invalid() {
         let mut env = TestEnv::default();
         env.customization_mut()

@@ -47,7 +47,7 @@ pub mod api;
 // TODO(kaczmarczyck): Refactor this so that ctap module isn't public.
 pub mod ctap;
 pub mod env;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "config_command"))]
 pub mod test_helpers;
 
 /// CTAP implementation parameterized by its environment.

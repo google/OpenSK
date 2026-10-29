@@ -17,7 +17,7 @@ use crate::ctap::secret::Secret;
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::{AesKey, Env};
 use alloc::vec::Vec;
-use rand_core::RngCore;
+use rand_core::Rng as _;
 
 /// Wraps the AES256-CBC encryption to match what we need in CTAP.
 pub fn aes256_cbc_encrypt<E: Env>(

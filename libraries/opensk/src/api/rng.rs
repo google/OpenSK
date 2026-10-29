@@ -13,13 +13,13 @@
 // limitations under the License.
 
 pub use rand_core;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng as CoreRng};
 
 /// Random number generator.
 ///
-/// Reuses the common API from `RngCore`. Implementing the marker trait `CryptoRng` asserts that
+/// Reuses the common API from `Rng`. Implementing the marker trait `CryptoRng` asserts that
 /// your random output is usable for sensitive key material.
-pub trait Rng: CryptoRng + RngCore {
+pub trait Rng: CryptoRng + CoreRng {
     /// Provides a random byte array.
     ///
     /// This is a convenience function, as CTAP often requires such keys or tokens.

@@ -27,7 +27,7 @@ use crate::env::test::TestEnv;
 use crate::env::{AesKey, EcdhSk, Env, Hkdf, Hmac, Sha};
 use alloc::vec::Vec;
 use core::ops::DerefMut;
-use rand_core::RngCore;
+use rand_core::Rng as _;
 
 /// Implements common functions between existing PIN protocols for handshakes.
 pub struct PinProtocol<E: Env> {

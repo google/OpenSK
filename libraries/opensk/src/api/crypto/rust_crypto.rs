@@ -21,16 +21,17 @@ use crate::api::crypto::{
     TRUNCATED_HMAC_SIZE, ec_signing, ecdh,
 };
 use crate::api::rng::Rng;
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use alloc::vec::Vec;
 #[cfg(test)]
 use core::cell::RefCell;
-use hmac::Mac;
+use core::convert::TryInto;
 use hmac::digest::FixedOutput;
+use hmac::{Hmac, KeyInit, Mac};
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::{SignatureEncoding, Signer as _};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::Generate as _;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use sha2::Digest;
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
@@ -77,7 +78,7 @@ impl ecdh::SecretKey for SoftwareEcdhSecretKey {
     type SharedSecret = SoftwareEcdhSharedSecret;
 
     fn random(rng: &mut impl Rng) -> Self {
-        let ephemeral_secret = EphemeralSecret::random(rng);
+        let ephemeral_secret = EphemeralSecret::generate_from_rng(rng);
         Self { ephemeral_secret }
     }
 
@@ -98,14 +99,14 @@ pub struct SoftwareEcdhPublicKey {
 
 impl ecdh::PublicKey for SoftwareEcdhPublicKey {
     fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self> {
-        let encoded_point: p256::EncodedPoint =
-            p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
+        let encoded_point: p256::Sec1Point =
+            p256::Sec1Point::from_affine_coordinates(x.into(), y.into(), false);
         let public_key = p256::PublicKey::from_sec1_bytes(encoded_point.as_bytes()).ok()?;
         Some(Self { public_key })
     }
 
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
-        let point = self.public_key.to_encoded_point(false);
+        let point = self.public_key.to_sec1_point(false);
         x.copy_from_slice(point.x().unwrap());
         y.copy_from_slice(point.y().unwrap());
     }
@@ -136,7 +137,7 @@ impl ec_signing::EcSecretKey for SoftwareEcdsaSecretKey {
     type Signature = SoftwareEcdsaSignature;
 
     fn random(rng: &mut impl Rng) -> Self {
-        let signing_key = p256::ecdsa::SigningKey::random(rng);
+        let signing_key = p256::ecdsa::SigningKey::generate_from_rng(rng);
         SoftwareEcdsaSecretKey { signing_key }
     }
 
@@ -168,7 +169,7 @@ impl ec_signing::EcPublicKey for SoftwareEcdsaPublicKey {
     type Signature = SoftwareEcdsaSignature;
 
     fn to_coordinates(&self, x: &mut [u8; EC_FIELD_SIZE], y: &mut [u8; EC_FIELD_SIZE]) {
-        let point = self.verifying_key.to_encoded_point(false);
+        let point = self.verifying_key.to_sec1_point(false);
         x.copy_from_slice(point.x().unwrap());
         y.copy_from_slice(point.y().unwrap());
     }
@@ -295,13 +296,13 @@ pub struct SoftwareHmac256;
 
 impl Hmac256 for SoftwareHmac256 {
     fn mac(key: &[u8; HMAC_KEY_SIZE], data: &[u8], output: &mut [u8; HASH_SIZE]) {
-        let mut hmac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).unwrap();
+        let mut hmac = Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
         hmac.update(data);
         hmac.finalize_into(output.into());
     }
 
     fn verify(key: &[u8; HMAC_KEY_SIZE], data: &[u8], mac: &[u8; HASH_SIZE]) -> bool {
-        let mut hmac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).unwrap();
+        let mut hmac = Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
         hmac.update(data);
         hmac.verify_slice(mac).is_ok()
     }
@@ -311,7 +312,7 @@ impl Hmac256 for SoftwareHmac256 {
         data: &[u8],
         mac: &[u8; TRUNCATED_HMAC_SIZE],
     ) -> bool {
-        let mut hmac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).unwrap();
+        let mut hmac = Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
         hmac.update(data);
         hmac.verify_truncated_left(mac).is_ok()
     }
@@ -338,14 +339,14 @@ impl Aes256 for SoftwareAes256 {
     fn encrypt_cbc(&self, iv: &[u8; AES_BLOCK_SIZE], plaintext: &mut [u8]) {
         let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(&self.key, iv).unwrap();
         for block in plaintext.chunks_mut(AES_BLOCK_SIZE) {
-            encryptor.encrypt_block_mut(GenericArray::from_mut_slice(block));
+            encryptor.encrypt_block(block.try_into().unwrap());
         }
     }
 
     fn decrypt_cbc(&self, iv: &[u8; AES_BLOCK_SIZE], ciphertext: &mut [u8]) {
         let mut decryptor = cbc::Decryptor::<aes::Aes256>::new_from_slices(&self.key, iv).unwrap();
         for block in ciphertext.chunks_mut(AES_BLOCK_SIZE) {
-            decryptor.decrypt_block_mut(GenericArray::from_mut_slice(block));
+            decryptor.decrypt_block(block.try_into().unwrap());
         }
     }
 }

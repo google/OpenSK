@@ -331,7 +331,13 @@ pub trait Persist {
 
     /// Sets a byte vector as the serialized large blobs array.
     fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
-        debug_assert!(buffer.len() <= keys::LARGE_BLOB_SHARDS.len() * VALUE_LENGTH);
+        // Fail closed if the array does not fit the shards. This must be a runtime
+        // check, so that a customization with a `max_large_blob_array_size()` above
+        // the shard capacity returns an error instead of silently truncating the
+        // array in release builds.
+        if buffer.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
+        }
         let mut offset = 0;
         for key in keys::LARGE_BLOB_SHARDS {
             let cur_len = cmp::min(buffer.len().saturating_sub(offset), VALUE_LENGTH);
@@ -614,6 +620,10 @@ pub trait Persist {
 
 const VALUE_LENGTH: usize = 1023;
 
+/// Maximum length of the serialized large blobs array that the shards in `keys` can hold.
+pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize =
+    VALUE_LENGTH * (keys::LARGE_BLOB_SHARDS.end - keys::LARGE_BLOB_SHARDS.start);
+
 /// Identifies an attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(Sequence))]
@@ -675,9 +685,30 @@ mod test {
     fn test_max_large_blob_array_size() {
         let env = TestEnv::default();
 
-        assert!(
-            env.customization().max_large_blob_array_size()
-                <= VALUE_LENGTH * keys::LARGE_BLOB_SHARDS.len()
+        assert!(env.customization().max_large_blob_array_size() <= MAX_LARGE_BLOB_ARRAY_SIZE);
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_too_large() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        let mut oversized: Vec<u8> = (0..(MAX_LARGE_BLOB_ARRAY_SIZE + 1))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        assert_eq!(
+            persist.commit_large_blob_array(&oversized),
+            Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
+        );
+        // The rejected array is not partially committed.
+        assert_eq!(persist.get_large_blob(0, oversized.len(), None), Ok(None));
+
+        // Shrinking the array to the shard capacity makes it committable.
+        oversized.pop();
+        persist.commit_large_blob_array(&oversized).unwrap();
+        assert_eq!(
+            persist.get_large_blob(0, oversized.len(), None),
+            Ok(Some(Cow::from(&oversized[..])))
         );
     }
 

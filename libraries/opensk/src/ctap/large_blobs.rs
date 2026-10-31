@@ -191,6 +191,7 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
 
@@ -788,5 +789,42 @@ mod test {
         );
         commit_valid_chunk(&mut env, &mut large_blobs, &data[1..], 1, None);
         assert_eq!(get_large_blob_array(&mut env, 0, data.len()).unwrap(), data);
+    }
+
+    #[test]
+    fn test_commit_oversized_customization_fails_closed() {
+        // A customization above the shard capacity is invalid and should be caught
+        // before deployment. Still, the commit must fail closed instead of silently
+        // truncating the array, so the platform learns that nothing was stored.
+        let mut env = TestEnv::default();
+        let oversized_max = MAX_LARGE_BLOB_ARRAY_SIZE + 1;
+        env.customization_mut()
+            .set_max_large_blob_array_size(oversized_max);
+        let mut large_blobs = LargeBlobState::default();
+
+        let mut data = vec![0x1B; oversized_max - TRUNCATED_HASH_LEN];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+
+        // The write passes the CTAP level size check, since the customization
+        // claims to support this length.
+        assert_eq!(
+            commit_chunk(&mut env, &mut large_blobs, &data, 0, Some(data.len())),
+            Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
+        );
+
+        // The failed commit does not corrupt the storage or the write session.
+        let mut recovery = vec![0x22; 4];
+        recovery.extend_from_slice(&Sha::<TestEnv>::digest(&recovery)[..TRUNCATED_HASH_LEN]);
+        commit_valid_chunk(
+            &mut env,
+            &mut large_blobs,
+            &recovery,
+            0,
+            Some(recovery.len()),
+        );
+        assert_eq!(
+            get_large_blob_array(&mut env, 0, recovery.len()).unwrap(),
+            recovery
+        );
     }
 }

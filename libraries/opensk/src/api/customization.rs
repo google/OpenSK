@@ -17,6 +17,8 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+#[cfg(feature = "std")]
+use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -445,9 +447,8 @@ impl Customization for CustomizationImpl {
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
-    // Two invariants are currently tested in different files:
-    // - storage.rs: if max_large_blob_array_size() fits the shards
-    // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
+    // The invariant for max_supported_resident_keys() is tested in storage/key.rs.
+    // The invariant for max_large_blob_array_size() is enforced below.
 
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
@@ -506,6 +507,12 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
+    // Max large blob array size must fit the large blob shards, so that committing
+    // the array in persist.rs cannot truncate it.
+    if customization.max_large_blob_array_size() > MAX_LARGE_BLOB_ARRAY_SIZE {
+        return false;
+    }
+
     // Default min pin length rp ids must be non-empty if max rp ids length is 0.
     if customization.max_rp_ids_length() == 0
         && customization.default_min_pin_length_rp_ids().is_empty()
@@ -549,6 +556,15 @@ mod test {
     #[test]
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
+    }
+
+    #[test]
+    fn test_invariants_max_large_blob_array_size() {
+        let mut customization = DEFAULT_CUSTOMIZATION.clone();
+        customization.max_large_blob_array_size = MAX_LARGE_BLOB_ARRAY_SIZE;
+        assert!(is_valid(&customization));
+        customization.max_large_blob_array_size = MAX_LARGE_BLOB_ARRAY_SIZE + 1;
+        assert!(!is_valid(&customization));
     }
 
     #[test]

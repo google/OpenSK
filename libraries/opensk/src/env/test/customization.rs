@@ -49,6 +49,10 @@ impl TestCustomization {
         self.allows_pin_protocol_v1 = is_allowed;
     }
 
+    pub fn set_max_large_blob_array_size(&mut self, max_large_blob_array_size: usize) {
+        self.max_large_blob_array_size = max_large_blob_array_size;
+    }
+
     pub fn setup_enterprise_attestation(
         &mut self,
         mode: Option<EnterpriseAttestationMode>,

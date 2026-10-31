@@ -330,8 +330,15 @@ pub trait Persist {
     }
 
     /// Sets a byte vector as the serialized large blobs array.
+    ///
+    /// Returns an error if the buffer doesn't fit into the shards, which can
+    /// only happen if `Customization::max_large_blob_array_size()` exceeds the
+    /// shard capacity. In that case, the previously committed array remains
+    /// unchanged.
     fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
-        debug_assert!(buffer.len() <= keys::LARGE_BLOB_SHARDS.len() * VALUE_LENGTH);
+        if buffer.len() > LARGE_BLOB_ARRAY_CAPACITY {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
         let mut offset = 0;
         for key in keys::LARGE_BLOB_SHARDS {
             let cur_len = cmp::min(buffer.len().saturating_sub(offset), VALUE_LENGTH);
@@ -613,6 +620,11 @@ pub trait Persist {
 }
 
 const VALUE_LENGTH: usize = 1023;
+
+/// The maximum length of the serialized large blob array, given by the shards
+/// reserved in storage/key.rs.
+pub(crate) const LARGE_BLOB_ARRAY_CAPACITY: usize =
+    (keys::LARGE_BLOB_SHARDS.end - keys::LARGE_BLOB_SHARDS.start) * VALUE_LENGTH;
 
 /// Identifies an attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -936,6 +948,30 @@ mod test {
                 .unwrap()
                 .as_deref(),
             Some(&[][..])
+        );
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_too_large() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        // Commit a small array, to check that a rejected commit leaves it intact.
+        let blob: Vec<u8> = (0..100).map(|i| (i % 251) as u8).collect();
+        assert_eq!(persist.commit_large_blob_array(&blob), Ok(()));
+
+        let oversized_blob = vec![0x42; LARGE_BLOB_ARRAY_CAPACITY + 1];
+        assert_eq!(
+            persist.commit_large_blob_array(&oversized_blob),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+
+        assert_eq!(
+            persist
+                .get_large_blob(0, blob.len(), None)
+                .unwrap()
+                .as_deref(),
+            Some(&blob[..])
         );
     }
 }

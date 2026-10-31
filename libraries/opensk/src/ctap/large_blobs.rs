@@ -789,4 +789,39 @@ mod test {
         commit_valid_chunk(&mut env, &mut large_blobs, &data[1..], 1, None);
         assert_eq!(get_large_blob_array(&mut env, 0, data.len()).unwrap(), data);
     }
+
+    #[test]
+    fn test_process_command_commit_too_large_config() {
+        use crate::api::persist::LARGE_BLOB_ARRAY_CAPACITY;
+
+        let mut env = TestEnv::default();
+        // The customization exceeds the shard capacity, so the array must be
+        // rejected on commit instead of being silently truncated.
+        env.customization_mut()
+            .set_max_large_blob_array_size(LARGE_BLOB_ARRAY_CAPACITY + 1);
+        let mut large_blobs = LargeBlobState::default();
+
+        // Commit a valid array first, which must stay intact.
+        let mut data = vec![0x01, 0x02, 0x03];
+        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
+        commit_valid_chunk(&mut env, &mut large_blobs, &data, 0, Some(data.len()));
+
+        // The oversized array passes the length check, because it doesn't
+        // exceed the configured maximum, but it doesn't fit the shards.
+        let mut oversized = vec![0x42; LARGE_BLOB_ARRAY_CAPACITY + 1 - TRUNCATED_HASH_LEN];
+        oversized.extend_from_slice(&Sha::<TestEnv>::digest(&oversized[..])[..TRUNCATED_HASH_LEN]);
+        assert_eq!(
+            commit_chunk(
+                &mut env,
+                &mut large_blobs,
+                &oversized,
+                0,
+                Some(oversized.len())
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+
+        // The previously committed array is unchanged.
+        assert_eq!(get_large_blob_array(&mut env, 0, data.len()).unwrap(), data);
+    }
 }

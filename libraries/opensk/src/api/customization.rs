@@ -17,6 +17,7 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+use crate::api::persist::LARGE_BLOB_ARRAY_CAPACITY;
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -245,7 +246,8 @@ pub trait Customization {
     /// # Invariant
     ///
     /// - The allowed size must be at least 1024.
-    /// - The array must fit into the shards reserved in storage/key.rs.
+    /// - The allowed size must be at most the capacity of the shards reserved
+    ///   in storage/key.rs, so the array always fits into the shards.
     fn max_large_blob_array_size(&self) -> usize;
 
     /// Limits the number of RP IDs that can change the minimum PIN length.
@@ -445,9 +447,10 @@ impl Customization for CustomizationImpl {
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
-    // Two invariants are currently tested in different files:
-    // - storage.rs: if max_large_blob_array_size() fits the shards
-    // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
+    // Two invariants relate to the storage layout:
+    // - max_large_blob_array_size() must fit the shards (checked below)
+    // - max_supported_resident_keys() must fit CREDENTIALS (tested in
+    //   persist/keys.rs)
 
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
@@ -501,8 +504,11 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
-    // Max large blob array size should not be less than 1024.
-    if customization.max_large_blob_array_size() < 1024 {
+    // Max large blob array size should be at least 1024, and the array must
+    // fit into the shards reserved in storage/key.rs.
+    if customization.max_large_blob_array_size() < 1024
+        || customization.max_large_blob_array_size() > LARGE_BLOB_ARRAY_CAPACITY
+    {
         return false;
     }
 
@@ -549,6 +555,15 @@ mod test {
     #[test]
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
+    }
+
+    #[test]
+    fn test_invariants_oversized_large_blob() {
+        let customization = CustomizationImpl {
+            max_large_blob_array_size: LARGE_BLOB_ARRAY_CAPACITY + 1,
+            ..DEFAULT_CUSTOMIZATION
+        };
+        assert!(!is_valid(&customization));
     }
 
     #[test]

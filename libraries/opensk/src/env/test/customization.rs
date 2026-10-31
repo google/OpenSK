@@ -59,6 +59,10 @@ impl TestCustomization {
             self.enterprise_rp_id_list = rp_id_list;
         }
     }
+
+    pub fn set_max_large_blob_array_size(&mut self, max_large_blob_array_size: usize) {
+        self.max_large_blob_array_size = max_large_blob_array_size;
+    }
 }
 
 impl Customization for TestCustomization {

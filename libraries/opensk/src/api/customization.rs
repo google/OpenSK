@@ -17,6 +17,8 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+#[cfg(feature = "std")]
+use crate::api::persist::LARGE_BLOB_ARRAY_MAX_LENGTH;
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -245,7 +247,7 @@ pub trait Customization {
     /// # Invariant
     ///
     /// - The allowed size must be at least 1024.
-    /// - The array must fit into the shards reserved in storage/key.rs.
+    /// - The allowed size must not exceed the capacity of the large blob shards.
     fn max_large_blob_array_size(&self) -> usize;
 
     /// Limits the number of RP IDs that can change the minimum PIN length.
@@ -445,8 +447,7 @@ impl Customization for CustomizationImpl {
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
-    // Two invariants are currently tested in different files:
-    // - storage.rs: if max_large_blob_array_size() fits the shards
+    // One invariant is currently tested in a different file:
     // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
 
     // Max message size must be between 1024 and 7609.
@@ -501,8 +502,11 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
-    // Max large blob array size should not be less than 1024.
-    if customization.max_large_blob_array_size() < 1024 {
+    // Max large blob array size must be at least 1024 and at most the capacity
+    // of the large blob shards.
+    if customization.max_large_blob_array_size() < 1024
+        || customization.max_large_blob_array_size() > LARGE_BLOB_ARRAY_MAX_LENGTH
+    {
         return false;
     }
 
@@ -549,6 +553,26 @@ mod test {
     #[test]
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
+    }
+
+    #[test]
+    fn test_invariants_large_blob_array_size() {
+        // The default customization fits into the large blob shards.
+        assert!(is_valid(&DEFAULT_CUSTOMIZATION));
+
+        let mut customization = DEFAULT_CUSTOMIZATION.clone();
+        // An array of exactly the maximum capacity is still valid.
+        customization.max_large_blob_array_size = LARGE_BLOB_ARRAY_MAX_LENGTH;
+        assert!(is_valid(&customization));
+
+        // A size beyond the capacity of the shards would silently truncate
+        // committed arrays, so it is invalid.
+        customization.max_large_blob_array_size = LARGE_BLOB_ARRAY_MAX_LENGTH + 1;
+        assert!(!is_valid(&customization));
+
+        // The lower bound is still enforced.
+        customization.max_large_blob_array_size = 1023;
+        assert!(!is_valid(&customization));
     }
 
     #[test]

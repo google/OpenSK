@@ -330,8 +330,12 @@ pub trait Persist {
     }
 
     /// Sets a byte vector as the serialized large blobs array.
+    ///
+    /// Returns `CTAP2_ERR_LARGE_BLOB_STORAGE_FULL` if the array doesn't fit into the shards.
     fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
-        debug_assert!(buffer.len() <= keys::LARGE_BLOB_SHARDS.len() * VALUE_LENGTH);
+        if buffer.len() > LARGE_BLOB_ARRAY_MAX_LENGTH {
+            return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
+        }
         let mut offset = 0;
         for key in keys::LARGE_BLOB_SHARDS {
             let cur_len = cmp::min(buffer.len().saturating_sub(offset), VALUE_LENGTH);
@@ -614,6 +618,10 @@ pub trait Persist {
 
 const VALUE_LENGTH: usize = 1023;
 
+/// Maximum number of bytes that fit into the large blob shards.
+pub(crate) const LARGE_BLOB_ARRAY_MAX_LENGTH: usize =
+    VALUE_LENGTH * (keys::LARGE_BLOB_SHARDS.end - keys::LARGE_BLOB_SHARDS.start);
+
 /// Identifies an attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(Sequence))]
@@ -678,6 +686,36 @@ mod test {
         assert!(
             env.customization().max_large_blob_array_size()
                 <= VALUE_LENGTH * keys::LARGE_BLOB_SHARDS.len()
+        );
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_capacity() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        // An oversized array is rejected without touching the stored data.
+        let oversized: LargeBlobBuffer = vec![0x41; LARGE_BLOB_ARRAY_MAX_LENGTH + 1];
+        assert_eq!(
+            persist.commit_large_blob_array(&oversized),
+            Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
+        );
+        assert_eq!(
+            persist.get_large_blob(0, LARGE_BLOB_ARRAY_MAX_LENGTH, None),
+            Ok(None)
+        );
+
+        // An array of exactly the maximum capacity is stored.
+        let max_sized: LargeBlobBuffer = (0..LARGE_BLOB_ARRAY_MAX_LENGTH)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        assert_eq!(persist.commit_large_blob_array(&max_sized), Ok(()));
+        assert_eq!(
+            persist
+                .get_large_blob(0, LARGE_BLOB_ARRAY_MAX_LENGTH, None)
+                .unwrap()
+                .as_deref(),
+            Some(&max_sized[..])
         );
     }
 

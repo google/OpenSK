@@ -17,6 +17,7 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+#[cfg(feature = "std")]
 use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;

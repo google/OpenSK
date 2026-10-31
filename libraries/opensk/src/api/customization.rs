@@ -17,6 +17,8 @@
 //! If you adapt them, make sure to run the tests before flashing the firmware.
 //! Our deploy script enforces the invariants.
 
+#[cfg(feature = "std")]
+use crate::api::persist::{MAX_LARGE_BLOB_ARRAY_SIZE, keys};
 use crate::ctap::data_formats::{CredentialProtectionPolicy, EnterpriseAttestationMode};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -445,9 +447,11 @@ impl Customization for CustomizationImpl {
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
-    // Two invariants are currently tested in different files:
-    // - storage.rs: if max_large_blob_array_size() fits the shards
-    // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
+    // The persistent store enforces two invariants on the customization: the large
+    // blob array has to fit into the shards of the store, and the resident keys
+    // have to fit into the credential key range. Committing an oversized large
+    // blob array fails closed, but rejecting invalid customizations here catches
+    // the problem before flashing the firmware.
 
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
@@ -506,6 +510,17 @@ pub fn is_valid(customization: &impl Customization) -> bool {
         return false;
     }
 
+    // Max large blob array size must fit into the shards of the persistent store.
+    if customization.max_large_blob_array_size() > MAX_LARGE_BLOB_ARRAY_SIZE {
+        return false;
+    }
+
+    // Max supported resident keys must fit into the credential key range.
+    if customization.max_supported_resident_keys() > keys::CREDENTIALS.end - keys::CREDENTIALS.start
+    {
+        return false;
+    }
+
     // Default min pin length rp ids must be non-empty if max rp ids length is 0.
     if customization.max_rp_ids_length() == 0
         && customization.default_min_pin_length_rp_ids().is_empty()
@@ -549,6 +564,24 @@ mod test {
     #[test]
     fn test_invariants() {
         assert!(is_valid(&DEFAULT_CUSTOMIZATION));
+    }
+
+    #[test]
+    fn test_invariants_oversized_large_blob_array() {
+        let customization = CustomizationImpl {
+            max_large_blob_array_size: MAX_LARGE_BLOB_ARRAY_SIZE + 1,
+            ..DEFAULT_CUSTOMIZATION
+        };
+        assert!(!is_valid(&customization));
+    }
+
+    #[test]
+    fn test_invariants_too_many_resident_keys() {
+        let customization = CustomizationImpl {
+            max_supported_resident_keys: keys::CREDENTIALS.end - keys::CREDENTIALS.start + 1,
+            ..DEFAULT_CUSTOMIZATION
+        };
+        assert!(!is_valid(&customization));
     }
 
     #[test]

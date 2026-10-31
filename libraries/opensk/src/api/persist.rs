@@ -331,7 +331,13 @@ pub trait Persist {
 
     /// Sets a byte vector as the serialized large blobs array.
     fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
-        debug_assert!(buffer.len() <= keys::LARGE_BLOB_SHARDS.len() * VALUE_LENGTH);
+        // This should be caught on CTAP level, which only accepts arrays up to
+        // `Customization::max_large_blob_array_size()`. If the customization
+        // itself exceeds the capacity of the shards, fail closed instead of
+        // silently dropping the bytes past the capacity.
+        if buffer.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
         let mut offset = 0;
         for key in keys::LARGE_BLOB_SHARDS {
             let cur_len = cmp::min(buffer.len().saturating_sub(offset), VALUE_LENGTH);
@@ -614,6 +620,14 @@ pub trait Persist {
 
 const VALUE_LENGTH: usize = 1023;
 
+/// The maximum size of a large blob array that the persistent store can hold.
+///
+/// The array is sharded over `keys::LARGE_BLOB_SHARDS` keys, each holding up to
+/// `VALUE_LENGTH` bytes. Committing a larger array would silently drop everything
+/// past that capacity, so writers have to reject it instead.
+pub const MAX_LARGE_BLOB_ARRAY_SIZE: usize =
+    VALUE_LENGTH * (keys::LARGE_BLOB_SHARDS.end - keys::LARGE_BLOB_SHARDS.start);
+
 /// Identifies an attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(Sequence))]
@@ -675,10 +689,21 @@ mod test {
     fn test_max_large_blob_array_size() {
         let env = TestEnv::default();
 
-        assert!(
-            env.customization().max_large_blob_array_size()
-                <= VALUE_LENGTH * keys::LARGE_BLOB_SHARDS.len()
+        assert!(env.customization().max_large_blob_array_size() <= MAX_LARGE_BLOB_ARRAY_SIZE);
+    }
+
+    #[test]
+    fn test_commit_large_blob_array_too_large() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        let blob: Vec<u8> = vec![0x55; MAX_LARGE_BLOB_ARRAY_SIZE + 1];
+        assert_eq!(
+            persist.commit_large_blob_array(&blob),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
+        // The rejected array must not have left any shards behind.
+        assert_eq!(persist.get_large_blob(0, 10, None), Ok(None));
     }
 
     #[test]

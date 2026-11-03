@@ -71,3 +71,4 @@ cargo test --lib --features=test
 cargo test --manifest-path=libraries/cbor/Cargo.toml
 
 cargo audit
+(cd libraries/opensk && cargo audit)

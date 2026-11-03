@@ -219,12 +219,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ed25519-compact"
-version = "1.0.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18997d4604542d0736fae2c5ad6de987f0a50530cbcc14a7ce5a685328a252d"
-
-[[package]]
 name = "elliptic-curve"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -369,7 +363,6 @@ dependencies = [
  "arrayref",
  "byteorder",
  "cbc",
- "ed25519-compact",
  "hkdf",
  "hmac",
  "p256",

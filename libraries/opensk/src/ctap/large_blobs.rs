@@ -18,6 +18,7 @@ use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::{Ctap2StatusCode, CtapResult};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
+use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
 use crate::api::persist::Persist;
 use crate::ctap::storage;
 use crate::env::{Env, Sha};
@@ -72,7 +73,7 @@ impl LargeBlobState {
             }
             let expected_length = if offset == 0 {
                 let length = length.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-                if length > env.customization().max_large_blob_array_size() {
+                if length > MAX_LARGE_BLOB_ARRAY_SIZE {
                     return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
                 }
                 if length <= TRUNCATED_HASH_LEN {
@@ -191,6 +192,7 @@ mod test {
     use super::super::pin_protocol::authenticate_pin_uv_auth_token;
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as EcdhSecretKey;
+    use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
 
@@ -756,9 +758,9 @@ mod test {
 
         commit_valid_chunk(&mut env, &mut large_blobs, &data[0..1], 0, Some(data.len()));
 
-        // A rejected offset == 0 request with length > max_large_blob_array_size() must not
+        // A rejected offset == 0 request with length > MAX_LARGE_BLOB_ARRAY_SIZE must not
         // overwrite expected_length and allow subsequent chunks to exceed the original length.
-        let oversized_len = env.customization().max_large_blob_array_size() + 1;
+        let oversized_len = MAX_LARGE_BLOB_ARRAY_SIZE + 1;
         assert_eq!(
             commit_chunk(
                 &mut env,

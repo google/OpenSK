@@ -76,7 +76,7 @@ use crate::api::customization::Customization;
 #[cfg(feature = "fingerprint")]
 use crate::api::fingerprint::Fingerprint;
 use crate::api::key_store::{CredentialSource, KeyStore, MAX_CREDENTIAL_ID_SIZE};
-use crate::api::persist::{Attestation, AttestationId, Persist};
+use crate::api::persist::{Attestation, AttestationId, MAX_LARGE_BLOB_ARRAY_SIZE, Persist};
 use crate::api::private_key::PrivateKey;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceError};
@@ -1438,9 +1438,7 @@ impl<E: Env> CtapState<E> {
                 max_credential_id_length: Some(MAX_CREDENTIAL_ID_SIZE as u64),
                 transports: Some(vec![AuthenticatorTransport::Usb]),
                 algorithms: Some(SUPPORTED_CRED_PARAMS.to_vec()),
-                max_serialized_large_blob_array: Some(
-                    env.customization().max_large_blob_array_size() as u64,
-                ),
+                max_serialized_large_blob_array: Some(MAX_LARGE_BLOB_ARRAY_SIZE as u64),
                 force_pin_change: Some(env.persist().has_force_pin_change()?),
                 min_pin_length: storage::min_pin_length(env)?,
                 firmware_version: env.firmware_version(),
@@ -1654,7 +1652,7 @@ mod test {
             0x08 => MAX_CREDENTIAL_ID_SIZE as u64,
             0x09 => cbor_array!["usb"],
             0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
-            0x0B => env.customization().max_large_blob_array_size() as u64,
+            0x0B => MAX_LARGE_BLOB_ARRAY_SIZE as u64,
             0x0C => false,
             0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
             0x0E => 0,

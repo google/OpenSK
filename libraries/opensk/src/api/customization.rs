@@ -240,14 +240,6 @@ pub trait Customization {
     /// MakeCredential and GetAssertion. This affects allowList and excludeList.
     fn max_credential_count_in_list(&self) -> Option<usize>;
 
-    /// Limits the size of largeBlobs the authenticator stores.
-    ///
-    /// # Invariant
-    ///
-    /// - The allowed size must be at least 1024.
-    /// - The array must fit into the shards reserved in storage/key.rs.
-    fn max_large_blob_array_size(&self) -> usize;
-
     /// Limits the number of RP IDs that can change the minimum PIN length.
     ///
     /// # Invariant
@@ -312,7 +304,6 @@ pub struct CustomizationImpl {
     pub use_signature_counter: bool,
     pub max_cred_blob_length: usize,
     pub max_credential_count_in_list: Option<usize>,
-    pub max_large_blob_array_size: usize,
     pub max_rp_ids_length: usize,
     pub max_supported_resident_keys: usize,
     #[cfg(feature = "fingerprint")]
@@ -339,7 +330,6 @@ pub const DEFAULT_CUSTOMIZATION: CustomizationImpl = CustomizationImpl {
     use_signature_counter: true,
     max_cred_blob_length: 32,
     max_credential_count_in_list: None,
-    max_large_blob_array_size: 2048,
     max_rp_ids_length: 8,
     max_supported_resident_keys: 150,
     #[cfg(feature = "fingerprint")]
@@ -425,10 +415,6 @@ impl Customization for CustomizationImpl {
         self.max_credential_count_in_list
     }
 
-    fn max_large_blob_array_size(&self) -> usize {
-        self.max_large_blob_array_size
-    }
-
     fn max_rp_ids_length(&self) -> usize {
         self.max_rp_ids_length
     }
@@ -445,9 +431,7 @@ impl Customization for CustomizationImpl {
 
 #[cfg(feature = "std")]
 pub fn is_valid(customization: &impl Customization) -> bool {
-    // Two invariants are currently tested in different files:
-    // - storage.rs: if max_large_blob_array_size() fits the shards
-    // - storage/key.rs: if max_supported_resident_keys() fits CREDENTIALS
+    // The invariant for max_supported_resident_keys() is tested in storage/key.rs.
 
     // Max message size must be between 1024 and 7609.
     if customization.max_msg_size() < 1024 || customization.max_msg_size() > 7609 {
@@ -498,11 +482,6 @@ pub fn is_valid(customization: &impl Customization) -> bool {
     if let Some(count) = customization.max_credential_count_in_list()
         && count < 1
     {
-        return false;
-    }
-
-    // Max large blob array size should not be less than 1024.
-    if customization.max_large_blob_array_size() < 1024 {
         return false;
     }
 
@@ -573,7 +552,6 @@ mod test {
             use_signature_counter: true,
             max_cred_blob_length: 32,
             max_credential_count_in_list: Some(3),
-            max_large_blob_array_size: 2048,
             max_rp_ids_length: 8,
             max_supported_resident_keys: 150,
             #[cfg(feature = "fingerprint")]
@@ -601,7 +579,6 @@ mod test {
         assert!(customization.use_signature_counter());
         assert_eq!(customization.max_cred_blob_length(), 32);
         assert_eq!(customization.max_credential_count_in_list(), Some(3));
-        assert_eq!(customization.max_large_blob_array_size(), 2048);
         assert_eq!(customization.max_rp_ids_length(), 8);
         assert_eq!(customization.max_supported_resident_keys(), 150);
         #[cfg(feature = "fingerprint")]

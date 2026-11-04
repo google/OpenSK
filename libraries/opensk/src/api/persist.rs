@@ -331,10 +331,6 @@ pub trait Persist {
 
     /// Sets a byte vector as the serialized large blobs array.
     fn commit_large_blob_array(&mut self, buffer: &LargeBlobBuffer) -> CtapResult<()> {
-        // Fail closed if the array does not fit the shards. This must be a runtime
-        // check, so that a customization with a `max_large_blob_array_size()` above
-        // the shard capacity returns an error instead of silently truncating the
-        // array in release builds.
         if buffer.len() > MAX_LARGE_BLOB_ARRAY_SIZE {
             return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
         }
@@ -675,18 +671,10 @@ impl TryFrom<cbor::Value> for Attestation {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::customization::Customization;
     use crate::api::rng::Rng;
     use crate::env::Env;
     use crate::env::test::TestEnv;
     use sk_cbor::cbor_map;
-
-    #[test]
-    fn test_max_large_blob_array_size() {
-        let env = TestEnv::default();
-
-        assert!(env.customization().max_large_blob_array_size() <= MAX_LARGE_BLOB_ARRAY_SIZE);
-    }
 
     #[test]
     fn test_commit_large_blob_array_too_large() {

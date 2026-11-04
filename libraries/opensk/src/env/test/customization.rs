@@ -37,7 +37,6 @@ pub struct TestCustomization {
     use_signature_counter: bool,
     max_cred_blob_length: usize,
     max_credential_count_in_list: Option<usize>,
-    max_large_blob_array_size: usize,
     max_rp_ids_length: usize,
     max_supported_resident_keys: usize,
     #[cfg(feature = "fingerprint")]
@@ -47,10 +46,6 @@ pub struct TestCustomization {
 impl TestCustomization {
     pub fn set_allows_pin_protocol_v1(&mut self, is_allowed: bool) {
         self.allows_pin_protocol_v1 = is_allowed;
-    }
-
-    pub fn set_max_large_blob_array_size(&mut self, max_large_blob_array_size: usize) {
-        self.max_large_blob_array_size = max_large_blob_array_size;
     }
 
     pub fn setup_enterprise_attestation(
@@ -137,10 +132,6 @@ impl Customization for TestCustomization {
         self.max_credential_count_in_list
     }
 
-    fn max_large_blob_array_size(&self) -> usize {
-        self.max_large_blob_array_size
-    }
-
     fn max_rp_ids_length(&self) -> usize {
         self.max_rp_ids_length
     }
@@ -177,7 +168,6 @@ impl From<CustomizationImpl> for TestCustomization {
             use_signature_counter,
             max_cred_blob_length,
             max_credential_count_in_list,
-            max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
             #[cfg(feature = "fingerprint")]
@@ -214,7 +204,6 @@ impl From<CustomizationImpl> for TestCustomization {
             use_signature_counter,
             max_cred_blob_length,
             max_credential_count_in_list,
-            max_large_blob_array_size,
             max_rp_ids_length,
             max_supported_resident_keys,
             #[cfg(feature = "fingerprint")]

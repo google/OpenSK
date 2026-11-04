@@ -18,6 +18,7 @@ use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::{Ctap2StatusCode, CtapResult};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
+use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
 use crate::api::persist::Persist;
 use crate::ctap::storage;
 use crate::env::{Env, Sha};
@@ -72,7 +73,7 @@ impl LargeBlobState {
             }
             let expected_length = if offset == 0 {
                 let length = length.ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-                if length > env.customization().max_large_blob_array_size() {
+                if length > MAX_LARGE_BLOB_ARRAY_SIZE {
                     return Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL);
                 }
                 if length <= TRUNCATED_HASH_LEN {
@@ -757,9 +758,9 @@ mod test {
 
         commit_valid_chunk(&mut env, &mut large_blobs, &data[0..1], 0, Some(data.len()));
 
-        // A rejected offset == 0 request with length > max_large_blob_array_size() must not
+        // A rejected offset == 0 request with length > MAX_LARGE_BLOB_ARRAY_SIZE must not
         // overwrite expected_length and allow subsequent chunks to exceed the original length.
-        let oversized_len = env.customization().max_large_blob_array_size() + 1;
+        let oversized_len = MAX_LARGE_BLOB_ARRAY_SIZE + 1;
         assert_eq!(
             commit_chunk(
                 &mut env,
@@ -789,42 +790,5 @@ mod test {
         );
         commit_valid_chunk(&mut env, &mut large_blobs, &data[1..], 1, None);
         assert_eq!(get_large_blob_array(&mut env, 0, data.len()).unwrap(), data);
-    }
-
-    #[test]
-    fn test_commit_oversized_customization_fails_closed() {
-        // A customization above the shard capacity is invalid and should be caught
-        // before deployment. Still, the commit must fail closed instead of silently
-        // truncating the array, so the platform learns that nothing was stored.
-        let mut env = TestEnv::default();
-        let oversized_max = MAX_LARGE_BLOB_ARRAY_SIZE + 1;
-        env.customization_mut()
-            .set_max_large_blob_array_size(oversized_max);
-        let mut large_blobs = LargeBlobState::default();
-
-        let mut data = vec![0x1B; oversized_max - TRUNCATED_HASH_LEN];
-        data.extend_from_slice(&Sha::<TestEnv>::digest(&data)[..TRUNCATED_HASH_LEN]);
-
-        // The write passes the CTAP level size check, since the customization
-        // claims to support this length.
-        assert_eq!(
-            commit_chunk(&mut env, &mut large_blobs, &data, 0, Some(data.len())),
-            Err(Ctap2StatusCode::CTAP2_ERR_LARGE_BLOB_STORAGE_FULL)
-        );
-
-        // The failed commit does not corrupt the storage or the write session.
-        let mut recovery = vec![0x22; 4];
-        recovery.extend_from_slice(&Sha::<TestEnv>::digest(&recovery)[..TRUNCATED_HASH_LEN]);
-        commit_valid_chunk(
-            &mut env,
-            &mut large_blobs,
-            &recovery,
-            0,
-            Some(recovery.len()),
-        );
-        assert_eq!(
-            get_large_blob_array(&mut env, 0, recovery.len()).unwrap(),
-            recovery
-        );
     }
 }

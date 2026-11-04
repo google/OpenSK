@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use opensk::api::customization::{CustomizationImpl, DEFAULT_CUSTOMIZATION};
-use opensk::ctap::status_code::Ctap2StatusCode;
+use opensk::api::private_key::PrivateKey;
+use opensk::ctap::data_formats::SignatureAlgorithm;
+use opensk::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use opensk::env::Env;
 use wasefire::Error;
 use wasefire::error::Space;
@@ -60,6 +62,17 @@ impl Env for WasefireEnv {
 
     fn rng(&mut self) -> &mut Self::Rng {
         self
+    }
+
+    fn generate_private_key(
+        &mut self,
+        algorithm: SignatureAlgorithm,
+    ) -> CtapResult<PrivateKey<Self>> {
+        crypto::generate_private_key(algorithm)
+    }
+
+    fn sign(&mut self, key: &PrivateKey<Self>, message: &[u8]) -> CtapResult<alloc::vec::Vec<u8>> {
+        crypto::sign(key, message)
     }
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {

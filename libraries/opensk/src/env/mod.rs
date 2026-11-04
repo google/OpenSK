@@ -24,9 +24,12 @@ use crate::api::customization::Customization;
 use crate::api::fingerprint::Fingerprint;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
+use crate::api::private_key::PrivateKey;
 use crate::api::rng::Rng;
 use crate::api::user_presence::UserPresence;
 use crate::ctap::Channel;
+use crate::ctap::data_formats::SignatureAlgorithm;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use alloc::vec::Vec;
 
 #[cfg(feature = "std")]
@@ -63,6 +66,38 @@ pub trait Env {
     type Fingerprint: Fingerprint;
 
     fn rng(&mut self) -> &mut Self::Rng;
+
+    /// Generates a signing key for the given algorithm.
+    ///
+    /// Platforms can override this to access their cryptographic hardware and propagate errors.
+    /// The default uses the cryptography implementation and RNG provided by this environment.
+    /// The returned key must use the requested algorithm. An unknown algorithm is rejected with
+    /// `CTAP2_ERR_UNSUPPORTED_ALGORITHM`.
+    fn generate_private_key(
+        &mut self,
+        algorithm: SignatureAlgorithm,
+    ) -> CtapResult<PrivateKey<Self>>
+    where
+        Self: Sized,
+    {
+        if algorithm == SignatureAlgorithm::Unknown {
+            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
+        }
+        Ok(PrivateKey::new(self, algorithm))
+    }
+
+    /// Signs a message and encodes the signature for CTAP.
+    ///
+    /// This applies to both credential and attestation keys. Platforms can override this to use
+    /// per-environment hardware state and propagate errors. The default delegates to the key.
+    /// ECDSA signatures must be ASN.1 DER encoded; Ed25519 signatures must be 64 raw bytes.
+    fn sign(&mut self, key: &PrivateKey<Self>, message: &[u8]) -> CtapResult<Vec<u8>>
+    where
+        Self: Sized,
+    {
+        key.sign_and_encode(message)
+    }
+
     fn user_presence(&mut self) -> &mut Self::UserPresence;
     fn persist(&mut self) -> &mut Self::Persist;
     fn key_store(&mut self) -> &mut Self::KeyStore;

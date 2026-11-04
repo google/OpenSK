@@ -52,6 +52,8 @@ impl<E: Env> PartialEq for PrivateKey<E> {
 impl<E: Env> PrivateKey<E> {
     /// Creates a new private key for the given algorithm.
     ///
+    /// CTAP operations use [`Env::generate_private_key`] so that platforms can report failures.
+    ///
     /// # Panics
     ///
     /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
@@ -79,6 +81,8 @@ impl<E: Env> PrivateKey<E> {
     }
 
     /// Returns the encoded signature for a given message.
+    ///
+    /// CTAP operations use [`Env::sign`] to access platform state and propagate signing failures.
     pub fn sign_and_encode(&self, message: &[u8]) -> CtapResult<Vec<u8>> {
         Ok(match self {
             PrivateKey::Ecdsa(key) => key.sign(message).to_der(),

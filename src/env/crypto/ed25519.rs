@@ -17,9 +17,10 @@ use alloc::vec::Vec;
 use opensk::api::crypto::EC_FIELD_SIZE;
 use opensk::api::crypto::ec_signing::{Ed25519, EdPublicKey, EdSecretKey, EdSignature};
 use opensk::api::rng::Rng;
+use opensk::ctap::status_code::CtapResult;
 use wasefire::crypto::ed25519::{Private, Public};
 
-use crate::env::WasefireEnv;
+use crate::env::{WasefireEnv, convert_error};
 
 impl Ed25519 for WasefireEnv {
     type SecretKey = SecretKey;
@@ -34,13 +35,30 @@ pub(crate) struct Signature {
     s: [u8; 32],
 }
 
+impl SecretKey {
+    pub(super) fn generate() -> CtapResult<Self> {
+        Private::generate().map(Self).map_err(convert_error)
+    }
+
+    pub(super) fn try_sign(&self, message: &[u8]) -> CtapResult<Signature> {
+        let mut signature = Signature {
+            r: [0; 32],
+            s: [0; 32],
+        };
+        self.0
+            .sign(message, &mut signature.r, &mut signature.s)
+            .map_err(convert_error)?;
+        Ok(signature)
+    }
+}
+
 impl EdSecretKey for SecretKey {
     type PublicKey = PublicKey;
     type Signature = Signature;
 
     fn random(_rng: &mut impl Rng) -> Self {
         // TODO: Use the rng argument.
-        SecretKey(Private::generate().unwrap())
+        Self::generate().unwrap()
     }
 
     fn public_key(&self) -> Self::PublicKey {
@@ -48,14 +66,7 @@ impl EdSecretKey for SecretKey {
     }
 
     fn sign(&self, message: &[u8]) -> Self::Signature {
-        let mut signature = Signature {
-            r: [0; 32],
-            s: [0; 32],
-        };
-        self.0
-            .sign(message, &mut signature.r, &mut signature.s)
-            .unwrap();
-        signature
+        self.try_sign(message).unwrap()
     }
 
     fn export(&self) -> Vec<u8> {

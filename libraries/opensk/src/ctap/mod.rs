@@ -69,7 +69,7 @@ use self::u2f_up::U2fUserPresenceState;
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
 use crate::api::crypto::HASH_SIZE;
-use crate::api::crypto::ec_signing::{EcSecretKey, EcSignature};
+use crate::api::crypto::ec_signing::EcSecretKey;
 use crate::api::crypto::hkdf256::Hkdf256;
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
@@ -967,7 +967,7 @@ impl<E: Env> CtapState<E> {
 
         // We decide on the algorithm early, but delay key creation since it takes time.
         // We rather do that later so all intermediate checks may return faster.
-        let private_key = PrivateKey::new(env, algorithm);
+        let private_key = env.generate_private_key(algorithm)?;
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
@@ -1059,11 +1059,11 @@ impl<E: Env> CtapState<E> {
                 let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 (
-                    attestation_key.sign(&signature_data).to_der(),
+                    env.sign(&PrivateKey::Ecdsa(attestation_key), &signature_data)?,
                     Some(vec![certificate]),
                 )
             }
-            None => (private_key.sign_and_encode(&signature_data)?, None),
+            None => (env.sign(&private_key, &signature_data)?, None),
         };
         let attestation_statement = PackedAttestationStatement {
             alg: algorithm as i64,
@@ -1146,7 +1146,7 @@ impl<E: Env> CtapState<E> {
 
         let mut signature_data = auth_data.clone();
         signature_data.extend(client_data_hash);
-        let signature = private_key.sign_and_encode(&signature_data)?;
+        let signature = env.sign(&private_key, &signature_data)?;
 
         let cred_desc = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
@@ -1715,6 +1715,136 @@ mod test {
             pin_uv_auth_protocol: None,
             enterprise_attestation: None,
         }
+    }
+
+    #[test]
+    fn test_make_credential_key_generation_error() {
+        for parameter in SUPPORTED_CRED_PARAMS {
+            let mut env = TestEnv::default();
+            let mut state = CtapState::new(&mut env);
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.pub_key_cred_params = vec![parameter.clone()];
+            let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
+            env.set_key_generation_error(Some(error));
+            assert_eq!(
+                state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
+                Err(error)
+            );
+            assert_eq!(storage::count_credentials(&mut env), Ok(0));
+
+            env.set_key_generation_error(None);
+            assert!(
+                state
+                    .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn test_make_credential_signing_error() {
+        for (parameter, use_batch_attestation) in [
+            (ES256_CRED_PARAM, false),
+            (ES256_CRED_PARAM, true),
+            #[cfg(feature = "ed25519")]
+            (EDDSA_CRED_PARAM, false),
+        ] {
+            let mut env = TestEnv::default();
+            *env.customization_mut() = crate::api::customization::CustomizationImpl {
+                use_batch_attestation,
+                ..crate::api::customization::DEFAULT_CUSTOMIZATION
+            }
+            .into();
+            if use_batch_attestation {
+                env.persist()
+                    .set_attestation(
+                        AttestationId::Batch,
+                        Some(&Attestation {
+                            wrapped_private_key: vec![0x41; 32],
+                            certificate: vec![0x99; 20],
+                        }),
+                    )
+                    .unwrap();
+            }
+            let mut state = CtapState::new(&mut env);
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.pub_key_cred_params = vec![parameter];
+            let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
+            env.set_signing_error(Some(error));
+            assert_eq!(
+                state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
+                Err(error)
+            );
+            env.set_signing_error(None);
+            assert!(
+                state
+                    .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "config_command")]
+    fn test_enterprise_attestation_signing_error() {
+        let mut env = TestEnv::default();
+        env.customization_mut()
+            .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
+        let mut state = CtapState::new(&mut env);
+        test_helpers::enable_enterprise_attestation(&mut state, &mut env).unwrap();
+        let mut parameters = create_minimal_make_credential_parameters();
+        parameters.enterprise_attestation = Some(2);
+        let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
+        env.set_signing_error(Some(error));
+        assert_eq!(
+            state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
+            Err(error)
+        );
+        env.set_signing_error(None);
+        check_ep(
+            state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+            true,
+        );
+    }
+
+    #[test]
+    fn test_assertion_signing_error() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        for user_id in [1, 2] {
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.user.user_id = vec![user_id];
+            state
+                .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
+                .unwrap();
+        }
+        let parameters = || AuthenticatorGetAssertionParameters {
+            rp_id: String::from("example.com"),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions::default(),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        };
+        let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
+        env.set_signing_error(Some(error));
+        assert_eq!(
+            state.process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL),
+            Err(error)
+        );
+        env.set_signing_error(None);
+        state
+            .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
+            .unwrap();
+        env.set_signing_error(Some(error));
+        assert_eq!(state.process_get_next_assertion(&mut env), Err(error));
+
+        env.set_signing_error(None);
+        state
+            .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
+            .unwrap();
+        assert!(state.process_get_next_assertion(&mut env).is_ok());
     }
 
     fn create_make_credential_parameters_with_exclude_list(

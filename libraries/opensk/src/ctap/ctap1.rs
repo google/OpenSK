@@ -15,10 +15,11 @@
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{CtapState, filter_listed_credential};
 use crate::api::crypto::EC_FIELD_SIZE;
-use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
+use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey};
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
+use crate::ctap::data_formats::SignatureAlgorithm;
 use crate::env::{EcdsaPk, EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
@@ -243,9 +244,14 @@ impl Ctap1Command {
         challenge: [u8; 32],
         application: [u8; 32],
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let sk = EcdsaSk::<E>::random(env.rng());
-        let pk = sk.public_key();
-        let private_key = PrivateKey::<E>::Ecdsa(sk);
+        let private_key = env
+            .generate_private_key(SignatureAlgorithm::Es256)
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
+        let pk = match &private_key {
+            PrivateKey::Ecdsa(sk) => sk.public_key(),
+            #[cfg(feature = "ed25519")]
+            PrivateKey::Ed25519(_) => return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION),
+        };
         let wrapped_private_key = private_key.to_cbor();
         let credential_source = CredentialSource {
             wrapped_private_key,
@@ -289,9 +295,11 @@ impl Ctap1Command {
 
         let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = attestation_key.sign(&signature_data);
+        let signature = env
+            .sign(&PrivateKey::Ecdsa(attestation_key), &signature_data)
+            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
-        response.extend(signature.to_der());
+        response.extend(signature);
         Ok(response)
     }
 
@@ -344,8 +352,8 @@ impl Ctap1Command {
         signature_data.extend(&challenge);
         let private_key = PrivateKey::<E>::from_cbor(credential_source.wrapped_private_key)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = private_key
-            .sign_and_encode(&signature_data)
+        let signature = env
+            .sign(&private_key, &signature_data)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = signature_data[application.len()..application.len() + 5].to_vec();
@@ -417,6 +425,57 @@ mod test {
         };
         let key_handle = env.key_store().wrap_credential(credential_source).unwrap();
         (key_handle, rp_id_hash)
+    }
+
+    #[test]
+    fn test_register_crypto_error() {
+        for fail_generation in [true, false] {
+            let mut env = TestEnv::default();
+            env.persist()
+                .set_attestation(
+                    AttestationId::Batch,
+                    Some(&Attestation {
+                        wrapped_private_key: vec![0x41; 32],
+                        certificate: vec![0x99; 20],
+                    }),
+                )
+                .unwrap();
+            let error =
+                super::super::status_code::Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
+            if fail_generation {
+                env.set_key_generation_error(Some(error));
+            } else {
+                env.set_signing_error(Some(error));
+            }
+            assert_eq!(
+                Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]),
+                Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+            );
+            env.set_key_generation_error(None);
+            env.set_signing_error(None);
+            assert!(Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_authenticate_signing_error() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        let (key_handle, application) = create_wrapped_credential(&mut env);
+        let message = create_authenticate_message(
+            &application,
+            Ctap1Flags::DontEnforceUpAndSign,
+            &key_handle,
+        );
+        env.set_signing_error(Some(
+            super::super::status_code::Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
+        ));
+        assert_eq!(
+            Ctap1Command::process_command(&mut env, &message, &mut state),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+        env.set_signing_error(None);
+        assert!(Ctap1Command::process_command(&mut env, &message, &mut state).is_ok());
     }
 
     #[test]

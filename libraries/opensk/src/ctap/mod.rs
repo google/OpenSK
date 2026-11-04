@@ -1471,6 +1471,12 @@ impl<E: Env> CtapState<E> {
                 remaining_discoverable_credentials: Some(
                     storage::remaining_credentials(env)? as u64
                 ),
+                #[cfg(feature = "fingerprint")]
+                uv_count_since_last_pin_entry: Some(
+                    env.persist().uv_count_since_last_pin_entry()? as u64
+                ),
+                #[cfg(not(feature = "fingerprint"))]
+                uv_count_since_last_pin_entry: None,
             },
         ))
     }
@@ -1671,6 +1677,7 @@ mod test {
             0x11 => uv_attempts,
             0x12 => cfg!(feature = "fingerprint").then_some(0x02),
             0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
+            0x17 => cfg!(feature = "fingerprint").then_some(0),
         };
 
         let mut response_cbor = vec![0x00];
@@ -1690,6 +1697,21 @@ mod test {
                     response.pin_protocols,
                     Some(vec![PinUvAuthProtocol::V2 as u64])
                 );
+            }
+            _ => panic!("Invalid response type"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_get_info_uv_count_since_last_pin_entry() {
+        let mut env = TestEnv::default();
+        env.persist().incr_uv_count_since_last_pin_entry().unwrap();
+        let ctap_state = CtapState::new(&mut env);
+        let info_response = ctap_state.process_get_info(&mut env).unwrap();
+        match info_response {
+            ResponseData::AuthenticatorGetInfo(response) => {
+                assert_eq!(response.uv_count_since_last_pin_entry, Some(1));
             }
             _ => panic!("Invalid response type"),
         }

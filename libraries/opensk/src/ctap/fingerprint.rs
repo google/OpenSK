@@ -178,11 +178,13 @@ fn check_fingerprint_loop<E: Env>(
     for _ in 0..FINGERPRINT_TIMEOUT_LOOPS {
         match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
             Ok(()) => {
+                env.persist().incr_uv_count_since_last_pin_entry()?;
                 return storage::reset_uv_retries(env);
             }
             Err(error) => {
                 match error {
                     FingerprintCheckError::NoMatch | FingerprintCheckError::Other => {
+                        env.persist().incr_uv_count_since_last_pin_entry()?;
                         storage::decr_uv_retries(env)?;
                         if storage::uv_retries(env)? == 0 {
                             return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
@@ -969,5 +971,22 @@ mod test {
             template_friendly_name: Some(String::from("Name")),
         }];
         assert_eq!(env.persist().template_infos(), Ok(expected));
+    }
+
+    #[test]
+    fn test_uv_count_since_last_pin_entry() {
+        let mut env = TestEnv::default();
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(0));
+
+        env.persist().store_template_id(vec![0x00]).unwrap();
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(1));
+
+        env.create_fingerprint().unwrap();
+        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(2));
     }
 }

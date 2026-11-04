@@ -151,6 +151,7 @@ pub struct AuthenticatorGetInfoResponse {
     pub certifications: Option<Vec<(String, i64)>>,
     pub remaining_discoverable_credentials: Option<u64>,
     // - 0x15: vendorPrototypeConfigCommands missing as we don't support it.
+    pub uv_count_since_last_pin_entry: Option<u64>,
 }
 
 impl From<AuthenticatorGetInfoResponse> for cbor::Value {
@@ -176,6 +177,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             uv_modality,
             certifications,
             remaining_discoverable_credentials,
+            uv_count_since_last_pin_entry,
         } = get_info_response;
 
         let options_cbor: Option<cbor::Value> = options.map(|options| {
@@ -215,6 +217,7 @@ impl From<AuthenticatorGetInfoResponse> for cbor::Value {
             0x12 => uv_modality,
             0x13 => certifications_cbor,
             0x14 => remaining_discoverable_credentials,
+            0x17 => uv_count_since_last_pin_entry,
         }
     }
 }
@@ -458,6 +461,7 @@ mod test {
             uv_modality: None,
             certifications: None,
             remaining_discoverable_credentials: None,
+            uv_count_since_last_pin_entry: None,
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
@@ -492,6 +496,7 @@ mod test {
             uv_modality: Some(1),
             certifications: Some(vec![(String::from("example-cert"), 1)]),
             remaining_discoverable_credentials: Some(150),
+            uv_count_since_last_pin_entry: Some(3),
         };
         let response_cbor: Option<cbor::Value> =
             ResponseData::AuthenticatorGetInfo(get_info_response).into();
@@ -516,6 +521,7 @@ mod test {
             0x12 => 1,
             0x13 => cbor_map! {"example-cert" => 1},
             0x14 => 150,
+            0x17 => 3,
         };
         assert_eq!(response_cbor, Some(expected_cbor));
     }

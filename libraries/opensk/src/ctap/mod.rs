@@ -968,7 +968,7 @@ impl<E: Env> CtapState<E> {
         // We decide on the algorithm early, but delay key creation since it takes time.
         // We rather do that later so all intermediate checks may return faster.
         let private_key = env.generate_private_key(algorithm)?;
-        let credential_id = if options.rk {
+        let (credential_id, credential_to_store) = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
                 key_type: PublicKeyCredentialType::PublicKey,
@@ -992,8 +992,7 @@ impl<E: Env> CtapState<E> {
                 cred_blob,
                 large_blob_key: large_blob_key.clone(),
             };
-            storage::store_credential(env, credential_source)?;
-            random_id
+            (random_id, Some(credential_source))
         } else {
             let credential_source = CredentialSource {
                 wrapped_private_key: private_key.to_cbor(),
@@ -1001,9 +1000,11 @@ impl<E: Env> CtapState<E> {
                 cred_protect_policy,
                 cred_blob,
             };
-            env.key_store()
+            let credential_id = env
+                .key_store()
                 .wrap_credential(credential_source)
-                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?
+                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
+            (credential_id, None)
         };
 
         let mut auth_data = self.generate_auth_data(env, &rp_id_hash, flags)?;
@@ -1072,6 +1073,10 @@ impl<E: Env> CtapState<E> {
             ecdaa_key_id: None,
         };
         let ep_att = if ep_att { Some(true) } else { None };
+        // A failed signature must not replace a credential that already works.
+        if let Some(credential) = credential_to_store {
+            storage::store_credential(env, credential)?;
+        }
         Ok(ResponseData::AuthenticatorMakeCredential(
             AuthenticatorMakeCredentialResponse {
                 fmt: String::from("packed"),
@@ -1355,21 +1360,30 @@ impl<E: Env> CtapState<E> {
                 .set_command(env, assertion_state, channel);
             number_of_credentials
         };
-        self.assertion_response(
+        let response = self.assertion_response(
             env,
             credential,
             assertion_input,
             number_of_credentials,
             false,
-        )
+        );
+        if response.is_err() {
+            self.stateful_command_permission.clear();
+        }
+        response
     }
 
     fn process_get_next_assertion(&mut self, env: &mut E) -> CtapResult<ResponseData> {
         let (assertion_input, credential_key) = self
             .stateful_command_permission
             .next_assertion_credential(env)?;
-        let credential = storage::get_credential(env, credential_key)?;
-        self.assertion_response(env, credential, assertion_input, None, true)
+        let response = storage::get_credential(env, credential_key).and_then(|credential| {
+            self.assertion_response(env, credential, assertion_input, None, true)
+        });
+        if response.is_err() {
+            self.stateful_command_permission.clear();
+        }
+        response
     }
 
     fn process_get_info(&self, env: &mut E) -> CtapResult<ResponseData> {
@@ -1769,11 +1783,28 @@ mod test {
             let mut state = CtapState::new(&mut env);
             let mut parameters = create_minimal_make_credential_parameters();
             parameters.pub_key_cred_params = vec![parameter];
+            state
+                .process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL)
+                .unwrap();
+            let mut iter_result = Ok(());
+            let old_id = storage::iter_credentials(&mut env, &mut iter_result)
+                .unwrap()
+                .next()
+                .unwrap()
+                .1
+                .credential_id;
+            assert_eq!(iter_result, Ok(()));
             let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
             env.set_signing_error(Some(error));
             assert_eq!(
                 state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
                 Err(error)
+            );
+            assert_eq!(storage::count_credentials(&mut env), Ok(1));
+            assert!(
+                storage::find_credential(&mut env, "example.com", &old_id)
+                    .unwrap()
+                    .is_some()
             );
             env.set_signing_error(None);
             assert!(
@@ -1811,7 +1842,7 @@ mod test {
     fn test_assertion_signing_error() {
         let mut env = TestEnv::default();
         let mut state = CtapState::new(&mut env);
-        for user_id in [1, 2] {
+        for user_id in [1, 2, 3] {
             let mut parameters = create_minimal_make_credential_parameters();
             parameters.user.user_id = vec![user_id];
             state
@@ -1833,12 +1864,20 @@ mod test {
             state.process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL),
             Err(error)
         );
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
         env.set_signing_error(None);
         state
             .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
             .unwrap();
         env.set_signing_error(Some(error));
         assert_eq!(state.process_get_next_assertion(&mut env), Err(error));
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
 
         env.set_signing_error(None);
         state

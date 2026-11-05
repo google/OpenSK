@@ -40,7 +40,6 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 #[cfg(test)]
 use enum_iterator::{Sequence, all};
-use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
 ///
@@ -107,7 +106,7 @@ fn check_and_store_new_pin<E: Env>(
         && let Some(old_pin_hash) = env.persist().pin_hash()?
     {
         let old_pin_hash = env.key_store().decrypt_pin_hash(&old_pin_hash)?;
-        if bool::from(old_pin_hash.ct_eq(new_pin_hash)) {
+        if env.persist().verify_pin_hash(&old_pin_hash, new_pin_hash)? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
         }
     }
@@ -213,9 +212,13 @@ impl<E: Env> ClientPin<E> {
                 }
                 storage::decr_pin_retries(env)?;
                 let pin_hash = env.key_store().decrypt_pin_hash(&pin_hash)?;
-                let is_valid = shared_secret
-                    .decrypt(&pin_hash_enc)
-                    .is_ok_and(|pin_hash_dec| bool::from(pin_hash.ct_eq(&pin_hash_dec)));
+                let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
+                    Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
+                        Ok(candidate) => env.persist().verify_pin_hash(&pin_hash, candidate)?,
+                        Err(_) => false,
+                    },
+                    Err(_) => false,
+                };
 
                 if !is_valid {
                     self.get_mut_pin_protocol(pin_uv_auth_protocol)
@@ -948,6 +951,66 @@ mod test {
     #[test]
     fn test_verify_pin_hash_enc_v1() {
         test_helper_verify_pin_hash_enc(PinUvAuthProtocol::V1);
+    }
+
+    #[test]
+    fn test_custom_pin_verification_and_errors() {
+        let mut env = TestEnv::default();
+        let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
+        let protocol = PinUvAuthProtocol::V1;
+        let pin_protocol = client_pin.get_pin_protocol(protocol);
+        let shared_secret = pin_protocol
+            .decapsulate(pin_protocol.get_public_key(), protocol)
+            .unwrap();
+        // TestEnv's key store is the identity for PIN encryption.
+        env.persist().set_pin(&[0x11; 16], 4).unwrap();
+        env.pin_verifier = Some(Box::new(|stored, candidate| {
+            assert_eq!(*stored, [0x11; 16]);
+            Ok(*candidate == [0x22; 16])
+        }));
+
+        let candidate = shared_secret.encrypt(&mut env, &[0x22; 16]).unwrap();
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(&mut env, protocol, &shared_secret, candidate),
+            Ok(())
+        );
+        let candidate = shared_secret.encrypt(&mut env, &[0x11; 16]).unwrap();
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(&mut env, protocol, &shared_secret, candidate),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+
+        env.pin_verifier = Some(Box::new(|_, _| {
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        }));
+        let candidate = shared_secret.encrypt(&mut env, &[0x22; 16]).unwrap();
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(&mut env, protocol, &shared_secret, candidate),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+    }
+
+    #[test]
+    fn test_custom_pin_verification_during_forced_change() {
+        let mut env = TestEnv::default();
+        let protocol = PinUvAuthProtocol::V1;
+        let pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
+        let shared_secret = pin_protocol
+            .decapsulate(pin_protocol.get_public_key(), protocol)
+            .unwrap();
+        env.persist().set_pin(&[0x11; 16], 4).unwrap();
+        env.persist().force_pin_change().unwrap();
+        env.pin_verifier = Some(Box::new(|stored, candidate| {
+            assert_eq!(*stored, [0x11; 16]);
+            assert_eq!(&candidate[..], &Sha::<TestEnv>::digest(b"1234")[..16]);
+            Ok(true)
+        }));
+        let pin = encrypt_pin(&shared_secret, b"1234".to_vec());
+        assert_eq!(
+            check_and_store_new_pin(&mut env, &shared_secret, pin),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
+        );
+        assert_eq!(env.persist().pin_hash().unwrap(), Some([0x11; 16]));
     }
 
     #[test]

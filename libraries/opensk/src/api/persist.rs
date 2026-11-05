@@ -33,6 +33,7 @@ use core::convert::TryFrom;
 use enum_iterator::{Sequence, all};
 use sk_cbor as cbor;
 use sk_cbor::destructure_cbor_map;
+use subtle::ConstantTimeEq;
 
 pub const AAGUID_LENGTH: usize = 16;
 
@@ -162,6 +163,25 @@ pub trait Persist {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         Ok(Some(*array_ref![pin_properties, 1, PIN_AUTH_LENGTH]))
+    }
+
+    /// Checks whether a PIN hash matches the configured PIN.
+    ///
+    /// `stored` is the value returned by [`Persist::pin_hash`] after decryption
+    /// by the key store. `candidate` is the first 16 bytes of SHA-256 of the PIN
+    /// being checked. Implementations may use `stored` as an opaque marker and
+    /// delegate the comparison to secure hardware instead of storing a PIN hash.
+    ///
+    /// This is also called when checking whether a new PIN is the same as the
+    /// old PIN during a forced PIN change. An error must not be reported as a
+    /// mismatch. Implementations should avoid leaking information about the PIN
+    /// through timing or error details.
+    fn verify_pin_hash(
+        &mut self,
+        stored: &[u8; PIN_AUTH_LENGTH],
+        candidate: &[u8; PIN_AUTH_LENGTH],
+    ) -> CtapResult<bool> {
+        Ok(bool::from(stored.ct_eq(candidate)))
     }
 
     /// Returns the length of the currently set PIN if defined.
@@ -675,6 +695,28 @@ mod test {
     use crate::env::Env;
     use crate::env::test::TestEnv;
     use sk_cbor::cbor_map;
+
+    #[test]
+    fn test_default_verify_pin_hash() {
+        struct DefaultVerifier;
+        impl Persist for DefaultVerifier {
+            fn find(&self, _: usize) -> CtapResult<Option<Vec<u8>>> {
+                unreachable!()
+            }
+            fn insert(&mut self, _: usize, _: &[u8]) -> CtapResult<()> {
+                unreachable!()
+            }
+            fn remove(&mut self, _: usize) -> CtapResult<()> {
+                unreachable!()
+            }
+            fn iter(&self) -> CtapResult<PersistIter<'_>> {
+                unreachable!()
+            }
+        }
+        let mut verifier = DefaultVerifier;
+        assert_eq!(verifier.verify_pin_hash(&[1; 16], &[1; 16]), Ok(true));
+        assert_eq!(verifier.verify_pin_hash(&[1; 16], &[2; 16]), Ok(false));
+    }
 
     #[test]
     fn test_commit_large_blob_array_too_large() {

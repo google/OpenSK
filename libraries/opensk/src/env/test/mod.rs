@@ -43,6 +43,8 @@ pub struct TestEnv {
     customization: TestCustomization,
     clock: TestClock,
     soft_reset: bool,
+    #[cfg(test)]
+    pub pin_verifier: Option<Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> CtapResult<bool>>>,
     #[cfg(feature = "fingerprint")]
     fingerprint: TestFingerprint,
 }
@@ -130,6 +132,15 @@ fn new_storage() -> BufferStorage {
 }
 
 impl Persist for TestEnv {
+    #[cfg(test)]
+    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> CtapResult<bool> {
+        use subtle::ConstantTimeEq;
+        match &mut self.pin_verifier {
+            Some(verify) => verify(stored, candidate),
+            None => Ok(bool::from(stored.ct_eq(candidate))),
+        }
+    }
+
     fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>> {
         Ok(self.store.find(key)?)
     }
@@ -181,6 +192,8 @@ impl Default for TestEnv {
             customization,
             clock,
             soft_reset: false,
+            #[cfg(test)]
+            pin_verifier: None,
             #[cfg(feature = "fingerprint")]
             fingerprint,
         }

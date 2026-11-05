@@ -15,9 +15,9 @@
 use alloc::vec::Vec;
 
 use opensk::api::crypto::EC_FIELD_SIZE;
+use opensk::api::crypto::ec_signing::Error;
 use opensk::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature, Ecdsa};
 use opensk::api::rng::Rng;
-use opensk::api::crypto::ec_signing::Error;
 use wasefire::crypto::ecdsa::{P256, Private, Public};
 
 use crate::env::WasefireEnv;

@@ -1739,14 +1739,14 @@ mod test {
             let mut parameters = create_minimal_make_credential_parameters();
             parameters.pub_key_cred_params = vec![parameter.clone()];
             let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-            env.set_key_generation_error(true);
+            let failure = crate::env::test::crypto::fail_key_generation();
             assert_eq!(
                 state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
                 Err(error)
             );
             assert_eq!(storage::count_credentials(&mut env), Ok(0));
 
-            env.set_key_generation_error(false);
+            drop(failure);
             assert!(
                 state
                     .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
@@ -1795,7 +1795,7 @@ mod test {
                 .credential_id;
             assert_eq!(iter_result, Ok(()));
             let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-            env.set_signing_error(true);
+            let failure = crate::env::test::crypto::fail_signing();
             assert_eq!(
                 state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
                 Err(error)
@@ -1806,7 +1806,7 @@ mod test {
                     .unwrap()
                     .is_some()
             );
-            env.set_signing_error(false);
+            drop(failure);
             assert!(
                 state
                     .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
@@ -1826,12 +1826,12 @@ mod test {
         let mut parameters = create_minimal_make_credential_parameters();
         parameters.enterprise_attestation = Some(2);
         let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-        env.set_signing_error(true);
+        let failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
             state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
             Err(error)
         );
-        env.set_signing_error(false);
+        drop(failure);
         check_ep(
             state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
             true,
@@ -1859,7 +1859,7 @@ mod test {
             pin_uv_auth_protocol: None,
         };
         let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-        env.set_signing_error(true);
+        let failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
             state.process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL),
             Err(error)
@@ -1868,18 +1868,18 @@ mod test {
             state.process_get_next_assertion(&mut env),
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         );
-        env.set_signing_error(false);
+        drop(failure);
         state
             .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
             .unwrap();
-        env.set_signing_error(true);
+        let failure = crate::env::test::crypto::fail_signing();
         assert_eq!(state.process_get_next_assertion(&mut env), Err(error));
         assert_eq!(
             state.process_get_next_assertion(&mut env),
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         );
 
-        env.set_signing_error(false);
+        drop(failure);
         state
             .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
             .unwrap();

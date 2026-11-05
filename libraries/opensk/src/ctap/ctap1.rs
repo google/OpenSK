@@ -439,17 +439,16 @@ mod test {
                     }),
                 )
                 .unwrap();
-            if fail_generation {
-                env.set_key_generation_error(true);
+            let failure = if fail_generation {
+                crate::env::test::crypto::fail_key_generation()
             } else {
-                env.set_signing_error(true);
-            }
+                crate::env::test::crypto::fail_signing()
+            };
             assert_eq!(
                 Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]),
                 Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
             );
-            env.set_key_generation_error(false);
-            env.set_signing_error(false);
+            drop(failure);
             assert!(Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]).is_ok());
         }
     }
@@ -464,12 +463,12 @@ mod test {
             Ctap1Flags::DontEnforceUpAndSign,
             &key_handle,
         );
-        env.set_signing_error(true);
+        let failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
             Ctap1Command::process_command(&mut env, &message, &mut state),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
-        env.set_signing_error(false);
+        drop(failure);
         assert!(Ctap1Command::process_command(&mut env, &message, &mut state).is_ok());
     }
 

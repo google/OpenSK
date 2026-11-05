@@ -14,6 +14,7 @@
 
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
+#[cfg(not(test))]
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 #[cfg(feature = "fingerprint")]
@@ -34,6 +35,8 @@ use rand::rngs::StdRng;
 use std::sync::{Arc, Mutex};
 use wasefire_store::{BufferOptions, BufferStorage, Store};
 
+#[cfg(test)]
+pub(crate) mod crypto;
 pub mod customization;
 
 pub struct TestEnv {
@@ -200,16 +203,6 @@ impl TestEnv {
         self.soft_reset = value;
     }
 
-    #[cfg(test)]
-    pub fn set_key_generation_error(&mut self, fail: bool) {
-        crate::api::crypto::software_crypto::fail_key_generation(fail);
-    }
-
-    #[cfg(test)]
-    pub fn set_signing_error(&mut self, fail: bool) {
-        crate::api::crypto::software_crypto::fail_signing(fail);
-    }
-
     #[cfg(feature = "fingerprint")]
     pub fn create_fingerprint(&mut self) -> CtapResult<Vec<u8>> {
         self.fingerprint().prepare_enrollment()?;
@@ -320,7 +313,10 @@ impl Env for TestEnv {
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
+    #[cfg(not(test))]
     type Crypto = SoftwareCrypto;
+    #[cfg(test)]
+    type Crypto = crypto::TestCrypto;
     #[cfg(feature = "fingerprint")]
     type Fingerprint = TestFingerprint;
 

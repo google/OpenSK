@@ -137,10 +137,6 @@ impl ec_signing::EcSecretKey for SoftwareEcdsaSecretKey {
     type Signature = SoftwareEcdsaSignature;
 
     fn random(rng: &mut impl Rng) -> Result<Self, ec_signing::Error> {
-        #[cfg(test)]
-        if KEY_GENERATION_FAILURE.with(|v| v.get()) {
-            return Err(ec_signing::Error);
-        }
         let signing_key = p256::ecdsa::SigningKey::generate_from_rng(rng);
         Ok(SoftwareEcdsaSecretKey { signing_key })
     }
@@ -151,10 +147,6 @@ impl ec_signing::EcSecretKey for SoftwareEcdsaSecretKey {
     }
 
     fn sign(&self, message: &[u8]) -> Result<Self::Signature, ec_signing::Error> {
-        #[cfg(test)]
-        if SIGNING_FAILURE.with(|v| v.get()) {
-            return Err(ec_signing::Error);
-        }
         let signature = self.signing_key.sign(message);
         Ok(SoftwareEcdsaSignature { signature })
     }
@@ -211,10 +203,6 @@ impl ec_signing::EdSecretKey for SoftwareEd25519SecretKey {
     type Signature = SoftwareEd25519Signature;
 
     fn random(rng: &mut impl Rng) -> Result<Self, ec_signing::Error> {
-        #[cfg(test)]
-        if KEY_GENERATION_FAILURE.with(|v| v.get()) {
-            return Err(ec_signing::Error);
-        }
         let mut bytes = [0; 32];
         rng.fill_bytes(&mut bytes[..]);
         let seed = ed25519_compact::Seed::from_slice(&bytes).unwrap();
@@ -229,10 +217,6 @@ impl ec_signing::EdSecretKey for SoftwareEd25519SecretKey {
     }
 
     fn sign(&self, message: &[u8]) -> Result<Self::Signature, ec_signing::Error> {
-        #[cfg(test)]
-        if SIGNING_FAILURE.with(|v| v.get()) {
-            return Err(ec_signing::Error);
-        }
         let signature = self.signing_key.sign(message, None);
         Ok(SoftwareEd25519Signature { signature })
     }
@@ -365,18 +349,4 @@ impl Aes256 for SoftwareAes256 {
             decryptor.decrypt_block(block.try_into().unwrap());
         }
     }
-}
-
-#[cfg(test)]
-thread_local! {
-    static KEY_GENERATION_FAILURE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
-    static SIGNING_FAILURE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
-}
-#[cfg(test)]
-pub(crate) fn fail_key_generation(value: bool) {
-    KEY_GENERATION_FAILURE.with(|v| v.set(value));
-}
-#[cfg(test)]
-pub(crate) fn fail_signing(value: bool) {
-    SIGNING_FAILURE.with(|v| v.set(value));
 }

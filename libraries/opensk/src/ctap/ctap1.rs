@@ -244,8 +244,7 @@ impl Ctap1Command {
         challenge: [u8; 32],
         application: [u8; 32],
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let private_key = env
-            .generate_private_key(SignatureAlgorithm::Es256)
+        let private_key = PrivateKey::new(env, SignatureAlgorithm::Es256)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
         let pk = match &private_key {
             PrivateKey::Ecdsa(sk) => sk.public_key(),
@@ -295,8 +294,8 @@ impl Ctap1Command {
 
         let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = env
-            .sign(&PrivateKey::Ecdsa(attestation_key), &signature_data)
+        let signature = PrivateKey::<E>::Ecdsa(attestation_key)
+            .sign_and_encode(&signature_data)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         response.extend(signature);
@@ -352,8 +351,8 @@ impl Ctap1Command {
         signature_data.extend(&challenge);
         let private_key = PrivateKey::<E>::from_cbor(credential_source.wrapped_private_key)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = env
-            .sign(&private_key, &signature_data)
+        let signature = private_key
+            .sign_and_encode(&signature_data)
             .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
 
         let mut response = signature_data[application.len()..application.len() + 5].to_vec();
@@ -414,7 +413,7 @@ mod test {
 
     /// Creates an example wrapped credential and RP ID hash.
     fn create_wrapped_credential(env: &mut TestEnv) -> (Vec<u8>, [u8; 32]) {
-        let private_key = PrivateKey::new_ecdsa(env);
+        let private_key = PrivateKey::new_ecdsa(env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {
@@ -440,19 +439,17 @@ mod test {
                     }),
                 )
                 .unwrap();
-            let error =
-                super::super::status_code::Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE;
             if fail_generation {
-                env.set_key_generation_error(Some(error));
+                env.set_key_generation_error(true);
             } else {
-                env.set_signing_error(Some(error));
+                env.set_signing_error(true);
             }
             assert_eq!(
                 Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]),
                 Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
             );
-            env.set_key_generation_error(None);
-            env.set_signing_error(None);
+            env.set_key_generation_error(false);
+            env.set_signing_error(false);
             assert!(Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]).is_ok());
         }
     }
@@ -467,14 +464,12 @@ mod test {
             Ctap1Flags::DontEnforceUpAndSign,
             &key_handle,
         );
-        env.set_signing_error(Some(
-            super::super::status_code::Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE,
-        ));
+        env.set_signing_error(true);
         assert_eq!(
             Ctap1Command::process_command(&mut env, &message, &mut state),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
-        env.set_signing_error(None);
+        env.set_signing_error(false);
         assert!(Ctap1Command::process_command(&mut env, &message, &mut state).is_ok());
     }
 
@@ -804,7 +799,7 @@ mod test {
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
 
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {

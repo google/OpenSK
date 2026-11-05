@@ -22,10 +22,9 @@ use crate::api::fingerprint::{
 };
 use crate::api::key_store;
 use crate::api::persist::{Persist, PersistIter};
-use crate::api::private_key::PrivateKey;
 use crate::api::rng::Rng;
 use crate::api::user_presence::{UserPresence, UserPresenceResult, UserPresenceWaitResult};
-use crate::ctap::data_formats::SignatureAlgorithm;
+#[cfg(feature = "fingerprint")]
 use crate::ctap::status_code::Ctap2StatusCode;
 use crate::ctap::status_code::CtapResult;
 use crate::env::Env;
@@ -44,8 +43,6 @@ pub struct TestEnv {
     customization: TestCustomization,
     clock: TestClock,
     soft_reset: bool,
-    key_generation_error: Option<Ctap2StatusCode>,
-    signing_error: Option<Ctap2StatusCode>,
     #[cfg(feature = "fingerprint")]
     fingerprint: TestFingerprint,
 }
@@ -184,8 +181,6 @@ impl Default for TestEnv {
             customization,
             clock,
             soft_reset: false,
-            key_generation_error: None,
-            signing_error: None,
             #[cfg(feature = "fingerprint")]
             fingerprint,
         }
@@ -205,12 +200,14 @@ impl TestEnv {
         self.soft_reset = value;
     }
 
-    pub fn set_key_generation_error(&mut self, error: Option<Ctap2StatusCode>) {
-        self.key_generation_error = error;
+    #[cfg(test)]
+    pub fn set_key_generation_error(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::fail_key_generation(fail);
     }
 
-    pub fn set_signing_error(&mut self, error: Option<Ctap2StatusCode>) {
-        self.signing_error = error;
+    #[cfg(test)]
+    pub fn set_signing_error(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::fail_signing(fail);
     }
 
     #[cfg(feature = "fingerprint")]
@@ -329,26 +326,6 @@ impl Env for TestEnv {
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
-    }
-
-    fn generate_private_key(
-        &mut self,
-        algorithm: SignatureAlgorithm,
-    ) -> CtapResult<PrivateKey<Self>> {
-        if algorithm == SignatureAlgorithm::Unknown {
-            return Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM);
-        }
-        if let Some(error) = self.key_generation_error {
-            return Err(error);
-        }
-        Ok(PrivateKey::new(self, algorithm))
-    }
-
-    fn sign(&mut self, key: &PrivateKey<Self>, message: &[u8]) -> CtapResult<Vec<u8>> {
-        if let Some(error) = self.signing_error {
-            return Err(error);
-        }
-        key.sign_and_encode(message)
     }
 
     fn user_presence(&mut self) -> &mut Self::UserPresence {

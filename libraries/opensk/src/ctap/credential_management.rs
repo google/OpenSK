@@ -390,7 +390,7 @@ mod test {
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
     fn create_credential_source(env: &mut TestEnv) -> PublicKeyCredentialSource {
-        let private_key = PrivateKey::new_ecdsa(env);
+        let private_key = PrivateKey::new_ecdsa(env).unwrap();
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),

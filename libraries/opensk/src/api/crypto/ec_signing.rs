@@ -31,19 +31,27 @@ pub trait Ed25519 {
     type Signature: EdSignature;
 }
 
+/// A signing operation or signing key generation failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Error;
+
 /// ECDSA signing key.
 pub trait EcSecretKey: Sized {
     type PublicKey: EcPublicKey;
     type Signature: EcSignature;
 
     /// Generates a new random secret key.
-    fn random(rng: &mut impl Rng) -> Self;
+    ///
+    /// Returns an error if the key cannot be generated.
+    fn random(rng: &mut impl Rng) -> Result<Self, Error>;
 
     /// Computes the corresponding public key for this private key.
     fn public_key(&self) -> Self::PublicKey;
 
     /// Signs the message.
-    fn sign(&self, message: &[u8]) -> Self::Signature;
+    ///
+    /// Returns an error if the message cannot be signed.
+    fn sign(&self, message: &[u8]) -> Result<Self::Signature, Error>;
 
     /// Returns the wrapped signing key.
     ///
@@ -85,13 +93,17 @@ pub trait EdSecretKey: Sized {
     type Signature: EdSignature;
 
     /// Generates a new random secret key.
-    fn random(rng: &mut impl Rng) -> Self;
+    ///
+    /// Returns an error if the key cannot be generated.
+    fn random(rng: &mut impl Rng) -> Result<Self, Error>;
 
     /// Computes the corresponding public key for this private key.
     fn public_key(&self) -> Self::PublicKey;
 
     /// Signs the message.
-    fn sign(&self, message: &[u8]) -> Self::Signature;
+    ///
+    /// Returns an error if the message cannot be signed.
+    fn sign(&self, message: &[u8]) -> Result<Self::Signature, Error>;
 
     /// Returns the wrapped signing key.
     ///

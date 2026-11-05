@@ -2082,7 +2082,7 @@ mod test {
     #[test]
     fn test_from_cose_key_ecdsa() {
         let mut env = TestEnv::default();
-        let ecdsa_sk = EcdsaSk::<TestEnv>::random(env.rng());
+        let ecdsa_sk = EcdsaSk::<TestEnv>::random(env.rng()).unwrap();
         let ecdsa_pk = ecdsa_sk.public_key();
         let mut x_bytes = [0u8; EC_FIELD_SIZE];
         let mut y_bytes = [0u8; EC_FIELD_SIZE];
@@ -2097,7 +2097,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_from_cose_key_ed25519() {
         let mut env = TestEnv::default();
-        let ed25519_sk = Ed25519Sk::<TestEnv>::random(env.rng());
+        let ed25519_sk = Ed25519Sk::<TestEnv>::random(env.rng()).unwrap();
         let ed25519_pk = ed25519_sk.public_key();
         let mut x_bytes = [0u8; EC_FIELD_SIZE];
         ed25519_pk.to_slice(&mut x_bytes);
@@ -2301,7 +2301,7 @@ mod test {
     #[test]
     fn test_credential_source_cbor_round_trip() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),

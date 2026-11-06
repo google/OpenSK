@@ -25,39 +25,50 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 use core::marker::PhantomData;
 
-// The signing traits provide no environment or context when signing. Thread-local
-// controls isolate parallel tests; they affect every TestCrypto key on this thread.
+// The signing traits provide no environment or context when signing. Counts allow
+// nested guards to be dropped in any order without leaving failures enabled.
 thread_local! {
-    static FAIL_KEY_GENERATION: Cell<bool> = const { Cell::new(false) };
-    static FAIL_SIGNING: Cell<bool> = const { Cell::new(false) };
+    static FAIL_KEY_GENERATION: Cell<usize> = const { Cell::new(0) };
+    static FAIL_SIGNING: Cell<usize> = const { Cell::new(0) };
 }
 
-/// Restores the previous setting even if the test panics. It cannot move threads.
+/// Keeps a failure enabled on this thread until dropped, including during unwinding.
+///
+/// Guards for the same failure may be nested or dropped in any order. A guard
+/// cannot be sent to another thread. Deliberately leaking it leaves the failure
+/// enabled for the rest of the thread's lifetime.
+#[must_use = "the failure is only enabled while the guard is alive"]
 pub(crate) struct FailureGuard {
-    flag: &'static std::thread::LocalKey<Cell<bool>>,
-    previous: bool,
+    count: &'static std::thread::LocalKey<Cell<usize>>,
     _not_send: PhantomData<Rc<()>>,
 }
 
 impl Drop for FailureGuard {
     fn drop(&mut self) {
-        self.flag.with(|flag| flag.set(self.previous));
+        self.count.with(|count| count.set(count.get() - 1));
     }
 }
 
-fn fail(flag: &'static std::thread::LocalKey<Cell<bool>>) -> FailureGuard {
-    let previous = flag.with(|flag| flag.replace(true));
+fn fail(count: &'static std::thread::LocalKey<Cell<usize>>) -> FailureGuard {
+    count.with(|count| count.set(count.get().checked_add(1).unwrap()));
     FailureGuard {
-        flag,
-        previous,
+        count,
         _not_send: PhantomData,
     }
 }
 
+/// Makes all `TestCrypto` key generation fail on the current thread while the
+/// returned guard is alive. Other threads, including parallel Cargo tests, are
+/// unaffected; a spawned thread must enable the failure itself. All environments
+/// on this thread share the setting, including interleaved tasks. Does not affect
+/// signing, key import, or production crypto implementations.
 pub(crate) fn fail_key_generation() -> FailureGuard {
     fail(&FAIL_KEY_GENERATION)
 }
 
+/// Makes all `TestCrypto` signing fail on the current thread while the returned
+/// guard is alive. The thread and environment scope is the same as for
+/// [`fail_key_generation`]; key generation remains unaffected.
 pub(crate) fn fail_signing() -> FailureGuard {
     fail(&FAIL_SIGNING)
 }
@@ -88,7 +99,7 @@ impl EcSecretKey for TestEcdsaSecretKey {
     type Signature = software_crypto::SoftwareEcdsaSignature;
 
     fn random(rng: &mut impl Rng) -> Result<Self, ec_signing::Error> {
-        if FAIL_KEY_GENERATION.with(Cell::get) {
+        if FAIL_KEY_GENERATION.with(Cell::get) != 0 {
             return Err(ec_signing::Error);
         }
         software_crypto::SoftwareEcdsaSecretKey::random(rng).map(Self)
@@ -97,7 +108,7 @@ impl EcSecretKey for TestEcdsaSecretKey {
         self.0.public_key()
     }
     fn sign(&self, message: &[u8]) -> Result<Self::Signature, ec_signing::Error> {
-        if FAIL_SIGNING.with(Cell::get) {
+        if FAIL_SIGNING.with(Cell::get) != 0 {
             return Err(ec_signing::Error);
         }
         self.0.sign(message)
@@ -128,7 +139,7 @@ impl EdSecretKey for TestEd25519SecretKey {
     type Signature = software_crypto::SoftwareEd25519Signature;
 
     fn random(rng: &mut impl Rng) -> Result<Self, ec_signing::Error> {
-        if FAIL_KEY_GENERATION.with(Cell::get) {
+        if FAIL_KEY_GENERATION.with(Cell::get) != 0 {
             return Err(ec_signing::Error);
         }
         software_crypto::SoftwareEd25519SecretKey::random(rng).map(Self)
@@ -137,7 +148,7 @@ impl EdSecretKey for TestEd25519SecretKey {
         self.0.public_key()
     }
     fn sign(&self, message: &[u8]) -> Result<Self::Signature, ec_signing::Error> {
-        if FAIL_SIGNING.with(Cell::get) {
+        if FAIL_SIGNING.with(Cell::get) != 0 {
             return Err(ec_signing::Error);
         }
         self.0.sign(message)
@@ -152,28 +163,45 @@ impl EdSecretKey for TestEd25519SecretKey {
 
 #[test]
 fn failure_guard_restores_nested_settings_and_after_unwind() {
-    assert!(!FAIL_SIGNING.with(Cell::get));
+    assert_eq!(FAIL_SIGNING.with(Cell::get), 0);
     {
-        let _outer = fail_signing();
-        {
-            let _inner = fail_signing();
-            assert!(FAIL_SIGNING.with(Cell::get));
-        }
-        assert!(FAIL_SIGNING.with(Cell::get));
+        let outer = fail_signing();
+        let inner = fail_signing();
+        drop(outer);
+        assert_eq!(FAIL_SIGNING.with(Cell::get), 1);
+        drop(inner);
     }
-    assert!(!FAIL_SIGNING.with(Cell::get));
+    assert_eq!(FAIL_SIGNING.with(Cell::get), 0);
     let _ = std::panic::catch_unwind(|| {
         let _failure = fail_signing();
         panic!("simulated test failure");
     });
-    assert!(!FAIL_SIGNING.with(Cell::get));
+    assert_eq!(FAIL_SIGNING.with(Cell::get), 0);
 }
 
 #[test]
 fn failure_setting_is_local_to_thread() {
-    let _failure = fail_signing();
-    assert!(FAIL_SIGNING.with(Cell::get));
-    std::thread::spawn(|| assert!(!FAIL_SIGNING.with(Cell::get)))
-        .join()
-        .unwrap();
+    use rand::SeedableRng;
+    use std::sync::{Arc, Barrier};
+
+    let barrier = Arc::new(Barrier::new(2));
+    let worker_barrier = barrier.clone();
+    let worker = std::thread::spawn(move || {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let key = TestEcdsaSecretKey::random(&mut rng).unwrap();
+        let _generation_failure = fail_key_generation();
+        let _signing_failure = fail_signing();
+        worker_barrier.wait();
+        let generation_failed = TestEcdsaSecretKey::random(&mut rng).is_err();
+        let signing_failed = key.sign(b"test").is_err();
+        worker_barrier.wait();
+        (generation_failed, signing_failed)
+    });
+    let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+    barrier.wait();
+    let key = TestEcdsaSecretKey::random(&mut rng);
+    let signing_succeeded = key.as_ref().is_ok_and(|key| key.sign(b"test").is_ok());
+    barrier.wait();
+    assert!(signing_succeeded);
+    assert_eq!(worker.join().unwrap(), (true, true));
 }

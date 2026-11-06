@@ -36,6 +36,9 @@ use wasefire_store::{BufferOptions, BufferStorage, Store};
 
 pub mod customization;
 
+#[cfg(test)]
+type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> CtapResult<bool>>;
+
 pub struct TestEnv {
     rng: TestRng,
     user_presence: TestUserPresence,
@@ -44,7 +47,7 @@ pub struct TestEnv {
     clock: TestClock,
     soft_reset: bool,
     #[cfg(test)]
-    pub pin_verifier: Option<Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> CtapResult<bool>>>,
+    pub pin_verifier: Option<PinVerifier>,
     #[cfg(feature = "fingerprint")]
     fingerprint: TestFingerprint,
 }

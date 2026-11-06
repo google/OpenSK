@@ -991,6 +991,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_custom_pin_verification_during_forced_change() {
         let mut env = TestEnv::default();
         let protocol = PinUvAuthProtocol::V1;

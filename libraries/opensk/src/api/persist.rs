@@ -698,24 +698,10 @@ mod test {
 
     #[test]
     fn test_default_verify_pin_hash() {
-        struct DefaultVerifier;
-        impl Persist for DefaultVerifier {
-            fn find(&self, _: usize) -> CtapResult<Option<Vec<u8>>> {
-                unreachable!()
-            }
-            fn insert(&mut self, _: usize, _: &[u8]) -> CtapResult<()> {
-                unreachable!()
-            }
-            fn remove(&mut self, _: usize) -> CtapResult<()> {
-                unreachable!()
-            }
-            fn iter(&self) -> CtapResult<PersistIter<'_>> {
-                unreachable!()
-            }
-        }
-        let mut verifier = DefaultVerifier;
-        assert_eq!(verifier.verify_pin_hash(&[1; 16], &[1; 16]), Ok(true));
-        assert_eq!(verifier.verify_pin_hash(&[1; 16], &[2; 16]), Ok(false));
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+        assert_eq!(persist.verify_pin_hash(&[1; 16], &[1; 16]), Ok(true));
+        assert_eq!(persist.verify_pin_hash(&[1; 16], &[2; 16]), Ok(false));
     }
 
     #[test]

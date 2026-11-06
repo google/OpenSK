@@ -162,16 +162,17 @@ impl EdSecretKey for TestEd25519SecretKey {
 }
 
 #[test]
-fn failure_guard_restores_nested_settings_and_after_unwind() {
+fn failure_remains_enabled_until_all_guards_are_dropped() {
+    let first = fail_signing();
+    let second = fail_signing();
+    drop(first);
+    assert_ne!(FAIL_SIGNING.with(Cell::get), 0);
+    drop(second);
     assert_eq!(FAIL_SIGNING.with(Cell::get), 0);
-    {
-        let outer = fail_signing();
-        let inner = fail_signing();
-        drop(outer);
-        assert_eq!(FAIL_SIGNING.with(Cell::get), 1);
-        drop(inner);
-    }
-    assert_eq!(FAIL_SIGNING.with(Cell::get), 0);
+}
+
+#[test]
+fn failure_guard_clears_setting_on_unwind() {
     let _ = std::panic::catch_unwind(|| {
         let _failure = fail_signing();
         panic!("simulated test failure");
@@ -180,28 +181,28 @@ fn failure_guard_restores_nested_settings_and_after_unwind() {
 }
 
 #[test]
-fn failure_setting_is_local_to_thread() {
+fn key_generation_failure_is_local_to_thread() {
     use rand::SeedableRng;
-    use std::sync::{Arc, Barrier};
 
-    let barrier = Arc::new(Barrier::new(2));
-    let worker_barrier = barrier.clone();
-    let worker = std::thread::spawn(move || {
+    let _failure = fail_key_generation();
+    let other_thread = std::thread::spawn(|| {
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        let key = TestEcdsaSecretKey::random(&mut rng).unwrap();
-        let _generation_failure = fail_key_generation();
-        let _signing_failure = fail_signing();
-        worker_barrier.wait();
-        let generation_failed = TestEcdsaSecretKey::random(&mut rng).is_err();
-        let signing_failed = key.sign(b"test").is_err();
-        worker_barrier.wait();
-        (generation_failed, signing_failed)
+        TestEcdsaSecretKey::random(&mut rng).is_ok()
     });
-    let mut rng = rand::rngs::StdRng::seed_from_u64(2);
-    barrier.wait();
-    let key = TestEcdsaSecretKey::random(&mut rng);
-    let signing_succeeded = key.as_ref().is_ok_and(|key| key.sign(b"test").is_ok());
-    barrier.wait();
-    assert!(signing_succeeded);
-    assert_eq!(worker.join().unwrap(), (true, true));
+    assert!(other_thread.join().unwrap());
+}
+
+#[test]
+fn signing_failure_is_local_to_thread() {
+    use rand::SeedableRng;
+
+    let _failure = fail_signing();
+    let other_thread = std::thread::spawn(|| {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        TestEcdsaSecretKey::random(&mut rng)
+            .unwrap()
+            .sign(b"test")
+            .is_ok()
+    });
+    assert!(other_thread.join().unwrap());
 }

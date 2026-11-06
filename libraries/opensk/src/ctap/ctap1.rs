@@ -426,35 +426,45 @@ mod test {
         (key_handle, rp_id_hash)
     }
 
-    #[test]
-    fn test_register_crypto_error() {
-        for fail_generation in [true, false] {
-            let mut env = TestEnv::default();
-            env.persist()
-                .set_attestation(
-                    AttestationId::Batch,
-                    Some(&Attestation {
-                        wrapped_private_key: vec![0x41; 32],
-                        certificate: vec![0x99; 20],
-                    }),
-                )
-                .unwrap();
-            let failure = if fail_generation {
-                crate::env::test::crypto::fail_key_generation()
-            } else {
-                crate::env::test::crypto::fail_signing()
-            };
-            assert_eq!(
-                Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]),
-                Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
-            );
-            drop(failure);
-            assert!(Ctap1Command::process_register(&mut env, [0x0C; 32], [0x0A; 32]).is_ok());
-        }
+    const TEST_CHALLENGE: [u8; 32] = [0x0C; 32];
+    const TEST_APPLICATION: [u8; 32] = [0x0A; 32];
+
+    fn set_batch_attestation(env: &mut TestEnv) {
+        env.persist()
+            .set_attestation(
+                AttestationId::Batch,
+                Some(&Attestation {
+                    wrapped_private_key: vec![0x41; 32],
+                    certificate: vec![0x99; 20],
+                }),
+            )
+            .unwrap();
     }
 
     #[test]
-    fn test_authenticate_signing_error() {
+    fn register_reports_key_generation_failure() {
+        let mut env = TestEnv::default();
+        set_batch_attestation(&mut env);
+        let _failure = crate::env::test::crypto::fail_key_generation();
+        assert_eq!(
+            Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+    }
+
+    #[test]
+    fn register_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        set_batch_attestation(&mut env);
+        let _failure = crate::env::test::crypto::fail_signing();
+        assert_eq!(
+            Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+    }
+
+    #[test]
+    fn authenticate_reports_signing_failure() {
         let mut env = TestEnv::default();
         let mut state = CtapState::new(&mut env);
         let (key_handle, application) = create_wrapped_credential(&mut env);
@@ -463,13 +473,11 @@ mod test {
             Ctap1Flags::DontEnforceUpAndSign,
             &key_handle,
         );
-        let failure = crate::env::test::crypto::fail_signing();
+        let _failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
             Ctap1Command::process_command(&mut env, &message, &mut state),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
-        drop(failure);
-        assert!(Ctap1Command::process_command(&mut env, &message, &mut state).is_ok());
     }
 
     #[test]

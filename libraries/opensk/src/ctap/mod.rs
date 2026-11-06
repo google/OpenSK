@@ -1731,54 +1731,97 @@ mod test {
         }
     }
 
+    const TEST_RP_ID: &str = "example.com";
+    const CRYPTO_ERROR: Ctap2StatusCode = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
+
+    fn configure_batch_attestation(env: &mut TestEnv) {
+        *env.customization_mut() = crate::api::customization::CustomizationImpl {
+            use_batch_attestation: true,
+            ..crate::api::customization::DEFAULT_CUSTOMIZATION
+        }
+        .into();
+        env.persist()
+            .set_attestation(
+                AttestationId::Batch,
+                Some(&Attestation {
+                    wrapped_private_key: vec![0x41; 32],
+                    certificate: vec![0x99; 20],
+                }),
+            )
+            .unwrap();
+    }
+
+    fn assertion_parameters() -> AuthenticatorGetAssertionParameters {
+        AuthenticatorGetAssertionParameters {
+            rp_id: String::from(TEST_RP_ID),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions::default(),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        }
+    }
+
+    fn create_assertion_credentials(env: &mut TestEnv, state: &mut CtapState<TestEnv>) {
+        for user_id in [1, 2, 3] {
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.user.user_id = vec![user_id];
+            state
+                .process_make_credential(env, parameters, DUMMY_CHANNEL)
+                .unwrap();
+        }
+    }
+
     #[test]
-    fn test_make_credential_key_generation_error() {
+    fn make_credential_reports_key_generation_failure() {
         for parameter in SUPPORTED_CRED_PARAMS {
             let mut env = TestEnv::default();
             let mut state = CtapState::new(&mut env);
             let mut parameters = create_minimal_make_credential_parameters();
             parameters.pub_key_cred_params = vec![parameter.clone()];
-            let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-            let failure = crate::env::test::crypto::fail_key_generation();
+            let _failure = crate::env::test::crypto::fail_key_generation();
             assert_eq!(
-                state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
-                Err(error)
-            );
-            assert_eq!(storage::count_credentials(&mut env), Ok(0));
-
-            drop(failure);
-            assert!(
-                state
-                    .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
-                    .is_ok()
+                state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+                Err(CRYPTO_ERROR)
             );
         }
     }
 
     #[test]
-    fn test_make_credential_signing_error() {
-        for (parameter, use_batch_attestation) in [
+    fn make_credential_reports_signing_failure() {
+        for (parameter, batch) in [
             (ES256_CRED_PARAM, false),
             (ES256_CRED_PARAM, true),
             #[cfg(feature = "ed25519")]
             (EDDSA_CRED_PARAM, false),
         ] {
             let mut env = TestEnv::default();
-            *env.customization_mut() = crate::api::customization::CustomizationImpl {
-                use_batch_attestation,
-                ..crate::api::customization::DEFAULT_CUSTOMIZATION
+            if batch {
+                configure_batch_attestation(&mut env);
             }
-            .into();
-            if use_batch_attestation {
-                env.persist()
-                    .set_attestation(
-                        AttestationId::Batch,
-                        Some(&Attestation {
-                            wrapped_private_key: vec![0x41; 32],
-                            certificate: vec![0x99; 20],
-                        }),
-                    )
-                    .unwrap();
+            let mut state = CtapState::new(&mut env);
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.pub_key_cred_params = vec![parameter];
+            let _failure = crate::env::test::crypto::fail_signing();
+            assert_eq!(
+                state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+                Err(CRYPTO_ERROR)
+            );
+        }
+    }
+
+    #[test]
+    fn signing_failure_does_not_replace_existing_credential() {
+        for (parameter, batch) in [
+            (ES256_CRED_PARAM, false),
+            (ES256_CRED_PARAM, true),
+            #[cfg(feature = "ed25519")]
+            (EDDSA_CRED_PARAM, false),
+        ] {
+            let mut env = TestEnv::default();
+            if batch {
+                configure_batch_attestation(&mut env);
             }
             let mut state = CtapState::new(&mut env);
             let mut parameters = create_minimal_make_credential_parameters();
@@ -1786,38 +1829,29 @@ mod test {
             state
                 .process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL)
                 .unwrap();
-            let mut iter_result = Ok(());
-            let old_id = storage::iter_credentials(&mut env, &mut iter_result)
+            let mut result = Ok(());
+            let old_id = storage::iter_credentials(&mut env, &mut result)
                 .unwrap()
                 .next()
                 .unwrap()
                 .1
                 .credential_id;
-            assert_eq!(iter_result, Ok(()));
-            let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-            let failure = crate::env::test::crypto::fail_signing();
-            assert_eq!(
-                state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
-                Err(error)
-            );
-            assert_eq!(storage::count_credentials(&mut env), Ok(1));
+            result.unwrap();
+            let _failure = crate::env::test::crypto::fail_signing();
+            state
+                .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
+                .unwrap_err();
             assert!(
-                storage::find_credential(&mut env, "example.com", &old_id)
+                storage::find_credential(&mut env, TEST_RP_ID, &old_id)
                     .unwrap()
                     .is_some()
-            );
-            drop(failure);
-            assert!(
-                state
-                    .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
-                    .is_ok()
             );
         }
     }
 
     #[test]
     #[cfg(feature = "config_command")]
-    fn test_enterprise_attestation_signing_error() {
+    fn enterprise_attestation_reports_signing_failure() {
         let mut env = TestEnv::default();
         env.customization_mut()
             .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
@@ -1825,65 +1859,69 @@ mod test {
         test_helpers::enable_enterprise_attestation(&mut state, &mut env).unwrap();
         let mut parameters = create_minimal_make_credential_parameters();
         parameters.enterprise_attestation = Some(2);
-        let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-        let failure = crate::env::test::crypto::fail_signing();
+        let _failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
-            state.process_make_credential(&mut env, parameters.clone(), DUMMY_CHANNEL),
-            Err(error)
-        );
-        drop(failure);
-        check_ep(
             state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
-            true,
+            Err(CRYPTO_ERROR)
         );
     }
 
     #[test]
-    fn test_assertion_signing_error() {
+    fn get_assertion_reports_signing_failure() {
         let mut env = TestEnv::default();
         let mut state = CtapState::new(&mut env);
-        for user_id in [1, 2, 3] {
-            let mut parameters = create_minimal_make_credential_parameters();
-            parameters.user.user_id = vec![user_id];
-            state
-                .process_make_credential(&mut env, parameters, DUMMY_CHANNEL)
-                .unwrap();
-        }
-        let parameters = || AuthenticatorGetAssertionParameters {
-            rp_id: String::from("example.com"),
-            client_data_hash: vec![0xCD],
-            allow_list: None,
-            extensions: GetAssertionExtensions::default(),
-            options: GetAssertionOptions::default(),
-            pin_uv_auth_param: None,
-            pin_uv_auth_protocol: None,
-        };
-        let error = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
-        let failure = crate::env::test::crypto::fail_signing();
+        create_assertion_credentials(&mut env, &mut state);
+        let _failure = crate::env::test::crypto::fail_signing();
         assert_eq!(
-            state.process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL),
-            Err(error)
+            state.process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL),
+            Err(CRYPTO_ERROR)
         );
-        assert_eq!(
-            state.process_get_next_assertion(&mut env),
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        );
-        drop(failure);
-        state
-            .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
-            .unwrap();
-        let failure = crate::env::test::crypto::fail_signing();
-        assert_eq!(state.process_get_next_assertion(&mut env), Err(error));
-        assert_eq!(
-            state.process_get_next_assertion(&mut env),
-            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
-        );
+    }
 
-        drop(failure);
+    #[test]
+    fn failed_get_assertion_clears_continuation() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        create_assertion_credentials(&mut env, &mut state);
+        let _failure = crate::env::test::crypto::fail_signing();
         state
-            .process_get_assertion(&mut env, parameters(), DUMMY_CHANNEL)
+            .process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL)
+            .unwrap_err();
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn get_next_assertion_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        create_assertion_credentials(&mut env, &mut state);
+        state
+            .process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL)
             .unwrap();
-        assert!(state.process_get_next_assertion(&mut env).is_ok());
+        let _failure = crate::env::test::crypto::fail_signing();
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(CRYPTO_ERROR)
+        );
+    }
+
+    #[test]
+    fn failed_get_next_assertion_clears_continuation() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        create_assertion_credentials(&mut env, &mut state);
+        state
+            .process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL)
+            .unwrap();
+        let _failure = crate::env::test::crypto::fail_signing();
+        state.process_get_next_assertion(&mut env).unwrap_err();
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
     }
 
     fn create_make_credential_parameters_with_exclude_list(

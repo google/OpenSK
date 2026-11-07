@@ -26,6 +26,7 @@ use core::convert::{TryFrom, TryInto};
 use rand_core::Rng as _;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
+use subtle::ConstantTimeEq;
 
 // CBOR credential IDs consist of
 // - 1   byte : version number
@@ -103,6 +104,21 @@ pub trait KeyStore {
     /// Decrypts a PIN hash.
     fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error>;
 
+    /// Checks whether a candidate PIN hash matches the stored encrypted PIN hash.
+    ///
+    /// `stored` is the value returned by [`Persist::pin_hash`]. `candidate` is
+    /// the first 16 bytes of SHA-256 of the PIN being checked. Implementations
+    /// may treat `stored` as an opaque marker and delegate verification to secure
+    /// hardware without exposing the decrypted PIN hash.
+    ///
+    /// This is also used to reject reuse of the old PIN during a forced PIN
+    /// change. Errors must remain distinguishable from a mismatch. Implementations
+    /// should avoid leaking information through timing or error details.
+    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
+        let plain = self.decrypt_pin_hash(stored)?;
+        Ok(bool::from(plain.ct_eq(candidate)))
+    }
+
     /// Resets the key store.
     fn reset(&mut self) -> Result<(), Error>;
 }
@@ -114,7 +130,17 @@ pub trait KeyStore {
 pub struct Error;
 
 /// Implements a default key store using the environment rng and store.
-pub trait Helper: Env {}
+pub trait Helper: Env {
+    /// Test-only override for exercising hardware PIN verification in CTAP tests.
+    #[cfg(test)]
+    fn test_verify_pin_hash(
+        &mut self,
+        _stored: &[u8; 16],
+        _candidate: &[u8; 16],
+    ) -> Option<Result<bool, Error>> {
+        None
+    }
+}
 
 impl<T: Helper> KeyStore for T {
     fn init(&mut self) -> Result<(), Error> {
@@ -212,6 +238,15 @@ impl<T: Helper> KeyStore for T {
 
     fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error> {
         Ok(Secret::from_exposed_secret(*cipher))
+    }
+
+    #[cfg(test)]
+    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
+        if let Some(result) = self.test_verify_pin_hash(stored, candidate) {
+            return result;
+        }
+        let plain = self.decrypt_pin_hash(stored)?;
+        Ok(bool::from(plain.ct_eq(candidate)))
     }
 
     fn reset(&mut self) -> Result<(), Error> {
@@ -384,6 +419,19 @@ mod test {
             &env.key_store().cred_random(true).unwrap(),
             &cred_random_with_uv
         );
+    }
+
+    #[test]
+    fn test_default_verify_pin_hash() {
+        let mut env = TestEnv::default();
+        let key_store = env.key_store();
+        let stored = key_store.encrypt_pin_hash(&[1; 16]).unwrap();
+        assert_eq!(key_store.verify_pin_hash(&stored, &[1; 16]), Ok(true));
+        for index in 0..16 {
+            let mut candidate = [1; 16];
+            candidate[index] ^= 1;
+            assert_eq!(key_store.verify_pin_hash(&stored, &candidate), Ok(false));
+        }
     }
 
     #[test]

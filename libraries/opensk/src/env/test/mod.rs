@@ -37,7 +37,7 @@ use wasefire_store::{BufferOptions, BufferStorage, Store};
 pub mod customization;
 
 #[cfg(test)]
-type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> CtapResult<bool>>;
+type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> Result<bool, key_store::Error>>;
 
 pub struct TestEnv {
     rng: TestRng,
@@ -135,15 +135,6 @@ fn new_storage() -> BufferStorage {
 }
 
 impl Persist for TestEnv {
-    #[cfg(test)]
-    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> CtapResult<bool> {
-        use subtle::ConstantTimeEq;
-        match &mut self.pin_verifier {
-            Some(verify) => verify(stored, candidate),
-            None => Ok(bool::from(stored.ct_eq(candidate))),
-        }
-    }
-
     fn find(&self, key: usize) -> CtapResult<Option<Vec<u8>>> {
         Ok(self.store.find(key)?)
     }
@@ -315,7 +306,18 @@ impl Fingerprint for TestFingerprint {
     }
 }
 
-impl key_store::Helper for TestEnv {}
+impl key_store::Helper for TestEnv {
+    #[cfg(test)]
+    fn test_verify_pin_hash(
+        &mut self,
+        stored: &[u8; 16],
+        candidate: &[u8; 16],
+    ) -> Option<Result<bool, key_store::Error>> {
+        self.pin_verifier
+            .as_mut()
+            .map(|verify| verify(stored, candidate))
+    }
+}
 
 impl Env for TestEnv {
     type Rng = TestRng;

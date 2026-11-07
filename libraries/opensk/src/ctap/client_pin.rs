@@ -104,11 +104,11 @@ fn check_and_store_new_pin<E: Env>(
     let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
     if env.persist().has_force_pin_change()?
         && let Some(old_pin_hash) = env.persist().pin_hash()?
+        && env
+            .key_store()
+            .verify_pin_hash(&old_pin_hash, new_pin_hash)?
     {
-        let old_pin_hash = env.key_store().decrypt_pin_hash(&old_pin_hash)?;
-        if env.persist().verify_pin_hash(&old_pin_hash, new_pin_hash)? {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
-        }
+        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let pin_hash = env.key_store().encrypt_pin_hash(new_pin_hash)?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
@@ -211,10 +211,9 @@ impl<E: Env> ClientPin<E> {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                 }
                 storage::decr_pin_retries(env)?;
-                let pin_hash = env.key_store().decrypt_pin_hash(&pin_hash)?;
                 let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
                     Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
-                        Ok(candidate) => env.persist().verify_pin_hash(&pin_hash, candidate)?,
+                        Ok(candidate) => env.key_store().verify_pin_hash(&pin_hash, candidate)?,
                         Err(_) => false,
                     },
                     Err(_) => false,
@@ -980,14 +979,25 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
         );
 
-        env.pin_verifier = Some(Box::new(|_, _| {
-            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-        }));
+        let retries = storage::pin_retries(&mut env).unwrap();
+        env.pin_verifier = Some(Box::new(|_, _| Err(crate::api::key_store::Error)));
         let candidate = shared_secret.encrypt(&mut env, &[0x22; 16]).unwrap();
         assert_eq!(
             client_pin.verify_pin_hash_enc(&mut env, protocol, &shared_secret, candidate),
             Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
+        assert_eq!(storage::pin_retries(&mut env), Ok(retries - 1));
+        assert_eq!(client_pin.consecutive_pin_mismatches, 1);
+
+        env.pin_verifier = Some(Box::new(|_, _| {
+            panic!("malformed candidate reached verifier")
+        }));
+        let candidate = shared_secret.encrypt(&mut env, &[0x22; 32]).unwrap();
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(&mut env, protocol, &shared_secret, candidate),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+        assert_eq!(storage::pin_retries(&mut env), Ok(retries - 2));
     }
 
     #[test]
@@ -1012,6 +1022,14 @@ mod test {
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
         assert_eq!(env.persist().pin_hash().unwrap(), Some([0x11; 16]));
+        env.pin_verifier = Some(Box::new(|_, _| Err(crate::api::key_store::Error)));
+        let pin = encrypt_pin(&shared_secret, b"1234".to_vec());
+        assert_eq!(
+            check_and_store_new_pin(&mut env, &shared_secret, pin),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        assert_eq!(env.persist().pin_hash().unwrap(), Some([0x11; 16]));
+        assert_eq!(env.persist().has_force_pin_change(), Ok(true));
     }
 
     #[test]

@@ -53,17 +53,16 @@ impl<E: Env> PrivateKey<E> {
     /// Creates a new private key for the given algorithm.
     ///
     /// Returns a generic internal error if key generation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
     pub fn new(env: &mut E, alg: SignatureAlgorithm) -> CtapResult<Self> {
-        let error = |_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
         match alg {
-            SignatureAlgorithm::Es256 => {
-                Ok(Self::Ecdsa(EcdsaSk::<E>::random(env.rng()).map_err(error)?))
-            }
+            SignatureAlgorithm::Es256 => Ok(Self::Ecdsa(EcdsaSk::<E>::random(env.rng())?)),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => Ok(Self::Ed25519(
-                Ed25519Sk::<E>::random(env.rng()).map_err(error)?,
-            )),
-            SignatureAlgorithm::Unknown => Err(Ctap2StatusCode::CTAP2_ERR_UNSUPPORTED_ALGORITHM),
+            SignatureAlgorithm::Eddsa => Ok(Self::Ed25519(Ed25519Sk::<E>::random(env.rng())?)),
+            SignatureAlgorithm::Unknown => unreachable!(),
         }
     }
 
@@ -84,15 +83,9 @@ impl<E: Env> PrivateKey<E> {
     /// Returns the encoded signature for a given message.
     pub fn sign_and_encode(&self, message: &[u8]) -> CtapResult<Vec<u8>> {
         Ok(match self {
-            PrivateKey::Ecdsa(key) => key
-                .sign(message)
-                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?
-                .to_der(),
+            PrivateKey::Ecdsa(key) => key.sign(message)?.to_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(key) => key
-                .sign(message)
-                .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?
-                .to_bytes(),
+            PrivateKey::Ed25519(key) => key.sign(message)?.to_bytes(),
         })
     }
 

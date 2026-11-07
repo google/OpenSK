@@ -14,7 +14,6 @@
 
 use crate::api::clock::Clock;
 use crate::api::connection::{HidConnection, RecvStatus, UsbEndpoint};
-#[cfg(not(test))]
 use crate::api::crypto::software_crypto::SoftwareCrypto;
 use crate::api::customization::DEFAULT_CUSTOMIZATION;
 #[cfg(feature = "fingerprint")]
@@ -35,8 +34,6 @@ use rand::rngs::StdRng;
 use std::sync::{Arc, Mutex};
 use wasefire_store::{BufferOptions, BufferStorage, Store};
 
-#[cfg(test)]
-pub(crate) mod crypto;
 pub mod customization;
 
 pub struct TestEnv {
@@ -191,6 +188,20 @@ impl Default for TestEnv {
 }
 
 impl TestEnv {
+    /// Makes software signing key generation fail on the current thread, across
+    /// all environments. Other threads are unaffected. Call with false to reset.
+    #[cfg(test)]
+    pub(crate) fn fail_key_generation(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::FAIL_KEY_GENERATION.set(fail);
+    }
+
+    /// Makes software signing fail on the current thread, across all environments.
+    /// Other threads are unaffected. Call with false to reset.
+    #[cfg(test)]
+    pub(crate) fn fail_signing(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::FAIL_SIGNING.set(fail);
+    }
+
     pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }
@@ -313,10 +324,7 @@ impl Env for TestEnv {
     type Write = TestWrite;
     type Customization = TestCustomization;
     type HidConnection = Self;
-    #[cfg(not(test))]
     type Crypto = SoftwareCrypto;
-    #[cfg(test)]
-    type Crypto = crypto::TestCrypto;
     #[cfg(feature = "fingerprint")]
     type Fingerprint = TestFingerprint;
 

@@ -15,11 +15,10 @@
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{CtapState, filter_listed_credential};
 use crate::api::crypto::EC_FIELD_SIZE;
-use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey};
+use crate::api::crypto::ec_signing::{self, EcPublicKey, EcSecretKey, EcSignature};
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
-use crate::ctap::data_formats::SignatureAlgorithm;
 use crate::env::{EcdsaPk, EcdsaSk, Env};
 use alloc::vec::Vec;
 use arrayref::{array_ref, mut_array_refs};
@@ -27,6 +26,12 @@ use core::convert::TryFrom;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;
+
+impl From<ec_signing::Error> for Ctap1StatusCode {
+    fn from(_: ec_signing::Error) -> Self {
+        Self::SW_INTERNAL_EXCEPTION
+    }
+}
 
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
@@ -244,13 +249,9 @@ impl Ctap1Command {
         challenge: [u8; 32],
         application: [u8; 32],
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let private_key = PrivateKey::new(env, SignatureAlgorithm::Es256)
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let pk = match &private_key {
-            PrivateKey::Ecdsa(sk) => sk.public_key(),
-            #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(_) => return Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION),
-        };
+        let sk = EcdsaSk::<E>::random(env.rng())?;
+        let pk = sk.public_key();
+        let private_key = PrivateKey::<E>::Ecdsa(sk);
         let wrapped_private_key = private_key.to_cbor();
         let credential_source = CredentialSource {
             wrapped_private_key,
@@ -294,11 +295,9 @@ impl Ctap1Command {
 
         let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = PrivateKey::<E>::Ecdsa(attestation_key)
-            .sign_and_encode(&signature_data)
-            .map_err(|_| Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
+        let signature = attestation_key.sign(&signature_data)?;
 
-        response.extend(signature);
+        response.extend(signature.to_der());
         Ok(response)
     }
 
@@ -445,22 +444,24 @@ mod test {
     fn register_reports_key_generation_failure() {
         let mut env = TestEnv::default();
         set_batch_attestation(&mut env);
-        let _failure = crate::env::test::crypto::fail_key_generation();
+        env.fail_key_generation(true);
         assert_eq!(
             Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
+        env.fail_key_generation(false);
     }
 
     #[test]
     fn register_reports_signing_failure() {
         let mut env = TestEnv::default();
         set_batch_attestation(&mut env);
-        let _failure = crate::env::test::crypto::fail_signing();
+        env.fail_signing(true);
         assert_eq!(
             Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
+        env.fail_signing(false);
     }
 
     #[test]
@@ -473,11 +474,12 @@ mod test {
             Ctap1Flags::DontEnforceUpAndSign,
             &key_handle,
         );
-        let _failure = crate::env::test::crypto::fail_signing();
+        env.fail_signing(true);
         assert_eq!(
             Ctap1Command::process_command(&mut env, &message, &mut state),
             Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
         );
+        env.fail_signing(false);
     }
 
     #[test]

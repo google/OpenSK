@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::api::crypto::ec_signing;
 use crate::api::key_store;
 use crate::api::user_presence::UserPresenceError;
 
@@ -94,6 +95,12 @@ impl From<UserPresenceError> for Ctap2StatusCode {
             UserPresenceError::Declined => Self::CTAP2_ERR_OPERATION_DENIED,
             UserPresenceError::Canceled => Self::CTAP2_ERR_KEEPALIVE_CANCEL,
         }
+    }
+}
+
+impl From<ec_signing::Error> for Ctap2StatusCode {
+    fn from(_: ec_signing::Error) -> Self {
+        Self::CTAP2_ERR_VENDOR_INTERNAL_ERROR
     }
 }
 

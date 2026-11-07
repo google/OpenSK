@@ -91,17 +91,17 @@ type VerifiedPin<E> = (
     Secret<[u8; PIN_AUTH_LENGTH]>,
 );
 
-/// Stores a hash prefix of the new PIN in the persistent storage, if correct.
+/// Validates a new PIN and returns its hash prefix and code point length.
 ///
 /// The new PIN is passed encrypted, so it is first decrypted and stripped from
 /// padding. Next, it is checked against the PIN policy. Last, it is hashed and
-/// truncated for persistent storage.
-fn check_and_store_new_pin<E: Env>(
+/// truncated for the backend.
+fn check_new_pin<E: Env>(
     env: &mut E,
     shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
-    previous: Option<VerifiedPin<E>>,
-) -> CtapResult<()> {
+    previous: Option<&[u8; PIN_AUTH_LENGTH]>,
+) -> CtapResult<(Secret<[u8; PIN_AUTH_LENGTH]>, u8)> {
     let pin = decrypt_pin(shared_secret, new_pin_enc)?;
     let min_pin_length = storage::min_pin_length(env)? as usize;
     let pin_length = str::from_utf8(&pin).unwrap_or("").chars().count();
@@ -111,21 +111,14 @@ fn check_and_store_new_pin<E: Env>(
     let mut pin_hash = Secret::default();
     Sha::<E>::digest_mut(&pin, &mut pin_hash);
     let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
-    // The PIN length is always < PIN_PADDED_LENGTH < 256.
-    match previous {
-        Some((verified, old_pin_hash)) => {
-            if env.persist().has_force_pin_change()? && bool::from(old_pin_hash.ct_eq(new_pin_hash))
-            {
-                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
-            }
-            env.key_store()
-                .change_pin(verified, new_pin_hash, pin_length as u8)?;
-        }
-        None => env
-            .key_store()
-            .initialize_pin(new_pin_hash, pin_length as u8)?,
+    if let Some(old_pin_hash) = previous
+        && env.persist().has_force_pin_change()?
+        && bool::from(old_pin_hash.ct_eq(new_pin_hash))
+    {
+        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
-    Ok(())
+    // The PIN length is always < PIN_PADDED_LENGTH < 256.
+    Ok((Secret::from_exposed_secret(*new_pin_hash), pin_length as u8))
 }
 
 pub(crate) fn check_pin_uv_auth_protocol(
@@ -308,7 +301,8 @@ impl<E: Env> ClientPin<E> {
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
         shared_secret.verify(&new_pin_enc, &pin_uv_auth_param)?;
 
-        check_and_store_new_pin(env, &shared_secret, new_pin_enc, None)?;
+        let (pin_hash, length) = check_new_pin(env, &shared_secret, new_pin_enc, None)?;
+        env.key_store().initialize_pin(&pin_hash, length)?;
         storage::reset_pin_retries(env)?;
         Ok(())
     }
@@ -341,8 +335,12 @@ impl<E: Env> ClientPin<E> {
         let verified =
             self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
 
-        check_and_store_new_pin(env, &shared_secret, new_pin_enc, Some(verified))?;
+        let (proof, old_pin_hash) = verified;
+        let (pin_hash, length) =
+            check_new_pin(env, &shared_secret, new_pin_enc, Some(&old_pin_hash))?;
+        // A backend error can follow a partial commit. Invalidate old tokens first.
         self.reset_pin_uv_auth_token(env);
+        env.key_store().change_pin(proof, &pin_hash, length)?;
         Ok(())
     }
 
@@ -1012,12 +1010,7 @@ mod test {
         let old_hash: [u8; 16] = Sha::<TestEnv>::digest(b"1234")[..16].try_into().unwrap();
         let pin = encrypt_pin(&shared_secret, b"1234".to_vec());
         assert_eq!(
-            check_and_store_new_pin(
-                &mut env,
-                &shared_secret,
-                pin,
-                Some(((), Secret::from_exposed_secret(old_hash)))
-            ),
+            check_new_pin(&mut env, &shared_secret, pin, Some(&old_hash)).map(|_| ()),
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
         assert_eq!(env.persist().pin_hash().unwrap(), Some([0x11; 16]));
@@ -1636,14 +1629,10 @@ mod test {
             let new_pin_enc = encrypt_pin(&shared_secret, pin);
 
             assert_eq!(
-                check_and_store_new_pin(&mut env, &shared_secret, new_pin_enc, None),
+                check_new_pin(&mut env, &shared_secret, new_pin_enc, None).map(|_| ()),
                 result
             );
-            if result.is_ok() {
-                assert_ne!(old_pin_hash, env.persist().pin_hash().unwrap());
-            } else {
-                assert_eq!(old_pin_hash, env.persist().pin_hash().unwrap());
-            }
+            assert_eq!(old_pin_hash, env.persist().pin_hash().unwrap());
         }
     }
 

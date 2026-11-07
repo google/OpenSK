@@ -194,7 +194,10 @@ pub trait KeyStore {
     /// OpenSK validates the new PIN first. For forced changes it compares the new
     /// verifier with the accepted old candidate in constant time, without another
     /// backend check. On success verifier and length must be durable and the CTAP
-    /// forced-change flag must be cleared. Interrupted updates must fail closed.
+    /// forced-change flag must be cleared. OpenSK invalidates old PIN tokens
+    /// immediately before this call, including when it returns an error. Ordinary
+    /// failures should preserve the old verifier. Ambiguous hardware commits need
+    /// recovery that fails closed.
     fn change_pin(
         &mut self,
         verified: Self::VerifiedPin,
@@ -529,6 +532,30 @@ mod test {
                 Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
             );
         }
+    }
+
+    #[test]
+    fn test_existing_software_pin_record() {
+        let mut env = TestEnv::default();
+        let mut legacy = vec![7];
+        legacy.extend_from_slice(&[0x77; 16]);
+        env.persist()
+            .insert(crate::api::persist::keys::PIN_PROPERTIES, &legacy)
+            .unwrap();
+        assert_eq!(
+            KeyStore::pin_info(&mut env),
+            Ok(Some(PinInfo {
+                code_point_length: 7
+            }))
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x77; 16]),
+            Ok(VerificationResult::Accepted(()))
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x78; 16]),
+            Ok(VerificationResult::Rejected)
+        );
     }
 
     #[test]

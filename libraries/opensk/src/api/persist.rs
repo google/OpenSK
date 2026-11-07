@@ -165,7 +165,6 @@ pub trait Persist {
     }
 
     /// Returns the length of the currently set PIN if defined.
-    #[cfg(feature = "config_command")]
     fn pin_code_point_length(&self) -> CtapResult<Option<u8>> {
         let pin_properties = match self.find(keys::PIN_PROPERTIES)? {
             None => return Ok(None),

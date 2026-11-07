@@ -23,6 +23,7 @@ use super::{Channel, CtapHid, KeepaliveStatus, send_packets, storage};
 use crate::Transport;
 use crate::api::customization::Customization;
 use crate::api::fingerprint::{Fingerprint, FingerprintCheckError};
+use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
 use crate::api::rng::Rng;
 use crate::ctap::cbor_write;
@@ -140,7 +141,7 @@ pub fn perform_built_in_uv<E: Env>(
     if env.persist().template_infos()?.is_empty() {
         return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
     }
-    if (env.persist().pin_hash()?.is_some() && storage::pin_retries(env)? == 0)
+    if (env.key_store().pin_info()?.is_some() && storage::pin_retries(env)? == 0)
         || storage::uv_retries(env)? == 0
     {
         return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);

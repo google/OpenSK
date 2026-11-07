@@ -301,7 +301,7 @@ pub fn has_user_verification(env: &mut impl Env) -> CtapResult<bool> {
     if !env.persist().template_infos()?.is_empty() {
         return Ok(true);
     }
-    Ok(env.persist().pin_hash()?.is_some())
+    Ok(env.key_store().pin_info()?.is_some())
 }
 
 /// Returns whether alwaysUv is enabled.

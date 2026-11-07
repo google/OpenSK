@@ -37,7 +37,7 @@ use wasefire_store::{BufferOptions, BufferStorage, Store};
 pub mod customization;
 
 #[cfg(test)]
-type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> Result<bool, key_store::Error>>;
+type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> CtapResult<bool>>;
 
 pub struct TestEnv {
     rng: TestRng,
@@ -308,14 +308,17 @@ impl Fingerprint for TestFingerprint {
 
 impl key_store::Helper for TestEnv {
     #[cfg(test)]
-    fn test_verify_pin_hash(
-        &mut self,
-        stored: &[u8; 16],
-        candidate: &[u8; 16],
-    ) -> Option<Result<bool, key_store::Error>> {
-        self.pin_verifier
-            .as_mut()
-            .map(|verify| verify(stored, candidate))
+    fn verify_pin(&mut self, candidate: &[u8; 16]) -> CtapResult<key_store::VerificationResult> {
+        use subtle::ConstantTimeEq;
+        let stored = self
+            .persist()
+            .pin_hash()?
+            .ok_or(crate::ctap::status_code::Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        Ok(match &mut self.pin_verifier {
+            Some(verify) => verify(&stored, candidate)?,
+            None => bool::from(stored.ct_eq(candidate)),
+        }
+        .into())
     }
 }
 

@@ -118,8 +118,15 @@ pub struct PinInfo {
 /// With `type VerifiedPin = ()`, map a constant-time comparison directly to
 /// the result:
 ///
-/// ```ignore
-/// Ok(bool::from(expected.ct_eq(candidate)).into())
+/// ```
+/// use opensk::api::key_store::VerificationResult;
+/// use subtle::ConstantTimeEq;
+///
+/// fn compare(expected: &[u8; 16], candidate: &[u8; 16]) -> VerificationResult {
+///     bool::from(expected.ct_eq(candidate)).into()
+/// }
+/// assert_eq!(compare(&[1; 16], &[1; 16]), VerificationResult::Accepted(()));
+/// assert_eq!(compare(&[1; 16], &[2; 16]), VerificationResult::Rejected);
 /// ```
 ///
 /// Hardware backends return `Accepted(proof)` after successful authorization.

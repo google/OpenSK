@@ -417,7 +417,7 @@ mod test {
         rp_id: &str,
         user_handle: Vec<u8>,
     ) -> PublicKeyCredentialSource {
-        let private_key = PrivateKey::new_ecdsa(env);
+        let private_key = PrivateKey::new_ecdsa(env).unwrap();
         PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),
@@ -813,7 +813,7 @@ mod test {
     #[test]
     fn test_serialize_deserialize_credential() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let credential = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: env.rng().gen_uniform_u8x32().to_vec(),

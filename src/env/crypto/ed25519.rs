@@ -15,6 +15,7 @@
 use alloc::vec::Vec;
 
 use opensk::api::crypto::EC_FIELD_SIZE;
+use opensk::api::crypto::ec_signing::Error;
 use opensk::api::crypto::ec_signing::{Ed25519, EdPublicKey, EdSecretKey, EdSignature};
 use opensk::api::rng::Rng;
 use wasefire::crypto::ed25519::{Private, Public};
@@ -38,24 +39,24 @@ impl EdSecretKey for SecretKey {
     type PublicKey = PublicKey;
     type Signature = Signature;
 
-    fn random(_rng: &mut impl Rng) -> Self {
+    fn random(_rng: &mut impl Rng) -> Result<Self, Error> {
         // TODO: Use the rng argument.
-        SecretKey(Private::generate().unwrap())
+        Private::generate().map(SecretKey).map_err(|_| Error)
     }
 
     fn public_key(&self) -> Self::PublicKey {
         PublicKey(self.0.public().unwrap())
     }
 
-    fn sign(&self, message: &[u8]) -> Self::Signature {
+    fn sign(&self, message: &[u8]) -> Result<Self::Signature, Error> {
         let mut signature = Signature {
             r: [0; 32],
             s: [0; 32],
         };
         self.0
             .sign(message, &mut signature.r, &mut signature.s)
-            .unwrap();
-        signature
+            .map_err(|_| Error)?;
+        Ok(signature)
     }
 
     fn export(&self) -> Vec<u8> {

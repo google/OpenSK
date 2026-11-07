@@ -52,20 +52,22 @@ impl<E: Env> PartialEq for PrivateKey<E> {
 impl<E: Env> PrivateKey<E> {
     /// Creates a new private key for the given algorithm.
     ///
+    /// Returns a generic internal error if key generation fails.
+    ///
     /// # Panics
     ///
     /// Panics if the algorithm is [`SignatureAlgorithm::Unknown`].
-    pub fn new(env: &mut E, alg: SignatureAlgorithm) -> Self {
+    pub fn new(env: &mut E, alg: SignatureAlgorithm) -> CtapResult<Self> {
         match alg {
-            SignatureAlgorithm::Es256 => Self::Ecdsa(EcdsaSk::<E>::random(env.rng())),
+            SignatureAlgorithm::Es256 => Ok(Self::Ecdsa(EcdsaSk::<E>::random(env.rng())?)),
             #[cfg(feature = "ed25519")]
-            SignatureAlgorithm::Eddsa => Self::Ed25519(Ed25519Sk::<E>::random(env.rng())),
+            SignatureAlgorithm::Eddsa => Ok(Self::Ed25519(Ed25519Sk::<E>::random(env.rng())?)),
             SignatureAlgorithm::Unknown => unreachable!(),
         }
     }
 
     /// Creates a new ecdsa private key.
-    pub fn new_ecdsa(env: &mut E) -> PrivateKey<E> {
+    pub fn new_ecdsa(env: &mut E) -> CtapResult<PrivateKey<E>> {
         Self::new(env, SignatureAlgorithm::Es256)
     }
 
@@ -81,9 +83,9 @@ impl<E: Env> PrivateKey<E> {
     /// Returns the encoded signature for a given message.
     pub fn sign_and_encode(&self, message: &[u8]) -> CtapResult<Vec<u8>> {
         Ok(match self {
-            PrivateKey::Ecdsa(key) => key.sign(message).to_der(),
+            PrivateKey::Ecdsa(key) => key.sign(message)?.to_der(),
             #[cfg(feature = "ed25519")]
-            PrivateKey::Ed25519(key) => key.sign(message).to_bytes(),
+            PrivateKey::Ed25519(key) => key.sign(message)?.to_bytes(),
         })
     }
 
@@ -140,7 +142,7 @@ mod test {
     #[test]
     fn test_new_ecdsa_export_import() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::<TestEnv>::new_ecdsa(&mut env);
+        let private_key = PrivateKey::<TestEnv>::new_ecdsa(&mut env).unwrap();
         let key_bytes = private_key.export();
         let ecdsa_key = EcdsaSk::<TestEnv>::import(&key_bytes).unwrap();
         let reconstructed = PrivateKey::<TestEnv>::Ecdsa(ecdsa_key);
@@ -151,7 +153,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_new_ed25519_export_import() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::<TestEnv>::new(&mut env, SignatureAlgorithm::Eddsa);
+        let private_key = PrivateKey::<TestEnv>::new(&mut env, SignatureAlgorithm::Eddsa).unwrap();
         let key_bytes = private_key.export();
         let ed25519_key = Ed25519Sk::<TestEnv>::import(&key_bytes).unwrap();
         let reconstructed = PrivateKey::<TestEnv>::Ed25519(ed25519_key);
@@ -161,7 +163,7 @@ mod test {
     #[test]
     fn test_private_key_get_pub_key() {
         let mut env = TestEnv::default();
-        let ecdsa_key = EcdsaSk::<TestEnv>::random(env.rng());
+        let ecdsa_key = EcdsaSk::<TestEnv>::random(env.rng()).unwrap();
         let public_key = ecdsa_key.public_key();
         let private_key = PrivateKey::<TestEnv>::Ecdsa(ecdsa_key);
         assert_eq!(
@@ -174,15 +176,15 @@ mod test {
     fn test_private_key_sign_and_encode() {
         let mut env = TestEnv::default();
         let message = [0x5A; 32];
-        let ecdsa_key = EcdsaSk::<TestEnv>::random(env.rng());
-        let signature = ecdsa_key.sign(&message).to_der();
+        let ecdsa_key = EcdsaSk::<TestEnv>::random(env.rng()).unwrap();
+        let signature = ecdsa_key.sign(&message).unwrap().to_der();
         let private_key = PrivateKey::<TestEnv>::Ecdsa(ecdsa_key);
         assert_eq!(private_key.sign_and_encode(&message), Ok(signature));
     }
 
     fn test_private_key_signature_algorithm(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::<TestEnv>::new(&mut env, signature_algorithm);
+        let private_key = PrivateKey::<TestEnv>::new(&mut env, signature_algorithm).unwrap();
         assert_eq!(private_key.signature_algorithm(), signature_algorithm);
     }
 
@@ -199,7 +201,7 @@ mod test {
 
     fn test_private_key_from_to_cbor(signature_algorithm: SignatureAlgorithm) {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::<TestEnv>::new(&mut env, signature_algorithm);
+        let private_key = PrivateKey::<TestEnv>::new(&mut env, signature_algorithm).unwrap();
         let cbor = private_key.to_cbor();
         assert!(PrivateKey::<TestEnv>::from_cbor(cbor) == Ok(private_key));
     }

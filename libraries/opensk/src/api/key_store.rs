@@ -350,7 +350,7 @@ mod test {
         env: &mut TestEnv,
         signature_algorithm: SignatureAlgorithm,
     ) -> CredentialSource {
-        let private_key = PrivateKey::new(env, signature_algorithm);
+        let private_key = PrivateKey::new(env, signature_algorithm).unwrap();
         CredentialSource {
             wrapped_private_key: private_key.to_cbor(),
             rp_id_hash: [0x55; 32],

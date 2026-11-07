@@ -188,6 +188,20 @@ impl Default for TestEnv {
 }
 
 impl TestEnv {
+    /// Makes software signing key generation fail on the current thread, across
+    /// all environments. Other threads are unaffected. Call with false to reset.
+    #[cfg(test)]
+    pub(crate) fn fail_key_generation(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::FAIL_KEY_GENERATION.set(fail);
+    }
+
+    /// Makes software signing fail on the current thread, across all environments.
+    /// Other threads are unaffected. Call with false to reset.
+    #[cfg(test)]
+    pub(crate) fn fail_signing(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::FAIL_SIGNING.set(fail);
+    }
+
     pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }

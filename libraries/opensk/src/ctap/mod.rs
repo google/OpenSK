@@ -967,7 +967,7 @@ impl<E: Env> CtapState<E> {
 
         // We decide on the algorithm early, but delay key creation since it takes time.
         // We rather do that later so all intermediate checks may return faster.
-        let private_key = PrivateKey::new(env, algorithm);
+        let private_key = PrivateKey::new(env, algorithm)?;
         let credential_id = if options.rk {
             let random_id = env.rng().gen_uniform_u8x32().to_vec();
             let credential_source = PublicKeyCredentialSource {
@@ -1059,7 +1059,7 @@ impl<E: Env> CtapState<E> {
                 let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
                     .ok_or(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
                 (
-                    attestation_key.sign(&signature_data).to_der(),
+                    attestation_key.sign(&signature_data)?.to_der(),
                     Some(vec![certificate]),
                 )
             }
@@ -1717,6 +1717,135 @@ mod test {
         }
     }
 
+    const TEST_RP_ID: &str = "example.com";
+    const CRYPTO_ERROR: Ctap2StatusCode = Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR;
+
+    fn configure_batch_attestation(env: &mut TestEnv) {
+        *env.customization_mut() = crate::api::customization::CustomizationImpl {
+            use_batch_attestation: true,
+            ..crate::api::customization::DEFAULT_CUSTOMIZATION
+        }
+        .into();
+        env.persist()
+            .set_attestation(
+                AttestationId::Batch,
+                Some(&Attestation {
+                    wrapped_private_key: vec![0x41; 32],
+                    certificate: vec![0x99; 20],
+                }),
+            )
+            .unwrap();
+    }
+
+    fn assertion_parameters() -> AuthenticatorGetAssertionParameters {
+        AuthenticatorGetAssertionParameters {
+            rp_id: String::from(TEST_RP_ID),
+            client_data_hash: vec![0xCD],
+            allow_list: None,
+            extensions: GetAssertionExtensions::default(),
+            options: GetAssertionOptions::default(),
+            pin_uv_auth_param: None,
+            pin_uv_auth_protocol: None,
+        }
+    }
+
+    fn create_assertion_credentials(env: &mut TestEnv, state: &mut CtapState<TestEnv>) {
+        for user_id in [1, 2, 3] {
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.user.user_id = vec![user_id];
+            state
+                .process_make_credential(env, parameters, DUMMY_CHANNEL)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn make_credential_reports_key_generation_failure() {
+        for parameter in SUPPORTED_CRED_PARAMS {
+            let mut env = TestEnv::default();
+            let mut state = CtapState::new(&mut env);
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.pub_key_cred_params = vec![parameter.clone()];
+            env.fail_key_generation(true);
+            assert_eq!(
+                state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+                Err(CRYPTO_ERROR)
+            );
+            env.fail_key_generation(false);
+        }
+    }
+
+    #[test]
+    fn make_credential_reports_signing_failure() {
+        for (parameter, batch) in [
+            (ES256_CRED_PARAM, false),
+            (ES256_CRED_PARAM, true),
+            #[cfg(feature = "ed25519")]
+            (EDDSA_CRED_PARAM, false),
+        ] {
+            let mut env = TestEnv::default();
+            if batch {
+                configure_batch_attestation(&mut env);
+            }
+            let mut state = CtapState::new(&mut env);
+            let mut parameters = create_minimal_make_credential_parameters();
+            parameters.pub_key_cred_params = vec![parameter];
+            env.fail_signing(true);
+            assert_eq!(
+                state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+                Err(CRYPTO_ERROR)
+            );
+            env.fail_signing(false);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "config_command")]
+    fn enterprise_attestation_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        env.customization_mut()
+            .setup_enterprise_attestation(Some(EnterpriseAttestationMode::PlatformManaged), None);
+        let mut state = CtapState::new(&mut env);
+        test_helpers::enable_enterprise_attestation(&mut state, &mut env).unwrap();
+        let mut parameters = create_minimal_make_credential_parameters();
+        parameters.enterprise_attestation = Some(2);
+        env.fail_signing(true);
+        assert_eq!(
+            state.process_make_credential(&mut env, parameters, DUMMY_CHANNEL),
+            Err(CRYPTO_ERROR)
+        );
+        env.fail_signing(false);
+    }
+
+    #[test]
+    fn get_assertion_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        create_assertion_credentials(&mut env, &mut state);
+        env.fail_signing(true);
+        assert_eq!(
+            state.process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL),
+            Err(CRYPTO_ERROR)
+        );
+        env.fail_signing(false);
+    }
+
+    #[test]
+    fn get_next_assertion_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        create_assertion_credentials(&mut env, &mut state);
+        state
+            .process_get_assertion(&mut env, assertion_parameters(), DUMMY_CHANNEL)
+            .unwrap();
+        env.fail_signing(true);
+        assert_eq!(
+            state.process_get_next_assertion(&mut env),
+            Err(CRYPTO_ERROR)
+        );
+        env.fail_signing(false);
+    }
+
     fn create_make_credential_parameters_with_exclude_list(
         excluded_credential_id: &[u8],
     ) -> AuthenticatorMakeCredentialParameters {
@@ -1809,7 +1938,7 @@ mod test {
     #[test]
     fn test_process_make_credential_credential_excluded() {
         let mut env = TestEnv::default();
-        let excluded_private_key = PrivateKey::new_ecdsa(&mut env);
+        let excluded_private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = excluded_private_key.to_cbor();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
@@ -2913,7 +3042,7 @@ mod test {
         let excluded_credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,
             credential_id: excluded_credential_id.clone(),
-            wrapped_private_key: PrivateKey::new_ecdsa(&mut env).to_cbor(),
+            wrapped_private_key: PrivateKey::new_ecdsa(&mut env).unwrap().to_cbor(),
             rp_id: String::from("example.com"),
             user_handle: vec![0x01],
             user_display_name: None,
@@ -3119,7 +3248,7 @@ mod test {
     #[test]
     fn test_resident_process_get_assertion_with_cred_protect() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -3295,7 +3424,7 @@ mod test {
     #[test]
     fn test_process_get_assertion_with_cred_blob() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -3415,7 +3544,7 @@ mod test {
     #[test]
     fn test_process_get_assertion_with_large_blob_key() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let credential_id = env.rng().gen_uniform_u8x32().to_vec();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
@@ -3704,7 +3833,7 @@ mod test {
     #[test]
     fn test_process_reset() {
         let mut env = TestEnv::default();
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
@@ -3901,7 +4030,7 @@ mod test {
             PinUvAuthProtocol::V1,
         );
 
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let credential_source = PublicKeyCredentialSource {
             key_type: PublicKeyCredentialType::PublicKey,

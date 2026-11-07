@@ -170,7 +170,7 @@ pub trait Persist {
             None => return Ok(None),
             Some(pin_properties) => pin_properties,
         };
-        if pin_properties.is_empty() {
+        if pin_properties.len() != 1 + PIN_AUTH_LENGTH {
             return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
         }
         Ok(Some(pin_properties[0]))

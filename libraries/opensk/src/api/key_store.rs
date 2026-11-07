@@ -513,6 +513,20 @@ mod test {
     }
 
     #[test]
+    fn test_pin_info_rejects_malformed_software_record() {
+        let mut env = TestEnv::default();
+        for malformed in [vec![], vec![4], vec![4; 16], vec![4; 18]] {
+            env.persist()
+                .insert(crate::api::persist::keys::PIN_PROPERTIES, &malformed)
+                .unwrap();
+            assert_eq!(
+                KeyStore::pin_info(&mut env),
+                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+            );
+        }
+    }
+
+    #[test]
     fn test_pin_lifecycle() {
         let mut env = TestEnv::default();
         assert_eq!(KeyStore::pin_info(&mut env), Ok(None));

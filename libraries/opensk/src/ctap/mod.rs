@@ -774,7 +774,7 @@ impl<E: Env> CtapState<E> {
             // This case was added in FIDO 2.1.
             if auth_param.is_empty() {
                 check_user_presence(env, channel)?;
-                if env.persist().pin_hash()?.is_none() {
+                if env.key_store().pin_info()?.is_none() {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 } else {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
@@ -1387,7 +1387,7 @@ impl<E: Env> CtapState<E> {
             (String::from("rk"), true),
             (
                 String::from("clientPin"),
-                env.persist().pin_hash()?.is_some(),
+                env.key_store().pin_info()?.is_some(),
             ),
             (String::from("up"), true),
             (String::from("pinUvAuthToken"), true),

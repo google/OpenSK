@@ -19,6 +19,7 @@ use crate::api::persist::Persist;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::{cbor_read, cbor_write};
 use crate::env::{AesKey, Env, Hmac};
 use alloc::vec::Vec;
@@ -26,6 +27,7 @@ use core::convert::{TryFrom, TryInto};
 use rand_core::Rng as _;
 use sk_cbor as cbor;
 use sk_cbor::{cbor_map_options, destructure_cbor_map};
+use subtle::ConstantTimeEq;
 
 // CBOR credential IDs consist of
 // - 1   byte : version number
@@ -63,8 +65,78 @@ impl From<CredentialSourceField> for cbor::Value {
     }
 }
 
-/// Provides storage for secret keys.
+/// The result of checking a PIN, including backend authorization on success.
+#[derive(Debug, PartialEq, Eq)]
+pub enum VerificationResult<P = ()> {
+    /// The configured verifier accepted the candidate.
+    Accepted(P),
+    /// The configured verifier explicitly rejected the candidate.
+    Rejected,
+}
+
+impl From<bool> for VerificationResult {
+    fn from(accepted: bool) -> Self {
+        if accepted {
+            Self::Accepted(())
+        } else {
+            Self::Rejected
+        }
+    }
+}
+
+/// Public metadata about a configured PIN. Contains no verifier material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinInfo {
+    /// Length of the configured PIN in Unicode code points.
+    pub code_point_length: u8,
+}
+
+/// Provides access to cryptographic keys and PIN verification.
+///
+/// OpenSK passes PIN verifiers as the first 16 bytes of SHA-256 over the UTF-8
+/// encoded PIN. These values are sensitive and permit offline guesses against
+/// short PINs; do not log or disclose them. They are neither plaintext PINs nor
+/// encrypted CTAP request fields.
+///
+/// A software backend can protect a stored verifier and compare candidates in
+/// constant time. A hardware backend can submit the candidate as authorization
+/// for a protected object without exporting an expected verifier. A successful
+/// check produces backend-defined evidence for a possible PIN change. Scope
+/// that evidence to the current command, protect any secrets it contains, and
+/// discard it when the command ends or fails. It must not authorize another
+/// request.
+///
+/// OpenSK owns CTAP retry and temporary lockout policy. It durably charges a
+/// retry before verification, including when verification returns an error,
+/// and resets retries only after acceptance. A hardware backend can impose
+/// additional limits. Hardware lockout, storage, communication, and other
+/// operational failures are errors; they must not grant authorization or be
+/// reported as a wrong PIN.
+///
+/// # Software verification
+///
+/// With `type VerifiedPin = ()`, map a constant-time comparison directly to
+/// the result:
+///
+/// ```
+/// use opensk::api::key_store::VerificationResult;
+/// use subtle::ConstantTimeEq;
+///
+/// fn compare(expected: &[u8; 16], candidate: &[u8; 16]) -> VerificationResult {
+///     bool::from(expected.ct_eq(candidate)).into()
+/// }
+/// assert_eq!(compare(&[1; 16], &[1; 16]), VerificationResult::Accepted(()));
+/// assert_eq!(compare(&[1; 16], &[2; 16]), VerificationResult::Rejected);
+/// ```
+///
+/// Hardware backends return `Accepted(proof)` after successful authorization.
+/// The owned proof carries the authorization needed by `change_pin`.
 pub trait KeyStore {
+    /// Evidence of a successful PIN check for the current command.
+    ///
+    /// OpenSK consumes this in `change_pin` or drops it at command completion.
+    /// Protect any contained secret; use `()` when no extra evidence is needed.
+    type VerifiedPin;
     /// Initializes the key store (if needed).
     ///
     /// This function should be a no-op if the key store is already initialized.
@@ -97,13 +169,53 @@ pub trait KeyStore {
     /// Returns the key for the CredRandom feature.
     fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
 
-    /// Encrypts a PIN hash.
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error>;
+    /// Returns configured PIN metadata, or `None` if no PIN is set.
+    ///
+    /// This does not verify a candidate. Device or storage failures are errors,
+    /// never an absent PIN. No verifier material is exposed.
+    fn pin_info(&mut self) -> CtapResult<Option<PinInfo>>;
 
-    /// Decrypts a PIN hash.
-    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error>;
+    /// Checks the first 16 bytes of SHA-256 of a PIN.
+    ///
+    /// Return `Accepted` only for successful authorization and `Rejected` only
+    /// for an explicit wrong PIN. Propagate device, storage and lockout errors.
+    /// CTAP charges a retry before calling this and resets retries after success;
+    /// this method must not change CTAP retry state. Compare software verifiers
+    /// in constant time. The proof must support replacement without a second
+    /// PIN attempt and must only authorize the current command.
+    fn verify_pin(
+        &mut self,
+        candidate: &[u8; 16],
+    ) -> CtapResult<VerificationResult<Self::VerifiedPin>>;
 
-    /// Resets the key store.
+    /// Installs the first validated PIN verifier and code point length.
+    ///
+    /// OpenSK calls this only when no PIN is configured, after checking policy.
+    /// On success verifier and length must be durable and the CTAP forced-change
+    /// flag must be cleared. If hardware and metadata require separate updates,
+    /// define recovery so interrupted updates fail closed.
+    fn initialize_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()>;
+
+    /// Replaces the PIN, consuming authorization from the current command.
+    ///
+    /// OpenSK validates the new PIN first. For forced changes it compares the new
+    /// verifier with the accepted old candidate in constant time, without another
+    /// backend check. On success verifier and length must be durable and the CTAP
+    /// forced-change flag must be cleared. OpenSK invalidates old PIN tokens
+    /// immediately before this call, including when it returns an error. Ordinary
+    /// failures should preserve the old verifier. Ambiguous hardware commits need
+    /// recovery that fails closed.
+    fn change_pin(
+        &mut self,
+        verified: Self::VerifiedPin,
+        pin_hash: &[u8; 16],
+        code_point_length: u8,
+    ) -> CtapResult<()>;
+
+    /// Resets the key store, including hardware PIN configuration.
+    ///
+    /// CTAP first resets persistent storage, which removes the software PIN.
+    /// Hardware implementations must also remove their protected PIN objects.
     fn reset(&mut self) -> Result<(), Error>;
 }
 
@@ -114,9 +226,16 @@ pub trait KeyStore {
 pub struct Error;
 
 /// Implements a default key store using the environment rng and store.
-pub trait Helper: Env {}
+pub trait Helper: Env {
+    /// Overrides software verification in unit tests.
+    #[cfg(test)]
+    fn test_verify_pin(&mut self, _candidate: &[u8; 16]) -> Option<CtapResult<VerificationResult>> {
+        None
+    }
+}
 
 impl<T: Helper> KeyStore for T {
+    type VerifiedPin = ();
     fn init(&mut self) -> Result<(), Error> {
         Ok(())
     }
@@ -206,12 +325,34 @@ impl<T: Helper> KeyStore for T {
         Ok(get_master_keys(self)?.cred_random[has_uv as usize].clone())
     }
 
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error> {
-        Ok(*plain)
+    fn pin_info(&mut self) -> CtapResult<Option<PinInfo>> {
+        Ok(self
+            .persist()
+            .pin_code_point_length()?
+            .map(|code_point_length| PinInfo { code_point_length }))
     }
 
-    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error> {
-        Ok(Secret::from_exposed_secret(*cipher))
+    fn verify_pin(&mut self, candidate: &[u8; 16]) -> CtapResult<VerificationResult> {
+        #[cfg(test)]
+        if let Some(result) = self.test_verify_pin(candidate) {
+            return result;
+        }
+        let stored = self
+            .persist()
+            .pin_hash()?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        Ok(bool::from(stored.ct_eq(candidate)).into())
+    }
+
+    fn initialize_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()> {
+        if KeyStore::pin_info(self)?.is_some() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
+        }
+        self.persist().set_pin(pin_hash, code_point_length)
+    }
+
+    fn change_pin(&mut self, (): (), pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()> {
+        self.persist().set_pin(pin_hash, code_point_length)
     }
 
     fn reset(&mut self) -> Result<(), Error> {
@@ -387,15 +528,80 @@ mod test {
     }
 
     #[test]
-    fn test_pin_hash_encrypt_decrypt() {
+    fn test_pin_info_rejects_malformed_software_record() {
         let mut env = TestEnv::default();
-        let key_store = env.key_store();
-        assert_eq!(KeyStore::init(key_store), Ok(()));
+        for malformed in [vec![], vec![4], vec![4; 16], vec![4; 18]] {
+            env.persist()
+                .insert(crate::api::persist::keys::PIN_PROPERTIES, &malformed)
+                .unwrap();
+            assert_eq!(
+                KeyStore::pin_info(&mut env),
+                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+            );
+        }
+    }
 
-        let pin_hash = [0x55; 16];
-        let encrypted = key_store.encrypt_pin_hash(&pin_hash).unwrap();
-        let decrypted = key_store.decrypt_pin_hash(&encrypted).unwrap();
-        assert_eq!(pin_hash, *decrypted);
+    #[test]
+    fn test_existing_software_pin_record() {
+        let mut env = TestEnv::default();
+        let mut legacy = vec![7];
+        legacy.extend_from_slice(&[0x77; 16]);
+        env.persist()
+            .insert(crate::api::persist::keys::PIN_PROPERTIES, &legacy)
+            .unwrap();
+        assert_eq!(
+            KeyStore::pin_info(&mut env),
+            Ok(Some(PinInfo {
+                code_point_length: 7
+            }))
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x77; 16]),
+            Ok(VerificationResult::Accepted(()))
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x78; 16]),
+            Ok(VerificationResult::Rejected)
+        );
+    }
+
+    #[test]
+    fn test_pin_lifecycle() {
+        let mut env = TestEnv::default();
+        assert_eq!(KeyStore::pin_info(&mut env), Ok(None));
+        env.key_store().initialize_pin(&[0x55; 16], 4).unwrap();
+        assert_eq!(
+            KeyStore::pin_info(&mut env),
+            Ok(Some(PinInfo {
+                code_point_length: 4
+            }))
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x54; 16]),
+            Ok(VerificationResult::Rejected)
+        );
+        let VerificationResult::Accepted(proof) =
+            KeyStore::verify_pin(&mut env, &[0x55; 16]).unwrap()
+        else {
+            panic!("correct PIN rejected")
+        };
+        env.key_store().change_pin(proof, &[0x66; 16], 6).unwrap();
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x55; 16]),
+            Ok(VerificationResult::Rejected)
+        );
+        assert_eq!(
+            KeyStore::verify_pin(&mut env, &[0x66; 16]),
+            Ok(VerificationResult::Accepted(()))
+        );
+        assert_eq!(
+            env.persist()
+                .find(crate::api::persist::keys::PIN_PROPERTIES)
+                .unwrap(),
+            Some([vec![6], vec![0x66; 16]].concat())
+        );
+        crate::ctap::reset(&mut env).unwrap();
+        assert_eq!(KeyStore::pin_info(&mut env), Ok(None));
     }
 
     fn test_wrap_unwrap_credential(signature_algorithm: SignatureAlgorithm) {

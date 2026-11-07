@@ -308,17 +308,20 @@ impl Fingerprint for TestFingerprint {
 
 impl key_store::Helper for TestEnv {
     #[cfg(test)]
-    fn verify_pin(&mut self, candidate: &[u8; 16]) -> CtapResult<key_store::VerificationResult> {
-        use subtle::ConstantTimeEq;
-        let stored = self
-            .persist()
-            .pin_hash()?
-            .ok_or(crate::ctap::status_code::Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
-        Ok(match &mut self.pin_verifier {
-            Some(verify) => verify(&stored, candidate)?,
-            None => bool::from(stored.ct_eq(candidate)),
-        }
-        .into())
+    fn test_verify_pin(
+        &mut self,
+        candidate: &[u8; 16],
+    ) -> Option<CtapResult<key_store::VerificationResult>> {
+        let verify = self.pin_verifier.as_mut()?;
+        let stored = match self.store.find(crate::api::persist::keys::PIN_PROPERTIES) {
+            Ok(Some(value)) if value.len() == 17 => *arrayref::array_ref![value, 1, 16],
+            _ => {
+                return Some(Err(
+                    crate::ctap::status_code::Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR,
+                ));
+            }
+        };
+        Some(verify(&stored, candidate).map(Into::into))
     }
 }
 

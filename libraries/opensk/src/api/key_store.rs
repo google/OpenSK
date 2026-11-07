@@ -217,13 +217,10 @@ pub struct Error;
 
 /// Implements a default key store using the environment rng and store.
 pub trait Helper: Env {
-    /// Compares a candidate with the software verifier without changing retry state.
-    fn verify_pin(&mut self, candidate: &[u8; 16]) -> CtapResult<VerificationResult> {
-        let stored = self
-            .persist()
-            .pin_hash()?
-            .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
-        Ok(bool::from(stored.ct_eq(candidate)).into())
+    /// Overrides software verification in unit tests.
+    #[cfg(test)]
+    fn test_verify_pin(&mut self, _candidate: &[u8; 16]) -> Option<CtapResult<VerificationResult>> {
+        None
     }
 }
 
@@ -326,7 +323,15 @@ impl<T: Helper> KeyStore for T {
     }
 
     fn verify_pin(&mut self, candidate: &[u8; 16]) -> CtapResult<VerificationResult> {
-        Helper::verify_pin(self, candidate)
+        #[cfg(test)]
+        if let Some(result) = self.test_verify_pin(candidate) {
+            return result;
+        }
+        let stored = self
+            .persist()
+            .pin_hash()?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        Ok(bool::from(stored.ct_eq(candidate)).into())
     }
 
     fn initialize_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()> {

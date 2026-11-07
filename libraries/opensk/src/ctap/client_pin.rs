@@ -961,7 +961,7 @@ mod test {
         let shared_secret = pin_protocol
             .decapsulate(pin_protocol.get_public_key(), protocol)
             .unwrap();
-        // TestEnv's key store is the identity for PIN encryption.
+        // The software backend stores the verifier in the existing record format.
         env.persist().set_pin(&[0x11; 16], 4).unwrap();
         env.pin_verifier = Some(Box::new(|stored, candidate| {
             assert_eq!(*stored, [0x11; 16]);
@@ -997,7 +997,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "config_command")]
-    fn test_custom_pin_verification_during_forced_change() {
+    fn test_forced_change_does_not_reverify_authenticated_candidate() {
         let mut env = TestEnv::default();
         let protocol = PinUvAuthProtocol::V1;
         let pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
@@ -1006,10 +1006,8 @@ mod test {
             .unwrap();
         env.persist().set_pin(&[0x11; 16], 4).unwrap();
         env.persist().force_pin_change().unwrap();
-        env.pin_verifier = Some(Box::new(|stored, candidate| {
-            assert_eq!(*stored, [0x11; 16]);
-            assert_eq!(&candidate[..], &Sha::<TestEnv>::digest(b"1234")[..16]);
-            Ok(true)
+        env.pin_verifier = Some(Box::new(|_, _| {
+            panic!("policy must not verify another candidate")
         }));
         let old_hash: [u8; 16] = Sha::<TestEnv>::digest(b"1234")[..16].try_into().unwrap();
         let pin = encrypt_pin(&shared_secret, b"1234".to_vec());

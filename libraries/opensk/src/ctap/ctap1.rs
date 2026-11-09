@@ -428,16 +428,15 @@ mod test {
     const TEST_CHALLENGE: [u8; 32] = [0x0C; 32];
     const TEST_APPLICATION: [u8; 32] = [0x0A; 32];
 
-    fn set_batch_attestation(env: &mut TestEnv) {
+    fn set_batch_attestation(env: &mut TestEnv) -> Attestation {
+        let attestation = Attestation {
+            wrapped_private_key: vec![0x41; 32],
+            certificate: vec![0x99; 20],
+        };
         env.persist()
-            .set_attestation(
-                AttestationId::Batch,
-                Some(&Attestation {
-                    wrapped_private_key: vec![0x41; 32],
-                    certificate: vec![0x99; 20],
-                }),
-            )
+            .set_attestation(AttestationId::Batch, Some(&attestation))
             .unwrap();
+        attestation
     }
 
     #[test]
@@ -513,13 +512,7 @@ mod test {
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
-        let attestation = Attestation {
-            wrapped_private_key: vec![0x41; 32],
-            certificate: vec![0x99; 100],
-        };
-        env.persist()
-            .set_attestation(AttestationId::Batch, Some(&attestation))
-            .unwrap();
+        let attestation = set_batch_attestation(&mut env);
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();

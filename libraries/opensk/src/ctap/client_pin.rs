@@ -40,7 +40,6 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 #[cfg(test)]
 use enum_iterator::{Sequence, all};
-use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
 ///
@@ -105,11 +104,11 @@ fn check_and_store_new_pin<E: Env>(
     let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
     if env.persist().has_force_pin_change()?
         && let Some(old_pin_hash) = env.persist().pin_hash()?
+        && env
+            .key_store()
+            .verify_pin_hash(&old_pin_hash, new_pin_hash)?
     {
-        let old_pin_hash = env.key_store().decrypt_pin_hash(&old_pin_hash)?;
-        if bool::from(old_pin_hash.ct_eq(new_pin_hash)) {
-            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
-        }
+        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let pin_hash = env.key_store().encrypt_pin_hash(new_pin_hash)?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
@@ -212,10 +211,13 @@ impl<E: Env> ClientPin<E> {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                 }
                 storage::decr_pin_retries(env)?;
-                let pin_hash = env.key_store().decrypt_pin_hash(&pin_hash)?;
-                let is_valid = shared_secret
-                    .decrypt(&pin_hash_enc)
-                    .is_ok_and(|pin_hash_dec| bool::from(pin_hash.ct_eq(&pin_hash_dec)));
+                let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
+                    Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
+                        Ok(candidate) => env.key_store().verify_pin_hash(&pin_hash, candidate)?,
+                        Err(_) => false,
+                    },
+                    Err(_) => false,
+                };
 
                 if !is_valid {
                     self.get_mut_pin_protocol(pin_uv_auth_protocol)

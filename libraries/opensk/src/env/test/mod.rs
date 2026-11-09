@@ -36,9 +36,6 @@ use wasefire_store::{BufferOptions, BufferStorage, Store};
 
 pub mod customization;
 
-#[cfg(test)]
-type PinVerifier = Box<dyn FnMut(&[u8; 16], &[u8; 16]) -> Result<bool, key_store::Error>>;
-
 pub struct TestEnv {
     rng: TestRng,
     user_presence: TestUserPresence,
@@ -46,8 +43,6 @@ pub struct TestEnv {
     customization: TestCustomization,
     clock: TestClock,
     soft_reset: bool,
-    #[cfg(test)]
-    pub pin_verifier: Option<PinVerifier>,
     #[cfg(feature = "fingerprint")]
     fingerprint: TestFingerprint,
 }
@@ -186,8 +181,6 @@ impl Default for TestEnv {
             customization,
             clock,
             soft_reset: false,
-            #[cfg(test)]
-            pin_verifier: None,
             #[cfg(feature = "fingerprint")]
             fingerprint,
         }
@@ -320,18 +313,7 @@ impl Fingerprint for TestFingerprint {
     }
 }
 
-impl key_store::Helper for TestEnv {
-    #[cfg(test)]
-    fn test_verify_pin_hash(
-        &mut self,
-        stored: &[u8; 16],
-        candidate: &[u8; 16],
-    ) -> Option<Result<bool, key_store::Error>> {
-        self.pin_verifier
-            .as_mut()
-            .map(|verify| verify(stored, candidate))
-    }
-}
+impl key_store::Helper for TestEnv {}
 
 impl Env for TestEnv {
     type Rng = TestRng;

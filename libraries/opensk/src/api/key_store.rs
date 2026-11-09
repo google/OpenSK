@@ -101,21 +101,21 @@ pub trait KeyStore {
     /// Encrypts a PIN hash.
     fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error>;
 
-    /// Decrypts a PIN hash.
-    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error>;
-
-    /// Checks whether a candidate PIN hash matches the stored encrypted PIN hash.
+    /// Checks whether a candidate PIN hash matches the stored PIN hash.
     ///
-    /// `stored` is the value returned by [`Persist::pin_hash`]. `candidate` is
-    /// the first 16 bytes of SHA-256 of the PIN being checked. Implementations
-    /// may treat `stored` as an opaque marker and delegate verification to secure
-    /// hardware without exposing the decrypted PIN hash.
+    /// `stored` is the output of [`Self::encrypt_pin_hash`], read back via
+    /// [`Persist::pin_hash`]. `candidate` is the first 16 bytes of SHA-256 of
+    /// the PIN being checked.
+    ///
+    /// Implementations that cannot decrypt `stored` may treat it as an opaque
+    /// marker and delegate verification to secure hardware without exposing
+    /// the decrypted PIN hash.
     ///
     /// This is also used to reject reuse of the old PIN during a forced PIN
     /// change. Errors must remain distinguishable from a mismatch. Implementations
     /// should avoid leaking information through timing or error details.
     fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
-        let plain = self.decrypt_pin_hash(stored)?;
+        let plain = Secret::from_exposed_secret(*stored);
         Ok(bool::from(plain.ct_eq(candidate)))
     }
 
@@ -130,17 +130,7 @@ pub trait KeyStore {
 pub struct Error;
 
 /// Implements a default key store using the environment rng and store.
-pub trait Helper: Env {
-    /// Test-only override for exercising hardware PIN verification in CTAP tests.
-    #[cfg(test)]
-    fn test_verify_pin_hash(
-        &mut self,
-        _stored: &[u8; 16],
-        _candidate: &[u8; 16],
-    ) -> Option<Result<bool, Error>> {
-        None
-    }
-}
+pub trait Helper: Env {}
 
 impl<T: Helper> KeyStore for T {
     fn init(&mut self) -> Result<(), Error> {
@@ -234,19 +224,6 @@ impl<T: Helper> KeyStore for T {
 
     fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error> {
         Ok(*plain)
-    }
-
-    fn decrypt_pin_hash(&mut self, cipher: &[u8; 16]) -> Result<Secret<[u8; 16]>, Error> {
-        Ok(Secret::from_exposed_secret(*cipher))
-    }
-
-    #[cfg(test)]
-    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
-        if let Some(result) = self.test_verify_pin_hash(stored, candidate) {
-            return result;
-        }
-        let plain = self.decrypt_pin_hash(stored)?;
-        Ok(bool::from(plain.ct_eq(candidate)))
     }
 
     fn reset(&mut self) -> Result<(), Error> {
@@ -432,18 +409,6 @@ mod test {
             candidate[index] ^= 1;
             assert_eq!(key_store.verify_pin_hash(&stored, &candidate), Ok(false));
         }
-    }
-
-    #[test]
-    fn test_pin_hash_encrypt_decrypt() {
-        let mut env = TestEnv::default();
-        let key_store = env.key_store();
-        assert_eq!(KeyStore::init(key_store), Ok(()));
-
-        let pin_hash = [0x55; 16];
-        let encrypted = key_store.encrypt_pin_hash(&pin_hash).unwrap();
-        let decrypted = key_store.decrypt_pin_hash(&encrypted).unwrap();
-        assert_eq!(pin_hash, *decrypted);
     }
 
     fn test_wrap_unwrap_credential(signature_algorithm: SignatureAlgorithm) {

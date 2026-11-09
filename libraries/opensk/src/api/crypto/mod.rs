@@ -111,7 +111,7 @@ mod test {
     #[test]
     fn test_ecdsa_secret_key_deterministic_export() {
         let mut env = TestEnv::default();
-        let key = SoftwareEcdsaSecretKey::random(env.rng());
+        let key = SoftwareEcdsaSecretKey::random(env.rng()).unwrap();
         let wrapped1 = key.export();
         let wrapped2 = key.export();
         assert_eq!(wrapped1, wrapped2);
@@ -120,7 +120,7 @@ mod test {
     #[test]
     fn test_ecdsa_secret_key_export_import() {
         let mut env = TestEnv::default();
-        let first_key = SoftwareEcdsaSecretKey::random(env.rng());
+        let first_key = SoftwareEcdsaSecretKey::random(env.rng()).unwrap();
         let wrapped = first_key.export();
         let second_key = SoftwareEcdsaSecretKey::import(&wrapped).unwrap();
         let wrapped_again = second_key.export();
@@ -130,11 +130,11 @@ mod test {
     #[test]
     fn test_ecdsa_signature_deterministic() {
         let mut env = TestEnv::default();
-        let private_key = SoftwareEcdsaSecretKey::random(env.rng());
+        let private_key = SoftwareEcdsaSecretKey::random(env.rng()).unwrap();
         let message = [0x12, 0x34, 0x56, 0x78];
-        let signature1 = private_key.sign(&message);
+        let signature1 = private_key.sign(&message).unwrap();
         let der1 = signature1.to_der();
-        let signature2 = private_key.sign(&message);
+        let signature2 = private_key.sign(&message).unwrap();
         let der2 = signature2.to_der();
         assert_eq!(der1, der2);
     }
@@ -143,7 +143,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_ed25519_secret_key_deterministic_export() {
         let mut env = TestEnv::default();
-        let key = SoftwareEd25519SecretKey::random(env.rng());
+        let key = SoftwareEd25519SecretKey::random(env.rng()).unwrap();
         let wrapped1 = key.export();
         let wrapped2 = key.export();
         assert_eq!(wrapped1, wrapped2);
@@ -153,7 +153,7 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_ed25519_secret_key_export_import() {
         let mut env = TestEnv::default();
-        let first_key = SoftwareEd25519SecretKey::random(env.rng());
+        let first_key = SoftwareEd25519SecretKey::random(env.rng()).unwrap();
         let wrapped = first_key.export();
         let second_key = SoftwareEd25519SecretKey::import(&wrapped).unwrap();
         let wrapped_again = second_key.export();
@@ -164,11 +164,11 @@ mod test {
     #[cfg(feature = "ed25519")]
     fn test_ed25519_signature_deterministic() {
         let mut env = TestEnv::default();
-        let private_key = SoftwareEd25519SecretKey::random(env.rng());
+        let private_key = SoftwareEd25519SecretKey::random(env.rng()).unwrap();
         let message = [0x12, 0x34, 0x56, 0x78];
-        let signature1 = private_key.sign(&message);
+        let signature1 = private_key.sign(&message).unwrap();
         let bytes1 = signature1.to_bytes();
-        let signature2 = private_key.sign(&message);
+        let signature2 = private_key.sign(&message).unwrap();
         let bytes2 = signature2.to_bytes();
         assert_eq!(bytes1, bytes2);
     }

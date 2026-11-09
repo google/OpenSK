@@ -15,7 +15,7 @@
 use super::apdu::{Apdu, ApduStatusCode};
 use super::{CtapState, filter_listed_credential};
 use crate::api::crypto::EC_FIELD_SIZE;
-use crate::api::crypto::ec_signing::{EcPublicKey, EcSecretKey, EcSignature};
+use crate::api::crypto::ec_signing::{self, EcPublicKey, EcSecretKey, EcSignature};
 use crate::api::key_store::{CredentialSource, KeyStore};
 use crate::api::persist::{Attestation, AttestationId, Persist};
 use crate::api::private_key::PrivateKey;
@@ -26,6 +26,12 @@ use core::convert::TryFrom;
 
 // For now, they're the same thing with apdu.rs containing the authoritative definition
 pub type Ctap1StatusCode = ApduStatusCode;
+
+impl From<ec_signing::Error> for Ctap1StatusCode {
+    fn from(_: ec_signing::Error) -> Self {
+        Self::SW_INTERNAL_EXCEPTION
+    }
+}
 
 // The specification referenced in this file is at:
 // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.pdf
@@ -243,7 +249,7 @@ impl Ctap1Command {
         challenge: [u8; 32],
         application: [u8; 32],
     ) -> Result<Vec<u8>, Ctap1StatusCode> {
-        let sk = EcdsaSk::<E>::random(env.rng());
+        let sk = EcdsaSk::<E>::random(env.rng())?;
         let pk = sk.public_key();
         let private_key = PrivateKey::<E>::Ecdsa(sk);
         let wrapped_private_key = private_key.to_cbor();
@@ -289,7 +295,7 @@ impl Ctap1Command {
 
         let attestation_key = EcdsaSk::<E>::import(&wrapped_private_key)
             .ok_or(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)?;
-        let signature = attestation_key.sign(&signature_data);
+        let signature = attestation_key.sign(&signature_data)?;
 
         response.extend(signature.to_der());
         Ok(response)
@@ -406,7 +412,7 @@ mod test {
 
     /// Creates an example wrapped credential and RP ID hash.
     fn create_wrapped_credential(env: &mut TestEnv) -> (Vec<u8>, [u8; 32]) {
-        let private_key = PrivateKey::new_ecdsa(env);
+        let private_key = PrivateKey::new_ecdsa(env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {
@@ -417,6 +423,62 @@ mod test {
         };
         let key_handle = env.key_store().wrap_credential(credential_source).unwrap();
         (key_handle, rp_id_hash)
+    }
+
+    const TEST_CHALLENGE: [u8; 32] = [0x0C; 32];
+    const TEST_APPLICATION: [u8; 32] = [0x0A; 32];
+
+    fn set_batch_attestation(env: &mut TestEnv) -> Attestation {
+        let attestation = Attestation {
+            wrapped_private_key: vec![0x41; 32],
+            certificate: vec![0x99; 20],
+        };
+        env.persist()
+            .set_attestation(AttestationId::Batch, Some(&attestation))
+            .unwrap();
+        attestation
+    }
+
+    #[test]
+    fn register_reports_key_generation_failure() {
+        let mut env = TestEnv::default();
+        set_batch_attestation(&mut env);
+        env.fail_key_generation(true);
+        assert_eq!(
+            Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+        env.fail_key_generation(false);
+    }
+
+    #[test]
+    fn register_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        set_batch_attestation(&mut env);
+        env.fail_signing(true);
+        assert_eq!(
+            Ctap1Command::process_register(&mut env, TEST_CHALLENGE, TEST_APPLICATION),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+        env.fail_signing(false);
+    }
+
+    #[test]
+    fn authenticate_reports_signing_failure() {
+        let mut env = TestEnv::default();
+        let mut state = CtapState::new(&mut env);
+        let (key_handle, application) = create_wrapped_credential(&mut env);
+        let message = create_authenticate_message(
+            &application,
+            Ctap1Flags::DontEnforceUpAndSign,
+            &key_handle,
+        );
+        env.fail_signing(true);
+        assert_eq!(
+            Ctap1Command::process_command(&mut env, &message, &mut state),
+            Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION)
+        );
+        env.fail_signing(false);
     }
 
     #[test]
@@ -450,13 +512,7 @@ mod test {
         // Certificate and private key are missing
         assert_eq!(response, Err(Ctap1StatusCode::SW_INTERNAL_EXCEPTION));
 
-        let attestation = Attestation {
-            wrapped_private_key: vec![0x41; 32],
-            certificate: vec![0x99; 100],
-        };
-        env.persist()
-            .set_attestation(AttestationId::Batch, Some(&attestation))
-            .unwrap();
+        let attestation = set_batch_attestation(&mut env);
         ctap_state.u2f_up_state.consume_up(&mut env);
         ctap_state.u2f_up_state.grant_up(&mut env);
         let response = Ctap1Command::process_command(&mut env, &message, &mut ctap_state).unwrap();
@@ -745,7 +801,7 @@ mod test {
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
 
-        let private_key = PrivateKey::new_ecdsa(&mut env);
+        let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
         let wrapped_private_key = private_key.to_cbor();
         let rp_id_hash = Sha::<TestEnv>::digest(b"example.com");
         let credential_source = CredentialSource {

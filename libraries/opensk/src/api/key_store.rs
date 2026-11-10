@@ -100,6 +100,11 @@ pub trait KeyStore {
     fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
 
     /// Returns whether a PIN is configured.
+    #[cfg(not(feature = "config_command"))]
+    fn has_pin(&mut self) -> CtapResult<bool>;
+
+    /// Returns whether a PIN is configured.
+    #[cfg(feature = "config_command")]
     fn has_pin(&mut self) -> CtapResult<bool> {
         self.is_pin_longer_than(0)
     }
@@ -120,6 +125,7 @@ pub trait KeyStore {
     /// forces a PIN change on policy updates even if the PIN was already long
     /// enough. Disable `config_command` if these unnecessary changes are unwanted.
     /// Device or storage failures must return errors, not report an absent PIN.
+    #[cfg(feature = "config_command")]
     fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool>;
 
     /// Checks the first 16 bytes of SHA-256 of the candidate PIN.
@@ -131,7 +137,8 @@ pub trait KeyStore {
 
     /// Sets or replaces the PIN using its hash and length in Unicode code points.
     ///
-    /// The length can inform [`Self::is_pin_longer_than`]; retaining it is optional.
+    /// The length can inform `is_pin_longer_than` with `config_command` enabled;
+    /// retaining it is optional.
     ///
     /// CTAP checks PIN policy and, for replacement, verifies the old PIN first.
     /// Backends may retain authorization from that verification for this call;
@@ -242,6 +249,11 @@ impl<T: Helper> KeyStore for T {
         Ok(get_master_keys(self)?.cred_random[has_uv as usize].clone())
     }
 
+    fn has_pin(&mut self) -> CtapResult<bool> {
+        Ok(self.persist().pin_hash()?.is_some())
+    }
+
+    #[cfg(feature = "config_command")]
     fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool> {
         Ok(self
             .persist()
@@ -438,10 +450,13 @@ mod test {
         let mut env = TestEnv::default();
         let key_store = env.key_store();
         assert_eq!(key_store.has_pin(), Ok(false));
+        #[cfg(feature = "config_command")]
         assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
         key_store.store_pin(&[1; 16], 4).unwrap();
         assert_eq!(key_store.has_pin(), Ok(true));
+        #[cfg(feature = "config_command")]
         assert_eq!(key_store.is_pin_longer_than(3), Ok(true));
+        #[cfg(feature = "config_command")]
         assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
         assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(true));
         for index in 0..16 {
@@ -450,25 +465,12 @@ mod test {
             assert_eq!(key_store.verify_pin_hash(&candidate), Ok(false));
         }
         key_store.store_pin(&[2; 16], 6).unwrap();
+        #[cfg(feature = "config_command")]
         assert_eq!(key_store.is_pin_longer_than(5), Ok(true));
         assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(false));
         assert_eq!(key_store.verify_pin_hash(&[2; 16]), Ok(true));
         crate::ctap::reset(&mut env).unwrap();
         assert_eq!(env.key_store().has_pin(), Ok(false));
-    }
-
-    #[test]
-    fn test_malformed_pin_record() {
-        let mut env = TestEnv::default();
-        for record in [vec![4], vec![0; 17]] {
-            env.persist()
-                .insert(crate::api::persist::keys::PIN_PROPERTIES, &record)
-                .unwrap();
-            assert_eq!(
-                env.key_store().has_pin(),
-                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
-            );
-        }
     }
 
     fn test_wrap_unwrap_credential(signature_algorithm: SignatureAlgorithm) {

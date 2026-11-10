@@ -133,6 +133,9 @@ pub trait KeyStore {
     /// Return false for an incorrect PIN and an error for backend failures.
     /// Software implementations must compare hashes in constant time. CTAP charges
     /// a retry before this call and resets retries after successful verification.
+    /// Return `CTAP2_ERR_PIN_AUTH_BLOCKED` if temporary backend lockout prevented
+    /// checking the candidate. OpenSK then refunds the retry. An attempted but
+    /// incorrect PIN must return false, even if it triggers hardware lockout.
     fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool>;
 
     /// Sets or replaces the PIN using its hash and length in Unicode code points.

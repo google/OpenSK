@@ -19,6 +19,7 @@ use crate::api::persist::Persist;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::{cbor_read, cbor_write};
 use crate::env::{AesKey, Env, Hmac};
 use alloc::vec::Vec;
@@ -98,28 +99,47 @@ pub trait KeyStore {
     /// Returns the key for the CredRandom feature.
     fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
 
-    /// Encrypts a PIN hash.
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error>;
-
-    /// Checks whether a candidate PIN hash matches the stored PIN hash.
-    ///
-    /// `stored` is the output of [`Self::encrypt_pin_hash`], read back via
-    /// [`Persist::pin_hash`]. `candidate` is the first 16 bytes of SHA-256 of
-    /// the PIN being checked.
-    ///
-    /// Implementations that cannot decrypt `stored` may treat it as an opaque
-    /// marker and delegate verification to secure hardware without exposing
-    /// the decrypted PIN hash.
-    ///
-    /// This is also used to reject reuse of the old PIN during a forced PIN
-    /// change. Errors must remain distinguishable from a mismatch. Implementations
-    /// should avoid leaking information through timing or error details.
-    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
-        let plain = Secret::from_exposed_secret(*stored);
-        Ok(bool::from(plain.ct_eq(candidate)))
+    /// Returns whether a PIN is configured.
+    fn has_pin(&mut self) -> CtapResult<bool> {
+        self.is_pin_longer_than(0)
     }
 
-    /// Resets the key store.
+    /// Returns whether the configured PIN is known to have more than `length`
+    /// Unicode code points. Returns false if no PIN is configured.
+    ///
+    /// The default [`Self::has_pin`] calls this with zero, which must accurately
+    /// report PIN presence without verifying the PIN.
+    ///
+    /// OpenSK only calls this with a nonzero length when a client sets the
+    /// minimum PIN length through `config_command`. Returning false then sets
+    /// `forcePINChange`, requiring the user to change their PIN.
+    ///
+    /// Backends need not retain the exact length: a guaranteed lower bound is
+    /// sufficient to answer true. If the length is unknown, answer true at zero
+    /// when a PIN exists, and false for positive thresholds. This conservatively
+    /// forces a PIN change on policy updates even if the PIN was already long
+    /// enough. Disable `config_command` if these unnecessary changes are unwanted.
+    /// Device or storage failures must return errors, not report an absent PIN.
+    fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool>;
+
+    /// Checks the first 16 bytes of SHA-256 of the candidate PIN.
+    ///
+    /// Return false for an incorrect PIN and an error for backend failures.
+    /// Software implementations must compare hashes in constant time. CTAP charges
+    /// a retry before this call and resets retries after successful verification.
+    fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool>;
+
+    /// Sets or replaces the PIN using its hash and length in Unicode code points.
+    ///
+    /// The length can inform [`Self::is_pin_longer_than`]; retaining it is optional.
+    ///
+    /// CTAP checks PIN policy and, for replacement, verifies the old PIN first.
+    /// Backends may retain authorization from that verification for this call;
+    /// any retained authorization must be scoped to the current command.
+    /// On success, the PIN must be durable and the forced-change flag cleared.
+    fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()>;
+
+    /// Resets the key store, including any hardware PIN configuration.
     fn reset(&mut self) -> Result<(), Error>;
 }
 
@@ -222,8 +242,23 @@ impl<T: Helper> KeyStore for T {
         Ok(get_master_keys(self)?.cred_random[has_uv as usize].clone())
     }
 
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error> {
-        Ok(*plain)
+    fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool> {
+        Ok(self
+            .persist()
+            .pin_code_point_length()?
+            .is_some_and(|pin_length| pin_length > length))
+    }
+
+    fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool> {
+        let stored = self
+            .persist()
+            .pin_hash()?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        Ok(bool::from(stored.ct_eq(candidate)))
+    }
+
+    fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()> {
+        self.persist().set_pin(pin_hash, code_point_length)
     }
 
     fn reset(&mut self) -> Result<(), Error> {
@@ -399,15 +434,40 @@ mod test {
     }
 
     #[test]
-    fn test_default_verify_pin_hash() {
+    fn test_pin_storage_and_verification() {
         let mut env = TestEnv::default();
         let key_store = env.key_store();
-        let stored = key_store.encrypt_pin_hash(&[1; 16]).unwrap();
-        assert_eq!(key_store.verify_pin_hash(&stored, &[1; 16]), Ok(true));
+        assert_eq!(key_store.has_pin(), Ok(false));
+        assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
+        key_store.store_pin(&[1; 16], 4).unwrap();
+        assert_eq!(key_store.has_pin(), Ok(true));
+        assert_eq!(key_store.is_pin_longer_than(3), Ok(true));
+        assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
+        assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(true));
         for index in 0..16 {
             let mut candidate = [1; 16];
             candidate[index] ^= 1;
-            assert_eq!(key_store.verify_pin_hash(&stored, &candidate), Ok(false));
+            assert_eq!(key_store.verify_pin_hash(&candidate), Ok(false));
+        }
+        key_store.store_pin(&[2; 16], 6).unwrap();
+        assert_eq!(key_store.is_pin_longer_than(5), Ok(true));
+        assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(false));
+        assert_eq!(key_store.verify_pin_hash(&[2; 16]), Ok(true));
+        crate::ctap::reset(&mut env).unwrap();
+        assert_eq!(env.key_store().has_pin(), Ok(false));
+    }
+
+    #[test]
+    fn test_malformed_pin_record() {
+        let mut env = TestEnv::default();
+        for record in [vec![4], vec![0; 17]] {
+            env.persist()
+                .insert(crate::api::persist::keys::PIN_PROPERTIES, &record)
+                .unwrap();
+            assert_eq!(
+                env.key_store().has_pin(),
+                Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+            );
         }
     }
 

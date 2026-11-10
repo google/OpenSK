@@ -116,6 +116,19 @@ fn check_new_pin<E: Env>(
     Ok((result, pin_length as u8))
 }
 
+// Retry accounting belongs to CTAP, including lockout reported by hardware.
+fn process_pin_verification_result(
+    env: &mut impl Env,
+    result: CtapResult<bool>,
+) -> CtapResult<bool> {
+    if result == Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED) {
+        let failures = env.persist().pin_fails()?.saturating_sub(1);
+        env.persist()
+            .insert(crate::api::persist::keys::PIN_RETRIES, &[failures])?;
+    }
+    result
+}
+
 pub(crate) fn check_pin_uv_auth_protocol(
     env: &impl Env,
     pin_uv_auth_protocol: PinUvAuthProtocol,
@@ -213,7 +226,10 @@ impl<E: Env> ClientPin<E> {
                 let candidate = shared_secret.decrypt(&pin_hash_enc).ok();
                 let is_valid = match candidate.as_deref() {
                     Some(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(candidate) {
-                        Ok(candidate) => env.key_store().verify_pin_hash(candidate)?,
+                        Ok(candidate) => {
+                            let result = env.key_store().verify_pin_hash(candidate);
+                            process_pin_verification_result(env, result)?
+                        }
                         Err(_) => false,
                     },
                     None => false,
@@ -745,6 +761,23 @@ mod test {
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
     /// Stores a PIN hash corresponding to the dummy PIN "1234".
+    #[test]
+    fn test_backend_lockout_refunds_only_unattempted_pin_verification() {
+        for (result, expected_failures) in [
+            (Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED), 2),
+            (Ok(false), 3),
+            (Ok(true), 3),
+            (Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE), 3),
+        ] {
+            let mut env = TestEnv::default();
+            env.persist()
+                .insert(crate::api::persist::keys::PIN_RETRIES, &[3])
+                .unwrap();
+            assert_eq!(process_pin_verification_result(&mut env, result), result);
+            assert_eq!(env.persist().pin_fails().unwrap(), expected_failures);
+        }
+    }
+
     fn set_standard_pin(env: &mut TestEnv) {
         let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(b"1234")[..16]);

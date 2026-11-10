@@ -40,6 +40,7 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 #[cfg(test)]
 use enum_iterator::{Sequence, all};
+use subtle::ConstantTimeEq;
 
 /// The prefix length of the PIN hash that is stored and compared.
 ///
@@ -83,16 +84,17 @@ fn decrypt_pin<E: Env>(
     Ok(result)
 }
 
-/// Stores a hash prefix of the new PIN in the persistent storage, if correct.
+/// Checks PIN policy and returns the new PIN hash prefix and code point length.
 ///
 /// The new PIN is passed encrypted, so it is first decrypted and stripped from
 /// padding. Next, it is checked against the PIN policy. Last, it is hashed and
-/// truncated for persistent storage.
-fn check_and_store_new_pin<E: Env>(
+/// truncated for storage.
+fn check_new_pin<E: Env>(
     env: &mut E,
     shared_secret: &SharedSecret<E>,
     new_pin_enc: Vec<u8>,
-) -> CtapResult<()> {
+    old_pin_hash: Option<&[u8]>,
+) -> CtapResult<(Secret<[u8; PIN_AUTH_LENGTH]>, u8)> {
     let pin = decrypt_pin(shared_secret, new_pin_enc)?;
     let min_pin_length = storage::min_pin_length(env)? as usize;
     let pin_length = str::from_utf8(&pin).unwrap_or("").chars().count();
@@ -103,18 +105,28 @@ fn check_and_store_new_pin<E: Env>(
     Sha::<E>::digest_mut(&pin, &mut pin_hash);
     let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
     if env.persist().has_force_pin_change()?
-        && let Some(old_pin_hash) = env.persist().pin_hash()?
-        && env
-            .key_store()
-            .verify_pin_hash(&old_pin_hash, new_pin_hash)?
+        && let Some(old_pin_hash) = old_pin_hash
+        && bool::from(old_pin_hash.ct_eq(new_pin_hash))
     {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
-    let pin_hash = env.key_store().encrypt_pin_hash(new_pin_hash)?;
+    let mut result = Secret::<[u8; PIN_AUTH_LENGTH]>::default();
+    result.copy_from_slice(new_pin_hash);
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
-    env.persist()
-        .set_pin(array_ref!(pin_hash, 0, PIN_AUTH_LENGTH), pin_length as u8)?;
-    Ok(())
+    Ok((result, pin_length as u8))
+}
+
+// Retry accounting belongs to CTAP, including lockout reported by hardware.
+fn process_pin_verification_result(
+    env: &mut impl Env,
+    result: CtapResult<bool>,
+) -> CtapResult<bool> {
+    if result == Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED) {
+        let failures = env.persist().pin_fails()?.saturating_sub(1);
+        env.persist()
+            .insert(crate::api::persist::keys::PIN_RETRIES, &[failures])?;
+    }
+    result
 }
 
 pub(crate) fn check_pin_uv_auth_protocol(
@@ -204,19 +216,23 @@ impl<E: Env> ClientPin<E> {
         pin_uv_auth_protocol: PinUvAuthProtocol,
         shared_secret: &SharedSecret<E>,
         pin_hash_enc: Vec<u8>,
-    ) -> CtapResult<()> {
-        match env.persist().pin_hash()? {
-            Some(pin_hash) => {
+    ) -> CtapResult<Secret<[u8]>> {
+        let candidate = match env.key_store().has_pin()? {
+            true => {
                 if self.consecutive_pin_mismatches >= 3 {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
                 }
                 storage::decr_pin_retries(env)?;
-                let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
-                    Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
-                        Ok(candidate) => env.key_store().verify_pin_hash(&pin_hash, candidate)?,
+                let candidate = shared_secret.decrypt(&pin_hash_enc).ok();
+                let is_valid = match candidate.as_deref() {
+                    Some(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(candidate) {
+                        Ok(candidate) => {
+                            let result = env.key_store().verify_pin_hash(candidate);
+                            process_pin_verification_result(env, result)?
+                        }
                         Err(_) => false,
                     },
-                    Err(_) => false,
+                    None => false,
                 };
 
                 if !is_valid {
@@ -231,15 +247,16 @@ impl<E: Env> ClientPin<E> {
                     }
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
                 }
+                candidate.unwrap()
             }
             // This status code is not explicitly mentioned in the specification.
-            None => return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED),
-        }
+            false => return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED),
+        };
         storage::reset_pin_retries(env)?;
         #[cfg(feature = "fingerprint")]
         storage::reset_uv_retries(env)?;
         self.consecutive_pin_mismatches = 0;
-        Ok(())
+        Ok(candidate)
     }
 
     fn process_get_pin_retries(&self, env: &mut E) -> CtapResult<AuthenticatorClientPinResponse> {
@@ -285,13 +302,16 @@ impl<E: Env> ClientPin<E> {
         let pin_uv_auth_param = ok_or_missing(pin_uv_auth_param)?;
         let new_pin_enc = ok_or_missing(new_pin_enc)?;
 
-        if env.persist().pin_hash()?.is_some() {
+        if env.key_store().has_pin()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;
         shared_secret.verify(&new_pin_enc, &pin_uv_auth_param)?;
 
-        check_and_store_new_pin(env, &shared_secret, new_pin_enc)?;
+        let (pin_hash, length) = check_new_pin(env, &shared_secret, new_pin_enc, None)?;
+        env.key_store().store_pin(&pin_hash, length)?;
+        env.persist()
+            .remove(crate::api::persist::keys::FORCE_PIN_CHANGE)?;
         storage::reset_pin_retries(env)?;
         Ok(())
     }
@@ -321,10 +341,16 @@ impl<E: Env> ClientPin<E> {
         let mut auth_param_data = new_pin_enc.clone();
         auth_param_data.extend(&pin_hash_enc);
         shared_secret.verify(&auth_param_data, &pin_uv_auth_param)?;
-        self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
+        let old_pin_hash =
+            self.verify_pin_hash_enc(env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)?;
 
-        check_and_store_new_pin(env, &shared_secret, new_pin_enc)?;
+        let (pin_hash, length) =
+            check_new_pin(env, &shared_secret, new_pin_enc, Some(&old_pin_hash))?;
+        // Invalidate tokens before replacement, which may fail after committing the new PIN.
         self.reset_pin_uv_auth_token(env);
+        env.key_store().store_pin(&pin_hash, length)?;
+        env.persist()
+            .remove(crate::api::persist::keys::FORCE_PIN_CHANGE)?;
         Ok(())
     }
 
@@ -739,6 +765,23 @@ mod test {
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
     /// Stores a PIN hash corresponding to the dummy PIN "1234".
+    #[test]
+    fn test_backend_lockout_refunds_only_unattempted_pin_verification() {
+        for (result, expected_failures) in [
+            (Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED), 2),
+            (Ok(false), 3),
+            (Ok(true), 3),
+            (Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_HARDWARE_FAILURE), 3),
+        ] {
+            let mut env = TestEnv::default();
+            env.persist()
+                .insert(crate::api::persist::keys::PIN_RETRIES, &[3])
+                .unwrap();
+            assert_eq!(process_pin_verification_result(&mut env, result), result);
+            assert_eq!(env.persist().pin_fails().unwrap(), expected_failures);
+        }
+    }
+
     fn set_standard_pin(env: &mut TestEnv) {
         let mut pin_hash = [0u8; 16];
         pin_hash.copy_from_slice(&Sha::<TestEnv>::digest(b"1234")[..16]);
@@ -880,13 +923,10 @@ mod test {
 
         let pin_hash_enc = shared_secret.encrypt(&mut env, &pin_hash).unwrap();
         assert_eq!(
-            client_pin.verify_pin_hash_enc(
-                &mut env,
-                pin_uv_auth_protocol,
-                &shared_secret,
-                pin_hash_enc
-            ),
-            Ok(())
+            &*client_pin
+                .verify_pin_hash_enc(&mut env, pin_uv_auth_protocol, &shared_secret, pin_hash_enc)
+                .unwrap(),
+            &pin_hash
         );
 
         let pin_hash_enc = vec![0xEE; 16];
@@ -1534,7 +1574,7 @@ mod test {
         test_helper_decrypt_pin(PinUvAuthProtocol::V2);
     }
 
-    fn test_helper_check_and_store_new_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
+    fn test_helper_check_new_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
         let mut env = TestEnv::default();
         let pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
         let shared_secret = pin_protocol
@@ -1561,29 +1601,23 @@ mod test {
             ),
         ];
         for (pin, result) in test_cases {
-            let old_pin_hash = env.persist().pin_hash().unwrap();
             let new_pin_enc = encrypt_pin(&shared_secret, pin);
 
             assert_eq!(
-                check_and_store_new_pin(&mut env, &shared_secret, new_pin_enc),
+                check_new_pin(&mut env, &shared_secret, new_pin_enc, None).map(|_| ()),
                 result
             );
-            if result.is_ok() {
-                assert_ne!(old_pin_hash, env.persist().pin_hash().unwrap());
-            } else {
-                assert_eq!(old_pin_hash, env.persist().pin_hash().unwrap());
-            }
         }
     }
 
     #[test]
-    fn test_check_and_store_new_pin_v1() {
-        test_helper_check_and_store_new_pin(PinUvAuthProtocol::V1);
+    fn test_check_new_pin_v1() {
+        test_helper_check_new_pin(PinUvAuthProtocol::V1);
     }
 
     #[test]
-    fn test_check_and_store_new_pin_v2() {
-        test_helper_check_and_store_new_pin(PinUvAuthProtocol::V2);
+    fn test_check_new_pin_v2() {
+        test_helper_check_new_pin(PinUvAuthProtocol::V2);
     }
 
     /// Generates valid inputs for process_hmac_secret and returns the output.

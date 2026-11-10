@@ -310,6 +310,8 @@ impl<E: Env> ClientPin<E> {
 
         let (pin_hash, length) = check_new_pin(env, &shared_secret, new_pin_enc, None)?;
         env.key_store().store_pin(&pin_hash, length)?;
+        env.persist()
+            .remove(crate::api::persist::keys::FORCE_PIN_CHANGE)?;
         storage::reset_pin_retries(env)?;
         Ok(())
     }
@@ -347,6 +349,8 @@ impl<E: Env> ClientPin<E> {
         // Invalidate tokens before replacement, which may fail after committing the new PIN.
         self.reset_pin_uv_auth_token(env);
         env.key_store().store_pin(&pin_hash, length)?;
+        env.persist()
+            .remove(crate::api::persist::keys::FORCE_PIN_CHANGE)?;
         Ok(())
     }
 

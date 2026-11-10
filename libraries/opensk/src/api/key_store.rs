@@ -146,7 +146,7 @@ pub trait KeyStore {
     /// CTAP checks PIN policy and, for replacement, verifies the old PIN first.
     /// Backends may retain authorization from that verification for this call;
     /// any retained authorization must be scoped to the current command.
-    /// On success, the PIN must be durable and the forced-change flag cleared.
+    /// On success, the PIN must be durable. CTAP clears the forced-change flag.
     fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()>;
 
     /// Resets the key store, including any hardware PIN configuration.

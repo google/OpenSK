@@ -1058,6 +1058,9 @@ mod test {
             rp_id_hash: Some(vec![0x1D; 32]),
             credential_id: None,
             user: None,
+            raw: Some(cbor_map! {
+                0x01 => vec![0x1D; 32],
+            }),
         };
         let expected_cred_management_parameters = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,

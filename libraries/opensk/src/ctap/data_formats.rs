@@ -1162,12 +1162,18 @@ pub struct CredentialManagementSubCommandParameters {
     pub rp_id_hash: Option<Vec<u8>>,
     pub credential_id: Option<PublicKeyCredentialDescriptor>,
     pub user: Option<PublicKeyCredentialUserEntity>,
+    /// The parameters as received, if parsed from CBOR.
+    ///
+    /// The pinUvAuthParam authenticates the parameters as sent by the platform. Parsing drops
+    /// what we don't understand, like unknown transports, so we keep the original to verify it.
+    pub raw: Option<cbor::Value>,
 }
 
 impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
+        let raw = Some(cbor_value.clone());
         destructure_cbor_map! {
             let {
                 0x01 => rp_id_hash,
@@ -1187,12 +1193,16 @@ impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
             rp_id_hash,
             credential_id,
             user,
+            raw,
         })
     }
 }
 
 impl From<CredentialManagementSubCommandParameters> for cbor::Value {
     fn from(sub_command_params: CredentialManagementSubCommandParameters) -> Self {
+        if let Some(raw) = sub_command_params.raw {
+            return raw;
+        }
         cbor_map_options! {
             0x01 => sub_command_params.rp_id_hash,
             0x02 => sub_command_params.credential_id,
@@ -2292,9 +2302,16 @@ mod test {
             rp_id_hash: Some(vec![0x1D; 32]),
             credential_id: Some(credential_id),
             user: Some(user_entity),
+            raw: Some(cbor_sub_command_params.clone()),
         };
-        assert_eq!(sub_command_params, Ok(expected_sub_command_params));
+        assert_eq!(sub_command_params, Ok(expected_sub_command_params.clone()));
         let created_cbor: cbor::Value = sub_command_params.unwrap().into();
+        assert_eq!(created_cbor, cbor_sub_command_params);
+        let created_cbor: cbor::Value = CredentialManagementSubCommandParameters {
+            raw: None,
+            ..expected_sub_command_params
+        }
+        .into();
         assert_eq!(created_cbor, cbor_sub_command_params);
     }
 

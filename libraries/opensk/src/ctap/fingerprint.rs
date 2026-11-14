@@ -210,7 +210,12 @@ fn finish_enrollment<E: Env>(
     enrollment_status: &mut EnrollmentStatus,
 ) -> CtapResult<()> {
     if let Some(template_id) = enrollment_status.internal_id() {
-        env.persist().store_template_id(template_id)?;
+        // The sensor already holds the template. If we can't store it, remove it from the
+        // sensor too, or it passes built-in UV without being listed or removed on reset.
+        if let Err(error) = env.persist().store_template_id(template_id.clone()) {
+            env.fingerprint().remove_enrollment(&template_id)?;
+            return Err(error);
+        }
     } else {
         return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
     }
@@ -423,8 +428,10 @@ pub fn process_bio_enrollment<E: Env>(
 mod test {
     use super::*;
     use crate::api::crypto::ecdh::SecretKey;
+    use crate::api::persist::keys;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
+    use crate::ctap::reset;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
     use sk_cbor::cbor_map;
@@ -697,6 +704,50 @@ mod test {
             true,
         );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION));
+    }
+
+    #[test]
+    fn test_enrollment_database_full() {
+        let mut env = TestEnv::default();
+        for _ in keys::FRIENDLY_NAMES {
+            env.create_fingerprint().unwrap();
+        }
+        let mut enrollment_status = EnrollmentStatus::default();
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollBegin,
+            None,
+            true,
+            &mut enrollment_status,
+        );
+        let template_id = match response.unwrap() {
+            ResponseData::AuthenticatorBioEnrollment(Some(response)) => {
+                response.template_id.unwrap()
+            }
+            _ => panic!("Invalid response type"),
+        };
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(template_id),
+            template_friendly_name: None,
+            timeout_milliseconds: None,
+        };
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollCaptureNextSample,
+            Some(sub_command_params),
+            true,
+            &mut enrollment_status,
+        );
+        assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_FP_DATABASE_FULL));
+
+        // The sensor must not keep a template that is not stored, or it would
+        // still pass built-in UV after a reset.
+        reset(&mut env).unwrap();
+        env.persist().store_template_id(vec![0x00]).unwrap();
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
     }
 
     #[test]

@@ -99,57 +99,16 @@ pub trait KeyStore {
     /// Returns the key for the CredRandom feature.
     fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
 
-    /// Returns whether a PIN is configured.
-    #[cfg(not(feature = "config_command"))]
+    /// Returns whether a PIN is set.
     fn has_pin(&mut self) -> CtapResult<bool>;
 
-    /// Returns whether a PIN is configured.
-    #[cfg(feature = "config_command")]
-    fn has_pin(&mut self) -> CtapResult<bool> {
-        self.is_pin_longer_than(0)
-    }
-
-    /// Returns whether the configured PIN is known to have more than `length`
-    /// Unicode code points. Returns false if no PIN is configured.
-    ///
-    /// The default [`Self::has_pin`] calls this with zero, which must accurately
-    /// report PIN presence without verifying the PIN.
-    ///
-    /// OpenSK only calls this with a nonzero length when a client sets the
-    /// minimum PIN length through `config_command`. Returning false then sets
-    /// `forcePINChange`, requiring the user to change their PIN.
-    ///
-    /// Backends need not retain the exact length: a guaranteed lower bound is
-    /// sufficient to answer true. If the length is unknown, answer true at zero
-    /// when a PIN exists, and false for positive thresholds. This conservatively
-    /// forces a PIN change on policy updates even if the PIN was already long
-    /// enough. Disable `config_command` if these unnecessary changes are unwanted.
-    /// Device or storage failures must return errors, not report an absent PIN.
-    #[cfg(feature = "config_command")]
-    fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool>;
-
-    /// Checks the first 16 bytes of SHA-256 of the candidate PIN.
-    ///
-    /// Return false for an incorrect PIN and an error for backend failures.
-    /// Software implementations must compare hashes in constant time. CTAP charges
-    /// a retry before this call and resets retries after successful verification.
-    /// Return `CTAP2_ERR_PIN_AUTH_BLOCKED` if temporary backend lockout prevented
-    /// checking the candidate. OpenSK then refunds the retry. An attempted but
-    /// incorrect PIN must return false, even if it triggers hardware lockout.
+    /// Checks whether a candidate PIN hash matches the stored PIN hash.
     fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool>;
 
-    /// Sets or replaces the PIN using its hash and length in Unicode code points.
-    ///
-    /// The length can inform `is_pin_longer_than` with `config_command` enabled;
-    /// retaining it is optional.
-    ///
-    /// CTAP checks PIN policy and, for replacement, verifies the old PIN first.
-    /// Backends may retain authorization from that verification for this call;
-    /// any retained authorization must be scoped to the current command.
-    /// On success, the PIN must be durable. CTAP clears the forced-change flag.
+    /// Stores a new PIN hash and its length in Unicode code points.
     fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()>;
 
-    /// Resets the key store, including any hardware PIN configuration.
+    /// Resets the key store.
     fn reset(&mut self) -> Result<(), Error>;
 }
 
@@ -254,14 +213,6 @@ impl<T: Helper> KeyStore for T {
 
     fn has_pin(&mut self) -> CtapResult<bool> {
         Ok(self.persist().pin_hash()?.is_some())
-    }
-
-    #[cfg(feature = "config_command")]
-    fn is_pin_longer_than(&mut self, length: u8) -> CtapResult<bool> {
-        Ok(self
-            .persist()
-            .pin_code_point_length()?
-            .is_some_and(|pin_length| pin_length > length))
     }
 
     fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool> {
@@ -453,14 +404,8 @@ mod test {
         let mut env = TestEnv::default();
         let key_store = env.key_store();
         assert_eq!(key_store.has_pin(), Ok(false));
-        #[cfg(feature = "config_command")]
-        assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
         key_store.store_pin(&[1; 16], 4).unwrap();
         assert_eq!(key_store.has_pin(), Ok(true));
-        #[cfg(feature = "config_command")]
-        assert_eq!(key_store.is_pin_longer_than(3), Ok(true));
-        #[cfg(feature = "config_command")]
-        assert_eq!(key_store.is_pin_longer_than(4), Ok(false));
         assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(true));
         for index in 0..16 {
             let mut candidate = [1; 16];
@@ -468,8 +413,6 @@ mod test {
             assert_eq!(key_store.verify_pin_hash(&candidate), Ok(false));
         }
         key_store.store_pin(&[2; 16], 6).unwrap();
-        #[cfg(feature = "config_command")]
-        assert_eq!(key_store.is_pin_longer_than(5), Ok(true));
         assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(false));
         assert_eq!(key_store.verify_pin_hash(&[2; 16]), Ok(true));
         crate::ctap::reset(&mut env).unwrap();

@@ -66,11 +66,12 @@ fn process_set_min_pin_length<E: Env>(
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let mut force_change_pin = force_change_pin.unwrap_or(false);
-    let has_pin = env.key_store().has_pin()?;
-    if force_change_pin && !has_pin {
+    if force_change_pin && !env.key_store().has_pin()? {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
     }
-    force_change_pin |= has_pin && !env.key_store().is_pin_longer_than(new_min_pin_length - 1)?;
+    if let Some(old_length) = env.persist().pin_code_point_length()? {
+        force_change_pin |= new_min_pin_length > old_length;
+    }
     // Write the RP IDs first: this is the only step that can fail because of its
     // input, so doing it before the other writes avoids leaving the minimum PIN
     // length or the force-change flag updated when the command ends up failing.

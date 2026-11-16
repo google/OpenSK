@@ -646,7 +646,6 @@ impl<E: Env> CtapState<E> {
         }
         let cmd = Command::deserialize(command_cbor);
         debug_ctap!(env, "Received command: {:#?}", cmd);
-        // A command that cannot be parsed cannot continue a stateful sequence.
         if cmd.is_err() {
             self.stateful_command_permission.clear();
         }
@@ -704,47 +703,20 @@ impl<E: Env> CtapState<E> {
             ) => (),
             (_, _) => self.stateful_command_permission.clear(),
         }
-        // Chrome and Windows run commands that may fail, like `GetInfo` or
-        // `MakeCredential`, between a power cycle and their reset request.
-        let probes_reset = matches!(
-            command,
-            Command::AuthenticatorGetInfo
-                | Command::AuthenticatorSelection
-                | Command::AuthenticatorMakeCredential(_)
-        );
         let response = match channel {
             Channel::MainHid(_) => self.process_fido_command(env, command, channel),
             #[cfg(feature = "vendor_hid")]
             Channel::VendorHid(_) => self.process_vendor_command(env, command),
         };
-        // An error terminates the sequence even if its handler already advanced
-        // or created continuation state before failing.
-        if let Err(error_code) = &response
-            && !self.keeps_stateful_permission(env, probes_reset, *error_code)
+        if response.is_err()
+            && !matches!(
+                self.stateful_command_permission.get_command(env),
+                Ok(StatefulCommand::Reset)
+            )
         {
             self.stateful_command_permission.clear();
         }
         response
-    }
-
-    /// Returns whether a failing command must not clear the stateful permission.
-    ///
-    /// A cancellation only declines the current user-presence prompt, so the host
-    /// may retry the same sequence. Chrome and Windows run commands that fail,
-    /// like `GetInfo` or `MakeCredential`, between a power cycle and their reset
-    /// request.
-    fn keeps_stateful_permission(
-        &mut self,
-        env: &mut E,
-        probes_reset: bool,
-        error_code: Ctap2StatusCode,
-    ) -> bool {
-        error_code == Ctap2StatusCode::CTAP2_ERR_KEEPALIVE_CANCEL
-            || (probes_reset
-                && matches!(
-                    self.stateful_command_permission.get_command(env),
-                    Ok(StatefulCommand::Reset)
-                ))
     }
 
     fn process_fido_command(
@@ -4301,17 +4273,7 @@ mod test {
         ));
     }
 
-    #[test]
-    fn failed_assertion_continuation_clears_remaining_credentials() {
-        check_failed_continuation(false);
-    }
-
-    #[test]
-    fn failed_enumeration_continuation_clears_remaining_credentials() {
-        check_failed_continuation(true);
-    }
-
-    fn check_failed_continuation(enumerate: bool) {
+    fn prepare_corrupted_continuation() -> (TestEnv, CtapState<TestEnv>, Vec<usize>) {
         let mut env = TestEnv::default();
         let mut state = CtapState::new(&mut env);
         for user_id in [1, 2, 3] {
@@ -4352,34 +4314,55 @@ mod test {
         // Simulate a storage failure after the sequence has begun. The other
         // credential remains readable, so continuing would otherwise succeed.
         env.persist().remove(*keys.last().unwrap()).unwrap();
-        if enumerate {
-            state.stateful_command_permission.set_command(
-                &mut env,
-                StatefulCommand::EnumerateCredentials(keys),
-                DUMMY_CHANNEL,
-            );
-        }
-        let command = || {
-            if enumerate {
-                Command::AuthenticatorCredentialManagement(
-                    AuthenticatorCredentialManagementParameters {
-                        sub_command:
-                            CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
-                        sub_command_params: None,
-                        pin_uv_auth_protocol: None,
-                        pin_uv_auth_param: None,
-                    },
-                )
-            } else {
-                Command::AuthenticatorGetNextAssertion
-            }
-        };
+        (env, state, keys)
+    }
+
+    #[test]
+    fn failed_assertion_continuation_clears_stateful_command() {
+        let (mut env, mut state, _) = prepare_corrupted_continuation();
         assert_eq!(
-            state.process_parsed_command(&mut env, command(), DUMMY_CHANNEL),
+            state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetNextAssertion,
+                DUMMY_CHANNEL
+            ),
             Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
         );
         assert_eq!(
-            state.process_parsed_command(&mut env, command(), DUMMY_CHANNEL),
+            state.process_parsed_command(
+                &mut env,
+                Command::AuthenticatorGetNextAssertion,
+                DUMMY_CHANNEL
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn failed_enumeration_continuation_clears_stateful_command() {
+        let (mut env, mut state, keys) = prepare_corrupted_continuation();
+        state.stateful_command_permission.set_command(
+            &mut env,
+            StatefulCommand::EnumerateCredentials(keys),
+            DUMMY_CHANNEL,
+        );
+        let next_credential_command = || {
+            Command::AuthenticatorCredentialManagement(
+                AuthenticatorCredentialManagementParameters {
+                    sub_command:
+                        CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential,
+                    sub_command_params: None,
+                    pin_uv_auth_protocol: None,
+                    pin_uv_auth_param: None,
+                },
+            )
+        };
+        assert_eq!(
+            state.process_parsed_command(&mut env, next_credential_command(), DUMMY_CHANNEL),
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        assert_eq!(
+            state.process_parsed_command(&mut env, next_credential_command(), DUMMY_CHANNEL),
             Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED)
         );
     }

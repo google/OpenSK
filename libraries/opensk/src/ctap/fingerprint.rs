@@ -25,7 +25,6 @@ use crate::api::customization::Customization;
 use crate::api::fingerprint::{Fingerprint, FingerprintCheckError};
 use crate::api::persist::Persist;
 use crate::api::rng::Rng;
-use crate::ctap::cbor_write;
 use crate::env::Env;
 use alloc::string::String;
 use alloc::vec;
@@ -385,35 +384,33 @@ pub fn process_bio_enrollment<E: Env>(
     let pin_uv_auth_protocol = params
         .pin_uv_auth_protocol
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-    let mut command_data = vec![MODALITY as u8, sub_command as u8];
-    if let Some(sub_command_params) = params.sub_command_params.clone() {
-        cbor_write(sub_command_params.into(), &mut command_data)?;
-    }
-    client_pin.verify_pin_uv_auth_token(
+    let sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
         env,
-        &command_data,
+        vec![MODALITY as u8, sub_command as u8],
+        params.sub_command_params,
         &pin_uv_auth_param,
         pin_uv_auth_protocol,
     )?;
     client_pin.has_permission(PinPermission::BioEnrollment)?;
+    let sub_command_params = sub_command_params
+        .map(BioEnrollmentSubCommandParams::try_from)
+        .transpose()?;
     // Now we process all other subcommands that need PIN UV authentication.
     match sub_command {
         // Since the subcommand parameter map can be empty, the whole map might be missing.
         // In CTAP, the parameter is not marked as optional, but Chrome omits it when empty.
         BioEnrollmentSubCommand::EnrollBegin => {
-            enroll_begin(env, params.sub_command_params, enrollment_status)
+            enroll_begin(env, sub_command_params, enrollment_status)
         }
-        BioEnrollmentSubCommand::EnrollCaptureNextSample => enroll_capture_next_sample(
-            env,
-            ok_or_missing(params.sub_command_params)?,
-            enrollment_status,
-        ),
+        BioEnrollmentSubCommand::EnrollCaptureNextSample => {
+            enroll_capture_next_sample(env, ok_or_missing(sub_command_params)?, enrollment_status)
+        }
         BioEnrollmentSubCommand::EnumerateEnrollments => enumerate_enrollments(env),
         BioEnrollmentSubCommand::SetFriendlyName => {
-            set_friendly_name(env, ok_or_missing(params.sub_command_params)?)
+            set_friendly_name(env, ok_or_missing(sub_command_params)?)
         }
         BioEnrollmentSubCommand::RemoveEnrollment => {
-            remove_enrollment(env, ok_or_missing(params.sub_command_params)?)
+            remove_enrollment(env, ok_or_missing(sub_command_params)?)
         }
         _ => unreachable!(),
     }
@@ -423,6 +420,7 @@ pub fn process_bio_enrollment<E: Env>(
 mod test {
     use super::*;
     use crate::api::crypto::ecdh::SecretKey;
+    use crate::ctap::cbor_write;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
     use crate::env::EcdhSk;
@@ -530,7 +528,7 @@ mod test {
     fn call_subcommand_with_status(
         env: &mut TestEnv,
         sub_command: BioEnrollmentSubCommand,
-        sub_command_params: Option<BioEnrollmentSubCommandParams>,
+        sub_command_params: Option<cbor::Value>,
         use_pin_uv: bool,
         enrollment_status: &mut EnrollmentStatus,
     ) -> CtapResult<ResponseData> {
@@ -547,7 +545,7 @@ mod test {
             env.persist().set_pin(&[0x88; 16], 4).unwrap();
             let mut command_data = vec![MODALITY as u8, sub_command as u8];
             if let Some(sub_command_params) = sub_command_params.clone() {
-                cbor_write(sub_command_params.into(), &mut command_data)?;
+                cbor_write(sub_command_params, &mut command_data)?;
             }
             Some(authenticate_pin_uv_auth_token(
                 &pin_uv_auth_token,
@@ -572,7 +570,7 @@ mod test {
     fn call_subcommand(
         env: &mut TestEnv,
         sub_command: BioEnrollmentSubCommand,
-        sub_command_params: Option<BioEnrollmentSubCommandParams>,
+        sub_command_params: Option<cbor::Value>,
         use_pin_uv: bool,
     ) -> CtapResult<ResponseData> {
         call_subcommand_with_status(
@@ -587,10 +585,8 @@ mod test {
     #[test]
     fn test_enrollment_cycle() {
         let mut env = TestEnv::default();
-        let sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: None,
-            template_friendly_name: None,
-            timeout_milliseconds: Some(10_000),
+        let sub_command_params = cbor_map! {
+            0x03 => 10_000,
         };
         let mut enrollment_status = EnrollmentStatus::default();
         let response = call_subcommand_with_status(
@@ -609,10 +605,9 @@ mod test {
         };
 
         while remaining_samples > 0 {
-            let sub_command_params = BioEnrollmentSubCommandParams {
-                template_id: Some(template_id.clone()),
-                template_friendly_name: None,
-                timeout_milliseconds: Some(10_000),
+            let sub_command_params = cbor_map! {
+                0x01 => template_id.clone(),
+                0x03 => 10_000,
             };
             let response = call_subcommand_with_status(
                 &mut env,
@@ -644,10 +639,9 @@ mod test {
             _ => panic!("Invalid response type"),
         };
 
-        let sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: Some(template_id.clone()),
-            template_friendly_name: Some(String::from("Name")),
-            timeout_milliseconds: None,
+        let sub_command_params = cbor_map! {
+            0x01 => template_id.clone(),
+            0x02 => "Name",
         };
         let response = call_subcommand(
             &mut env,
@@ -677,10 +671,8 @@ mod test {
             _ => panic!("Invalid response type"),
         };
 
-        let sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: Some(template_id),
-            template_friendly_name: None,
-            timeout_milliseconds: None,
+        let sub_command_params = cbor_map! {
+            0x01 => template_id,
         };
         let response = call_subcommand(
             &mut env,
@@ -703,10 +695,8 @@ mod test {
     fn test_cancel_enrollment() {
         let mut env = TestEnv::default();
         let mut enrollment_status = EnrollmentStatus::default();
-        let sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: None,
-            template_friendly_name: None,
-            timeout_milliseconds: Some(10_000),
+        let sub_command_params = cbor_map! {
+            0x03 => 10_000,
         };
         let response = call_subcommand_with_status(
             &mut env,
@@ -876,5 +866,56 @@ mod test {
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
         );
+    }
+
+    #[test]
+    fn test_set_friendly_name_with_unknown_key() {
+        let mut env = TestEnv::default();
+        let template_id = env.create_fingerprint().unwrap();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let pin_uv_auth_protocol = PinUvAuthProtocol::V2;
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            pin_uv_auth_protocol,
+        );
+        env.persist().set_pin(&[0x88; 16], 4).unwrap();
+
+        // The platform authenticates the subCommandParams as it sends them, including keys
+        // that the authenticator does not know and ignores when parsing.
+        let sub_command_params = cbor_map! {
+            0x01 => template_id.clone(),
+            0x02 => "Name",
+            0x10 => "future parameter",
+        };
+        let mut command_data = vec![
+            MODALITY as u8,
+            BioEnrollmentSubCommand::SetFriendlyName as u8,
+        ];
+        cbor_write(sub_command_params.clone(), &mut command_data).unwrap();
+        let pin_uv_auth_param =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token, &command_data, pin_uv_auth_protocol);
+        let cbor_value = cbor_map! {
+            0x01 => MODALITY,
+            0x02 => BioEnrollmentSubCommand::SetFriendlyName,
+            0x03 => sub_command_params,
+            0x04 => pin_uv_auth_protocol as u64,
+            0x05 => pin_uv_auth_param,
+        };
+        let params = AuthenticatorBioEnrollmentParameters::try_from(cbor_value).unwrap();
+        let response = process_bio_enrollment(
+            &mut env,
+            &mut client_pin,
+            params,
+            &mut EnrollmentStatus::default(),
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorBioEnrollment(None)));
+        let expected = vec![TemplateInfo {
+            template_id,
+            template_friendly_name: Some(String::from("Name")),
+        }];
+        assert_eq!(env.persist().template_infos(), Ok(expected));
     }
 }

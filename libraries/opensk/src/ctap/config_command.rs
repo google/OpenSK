@@ -14,7 +14,7 @@
 
 use super::client_pin::{ClientPin, PIN_PADDED_LENGTH, PinPermission};
 use super::command::AuthenticatorConfigParameters;
-use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
+use super::data_formats::{ConfigSubCommand, SetMinPinLengthParams, ok_or_missing};
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use crate::api::customization::Customization;
@@ -102,7 +102,7 @@ pub fn process_config<E: Env>(
 
     let enforce_uv =
         !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && storage::has_always_uv(env)?;
-    if storage::has_user_verification(env)? || enforce_uv {
+    let sub_command_params = if storage::has_user_verification(env)? || enforce_uv {
         let pin_uv_auth_param =
             pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
         let pin_uv_auth_protocol =
@@ -110,27 +110,25 @@ pub fn process_config<E: Env>(
         // Constants are taken from the specification, section 6.11, step 4.2.
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
-        if let Some(sub_command_params) = sub_command_params.clone() {
-            super::cbor_write(sub_command_params.into(), &mut config_data)?;
-        }
-        client_pin.verify_pin_uv_auth_token(
+        let sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
             env,
-            &config_data,
+            config_data,
+            sub_command_params,
             &pin_uv_auth_param,
             pin_uv_auth_protocol,
         )?;
         client_pin.has_permission(PinPermission::AuthenticatorConfiguration)?;
-    }
+        sub_command_params
+    } else {
+        sub_command_params
+    };
 
     match sub_command {
         ConfigSubCommand::EnableEnterpriseAttestation => process_enable_enterprise_attestation(env),
         ConfigSubCommand::ToggleAlwaysUv => process_toggle_always_uv(env),
         ConfigSubCommand::SetMinPinLength => {
-            if let Some(ConfigSubCommandParams::SetMinPinLength(params)) = sub_command_params {
-                process_set_min_pin_length(env, client_pin, params)
-            } else {
-                Err(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)
-            }
+            let params = SetMinPinLengthParams::try_from(ok_or_missing(sub_command_params)?)?;
+            process_set_min_pin_length(env, client_pin, params)
         }
         _ => Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER),
     }
@@ -141,10 +139,12 @@ mod test {
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization::Customization;
+    use crate::ctap::cbor_write;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
+    use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options};
 
     #[test]
     fn test_process_enable_enterprise_attestation() {
@@ -303,16 +303,13 @@ mod test {
         min_pin_length: u8,
         min_pin_length_rp_ids: Option<Vec<String>>,
     ) -> AuthenticatorConfigParameters {
-        let set_min_pin_length_params = SetMinPinLengthParams {
-            new_min_pin_length: Some(min_pin_length),
-            min_pin_length_rp_ids,
-            force_change_pin: None,
+        let set_min_pin_length_params = cbor_map_options! {
+            0x01 => min_pin_length as u64,
+            0x02 => min_pin_length_rp_ids.map(|vec| cbor_array_vec!(vec)),
         };
         AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::SetMinPinLength,
-            sub_command_params: Some(ConfigSubCommandParams::SetMinPinLength(
-                set_min_pin_length_params,
-            )),
+            sub_command_params: Some(set_min_pin_length_params),
             pin_uv_auth_param: None,
             pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         }
@@ -380,9 +377,12 @@ mod test {
 
         // The serialized list is bigger than what a persistent store value can
         // hold, so writing the RP IDs fails after the parameters were parsed.
-        let oversized_rp_ids = Some(vec!["r".repeat(500), "s".repeat(500), "t".repeat(500)]);
-        let config_params = create_min_pin_config_params(6, oversized_rp_ids);
-        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        let params = SetMinPinLengthParams {
+            new_min_pin_length: Some(6),
+            min_pin_length_rp_ids: Some(vec!["r".repeat(500), "s".repeat(500), "t".repeat(500)]),
+            force_change_pin: None,
+        };
+        let config_response = process_set_min_pin_length(&mut env, &mut client_pin, params);
         assert!(config_response.is_err());
 
         // The minimum PIN length is not updated by the failed command.
@@ -546,16 +546,13 @@ mod test {
             0xE3, 0x74, 0xF4, 0x27, 0xBE, 0x7D, 0x40, 0xB5, 0x71, 0xB6, 0xB4, 0x1A, 0xD2, 0xC1,
             0x53, 0xD7,
         ]);
-        let set_min_pin_length_params = SetMinPinLengthParams {
-            new_min_pin_length: Some(storage::min_pin_length(&mut env).unwrap()),
-            min_pin_length_rp_ids: None,
-            force_change_pin: Some(true),
+        let set_min_pin_length_params = cbor_map! {
+            0x01 => storage::min_pin_length(&mut env).unwrap() as u64,
+            0x03 => true,
         };
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::SetMinPinLength,
-            sub_command_params: Some(ConfigSubCommandParams::SetMinPinLength(
-                set_min_pin_length_params,
-            )),
+            sub_command_params: Some(set_min_pin_length_params),
             pin_uv_auth_param,
             pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
         };
@@ -588,5 +585,41 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
         );
+    }
+
+    #[test]
+    fn test_process_set_min_pin_length_with_unknown_key() {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let mut client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+        env.persist().set_pin(&[0x88; 16], 8).unwrap();
+
+        // The platform authenticates the subCommandParams as it sends them, including keys
+        // that the authenticator does not know and ignores when parsing.
+        let sub_command_params = cbor_map! {
+            0x01 => 6,
+            0x10 => "future parameter",
+        };
+        let mut config_data = vec![0xFF; 32];
+        config_data.extend(&[0x0D, ConfigSubCommand::SetMinPinLength as u8]);
+        cbor_write(sub_command_params.clone(), &mut config_data).unwrap();
+        let pin_uv_auth_param =
+            authenticate_pin_uv_auth_token(&pin_uv_auth_token, &config_data, PinUvAuthProtocol::V1);
+        let cbor_value = cbor_map! {
+            0x01 => ConfigSubCommand::SetMinPinLength as u64,
+            0x02 => sub_command_params,
+            0x03 => PinUvAuthProtocol::V1 as u64,
+            0x04 => pin_uv_auth_param,
+        };
+        let config_params = AuthenticatorConfigParameters::try_from(cbor_value).unwrap();
+        let config_response = process_config(&mut env, &mut client_pin, config_params);
+        assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
+        assert_eq!(storage::min_pin_length(&mut env), Ok(6));
     }
 }

@@ -1018,22 +1018,7 @@ impl TryFrom<cbor::Value> for ConfigSubCommand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ConfigSubCommandParams {
-    SetMinPinLength(SetMinPinLengthParams),
-}
-
-impl From<ConfigSubCommandParams> for cbor::Value {
-    fn from(params: ConfigSubCommandParams) -> Self {
-        match params {
-            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params) => {
-                set_min_pin_length_params.into()
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SetMinPinLengthParams {
     pub new_min_pin_length: Option<u8>,
     pub min_pin_length_rp_ids: Option<Vec<String>>,
@@ -1084,16 +1069,6 @@ impl TryFrom<cbor::Value> for SetMinPinLengthParams {
             min_pin_length_rp_ids,
             force_change_pin,
         })
-    }
-}
-
-impl From<SetMinPinLengthParams> for cbor::Value {
-    fn from(params: SetMinPinLengthParams) -> Self {
-        cbor_map_options! {
-            0x01 => params.new_min_pin_length.map(|u| u as u64),
-            0x02 => params.min_pin_length_rp_ids.map(|vec| cbor_array_vec!(vec)),
-            0x03 => params.force_change_pin,
-        }
     }
 }
 
@@ -1157,23 +1132,17 @@ impl TryFrom<cbor::Value> for CredentialManagementSubCommand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CredentialManagementSubCommandParameters {
     pub rp_id_hash: Option<Vec<u8>>,
     pub credential_id: Option<PublicKeyCredentialDescriptor>,
     pub user: Option<PublicKeyCredentialUserEntity>,
-    /// The parameters as received, if parsed from CBOR.
-    ///
-    /// The pinUvAuthParam authenticates the parameters as sent by the platform. Parsing drops
-    /// what we don't understand, like unknown transports, so we keep the original to verify it.
-    pub raw: Option<cbor::Value>,
 }
 
 impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
     type Error = Ctap2StatusCode;
 
     fn try_from(cbor_value: cbor::Value) -> CtapResult<Self> {
-        let raw = Some(cbor_value.clone());
         destructure_cbor_map! {
             let {
                 0x01 => rp_id_hash,
@@ -1193,21 +1162,7 @@ impl TryFrom<cbor::Value> for CredentialManagementSubCommandParameters {
             rp_id_hash,
             credential_id,
             user,
-            raw,
         })
-    }
-}
-
-impl From<CredentialManagementSubCommandParameters> for cbor::Value {
-    fn from(sub_command_params: CredentialManagementSubCommandParameters) -> Self {
-        if let Some(raw) = sub_command_params.raw {
-            return raw;
-        }
-        cbor_map_options! {
-            0x01 => sub_command_params.rp_id_hash,
-            0x02 => sub_command_params.credential_id,
-            0x03 => sub_command_params.user,
-        }
     }
 }
 
@@ -2180,7 +2135,6 @@ mod test {
             0x02 => cbor_array!("example.com".to_string()),
             0x03 => true,
         };
-        assert_eq!(cbor::Value::from(params.clone()), cbor_params);
         let reconstructed_params = SetMinPinLengthParams::try_from(cbor_params);
         assert_eq!(reconstructed_params, Ok(params));
     }
@@ -2226,23 +2180,6 @@ mod test {
     }
 
     #[test]
-    fn test_from_config_sub_command_params() {
-        let set_min_pin_length_params = SetMinPinLengthParams {
-            new_min_pin_length: Some(6),
-            min_pin_length_rp_ids: Some(vec!["example.com".to_string()]),
-            force_change_pin: Some(true),
-        };
-        let config_sub_command_params =
-            ConfigSubCommandParams::SetMinPinLength(set_min_pin_length_params);
-        let cbor_params = cbor_map! {
-            0x01 => 6,
-            0x02 => cbor_array!("example.com".to_string()),
-            0x03 => true,
-        };
-        assert_eq!(cbor::Value::from(config_sub_command_params), cbor_params);
-    }
-
-    #[test]
     fn test_from_enterprise_attestation_mode() {
         assert_eq!(
             EnterpriseAttestationMode::try_from(0),
@@ -2279,7 +2216,7 @@ mod test {
     }
 
     #[test]
-    fn test_from_into_cred_management_sub_command_params() {
+    fn test_from_cred_management_sub_command_params() {
         let credential_id = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::PublicKey,
             key_id: vec![0x2D, 0x2D, 0x2D, 0x2D],
@@ -2297,22 +2234,13 @@ mod test {
             0x03 => user_entity.clone(),
         };
         let sub_command_params =
-            CredentialManagementSubCommandParameters::try_from(cbor_sub_command_params.clone());
+            CredentialManagementSubCommandParameters::try_from(cbor_sub_command_params);
         let expected_sub_command_params = CredentialManagementSubCommandParameters {
             rp_id_hash: Some(vec![0x1D; 32]),
             credential_id: Some(credential_id),
             user: Some(user_entity),
-            raw: Some(cbor_sub_command_params.clone()),
         };
-        assert_eq!(sub_command_params, Ok(expected_sub_command_params.clone()));
-        let created_cbor: cbor::Value = sub_command_params.unwrap().into();
-        assert_eq!(created_cbor, cbor_sub_command_params);
-        let created_cbor: cbor::Value = CredentialManagementSubCommandParameters {
-            raw: None,
-            ..expected_sub_command_params
-        }
-        .into();
-        assert_eq!(created_cbor, cbor_sub_command_params);
+        assert_eq!(sub_command_params, Ok(expected_sub_command_params));
     }
 
     #[test]

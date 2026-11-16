@@ -19,6 +19,7 @@ use crate::api::persist::Persist;
 use crate::ctap::crypto_wrapper::{aes256_cbc_decrypt, aes256_cbc_encrypt};
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::secret::Secret;
+use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::ctap::{cbor_read, cbor_write};
 use crate::env::{AesKey, Env, Hmac};
 use alloc::vec::Vec;
@@ -98,26 +99,14 @@ pub trait KeyStore {
     /// Returns the key for the CredRandom feature.
     fn cred_random(&mut self, has_uv: bool) -> Result<Secret<[u8; 32]>, Error>;
 
-    /// Encrypts a PIN hash.
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error>;
+    /// Returns whether a PIN is set.
+    fn has_pin(&mut self) -> CtapResult<bool>;
 
     /// Checks whether a candidate PIN hash matches the stored PIN hash.
-    ///
-    /// `stored` is the output of [`Self::encrypt_pin_hash`], read back via
-    /// [`Persist::pin_hash`]. `candidate` is the first 16 bytes of SHA-256 of
-    /// the PIN being checked.
-    ///
-    /// Implementations that cannot decrypt `stored` may treat it as an opaque
-    /// marker and delegate verification to secure hardware without exposing
-    /// the decrypted PIN hash.
-    ///
-    /// This is also used to reject reuse of the old PIN during a forced PIN
-    /// change. Errors must remain distinguishable from a mismatch. Implementations
-    /// should avoid leaking information through timing or error details.
-    fn verify_pin_hash(&mut self, stored: &[u8; 16], candidate: &[u8; 16]) -> Result<bool, Error> {
-        let plain = Secret::from_exposed_secret(*stored);
-        Ok(bool::from(plain.ct_eq(candidate)))
-    }
+    fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool>;
+
+    /// Stores a new PIN hash and its length in Unicode code points.
+    fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()>;
 
     /// Resets the key store.
     fn reset(&mut self) -> Result<(), Error>;
@@ -222,8 +211,20 @@ impl<T: Helper> KeyStore for T {
         Ok(get_master_keys(self)?.cred_random[has_uv as usize].clone())
     }
 
-    fn encrypt_pin_hash(&mut self, plain: &[u8; 16]) -> Result<[u8; 16], Error> {
-        Ok(*plain)
+    fn has_pin(&mut self) -> CtapResult<bool> {
+        Ok(self.persist().pin_hash()?.is_some())
+    }
+
+    fn verify_pin_hash(&mut self, candidate: &[u8; 16]) -> CtapResult<bool> {
+        let stored = self
+            .persist()
+            .pin_hash()?
+            .ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
+        Ok(bool::from(stored.ct_eq(candidate)))
+    }
+
+    fn store_pin(&mut self, pin_hash: &[u8; 16], code_point_length: u8) -> CtapResult<()> {
+        self.persist().set_pin(pin_hash, code_point_length)
     }
 
     fn reset(&mut self) -> Result<(), Error> {
@@ -399,16 +400,23 @@ mod test {
     }
 
     #[test]
-    fn test_default_verify_pin_hash() {
+    fn test_pin_storage_and_verification() {
         let mut env = TestEnv::default();
         let key_store = env.key_store();
-        let stored = key_store.encrypt_pin_hash(&[1; 16]).unwrap();
-        assert_eq!(key_store.verify_pin_hash(&stored, &[1; 16]), Ok(true));
+        assert_eq!(key_store.has_pin(), Ok(false));
+        key_store.store_pin(&[1; 16], 4).unwrap();
+        assert_eq!(key_store.has_pin(), Ok(true));
+        assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(true));
         for index in 0..16 {
             let mut candidate = [1; 16];
             candidate[index] ^= 1;
-            assert_eq!(key_store.verify_pin_hash(&stored, &candidate), Ok(false));
+            assert_eq!(key_store.verify_pin_hash(&candidate), Ok(false));
         }
+        key_store.store_pin(&[2; 16], 6).unwrap();
+        assert_eq!(key_store.verify_pin_hash(&[1; 16]), Ok(false));
+        assert_eq!(key_store.verify_pin_hash(&[2; 16]), Ok(true));
+        crate::ctap::reset(&mut env).unwrap();
+        assert_eq!(env.key_store().has_pin(), Ok(false));
     }
 
     fn test_wrap_unwrap_credential(signature_algorithm: SignatureAlgorithm) {

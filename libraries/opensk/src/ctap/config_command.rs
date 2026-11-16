@@ -18,6 +18,7 @@ use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLen
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
 use crate::api::customization::Customization;
+use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
 use crate::ctap::status_code::CtapResult;
 use crate::ctap::storage;
@@ -65,7 +66,7 @@ fn process_set_min_pin_length<E: Env>(
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
     let mut force_change_pin = force_change_pin.unwrap_or(false);
-    if force_change_pin && env.persist().pin_hash()?.is_none() {
+    if force_change_pin && !env.key_store().has_pin()? {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
     }
     if let Some(old_length) = env.persist().pin_code_point_length()? {

@@ -720,10 +720,8 @@ mod test {
             }
             _ => panic!("Invalid response type"),
         };
-        let sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: Some(template_id),
-            template_friendly_name: None,
-            timeout_milliseconds: None,
+        let sub_command_params = cbor_map! {
+            0x01 => template_id,
         };
         let response = call_subcommand_with_status(
             &mut env,

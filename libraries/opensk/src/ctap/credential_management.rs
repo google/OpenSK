@@ -280,7 +280,7 @@ pub fn process_credential_management<E: Env>(
 ) -> CtapResult<ResponseData> {
     let AuthenticatorCredentialManagementParameters {
         sub_command,
-        sub_command_params,
+        mut sub_command_params,
         pin_uv_auth_protocol,
         pin_uv_auth_param,
     } = cred_management_params;
@@ -299,7 +299,7 @@ pub fn process_credential_management<E: Env>(
         }
     }
 
-    let sub_command_params = match sub_command {
+    match sub_command {
         CredentialManagementSubCommand::GetCredsMetadata
         | CredentialManagementSubCommand::EnumerateRpsBegin
         | CredentialManagementSubCommand::EnumerateCredentialsBegin
@@ -309,7 +309,7 @@ pub fn process_credential_management<E: Env>(
                 pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
             let pin_uv_auth_protocol =
                 pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-            let sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
+            sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
                 env,
                 vec![sub_command as u8],
                 sub_command_params,
@@ -318,13 +318,10 @@ pub fn process_credential_management<E: Env>(
             )?;
             // The RP ID permission is handled differently per subcommand below.
             client_pin.has_permission(PinPermission::CredentialManagement)?;
-            sub_command_params
         }
         CredentialManagementSubCommand::EnumerateRpsGetNextRp
-        | CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {
-            sub_command_params
-        }
-    };
+        | CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {}
+    }
     let sub_command_params = sub_command_params
         .map(CredentialManagementSubCommandParameters::try_from)
         .transpose()?;

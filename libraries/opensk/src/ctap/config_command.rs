@@ -95,14 +95,14 @@ pub fn process_config<E: Env>(
 ) -> CtapResult<ResponseData> {
     let AuthenticatorConfigParameters {
         sub_command,
-        sub_command_params,
+        mut sub_command_params,
         pin_uv_auth_protocol,
         pin_uv_auth_param,
     } = params;
 
     let enforce_uv =
         !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && storage::has_always_uv(env)?;
-    let sub_command_params = if storage::has_user_verification(env)? || enforce_uv {
+    if storage::has_user_verification(env)? || enforce_uv {
         let pin_uv_auth_param =
             pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
         let pin_uv_auth_protocol =
@@ -110,7 +110,7 @@ pub fn process_config<E: Env>(
         // Constants are taken from the specification, section 6.11, step 4.2.
         let mut config_data = vec![0xFF; 32];
         config_data.extend(&[0x0D, sub_command as u8]);
-        let sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
+        sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
             env,
             config_data,
             sub_command_params,
@@ -118,10 +118,7 @@ pub fn process_config<E: Env>(
             pin_uv_auth_protocol,
         )?;
         client_pin.has_permission(PinPermission::AuthenticatorConfiguration)?;
-        sub_command_params
-    } else {
-        sub_command_params
-    };
+    }
 
     match sub_command {
         ConfigSubCommand::EnableEnterpriseAttestation => process_enable_enterprise_attestation(env),

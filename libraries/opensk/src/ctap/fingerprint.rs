@@ -214,6 +214,7 @@ fn finish_enrollment<E: Env>(
         // The sensor already holds the template. If we can't store it, remove it from the
         // sensor too, or it passes built-in UV without being listed or removed on reset.
         if let Err(error) = env.persist().store_template_id(template_id.clone()) {
+            enrollment_status.clear();
             env.fingerprint().remove_enrollment(&template_id)?;
             return Err(error);
         }
@@ -740,6 +741,7 @@ mod test {
             &mut enrollment_status,
         );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP2_ERR_FP_DATABASE_FULL));
+        assert_eq!(enrollment_status, EnrollmentStatus::default());
 
         // The sensor must not keep a template that is not stored, or it would
         // still pass built-in UV after a reset.

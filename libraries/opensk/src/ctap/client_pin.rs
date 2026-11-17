@@ -104,17 +104,13 @@ fn check_and_store_new_pin<E: Env>(
     Sha::<E>::digest_mut(&pin, &mut pin_hash);
     let new_pin_hash = array_ref![pin_hash, 0, PIN_AUTH_LENGTH];
     if env.persist().has_force_pin_change()?
-        && let Some(old_pin_hash) = env.persist().pin_hash()?
-        && env
-            .key_store()
-            .verify_pin_hash(&old_pin_hash, new_pin_hash)?
+        && env.key_store().has_pin()?
+        && env.key_store().verify_pin_hash(new_pin_hash)?
     {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
     }
-    let pin_hash = env.key_store().encrypt_pin_hash(new_pin_hash)?;
     // The PIN length is always < PIN_PADDED_LENGTH < 256.
-    env.persist()
-        .set_pin(array_ref!(pin_hash, 0, PIN_AUTH_LENGTH), pin_length as u8)?;
+    env.key_store().store_pin(new_pin_hash, pin_length as u8)?;
     Ok(())
 }
 
@@ -206,35 +202,33 @@ impl<E: Env> ClientPin<E> {
         shared_secret: &SharedSecret<E>,
         pin_hash_enc: Vec<u8>,
     ) -> CtapResult<()> {
-        match env.persist().pin_hash()? {
-            Some(pin_hash) => {
-                if self.consecutive_pin_mismatches >= 3 {
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
-                }
-                storage::decr_pin_retries(env)?;
-                let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
-                    Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
-                        Ok(candidate) => env.key_store().verify_pin_hash(&pin_hash, candidate)?,
-                        Err(_) => false,
-                    },
-                    Err(_) => false,
-                };
-
-                if !is_valid {
-                    self.get_mut_pin_protocol(pin_uv_auth_protocol)
-                        .regenerate(env);
-                    if storage::pin_retries(env)? == 0 {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
-                    }
-                    self.consecutive_pin_mismatches += 1;
-                    if self.consecutive_pin_mismatches >= 3 {
-                        return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
-                    }
-                    return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
-                }
-            }
+        if !env.key_store().has_pin()? {
             // This status code is not explicitly mentioned in the specification.
-            None => return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED),
+            return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
+        }
+        if self.consecutive_pin_mismatches >= 3 {
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
+        }
+        storage::decr_pin_retries(env)?;
+        let is_valid = match shared_secret.decrypt(&pin_hash_enc) {
+            Ok(candidate) => match <&[u8; PIN_AUTH_LENGTH]>::try_from(&*candidate) {
+                Ok(candidate) => env.key_store().verify_pin_hash(candidate)?,
+                Err(_) => false,
+            },
+            Err(_) => false,
+        };
+
+        if !is_valid {
+            self.get_mut_pin_protocol(pin_uv_auth_protocol)
+                .regenerate(env);
+            if storage::pin_retries(env)? == 0 {
+                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_BLOCKED);
+            }
+            self.consecutive_pin_mismatches += 1;
+            if self.consecutive_pin_mismatches >= 3 {
+                return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_BLOCKED);
+            }
+            return Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID);
         }
         storage::reset_pin_retries(env)?;
         #[cfg(feature = "fingerprint")]
@@ -286,7 +280,7 @@ impl<E: Env> ClientPin<E> {
         let pin_uv_auth_param = ok_or_missing(pin_uv_auth_param)?;
         let new_pin_enc = ok_or_missing(new_pin_enc)?;
 
-        if env.persist().pin_hash()?.is_some() {
+        if env.key_store().has_pin()? {
             return Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID);
         }
         let shared_secret = self.get_shared_secret(pin_uv_auth_protocol, key_agreement)?;

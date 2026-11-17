@@ -23,7 +23,7 @@ use super::response::{AuthenticatorClientPinResponse, ResponseData};
 use super::secret::Secret;
 use super::status_code::{Ctap2StatusCode, CtapResult};
 use super::token_state::PinUvAuthTokenState;
-use super::{Channel, storage};
+use super::{Channel, cbor_read, cbor_write, storage};
 #[cfg(test)]
 use crate::api::crypto::ecdh::SecretKey as _;
 use crate::api::crypto::hmac256::Hmac256;
@@ -40,6 +40,7 @@ use alloc::vec::Vec;
 use arrayref::array_ref;
 #[cfg(test)]
 use enum_iterator::{Sequence, all};
+use sk_cbor as cbor;
 
 /// The prefix length of the PIN hash that is stored and compared.
 ///
@@ -561,6 +562,34 @@ impl<E: Env> ClientPin<E> {
             pin_uv_auth_param,
             pin_uv_auth_protocol,
         )
+    }
+
+    /// Verifies the pinUvAuthParam over `message || subCommandParams`.
+    ///
+    /// The platform authenticates the subCommandParams as it sent them. Parsing ignores entries
+    /// we don't know, like unknown map keys or transports, so this check runs on the received
+    /// CBOR value before it is parsed. Received CBOR is canonical, so encoding the value again
+    /// yields the received bytes.
+    ///
+    /// The value is moved into the message and decoded from it again after the check, to avoid
+    /// holding a second copy. Returns the subCommandParams for parsing.
+    pub fn verify_pin_uv_auth_token_with_params(
+        &self,
+        env: &E,
+        mut message: Vec<u8>,
+        sub_command_params: Option<cbor::Value>,
+        pin_uv_auth_param: &[u8],
+        pin_uv_auth_protocol: PinUvAuthProtocol,
+    ) -> CtapResult<Option<cbor::Value>> {
+        let params_start = message.len();
+        if let Some(sub_command_params) = sub_command_params {
+            cbor_write(sub_command_params, &mut message)?;
+        }
+        self.verify_pin_uv_auth_token(env, &message, pin_uv_auth_param, pin_uv_auth_protocol)?;
+        if message.len() == params_start {
+            return Ok(None);
+        }
+        cbor_read(&message[params_start..]).map(Some)
     }
 
     /// Resets the pinUvAuthToken for all protocols and stops using it.

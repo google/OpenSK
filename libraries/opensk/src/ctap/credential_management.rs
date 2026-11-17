@@ -280,7 +280,7 @@ pub fn process_credential_management<E: Env>(
 ) -> CtapResult<ResponseData> {
     let AuthenticatorCredentialManagementParameters {
         sub_command,
-        sub_command_params,
+        mut sub_command_params,
         pin_uv_auth_protocol,
         pin_uv_auth_param,
     } = cred_management_params;
@@ -309,13 +309,10 @@ pub fn process_credential_management<E: Env>(
                 pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
             let pin_uv_auth_protocol =
                 pin_uv_auth_protocol.ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
-            let mut management_data = vec![sub_command as u8];
-            if let Some(sub_command_params) = sub_command_params.clone() {
-                super::cbor_write(sub_command_params.into(), &mut management_data)?;
-            }
-            client_pin.verify_pin_uv_auth_token(
+            sub_command_params = client_pin.verify_pin_uv_auth_token_with_params(
                 env,
-                &management_data,
+                vec![sub_command as u8],
+                sub_command_params,
                 &pin_uv_auth_param,
                 pin_uv_auth_protocol,
             )?;
@@ -325,6 +322,9 @@ pub fn process_credential_management<E: Env>(
         CredentialManagementSubCommand::EnumerateRpsGetNextRp
         | CredentialManagementSubCommand::EnumerateCredentialsGetNextCredential => {}
     }
+    let sub_command_params = sub_command_params
+        .map(CredentialManagementSubCommandParameters::try_from)
+        .transpose()?;
 
     let response = match sub_command {
         CredentialManagementSubCommand::GetCredsMetadata => {
@@ -386,6 +386,8 @@ mod test {
     use crate::api::rng::Rng;
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
+    use sk_cbor as cbor;
+    use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options};
 
     const DUMMY_CHANNEL: Channel = Channel::MainHid([0x12, 0x34, 0x56, 0x78]);
 
@@ -698,10 +700,8 @@ mod test {
             0x2B, 0x68,
         ]);
 
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: Some(Sha::<TestEnv>::digest(b"example.com").to_vec()),
-            credential_id: None,
-            user: None,
+        let sub_command_params = cbor_map! {
+            0x01 => Sha::<TestEnv>::digest(b"example.com").to_vec(),
         };
         // RP ID hash:
         // A379A6F6EEAFB9A55E378C118034E2751E682FAB9F2D30AB13D2125586CE1947
@@ -801,10 +801,8 @@ mod test {
             key_id: vec![0x1D; 32],
             transports: None, // You can set USB as a hint here.
         };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id),
-            user: None,
+        let sub_command_params = cbor_map! {
+            0x02 => credential_id,
         };
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::DeleteCredential,
@@ -844,6 +842,72 @@ mod test {
     }
 
     #[test]
+    fn test_process_delete_credential_with_unknown_transport() {
+        // The platform authenticates the subCommandParams it sends, including transports that
+        // the authenticator does not know and ignores.
+        for transports in [vec!["usb"], vec!["usb", "smart-card"]] {
+            let case = transports.join(",");
+            let mut env = TestEnv::default();
+            let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+            let pin_uv_auth_token = [0x55; 32];
+            let client_pin = ClientPin::<TestEnv>::new_test(
+                &mut env,
+                key_agreement_key,
+                pin_uv_auth_token,
+                PinUvAuthProtocol::V1,
+            );
+            let mut credential_source = create_credential_source(&mut env);
+            credential_source.credential_id = vec![0x1D; 32];
+
+            let mut ctap_state = CtapState::new(&mut env);
+            ctap_state.client_pin = client_pin;
+
+            storage::store_credential(&mut env, credential_source).unwrap();
+            env.persist().set_pin(&[0u8; 16], 4).unwrap();
+
+            let sub_command_params = cbor_map! {
+                0x02 => cbor_map! {
+                    "id" => vec![0x1D; 32],
+                    "type" => "public-key",
+                    "transports" => cbor_array_vec!(transports),
+                },
+            };
+            let mut management_data = vec![CredentialManagementSubCommand::DeleteCredential as u8];
+            super::super::cbor_write(sub_command_params.clone(), &mut management_data).unwrap();
+            let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+                &pin_uv_auth_token,
+                &management_data,
+                PinUvAuthProtocol::V1,
+            );
+            let cbor_value = cbor_map! {
+                0x01 => CredentialManagementSubCommand::DeleteCredential as u64,
+                0x02 => sub_command_params,
+                0x03 => PinUvAuthProtocol::V1 as u64,
+                0x04 => pin_uv_auth_param,
+            };
+            let cred_management_params =
+                AuthenticatorCredentialManagementParameters::try_from(cbor_value).unwrap();
+            let cred_management_response = process_credential_management(
+                &mut env,
+                &mut ctap_state.stateful_command_permission,
+                &mut ctap_state.client_pin,
+                cred_management_params,
+                DUMMY_CHANNEL,
+            );
+            assert_eq!(
+                cred_management_response,
+                Ok(ResponseData::AuthenticatorCredentialManagement(None)),
+                "transports: {case}"
+            );
+            assert_eq!(
+                storage::find_credential(&mut env, "example.com", &[0x1D; 32]),
+                Ok(None),
+                "transports: {case}"
+            );
+        }
+    }
+
+    #[test]
     fn test_process_update_user_information() {
         let mut env = TestEnv::default();
         let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
@@ -879,10 +943,9 @@ mod test {
             user_display_name: Some("new_display_name".to_string()),
             user_icon: Some("new_icon".to_string()),
         };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id.clone()),
-            user: Some(mismatched_user),
+        let sub_command_params = cbor_map! {
+            0x02 => credential_id.clone(),
+            0x03 => mismatched_user,
         };
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::UpdateUserInformation,
@@ -908,13 +971,12 @@ mod test {
             user_display_name: Some("new_display_name".to_string()),
             user_icon: Some(String::new()),
         };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id),
-            user: Some(new_user),
+        let sub_command_params = cbor_map! {
+            0x02 => credential_id,
+            0x03 => new_user,
         };
         let mut auth_data = vec![CredentialManagementSubCommand::UpdateUserInformation as u8];
-        super::super::cbor_write(sub_command_params.clone().into(), &mut auth_data).unwrap();
+        super::super::cbor_write(sub_command_params.clone(), &mut auth_data).unwrap();
         let pin_uv_auth_param = Some(authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
             &auth_data,
@@ -983,13 +1045,12 @@ mod test {
             user_display_name: Some(format!("{}é", "d".repeat(63))),
             user_icon: None,
         };
-        let sub_command_params = CredentialManagementSubCommandParameters {
-            rp_id_hash: None,
-            credential_id: Some(credential_id),
-            user: Some(new_user),
+        let sub_command_params = cbor_map! {
+            0x02 => credential_id,
+            0x03 => new_user,
         };
         let mut management_data = vec![CredentialManagementSubCommand::UpdateUserInformation as u8];
-        super::super::cbor_write(sub_command_params.clone().into(), &mut management_data).unwrap();
+        super::super::cbor_write(sub_command_params.clone(), &mut management_data).unwrap();
         let pin_uv_auth_param = authenticate_pin_uv_auth_token(
             &pin_uv_auth_token,
             &management_data,
@@ -1046,5 +1107,157 @@ mod test {
             cred_management_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
+    }
+
+    /// Stores a credential and sends deleteCredential for it, as CBOR bytes, with the given
+    /// subCommandParams. The pinUvAuthParam is computed over the subCommandParams as sent.
+    ///
+    /// Returns the response and whether the credential still exists.
+    fn delete_credential_with_sent_params(sub_command_params: cbor::Value) -> (Vec<u8>, bool) {
+        let mut env = TestEnv::default();
+        let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+        let pin_uv_auth_token = [0x55; 32];
+        let client_pin = ClientPin::<TestEnv>::new_test(
+            &mut env,
+            key_agreement_key,
+            pin_uv_auth_token,
+            PinUvAuthProtocol::V1,
+        );
+        let mut credential_source = create_credential_source(&mut env);
+        credential_source.credential_id = vec![0x1D; 32];
+
+        let mut ctap_state = CtapState::new(&mut env);
+        ctap_state.client_pin = client_pin;
+
+        storage::store_credential(&mut env, credential_source).unwrap();
+        env.persist().set_pin(&[0u8; 16], 4).unwrap();
+
+        let mut management_data = vec![CredentialManagementSubCommand::DeleteCredential as u8];
+        super::super::cbor_write(sub_command_params.clone(), &mut management_data).unwrap();
+        let pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &management_data,
+            PinUvAuthProtocol::V1,
+        );
+        let cbor_value = cbor_map! {
+            0x01 => CredentialManagementSubCommand::DeleteCredential as u64,
+            0x02 => sub_command_params,
+            0x03 => PinUvAuthProtocol::V1 as u64,
+            0x04 => pin_uv_auth_param,
+        };
+        // 0x0A is authenticatorCredentialManagement.
+        let mut command = vec![0x0A];
+        super::super::cbor_write(cbor_value, &mut command).unwrap();
+        let response = ctap_state.process_command(&mut env, &command, DUMMY_CHANNEL);
+        let exists = storage::find_credential(&mut env, "example.com", &[0x1D; 32])
+            .unwrap()
+            .is_some();
+        (response, exists)
+    }
+
+    #[test]
+    fn test_process_delete_credential_with_unknown_entries() {
+        // The platform authenticates the subCommandParams as it sends them, including entries
+        // that the authenticator does not know and ignores when parsing.
+        let cases = [
+            (
+                "unknown subCommandParams key",
+                cbor_map! {
+                    0x02 => cbor_map! {
+                        "id" => vec![0x1D; 32],
+                        "type" => "public-key",
+                    },
+                    0x10 => "future parameter",
+                },
+            ),
+            (
+                "unknown credentialId member",
+                cbor_map! {
+                    0x02 => cbor_map! {
+                        "id" => vec![0x1D; 32],
+                        "type" => "public-key",
+                        "futureMember" => true,
+                    },
+                },
+            ),
+        ];
+        for (case, sub_command_params) in cases {
+            let (response, exists) = delete_credential_with_sent_params(sub_command_params);
+            assert_eq!(response, vec![Ctap2StatusCode::CTAP2_OK as u8], "{case}");
+            assert!(!exists, "{case}");
+        }
+    }
+
+    #[test]
+    fn test_process_delete_credential_with_unknown_type() {
+        // The MAC check passes on the type as sent. The unknown type then matches no credential.
+        let sub_command_params = cbor_map! {
+            0x02 => cbor_map! {
+                "id" => vec![0x1D; 32],
+                "type" => "future-type",
+            },
+        };
+        let (response, exists) = delete_credential_with_sent_params(sub_command_params);
+        assert_eq!(
+            response,
+            vec![Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS as u8]
+        );
+        assert!(exists);
+    }
+
+    #[test]
+    fn test_process_delete_credential_checks_auth_before_parameters() {
+        // The credential ID must be a byte string. Like in the specification, the parameters are
+        // only validated after the pinUvAuthParam was checked.
+        let sub_command_params = cbor_map! {
+            0x02 => cbor_map! {
+                "id" => "not a byte string",
+                "type" => "public-key",
+            },
+        };
+        let mut management_data = vec![CredentialManagementSubCommand::DeleteCredential as u8];
+        super::super::cbor_write(sub_command_params.clone(), &mut management_data).unwrap();
+        let pin_uv_auth_token = [0x55; 32];
+        let valid_pin_uv_auth_param = authenticate_pin_uv_auth_token(
+            &pin_uv_auth_token,
+            &management_data,
+            PinUvAuthProtocol::V1,
+        );
+        let cases = [
+            (None, Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED),
+            (
+                Some(vec![0x00; 16]),
+                Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID,
+            ),
+            (
+                Some(valid_pin_uv_auth_param),
+                Ctap2StatusCode::CTAP2_ERR_CBOR_UNEXPECTED_TYPE,
+            ),
+        ];
+        for (pin_uv_auth_param, expected_status) in cases {
+            let mut env = TestEnv::default();
+            let key_agreement_key = EcdhSk::<TestEnv>::random(env.rng());
+            let client_pin = ClientPin::<TestEnv>::new_test(
+                &mut env,
+                key_agreement_key,
+                pin_uv_auth_token,
+                PinUvAuthProtocol::V1,
+            );
+            let mut ctap_state = CtapState::new(&mut env);
+            ctap_state.client_pin = client_pin;
+            env.persist().set_pin(&[0u8; 16], 4).unwrap();
+
+            let cbor_value = cbor_map_options! {
+                0x01 => CredentialManagementSubCommand::DeleteCredential as u64,
+                0x02 => sub_command_params.clone(),
+                0x03 => PinUvAuthProtocol::V1 as u64,
+                0x04 => pin_uv_auth_param,
+            };
+            // 0x0A is authenticatorCredentialManagement.
+            let mut command = vec![0x0A];
+            super::super::cbor_write(cbor_value, &mut command).unwrap();
+            let response = ctap_state.process_command(&mut env, &command, DUMMY_CHANNEL);
+            assert_eq!(response, vec![expected_status as u8]);
+        }
     }
 }

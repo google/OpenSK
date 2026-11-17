@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use super::cbor_read;
+#[cfg(feature = "config_command")]
+use super::data_formats::ConfigSubCommand;
 #[cfg(feature = "fingerprint")]
 use super::data_formats::extract_bool;
 use super::data_formats::{
-    ClientPinSubCommand, CoseKey, CredentialManagementSubCommand,
-    CredentialManagementSubCommandParameters, GetAssertionExtensions, GetAssertionOptions,
-    MAX_RP_ID_LENGTH, MakeCredentialExtensions, MakeCredentialOptions, PinUvAuthProtocol,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialUserEntity, extract_array, extract_byte_string, extract_map,
-    extract_text_string, extract_unsigned, extract_usize, ok_or_missing,
+    ClientPinSubCommand, CoseKey, CredentialManagementSubCommand, GetAssertionExtensions,
+    GetAssertionOptions, MAX_RP_ID_LENGTH, MakeCredentialExtensions, MakeCredentialOptions,
+    PinUvAuthProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameter,
+    PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity, extract_array, extract_byte_string,
+    extract_map, extract_text_string, extract_unsigned, extract_usize, ok_or_missing,
 };
-#[cfg(feature = "config_command")]
-use super::data_formats::{ConfigSubCommand, ConfigSubCommandParams, SetMinPinLengthParams};
 use super::status_code::Ctap2StatusCode;
 use crate::ctap::status_code::CtapResult;
 use alloc::string::String;
@@ -35,8 +34,6 @@ use core::convert::TryFrom;
 #[cfg(all(test, feature = "fingerprint"))]
 use enum_iterator::{Sequence, all};
 use sk_cbor as cbor;
-#[cfg(feature = "fingerprint")]
-use sk_cbor::cbor_map_options;
 use sk_cbor::destructure_cbor_map;
 
 /// The maximum length of a user handle, in bytes.
@@ -396,7 +393,8 @@ impl TryFrom<cbor::Value> for AuthenticatorClientPinParameters {
 pub struct AuthenticatorBioEnrollmentParameters {
     pub modality: Option<u64>,
     pub sub_command: Option<BioEnrollmentSubCommand>,
-    pub sub_command_params: Option<BioEnrollmentSubCommandParams>,
+    /// The subCommandParams as received, parsed after checking the pinUvAuthParam over them.
+    pub sub_command_params: Option<cbor::Value>,
     pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
     pub pin_uv_auth_param: Option<Vec<u8>>,
     pub get_modality: Option<bool>,
@@ -421,9 +419,6 @@ impl TryFrom<cbor::Value> for AuthenticatorBioEnrollmentParameters {
         let modality = modality.map(extract_unsigned).transpose()?;
         let sub_command = sub_command
             .map(BioEnrollmentSubCommand::try_from)
-            .transpose()?;
-        let sub_command_params = sub_command_params
-            .map(BioEnrollmentSubCommandParams::try_from)
             .transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
@@ -482,7 +477,7 @@ impl TryFrom<cbor::Value> for BioEnrollmentSubCommand {
 }
 
 #[cfg(feature = "fingerprint")]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BioEnrollmentSubCommandParams {
     pub template_id: Option<Vec<u8>>,
     pub template_friendly_name: Option<String>,
@@ -513,17 +508,6 @@ impl TryFrom<cbor::Value> for BioEnrollmentSubCommandParams {
             template_friendly_name,
             timeout_milliseconds,
         })
-    }
-}
-
-#[cfg(feature = "fingerprint")]
-impl From<BioEnrollmentSubCommandParams> for cbor::Value {
-    fn from(sub_command_params: BioEnrollmentSubCommandParams) -> Self {
-        cbor_map_options! {
-            0x01 => sub_command_params.template_id,
-            0x02 => sub_command_params.template_friendly_name,
-            0x03 => sub_command_params.timeout_milliseconds.map(|u| u as u64),
-        }
     }
 }
 
@@ -589,7 +573,8 @@ impl TryFrom<cbor::Value> for AuthenticatorLargeBlobsParameters {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorConfigParameters {
     pub sub_command: ConfigSubCommand,
-    pub sub_command_params: Option<ConfigSubCommandParams>,
+    /// The subCommandParams as received, parsed after checking the pinUvAuthParam over them.
+    pub sub_command_params: Option<cbor::Value>,
     pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
     pub pin_uv_auth_param: Option<Vec<u8>>,
 }
@@ -609,12 +594,6 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
         }
 
         let sub_command = ConfigSubCommand::try_from(ok_or_missing(sub_command)?)?;
-        let sub_command_params = match sub_command {
-            ConfigSubCommand::SetMinPinLength => Some(ConfigSubCommandParams::SetMinPinLength(
-                SetMinPinLengthParams::try_from(ok_or_missing(sub_command_params)?)?,
-            )),
-            _ => None,
-        };
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
             .transpose()?;
@@ -632,7 +611,8 @@ impl TryFrom<cbor::Value> for AuthenticatorConfigParameters {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorCredentialManagementParameters {
     pub sub_command: CredentialManagementSubCommand,
-    pub sub_command_params: Option<CredentialManagementSubCommandParameters>,
+    /// The subCommandParams as received, parsed after checking the pinUvAuthParam over them.
+    pub sub_command_params: Option<cbor::Value>,
     pub pin_uv_auth_protocol: Option<PinUvAuthProtocol>,
     pub pin_uv_auth_param: Option<Vec<u8>>,
 }
@@ -651,9 +631,6 @@ impl TryFrom<cbor::Value> for AuthenticatorCredentialManagementParameters {
         }
 
         let sub_command = CredentialManagementSubCommand::try_from(ok_or_missing(sub_command)?)?;
-        let sub_command_params = sub_command_params
-            .map(CredentialManagementSubCommandParameters::try_from)
-            .transpose()?;
         let pin_uv_auth_protocol = pin_uv_auth_protocol
             .map(PinUvAuthProtocol::try_from)
             .transpose()?;
@@ -946,7 +923,7 @@ mod test {
         let cbor_value = cbor_map! {
             0x01 => 1,
             0x02 => BioEnrollmentSubCommand::EnrollBegin,
-            0x03 => sub_command_params_cbor_value,
+            0x03 => sub_command_params_cbor_value.clone(),
             0x04 => 1,
             0x05 => vec![0xBB],
             0x06 => true,
@@ -954,15 +931,10 @@ mod test {
         let returned_bio_enrollment_parameters =
             AuthenticatorBioEnrollmentParameters::try_from(cbor_value).unwrap();
 
-        let expected_sub_command_params = BioEnrollmentSubCommandParams {
-            template_id: Some(vec![0x01]),
-            template_friendly_name: Some(String::from("Name")),
-            timeout_milliseconds: Some(1000),
-        };
         let expected_bio_enrollment_parameters = AuthenticatorBioEnrollmentParameters {
             modality: Some(1),
             sub_command: Some(BioEnrollmentSubCommand::EnrollBegin),
-            sub_command_params: Some(expected_sub_command_params),
+            sub_command_params: Some(sub_command_params_cbor_value),
             pin_uv_auth_protocol: Some(PinUvAuthProtocol::V1),
             pin_uv_auth_param: Some(vec![0xBB]),
             get_modality: Some(true),
@@ -992,22 +964,19 @@ mod test {
 
     #[test]
     #[cfg(feature = "fingerprint")]
-    fn test_from_into_bio_enrollment_sub_command_params() {
+    fn test_from_cbor_bio_enrollment_sub_command_params() {
         let cbor_sub_command_params = cbor_map! {
             0x01 => vec![0x1D; 32],
             0x02 => "Name",
             0x03 => 30_000,
         };
-        let sub_command_params =
-            BioEnrollmentSubCommandParams::try_from(cbor_sub_command_params.clone());
+        let sub_command_params = BioEnrollmentSubCommandParams::try_from(cbor_sub_command_params);
         let expected_sub_command_params = BioEnrollmentSubCommandParams {
             template_id: Some(vec![0x1D; 32]),
             template_friendly_name: Some(String::from("Name")),
             timeout_milliseconds: Some(30_000),
         };
         assert_eq!(sub_command_params, Ok(expected_sub_command_params));
-        let created_cbor: cbor::Value = sub_command_params.unwrap().into();
-        assert_eq!(created_cbor, cbor_sub_command_params);
     }
 
     #[test]
@@ -1026,11 +995,11 @@ mod test {
         let returned_config_parameters =
             AuthenticatorConfigParameters::try_from(cbor_value).unwrap();
 
-        let sub_command_params = ConfigSubCommandParams::SetMinPinLength(SetMinPinLengthParams {
-            new_min_pin_length: Some(6),
-            min_pin_length_rp_ids: Some(vec![String::from("example.com")]),
-            force_change_pin: Some(true),
-        });
+        let sub_command_params = cbor_map! {
+            0x01 => 6,
+            0x02 => cbor_array![String::from("example.com")],
+            0x03 => true,
+        };
         let expected_config_parameters = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::SetMinPinLength,
             sub_command_params: Some(sub_command_params),
@@ -1054,10 +1023,8 @@ mod test {
         let returned_cred_management_parameters =
             AuthenticatorCredentialManagementParameters::try_from(cbor_value).unwrap();
 
-        let params = CredentialManagementSubCommandParameters {
-            rp_id_hash: Some(vec![0x1D; 32]),
-            credential_id: None,
-            user: None,
+        let params = cbor_map! {
+            0x01 => vec![0x1D; 32],
         };
         let expected_cred_management_parameters = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::EnumerateCredentialsBegin,

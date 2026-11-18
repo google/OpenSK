@@ -94,8 +94,9 @@ pub trait Fingerprint {
     /// Collects a fingerprint from the user and verifies it.
     ///
     /// Waits for the user to present a finger, or the timeout to pass.
-    /// Returns Ok if the fingerprint was valid, and an error otherwise.
-    fn check_fingerprint(&mut self, timeout_ms: usize) -> Result<(), FingerprintCheckError>;
+    /// Returns the template ID of the matching enrollment if the fingerprint was valid, and an
+    /// error otherwise.
+    fn check_fingerprint(&mut self, timeout_ms: usize) -> Result<Vec<u8>, FingerprintCheckError>;
 
     /// Deinitilize hardware after a fingerprint check.
     ///

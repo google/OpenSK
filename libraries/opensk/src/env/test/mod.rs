@@ -293,11 +293,12 @@ impl Fingerprint for TestFingerprint {
         Ok(())
     }
 
-    fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<(), FingerprintCheckError> {
-        if self.template_ids.is_empty() {
-            return Err(FingerprintCheckError::NoMatch);
-        }
-        Ok(())
+    /// Matches the most recently enrolled finger.
+    fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<Vec<u8>, FingerprintCheckError> {
+        self.template_ids
+            .last()
+            .cloned()
+            .ok_or(FingerprintCheckError::NoMatch)
     }
 
     fn check_fingerprint_complete(&mut self) -> CtapResult<()> {

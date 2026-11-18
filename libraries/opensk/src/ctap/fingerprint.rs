@@ -172,6 +172,10 @@ fn check_fingerprint_loop<E: Env>(
     };
     let endpoint = transport.usb_endpoint();
 
+    // Each attempt uses up a UV retry before the sensor runs, like a PIN retry before
+    // the PIN is checked. If the counter was written after a mismatch, cutting the power
+    // in between would give unlimited attempts.
+    storage::decr_uv_retries(env)?;
     // We need to give the user time to touch the device during UV.
     // Also, on Windows, it seems we need to send KEEPALIVEs to
     // avoid timeouts, so we need to do the check incrementally.
@@ -183,7 +187,6 @@ fn check_fingerprint_loop<E: Env>(
             Err(error) => {
                 match error {
                     FingerprintCheckError::NoMatch | FingerprintCheckError::Other => {
-                        storage::decr_uv_retries(env)?;
                         if storage::uv_retries(env)? == 0 {
                             return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
                         }
@@ -191,6 +194,7 @@ fn check_fingerprint_loop<E: Env>(
                         if retries == 0 {
                             return Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID);
                         }
+                        storage::decr_uv_retries(env)?;
                     }
                     FingerprintCheckError::Timeout => {
                         // Send a KEEPALIVE to avoid timeouts on Windows.
@@ -201,6 +205,8 @@ fn check_fingerprint_loop<E: Env>(
             }
         }
     }
+    // No finger was presented for the current attempt, so it gets its retry back.
+    storage::incr_uv_retries(env)?;
     Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
 }
 
@@ -918,6 +924,34 @@ mod test {
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
         );
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_power_loss() {
+        let mut env = TestEnv::default();
+        env.create_fingerprint().unwrap();
+        let max_uv_retries = env.customization().max_uv_retries();
+        // Losing power while the sensor matches means the check never returns.
+        env.fingerprint().set_check(|| panic!("power loss"));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false)
+        }));
+        assert!(result.is_err());
+        assert_eq!(storage::uv_retries(&mut env), Ok(max_uv_retries - 1));
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_timeout() {
+        let mut env = TestEnv::default();
+        env.create_fingerprint().unwrap();
+        let max_uv_retries = env.customization().max_uv_retries();
+        env.fingerprint()
+            .set_check(|| Err(FingerprintCheckError::Timeout));
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+        );
+        assert_eq!(storage::uv_retries(&mut env), Ok(max_uv_retries));
     }
 
     #[test]

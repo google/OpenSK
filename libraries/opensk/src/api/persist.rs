@@ -232,6 +232,15 @@ pub trait Persist {
         self.insert(keys::UV_RETRIES, &[new_value])
     }
 
+    /// Increments the number of remaining UV retries.
+    #[cfg(feature = "fingerprint")]
+    fn decr_uv_fails(&mut self) -> CtapResult<()> {
+        match self.uv_fails()? {
+            0 | 1 => self.reset_uv_retries(),
+            old_value => self.insert(keys::UV_RETRIES, &[old_value - 1]),
+        }
+    }
+
     /// Resets the number of remaining UV retries.
     #[cfg(feature = "fingerprint")]
     fn reset_uv_retries(&mut self) -> CtapResult<()> {
@@ -792,6 +801,14 @@ mod test {
         assert_eq!(persist.incr_uv_fails(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 1);
         assert_eq!(persist.reset_uv_retries(), Ok(()));
+        assert_eq!(persist.uv_fails().unwrap(), 0);
+        assert_eq!(persist.incr_uv_fails(), Ok(()));
+        assert_eq!(persist.incr_uv_fails(), Ok(()));
+        assert_eq!(persist.decr_uv_fails(), Ok(()));
+        assert_eq!(persist.uv_fails().unwrap(), 1);
+        assert_eq!(persist.decr_uv_fails(), Ok(()));
+        assert_eq!(persist.uv_fails().unwrap(), 0);
+        assert_eq!(persist.decr_uv_fails(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 0);
     }
 

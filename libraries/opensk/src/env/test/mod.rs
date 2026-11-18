@@ -104,6 +104,7 @@ pub struct TestFingerprint {
     template_ids: Vec<Vec<u8>>,
     template_counter: usize,
     progress: Option<usize>,
+    check: Option<fn() -> Result<(), FingerprintCheckError>>,
 }
 
 pub struct TestWrite;
@@ -237,6 +238,14 @@ impl TestUserPresence {
     }
 }
 
+#[cfg(feature = "fingerprint")]
+impl TestFingerprint {
+    /// Overrides the result of `check_fingerprint`.
+    pub fn set_check(&mut self, check: fn() -> Result<(), FingerprintCheckError>) {
+        self.check = Some(check);
+    }
+}
+
 impl UserPresence for TestUserPresence {
     fn check_init(&mut self) {}
     fn wait_with_timeout(
@@ -294,6 +303,9 @@ impl Fingerprint for TestFingerprint {
     }
 
     fn check_fingerprint(&mut self, _timeout_ms: usize) -> Result<(), FingerprintCheckError> {
+        if let Some(check) = self.check {
+            return check();
+        }
         if self.template_ids.is_empty() {
             return Err(FingerprintCheckError::NoMatch);
         }

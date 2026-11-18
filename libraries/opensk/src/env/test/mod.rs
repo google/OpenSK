@@ -282,6 +282,10 @@ impl Fingerprint for TestFingerprint {
     }
 
     fn remove_enrollment(&mut self, template_id: &[u8]) -> CtapResult<()> {
+        // Like the FPC2534 driver, refuse to delete while another operation is running.
+        if self.progress.is_some() {
+            return Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR);
+        }
         let index = self.template_ids.iter().position(|x| x == template_id);
         if let Some(index) = index {
             self.template_ids.remove(index);

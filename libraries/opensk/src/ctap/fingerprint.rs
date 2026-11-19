@@ -176,7 +176,15 @@ fn check_fingerprint_loop<E: Env>(
     // Also, on Windows, it seems we need to send KEEPALIVEs to
     // avoid timeouts, so we need to do the check incrementally.
     for _ in 0..FINGERPRINT_TIMEOUT_LOOPS {
-        match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
+        let result = match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
+            // The sensor matches against all its templates. Only those we store are enrolled.
+            // Others are left over, e.g. from an enrollment that finished but was not stored.
+            Ok(template_id) if !is_enrolled(env, &template_id)? => {
+                Err(FingerprintCheckError::NoMatch)
+            }
+            result => result.map(|_| ()),
+        };
+        match result {
             Ok(()) => {
                 env.persist().incr_uv_count_since_last_pin_entry()?;
                 return storage::reset_uv_retries(env);
@@ -204,6 +212,14 @@ fn check_fingerprint_loop<E: Env>(
         }
     }
     Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
+}
+
+/// Returns whether the template ID is stored in persistent storage.
+fn is_enrolled<E: Env>(env: &mut E, template_id: &[u8]) -> CtapResult<bool> {
+    let template_infos = env.persist().template_infos()?;
+    Ok(template_infos
+        .iter()
+        .any(|template_info| template_info.template_id == template_id))
 }
 
 /// Helper function to move the template ID into persistent storage.
@@ -479,6 +495,22 @@ mod test {
                 Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
             );
         }
+    }
+
+    #[test]
+    fn test_perform_built_in_uv_unlisted_template() {
+        let mut env = TestEnv::default();
+        env.create_fingerprint().unwrap();
+        assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
+        // The sensor finishes an enrollment whose template ID is never stored, like after a power
+        // loss or a cancelCurrentEnrollment that arrives after the last sample.
+        env.fingerprint().prepare_enrollment().unwrap();
+        while env.fingerprint().capture_sample(None).unwrap().1 > 0 {}
+        // The test sensor matches the most recently enrolled finger.
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
     }
 
     #[test]

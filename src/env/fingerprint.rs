@@ -138,7 +138,7 @@ impl Fingerprint for Impl {
         Ok(())
     }
 
-    fn check_fingerprint(&mut self, timeout_ms: usize) -> Result<(), FingerprintCheckError> {
+    fn check_fingerprint(&mut self, timeout_ms: usize) -> Result<Vec<u8>, FingerprintCheckError> {
         let State::Identify(state) = &mut self.0 else {
             return Err(FingerprintCheckError::Other);
         };
@@ -152,7 +152,7 @@ impl Fingerprint for Impl {
                 .map_err(|_| FingerprintCheckError::Other)?
             {
                 IdentifyResult::NoMatch => Err(FingerprintCheckError::NoMatch),
-                IdentifyResult::Match { .. } => Ok(()),
+                IdentifyResult::Match { template } => Ok(template.into_vec()),
             }
         } else {
             Err(FingerprintCheckError::Timeout)

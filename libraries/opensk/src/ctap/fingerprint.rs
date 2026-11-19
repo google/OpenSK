@@ -330,9 +330,19 @@ fn remove_enrollment<E: Env>(
     sub_command_params: BioEnrollmentSubCommandParams,
 ) -> CtapResult<ResponseData> {
     let template_id = ok_or_missing(sub_command_params.template_id)?;
-    // Will return an error if the template_id is unknown.
-    env.persist().remove_template_id(&template_id)?;
+    if !env
+        .persist()
+        .template_infos()?
+        .iter()
+        .any(|info| info.template_id == template_id)
+    {
+        return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+    }
+    // Remove the template from the sensor first. If the sensor fails to delete it, the
+    // template must stay stored, or it passes built-in UV without being listed or removed
+    // on reset.
     env.fingerprint().remove_enrollment(&template_id)?;
+    env.persist().remove_template_id(&template_id)?;
     Ok(ResponseData::AuthenticatorBioEnrollment(None))
 }
 
@@ -738,6 +748,59 @@ mod test {
         // The sensor must not keep a template that is not stored, or it would
         // still pass built-in UV after a reset.
         reset(&mut env).unwrap();
+        env.persist().store_template_id(vec![0x00]).unwrap();
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
+    }
+
+    #[test]
+    fn test_remove_enrollment_sensor_failure() {
+        let mut env = TestEnv::default();
+        let template_id = env.create_fingerprint().unwrap();
+        // The sensor refuses to delete templates while an enrollment is in progress.
+        let mut enrollment_status = EnrollmentStatus::default();
+        call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollBegin,
+            None,
+            true,
+            &mut enrollment_status,
+        )
+        .unwrap();
+        let sub_command_params = BioEnrollmentSubCommandParams {
+            template_id: Some(template_id.clone()),
+            template_friendly_name: None,
+            timeout_milliseconds: None,
+        };
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::RemoveEnrollment,
+            Some(sub_command_params.clone()),
+            true,
+        );
+        assert_eq!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+        // The sensor still holds the template, so it must still be listed.
+        let template_infos = env.persist().template_infos().unwrap();
+        assert!(
+            template_infos
+                .iter()
+                .any(|info| info.template_id == template_id)
+        );
+
+        // Once the sensor is idle, removing the template works and it stops passing UV.
+        env.fingerprint().cancel_enrollment().unwrap();
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::RemoveEnrollment,
+            Some(sub_command_params),
+            true,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorBioEnrollment(None)));
         env.persist().store_template_id(vec![0x00]).unwrap();
         assert_eq!(
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),

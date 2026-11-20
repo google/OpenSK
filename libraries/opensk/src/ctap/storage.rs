@@ -219,12 +219,6 @@ pub fn decr_uv_retries(env: &mut impl Env) -> CtapResult<()> {
     env.persist().incr_uv_fails()
 }
 
-/// Increments the number of remaining UV retries.
-#[cfg(feature = "fingerprint")]
-pub fn incr_uv_retries(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().decr_uv_fails()
-}
-
 /// Resets the number of remaining UV retries.
 #[cfg(feature = "fingerprint")]
 pub fn reset_uv_retries(env: &mut impl Env) -> CtapResult<()> {

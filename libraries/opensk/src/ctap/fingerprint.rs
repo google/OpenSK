@@ -206,7 +206,7 @@ fn check_fingerprint_loop<E: Env>(
         }
     }
     // No finger was presented for the current attempt, so it gets its retry back.
-    storage::incr_uv_retries(env)?;
+    env.persist().decr_uv_fails()?;
     Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
 }
 

@@ -18,6 +18,7 @@ pub mod command;
 #[cfg(feature = "config_command")]
 mod config_command;
 mod credential_management;
+mod credential_store;
 pub mod crypto_wrapper;
 #[cfg(feature = "ctap1")]
 mod ctap1;
@@ -31,7 +32,6 @@ mod pin_protocol;
 pub mod response;
 pub mod secret;
 pub mod status_code;
-mod storage;
 mod token_state;
 #[cfg(feature = "ctap1")]
 mod u2f_up;
@@ -50,7 +50,8 @@ use self::data_formats::{
     AuthenticatorTransport, CredentialProtectionPolicy, EnterpriseAttestationMode,
     GetAssertionExtensions, PackedAttestationStatement, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameter, PublicKeyCredentialSource,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity, SignatureAlgorithm, extract_array,
+    extract_text_string,
 };
 #[cfg(feature = "fingerprint")]
 use self::fingerprint::{EnrollmentStatus, perform_built_in_uv, process_bio_enrollment};
@@ -193,6 +194,81 @@ pub fn cbor_write(value: cbor::Value, encoded_cbor: &mut Vec<u8>) -> CtapResult<
         .map_err(|_e| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
 }
 
+/// Initializes persistent storage and key store by creating missing objects.
+pub(crate) fn init(env: &mut impl Env) -> CtapResult<()> {
+    env.persist().init()?;
+    env.key_store().init()?;
+    Ok(())
+}
+
+/// Returns whether the authenticator is protected by some form of user verification.
+///
+/// That is the case if a PIN is set, or a built-in user verification method is enrolled. Both
+/// can provide a pinUvAuthToken, which OpenSK always supports.
+pub(crate) fn has_user_verification(env: &mut impl Env) -> CtapResult<bool> {
+    #[cfg(feature = "fingerprint")]
+    if !env.persist().template_infos()?.is_empty() {
+        return Ok(true);
+    }
+    env.key_store().has_pin()
+}
+
+/// Returns the minimum PIN length.
+pub(crate) fn min_pin_length(env: &mut impl Env) -> CtapResult<u8> {
+    Ok(env
+        .persist()
+        .min_pin_length()?
+        .unwrap_or(env.customization().default_min_pin_length()))
+}
+
+/// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
+/// allowed.
+pub(crate) fn min_pin_length_rp_ids(env: &mut impl Env) -> CtapResult<Vec<String>> {
+    let rp_ids_bytes = env.persist().min_pin_length_rp_ids_bytes()?;
+    let rp_ids = if rp_ids_bytes.is_empty() {
+        Some(env.customization().default_min_pin_length_rp_ids())
+    } else {
+        deserialize_min_pin_length_rp_ids(&rp_ids_bytes)
+    };
+    debug_assert!(rp_ids.is_some());
+    Ok(rp_ids.unwrap_or_default())
+}
+
+/// Deserializes a list of RP IDs from storage representation.
+fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
+    let cbor = cbor_read(data).ok()?;
+    extract_array(cbor)
+        .ok()?
+        .into_iter()
+        .map(extract_text_string)
+        .collect::<CtapResult<Vec<String>>>()
+        .ok()
+}
+
+/// Returns whether enterprise attestation is enabled.
+///
+/// Without the AuthenticatorConfig command, customization determines the result.
+#[cfg(not(feature = "config_command"))]
+pub(crate) fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
+    Ok(env.customization().enterprise_attestation_mode().is_some())
+}
+
+/// Returns whether enterprise attestation is enabled.
+///
+/// Use the AuthenticatorConfig command to turn it on.
+#[cfg(feature = "config_command")]
+pub(crate) fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
+    env.persist().enterprise_attestation()
+}
+
+/// Returns whether alwaysUv is enabled.
+pub(crate) fn has_always_uv(env: &mut impl Env) -> CtapResult<bool> {
+    if env.customization().enforce_always_uv() {
+        return Ok(true);
+    }
+    env.persist().has_always_uv()
+}
+
 /// Resets the all state for a CTAP Reset command.
 pub fn reset(env: &mut impl Env) -> CtapResult<()> {
     #[cfg(feature = "fingerprint")]
@@ -207,7 +283,7 @@ pub fn reset(env: &mut impl Env) -> CtapResult<()> {
     }
     env.persist().reset()?;
     env.key_store().reset()?;
-    storage::init(env)
+    init(env)
 }
 
 /// Filters the credential from the option if credProtect criteria are not met.
@@ -583,7 +659,7 @@ pub struct CtapState<E: Env> {
 
 impl<E: Env> CtapState<E> {
     pub fn new(env: &mut E) -> Self {
-        storage::init(env).ok().unwrap();
+        init(env).ok().unwrap();
         let client_pin = ClientPin::new(env);
         let stateful_command_permission = if env.boots_after_soft_reset() {
             StatefulPermission::default()
@@ -613,7 +689,7 @@ impl<E: Env> CtapState<E> {
     // CTAP1 needs to be disabled.
     #[cfg(feature = "ctap1")]
     pub fn allows_ctap1(&self, env: &mut E) -> CtapResult<bool> {
-        Ok(!storage::has_always_uv(env)?)
+        Ok(!has_always_uv(env)?)
     }
 
     fn clear_other_channels(&mut self, channel: Channel) {
@@ -841,7 +917,7 @@ impl<E: Env> CtapState<E> {
                 .customization()
                 .enterprise_attestation_mode()
                 .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
-            if !storage::enterprise_attestation(env)? {
+            if !self::enterprise_attestation(env)? {
                 return Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER);
             }
             match (
@@ -863,7 +939,7 @@ impl<E: Env> CtapState<E> {
             Some(pin_uv_auth_param) => {
                 // CTAP2.1 only verifies pinUvAuthParam if the authenticator is protected by
                 // some form of user verification. Without one, keep the CTAP2.0 error.
-                if !storage::has_user_verification(env)? {
+                if !has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -890,13 +966,13 @@ impl<E: Env> CtapState<E> {
                     #[cfg(feature = "fingerprint")]
                     UV_FLAG
                 } else {
-                    if storage::has_always_uv(env)? {
+                    if has_always_uv(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
                     // Corresponds to makeCredUvNotRqd set to true: only discoverable
                     // credentials need user verification, if the authenticator is protected
                     // by some form of user verification.
-                    if options.rk && storage::has_user_verification(env)? {
+                    if options.rk && has_user_verification(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
                     0x00
@@ -915,7 +991,7 @@ impl<E: Env> CtapState<E> {
                     continue;
                 }
                 if filter_listed_resident_credential(
-                    storage::find_credential(env, &rp_id, &cred_desc.key_id)?,
+                    credential_store::find_credential(env, &rp_id, &cred_desc.key_id)?,
                     has_uv,
                 )
                 .is_some()
@@ -952,7 +1028,7 @@ impl<E: Env> CtapState<E> {
             cred_protect_policy = default_cred_protect;
         }
         let min_pin_length =
-            extensions.min_pin_length && storage::min_pin_length_rp_ids(env)?.contains(&rp_id);
+            extensions.min_pin_length && min_pin_length_rp_ids(env)?.contains(&rp_id);
         // None for no input, false for invalid input, true for valid input.
         let has_cred_blob_output = extensions.cred_blob.is_some();
         let cred_blob = extensions
@@ -995,7 +1071,7 @@ impl<E: Env> CtapState<E> {
                     .user_display_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
                 cred_protect_policy,
-                creation_order: storage::new_creation_order(env)?,
+                creation_order: credential_store::new_creation_order(env)?,
                 user_name: user
                     .user_name
                     .map(|s| truncate_to_char_boundary(&s, 64).to_string()),
@@ -1005,7 +1081,7 @@ impl<E: Env> CtapState<E> {
                 cred_blob,
                 large_blob_key: large_blob_key.clone(),
             };
-            storage::store_credential(env, credential_source)?;
+            credential_store::store_credential(env, credential_source)?;
             random_id
         } else {
             let credential_source = CredentialSource {
@@ -1036,7 +1112,7 @@ impl<E: Env> CtapState<E> {
                 None
             };
             let min_pin_length_output = if min_pin_length {
-                Some(storage::min_pin_length(env)? as u64)
+                Some(self::min_pin_length(env)? as u64)
             } else {
                 None
             };
@@ -1212,7 +1288,7 @@ impl<E: Env> CtapState<E> {
                 continue;
             }
             let credential = filter_listed_resident_credential(
-                storage::find_credential(env, rp_id, &allowed_credential.key_id)?,
+                credential_store::find_credential(env, rp_id, &allowed_credential.key_id)?,
                 has_uv,
             );
             if credential.is_some() {
@@ -1258,7 +1334,7 @@ impl<E: Env> CtapState<E> {
             Some(pin_uv_auth_param) => {
                 // CTAP2.1 only verifies pinUvAuthParam if the authenticator is protected by
                 // some form of user verification. Without one, keep the CTAP2.0 error.
-                if !storage::has_user_verification(env)? {
+                if !has_user_verification(env)? {
                     return Err(Ctap2StatusCode::CTAP2_ERR_PIN_NOT_SET);
                 }
                 self.client_pin.verify_pin_uv_auth_token(
@@ -1285,7 +1361,7 @@ impl<E: Env> CtapState<E> {
                     #[cfg(feature = "fingerprint")]
                     UV_FLAG
                 } else {
-                    if options.up && storage::has_always_uv(env)? {
+                    if options.up && has_always_uv(env)? {
                         return Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED);
                     }
                     0x00
@@ -1315,7 +1391,7 @@ impl<E: Env> CtapState<E> {
             )
         } else {
             let mut iter_result = Ok(());
-            let iter = storage::iter_credentials(env, &mut iter_result)?;
+            let iter = credential_store::iter_credentials(env, &mut iter_result)?;
             let mut stored_credentials: Vec<(usize, u64)> = iter
                 .filter_map(|(key, credential)| {
                     if credential.rp_id == rp_id && (has_uv || credential.is_discoverable()) {
@@ -1333,7 +1409,7 @@ impl<E: Env> CtapState<E> {
                 .collect();
             let credential = stored_credentials
                 .pop()
-                .map(|key| storage::get_credential(env, key))
+                .map(|key| credential_store::get_credential(env, key))
                 .transpose()?;
             (credential, stored_credentials)
         };
@@ -1381,12 +1457,12 @@ impl<E: Env> CtapState<E> {
         let (assertion_input, credential_key) = self
             .stateful_command_permission
             .next_assertion_credential(env)?;
-        let credential = storage::get_credential(env, credential_key)?;
+        let credential = credential_store::get_credential(env, credential_key)?;
         self.assertion_response(env, credential, assertion_input, None, true)
     }
 
     fn process_get_info(&self, env: &mut E) -> CtapResult<ResponseData> {
-        let has_always_uv = storage::has_always_uv(env)?;
+        let has_always_uv = has_always_uv(env)?;
         #[cfg_attr(not(feature = "ctap1"), allow(unused_mut))]
         let mut versions = vec![
             String::from(FIDO2_VERSION_STRING),
@@ -1419,7 +1495,7 @@ impl<E: Env> CtapState<E> {
             options.push((String::from("bioEnroll"), has_fingerprint));
         }
         if env.customization().enterprise_attestation_mode().is_some() {
-            options.push((String::from("ep"), storage::enterprise_attestation(env)?));
+            options.push((String::from("ep"), enterprise_attestation(env)?));
         }
         let mut pin_protocols = vec![PinUvAuthProtocol::V2 as u64];
         if env.customization().allows_pin_protocol_v1() {
@@ -1450,7 +1526,7 @@ impl<E: Env> CtapState<E> {
                 algorithms: Some(SUPPORTED_CRED_PARAMS.to_vec()),
                 max_serialized_large_blob_array: Some(MAX_LARGE_BLOB_ARRAY_SIZE as u64),
                 force_pin_change: Some(env.persist().has_force_pin_change()?),
-                min_pin_length: storage::min_pin_length(env)?,
+                min_pin_length: min_pin_length(env)?,
                 firmware_version: env.firmware_version(),
                 max_cred_blob_length: Some(env.customization().max_cred_blob_length() as u64),
                 max_rp_ids_for_set_min_pin_length: Some(
@@ -1468,9 +1544,9 @@ impl<E: Env> CtapState<E> {
                 #[cfg(not(feature = "fingerprint"))]
                 uv_modality: None,
                 certifications: None,
-                remaining_discoverable_credentials: Some(
-                    storage::remaining_credentials(env)? as u64
-                ),
+                remaining_discoverable_credentials: Some(credential_store::remaining_credentials(
+                    env,
+                )? as u64),
                 #[cfg(feature = "fingerprint")]
                 uv_count_since_last_pin_entry: Some(
                     env.persist().uv_count_since_last_pin_entry()? as u64
@@ -1670,13 +1746,13 @@ mod test {
             0x0A => cbor_array_vec!(SUPPORTED_CRED_PARAMS.to_vec()),
             0x0B => MAX_LARGE_BLOB_ARRAY_SIZE as u64,
             0x0C => false,
-            0x0D => storage::min_pin_length(&mut env).unwrap() as u64,
+            0x0D => min_pin_length(&mut env).unwrap() as u64,
             0x0E => 0,
             0x0F => env.customization().max_cred_blob_length() as u64,
             0x10 => env.customization().max_rp_ids_length() as u64,
             0x11 => uv_attempts,
             0x12 => cfg!(feature = "fingerprint").then_some(0x02),
-            0x14 => storage::remaining_credentials(&mut env).unwrap() as u64,
+            0x14 => credential_store::remaining_credentials(&mut env).unwrap() as u64,
             0x17 => cfg!(feature = "fingerprint").then_some(0),
         };
 
@@ -1991,7 +2067,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(storage::store_credential(&mut env, excluded_credential_source).is_ok());
+        assert!(credential_store::store_credential(&mut env, excluded_credential_source).is_ok());
 
         let make_credential_response = ctap_state.process_make_credential(
             &mut env,
@@ -2070,7 +2146,7 @@ mod test {
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
-        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        let iter = credential_store::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -2094,7 +2170,7 @@ mod test {
         assert!(make_credential_response.is_ok());
 
         let mut iter_result = Ok(());
-        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        let iter = credential_store::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -2224,7 +2300,10 @@ mod test {
         #[cfg(feature = "config_command")]
         {
             assert_eq!(
-                storage::set_min_pin_length_rp_ids(&mut env, vec!["example.com".to_string()]),
+                config_command::set_min_pin_length_rp_ids(
+                    &mut env,
+                    vec!["example.com".to_string()]
+                ),
                 Ok(())
             );
 
@@ -2275,7 +2354,7 @@ mod test {
         );
 
         let mut iter_result = Ok(());
-        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        let iter = credential_store::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -2307,7 +2386,7 @@ mod test {
         );
 
         let mut iter_result = Ok(());
-        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        let iter = credential_store::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -2342,7 +2421,7 @@ mod test {
         assert_eq!(large_blob_key.len(), 32);
 
         let mut iter_result = Ok(());
-        let iter = storage::iter_credentials(&mut env, &mut iter_result).unwrap();
+        let iter = credential_store::iter_credentials(&mut env, &mut iter_result).unwrap();
         // There is only 1 credential, so last is good enough.
         let (_, stored_credential) = iter.last().unwrap();
         iter_result.unwrap();
@@ -2459,7 +2538,7 @@ mod test {
         let mut env = TestEnv::default();
         let mut ctap_state = CtapState::<TestEnv>::new(&mut env);
 
-        storage::toggle_always_uv(&mut env).unwrap();
+        config_command::toggle_always_uv(&mut env).unwrap();
         let make_credential_params = create_minimal_make_credential_parameters();
         let make_credential_response =
             ctap_state.process_make_credential(&mut env, make_credential_params, DUMMY_CHANNEL);
@@ -3085,7 +3164,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        storage::store_credential(&mut env, excluded_credential_source).unwrap();
+        credential_store::store_credential(&mut env, excluded_credential_source).unwrap();
 
         let unknown_descriptor = PublicKeyCredentialDescriptor {
             key_type: PublicKeyCredentialType::Unknown,
@@ -3306,7 +3385,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(storage::store_credential(&mut env, credential).is_ok());
+        assert!(credential_store::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
@@ -3358,7 +3437,7 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(storage::store_credential(&mut env, credential).is_ok());
+        assert!(credential_store::store_credential(&mut env, credential).is_ok());
 
         let get_assertion_params = AuthenticatorGetAssertionParameters {
             rp_id: String::from("example.com"),
@@ -3475,7 +3554,7 @@ mod test {
             cred_blob: Some(vec![0xCB]),
             large_blob_key: None,
         };
-        assert!(storage::store_credential(&mut env, credential).is_ok());
+        assert!(credential_store::store_credential(&mut env, credential).is_ok());
 
         let extensions = GetAssertionExtensions {
             cred_blob: true,
@@ -3595,7 +3674,7 @@ mod test {
             cred_blob: None,
             large_blob_key: Some(vec![0x1C; 32]),
         };
-        assert!(storage::store_credential(&mut env, credential).is_ok());
+        assert!(credential_store::store_credential(&mut env, credential).is_ok());
 
         let extensions = GetAssertionExtensions {
             large_blob_key: Some(true),
@@ -3884,13 +3963,13 @@ mod test {
             cred_blob: None,
             large_blob_key: None,
         };
-        assert!(storage::store_credential(&mut env, credential_source).is_ok());
-        assert!(storage::count_credentials(&mut env).unwrap() > 0);
+        assert!(credential_store::store_credential(&mut env, credential_source).is_ok());
+        assert!(credential_store::count_credentials(&mut env).unwrap() > 0);
 
         let reset_reponse = ctap_state.process_command(&mut env, &[0x07], DUMMY_CHANNEL);
         let expected_response = vec![0x00];
         assert_eq!(reset_reponse, expected_response);
-        assert!(storage::count_credentials(&mut env).unwrap() == 0);
+        assert!(credential_store::count_credentials(&mut env).unwrap() == 0);
     }
 
     #[test]
@@ -4085,7 +4164,7 @@ mod test {
         for i in 0..3 {
             let mut credential = credential_source.clone();
             credential.rp_id = i.to_string();
-            storage::store_credential(&mut env, credential).unwrap();
+            credential_store::store_credential(&mut env, credential).unwrap();
         }
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
@@ -4556,5 +4635,117 @@ mod test {
             DUMMY_CHANNEL,
         );
         assert_eq!(response, Err(Ctap2StatusCode::CTAP1_ERR_INVALID_SEQ));
+    }
+
+    #[test]
+    fn test_persistent_keys() {
+        let mut env = TestEnv::default();
+        init(&mut env).unwrap();
+
+        assert_eq!(
+            env.persist().get_attestation(AttestationId::Batch),
+            Ok(None)
+        );
+
+        let dummy_attestation = Attestation {
+            wrapped_private_key: vec![0x41; 32],
+            certificate: vec![0xdd; 20],
+        };
+        env.persist()
+            .set_attestation(AttestationId::Batch, Some(&dummy_attestation))
+            .unwrap();
+
+        reset(&mut env).unwrap();
+        assert_eq!(
+            env.persist().get_attestation(AttestationId::Batch),
+            Ok(Some(dummy_attestation))
+        );
+    }
+
+    #[test]
+    fn test_min_pin_length() {
+        let mut env = TestEnv::default();
+
+        assert_eq!(
+            min_pin_length(&mut env).unwrap(),
+            env.customization().default_min_pin_length()
+        );
+
+        #[cfg(feature = "config_command")]
+        {
+            let new_min_pin_length = 8;
+            env.persist()
+                .set_min_pin_length(new_min_pin_length)
+                .unwrap();
+            assert_eq!(min_pin_length(&mut env).unwrap(), new_min_pin_length);
+        }
+    }
+
+    #[test]
+    fn test_min_pin_length_rp_ids() {
+        let mut env = TestEnv::default();
+
+        assert_eq!(
+            min_pin_length_rp_ids(&mut env).unwrap(),
+            env.customization().default_min_pin_length_rp_ids()
+        );
+
+        #[cfg(feature = "config_command")]
+        {
+            let mut rp_ids = vec![String::from("example.com")];
+            assert_eq!(
+                config_command::set_min_pin_length_rp_ids(&mut env, rp_ids.clone()),
+                Ok(())
+            );
+            for rp_id in env.customization().default_min_pin_length_rp_ids() {
+                if !rp_ids.contains(&rp_id) {
+                    rp_ids.push(rp_id);
+                }
+            }
+            assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "config_command")]
+    fn test_enterprise_attestation() {
+        let mut env = TestEnv::default();
+
+        let dummy_attestation = Attestation {
+            wrapped_private_key: vec![0x41; 32],
+            certificate: vec![0xdd; 20],
+        };
+        env.persist()
+            .set_attestation(AttestationId::Enterprise, Some(&dummy_attestation))
+            .unwrap();
+
+        assert!(!enterprise_attestation(&mut env).unwrap());
+        assert_eq!(env.persist().enable_enterprise_attestation(), Ok(()));
+        assert!(enterprise_attestation(&mut env).unwrap());
+        reset(&mut env).unwrap();
+        assert!(!enterprise_attestation(&mut env).unwrap());
+    }
+
+    #[test]
+    fn test_always_uv() {
+        let mut env = TestEnv::default();
+
+        if env.customization().enforce_always_uv() {
+            assert!(has_always_uv(&mut env).unwrap());
+            #[cfg(feature = "config_command")]
+            assert_eq!(
+                config_command::toggle_always_uv(&mut env),
+                Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
+            );
+        } else {
+            assert!(!has_always_uv(&mut env).unwrap());
+            #[cfg(feature = "config_command")]
+            {
+                assert_eq!(config_command::toggle_always_uv(&mut env), Ok(()));
+                assert!(has_always_uv(&mut env).unwrap());
+                assert_eq!(config_command::toggle_always_uv(&mut env), Ok(()));
+                assert!(!has_always_uv(&mut env).unwrap());
+            }
+        }
     }
 }

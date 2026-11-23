@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::client_pin::{ClientPin, PinPermission};
+use super::client_pin::{ClientPin, PinPermission, pin_retries};
 use super::command::{
     AuthenticatorBioEnrollmentParameters, BioEnrollmentSubCommand, BioEnrollmentSubCommandParams,
 };
 use super::data_formats::{extract_byte_string, extract_map, extract_text_string, ok_or_missing};
 use super::response::{AuthenticatorBioEnrollmentResponse, ResponseData};
 use super::status_code::{Ctap2StatusCode, CtapResult};
-use super::{Channel, CtapHid, KeepaliveStatus, send_packets, storage};
+use super::{Channel, CtapHid, KeepaliveStatus, send_packets};
 use crate::Transport;
 use crate::api::customization::Customization;
 use crate::api::fingerprint::{Fingerprint, FingerprintCheckError};
@@ -131,6 +131,14 @@ impl From<TemplateInfo> for cbor::Value {
     }
 }
 
+/// Returns the number of remaining UV retries.
+pub(super) fn uv_retries(env: &mut impl Env) -> CtapResult<u8> {
+    Ok(env
+        .customization()
+        .max_uv_retries()
+        .saturating_sub(env.persist().uv_fails()?))
+}
+
 /// Uses to fingerprint sensor to establish user verification.
 pub fn perform_built_in_uv<E: Env>(
     env: &mut E,
@@ -140,9 +148,7 @@ pub fn perform_built_in_uv<E: Env>(
     if env.persist().template_infos()?.is_empty() {
         return Err(Ctap2StatusCode::CTAP2_ERR_NOT_ALLOWED);
     }
-    if (env.key_store().has_pin()? && storage::pin_retries(env)? == 0)
-        || storage::uv_retries(env)? == 0
-    {
+    if (env.key_store().has_pin()? && pin_retries(env)? == 0) || uv_retries(env)? == 0 {
         return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
     }
     env.fingerprint().check_fingerprint_init()?;
@@ -175,7 +181,7 @@ fn check_fingerprint_loop<E: Env>(
     // Each attempt uses up a UV retry before the sensor runs, like a PIN retry before
     // the PIN is checked. If the counter was written after a mismatch, cutting the power
     // in between would give unlimited attempts.
-    storage::decr_uv_retries(env)?;
+    env.persist().decr_uv_retries()?;
     // We need to give the user time to touch the device during UV.
     // Also, on Windows, it seems we need to send KEEPALIVEs to
     // avoid timeouts, so we need to do the check incrementally.
@@ -183,20 +189,20 @@ fn check_fingerprint_loop<E: Env>(
         match env.fingerprint().check_fingerprint(FINGERPRINT_TIMEOUT_MS) {
             Ok(()) => {
                 env.persist().incr_uv_count_since_last_pin_entry()?;
-                return storage::reset_uv_retries(env);
+                return env.persist().reset_uv_retries();
             }
             Err(error) => {
                 match error {
                     FingerprintCheckError::NoMatch | FingerprintCheckError::Other => {
                         env.persist().incr_uv_count_since_last_pin_entry()?;
-                        if storage::uv_retries(env)? == 0 {
+                        if uv_retries(env)? == 0 {
                             return Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED);
                         }
                         retries -= 1;
                         if retries == 0 {
                             return Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID);
                         }
-                        storage::decr_uv_retries(env)?;
+                        env.persist().decr_uv_retries()?;
                     }
                     FingerprintCheckError::Timeout => {
                         // Send a KEEPALIVE to avoid timeouts on Windows.
@@ -208,7 +214,7 @@ fn check_fingerprint_loop<E: Env>(
         }
     }
     // No finger was presented for the current attempt, so it gets its retry back.
-    env.persist().decr_uv_fails()?;
+    env.persist().incr_uv_retries()?;
     Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
 }
 
@@ -711,7 +717,7 @@ mod test {
     #[test]
     fn test_enrollment_database_full() {
         let mut env = TestEnv::default();
-        for _ in keys::FRIENDLY_NAMES {
+        for _ in keys::TEMPLATE_INFOS {
             env.create_fingerprint().unwrap();
         }
         let mut enrollment_status = EnrollmentStatus::default();
@@ -918,10 +924,10 @@ mod test {
         let mut env = TestEnv::default();
         env.create_fingerprint().unwrap();
         env.persist().set_pin(&[0x88; 16], 4).unwrap();
-        while storage::pin_retries(&mut env).unwrap() > 0 {
-            storage::decr_pin_retries(&mut env).unwrap();
+        while pin_retries(&mut env).unwrap() > 0 {
+            env.persist().decr_pin_retries().unwrap();
         }
-        assert!(storage::uv_retries(&mut env).unwrap() > 0);
+        assert!(uv_retries(&mut env).unwrap() > 0);
         assert_eq!(
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_UV_BLOCKED)
@@ -939,7 +945,7 @@ mod test {
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false)
         }));
         assert!(result.is_err());
-        assert_eq!(storage::uv_retries(&mut env), Ok(max_uv_retries - 1));
+        assert_eq!(uv_retries(&mut env), Ok(max_uv_retries - 1));
     }
 
     #[test]
@@ -953,7 +959,7 @@ mod test {
             perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
             Err(Ctap2StatusCode::CTAP2_ERR_USER_ACTION_TIMEOUT)
         );
-        assert_eq!(storage::uv_retries(&mut env), Ok(max_uv_retries));
+        assert_eq!(uv_retries(&mut env), Ok(max_uv_retries));
     }
 
     #[test]
@@ -1022,5 +1028,29 @@ mod test {
         env.create_fingerprint().unwrap();
         assert_eq!(perform_built_in_uv(&mut env, DUMMY_CHANNEL, false), Ok(()));
         assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(2));
+    }
+
+    #[test]
+    fn test_uv_retries() {
+        let mut env = TestEnv::default();
+
+        assert_eq!(
+            uv_retries(&mut env),
+            Ok(env.customization().max_uv_retries())
+        );
+
+        for retries in (0..env.customization().max_uv_retries()).rev() {
+            env.persist().decr_uv_retries().unwrap();
+            assert_eq!(uv_retries(&mut env), Ok(retries));
+        }
+
+        env.persist().decr_uv_retries().unwrap();
+        assert_eq!(uv_retries(&mut env), Ok(0));
+
+        env.persist().reset_uv_retries().unwrap();
+        assert_eq!(
+            uv_retries(&mut env),
+            Ok(env.customization().max_uv_retries())
+        );
     }
 }

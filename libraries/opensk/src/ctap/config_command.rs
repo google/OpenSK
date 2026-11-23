@@ -17,13 +17,16 @@ use super::command::AuthenticatorConfigParameters;
 use super::data_formats::{ConfigSubCommand, SetMinPinLengthParams, ok_or_missing};
 use super::response::ResponseData;
 use super::status_code::Ctap2StatusCode;
+use super::{has_always_uv, has_user_verification, min_pin_length};
 use crate::api::customization::Customization;
 use crate::api::key_store::KeyStore;
 use crate::api::persist::Persist;
 use crate::ctap::status_code::CtapResult;
-use crate::ctap::storage;
 use crate::env::Env;
+use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
+use sk_cbor::cbor_array_vec;
 
 /// The maximum length of a PIN, in bytes.
 ///
@@ -33,10 +36,42 @@ use alloc::vec;
 /// user verification.
 const MAX_PIN_LENGTH: u8 = (PIN_PADDED_LENGTH - 1) as u8;
 
+/// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
+pub fn set_min_pin_length_rp_ids(
+    env: &mut impl Env,
+    mut min_pin_length_rp_ids: Vec<String>,
+) -> CtapResult<()> {
+    for rp_id in env.customization().default_min_pin_length_rp_ids() {
+        if !min_pin_length_rp_ids.contains(&rp_id) {
+            min_pin_length_rp_ids.push(rp_id);
+        }
+    }
+    if min_pin_length_rp_ids.len() > env.customization().max_rp_ids_length() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
+    }
+    env.persist()
+        .set_min_pin_length_rp_ids(&serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?)
+}
+
+/// Enables alwaysUv, when disabled, and vice versa.
+pub fn toggle_always_uv(env: &mut impl Env) -> CtapResult<()> {
+    if env.customization().enforce_always_uv() {
+        return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
+    }
+    env.persist().toggle_always_uv()
+}
+
+/// Serializes a list of RP IDs to storage representation.
+fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> CtapResult<Vec<u8>> {
+    let mut data = Vec::new();
+    super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;
+    Ok(data)
+}
+
 /// Processes the subcommand enableEnterpriseAttestation for AuthenticatorConfig.
 fn process_enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<ResponseData> {
     if env.customization().enterprise_attestation_mode().is_some() {
-        storage::enable_enterprise_attestation(env)?;
+        env.persist().enable_enterprise_attestation()?;
         Ok(ResponseData::AuthenticatorConfig)
     } else {
         Err(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
@@ -45,7 +80,7 @@ fn process_enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<Respo
 
 /// Processes the subcommand toggleAlwaysUv for AuthenticatorConfig.
 fn process_toggle_always_uv(env: &mut impl Env) -> CtapResult<ResponseData> {
-    storage::toggle_always_uv(env)?;
+    toggle_always_uv(env)?;
     Ok(ResponseData::AuthenticatorConfig)
 }
 
@@ -60,7 +95,7 @@ fn process_set_min_pin_length<E: Env>(
         min_pin_length_rp_ids,
         force_change_pin,
     } = params;
-    let store_min_pin_length = storage::min_pin_length(env)?;
+    let store_min_pin_length = min_pin_length(env)?;
     let new_min_pin_length = new_min_pin_length.unwrap_or(store_min_pin_length);
     if new_min_pin_length < store_min_pin_length || new_min_pin_length > MAX_PIN_LENGTH {
         return Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION);
@@ -76,7 +111,7 @@ fn process_set_min_pin_length<E: Env>(
     // input, so doing it before the other writes avoids leaving the minimum PIN
     // length or the force-change flag updated when the command ends up failing.
     if let Some(min_pin_length_rp_ids) = min_pin_length_rp_ids {
-        storage::set_min_pin_length_rp_ids(env, min_pin_length_rp_ids)?;
+        set_min_pin_length_rp_ids(env, min_pin_length_rp_ids)?;
     }
     if force_change_pin {
         env.persist().force_pin_change()?;
@@ -84,7 +119,7 @@ fn process_set_min_pin_length<E: Env>(
     if env.persist().has_force_pin_change()? {
         client_pin.reset_pin_uv_auth_token(env);
     }
-    storage::set_min_pin_length(env, new_min_pin_length)?;
+    env.persist().set_min_pin_length(new_min_pin_length)?;
     Ok(ResponseData::AuthenticatorConfig)
 }
 
@@ -102,8 +137,8 @@ pub fn process_config<E: Env>(
     } = params;
 
     let enforce_uv =
-        !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && storage::has_always_uv(env)?;
-    if storage::has_user_verification(env)? || enforce_uv {
+        !matches!(sub_command, ConfigSubCommand::ToggleAlwaysUv) && has_always_uv(env)?;
+    if has_user_verification(env)? || enforce_uv {
         let pin_uv_auth_param =
             pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
         let pin_uv_auth_protocol =
@@ -137,9 +172,9 @@ mod test {
     use super::*;
     use crate::api::crypto::ecdh::SecretKey as _;
     use crate::api::customization::Customization;
-    use crate::ctap::cbor_write;
     use crate::ctap::data_formats::PinUvAuthProtocol;
     use crate::ctap::pin_protocol::authenticate_pin_uv_auth_token;
+    use crate::ctap::{cbor_write, deserialize_min_pin_length_rp_ids, enterprise_attestation};
     use crate::env::EcdhSk;
     use crate::env::test::TestEnv;
     use sk_cbor::{cbor_array_vec, cbor_map, cbor_map_options};
@@ -166,7 +201,7 @@ mod test {
 
         if env.customization().enterprise_attestation_mode().is_some() {
             assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-            assert_eq!(storage::enterprise_attestation(&mut env), Ok(true));
+            assert_eq!(enterprise_attestation(&mut env), Ok(true));
         } else {
             assert_eq!(
                 config_response,
@@ -195,7 +230,7 @@ mod test {
         };
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert!(storage::has_always_uv(&mut env).unwrap());
+        assert!(has_always_uv(&mut env).unwrap());
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
@@ -211,7 +246,7 @@ mod test {
             );
         } else {
             assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-            assert!(!storage::has_always_uv(&mut env).unwrap());
+            assert!(!has_always_uv(&mut env).unwrap());
         }
     }
 
@@ -240,7 +275,7 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)
         );
-        assert!(!storage::has_always_uv(&mut env).unwrap());
+        assert!(!has_always_uv(&mut env).unwrap());
     }
 
     fn test_helper_process_toggle_always_uv_with_pin(pin_uv_auth_protocol: PinUvAuthProtocol) {
@@ -274,7 +309,7 @@ mod test {
             return;
         }
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert!(storage::has_always_uv(&mut env).unwrap());
+        assert!(has_always_uv(&mut env).unwrap());
 
         let config_params = AuthenticatorConfigParameters {
             sub_command: ConfigSubCommand::ToggleAlwaysUv,
@@ -284,7 +319,7 @@ mod test {
         };
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert!(!storage::has_always_uv(&mut env).unwrap());
+        assert!(!has_always_uv(&mut env).unwrap());
     }
 
     #[test]
@@ -330,7 +365,7 @@ mod test {
         let config_params = create_min_pin_config_params(min_pin_length, None);
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
 
         // Second, increase minimum PIN length from 6 to 8 with PIN auth.
         // The stored PIN or its length don't matter since we control the token.
@@ -344,7 +379,7 @@ mod test {
         config_params.pin_uv_auth_param = Some(pin_uv_auth_param);
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
 
         // Third, decreasing the minimum PIN length from 8 to 7 fails.
         let mut config_params = create_min_pin_config_params(7, None);
@@ -358,7 +393,7 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
     }
 
     #[test]
@@ -385,7 +420,7 @@ mod test {
 
         // The minimum PIN length is not updated by the failed command.
         assert_eq!(
-            storage::min_pin_length(&mut env),
+            super::min_pin_length(&mut env),
             Ok(env.customization().default_min_pin_length())
         );
     }
@@ -407,7 +442,7 @@ mod test {
         let config_params = create_min_pin_config_params(MAX_PIN_LENGTH, None);
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(MAX_PIN_LENGTH));
+        assert_eq!(super::min_pin_length(&mut env), Ok(MAX_PIN_LENGTH));
 
         // Larger values are rejected because a PIN is at most MAX_PIN_LENGTH bytes long.
         let config_params = create_min_pin_config_params(MAX_PIN_LENGTH + 1, None);
@@ -416,7 +451,7 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_POLICY_VIOLATION)
         );
-        assert_eq!(storage::min_pin_length(&mut env), Ok(MAX_PIN_LENGTH));
+        assert_eq!(super::min_pin_length(&mut env), Ok(MAX_PIN_LENGTH));
     }
 
     #[test]
@@ -438,9 +473,9 @@ mod test {
             create_min_pin_config_params(min_pin_length, Some(min_pin_length_rp_ids.clone()));
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(
-            storage::min_pin_length_rp_ids(&mut env),
+            crate::ctap::min_pin_length_rp_ids(&mut env),
             Ok(min_pin_length_rp_ids)
         );
 
@@ -458,9 +493,9 @@ mod test {
         config_params.pin_uv_auth_param = Some(pin_uv_auth_param.clone());
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(
-            storage::min_pin_length_rp_ids(&mut env),
+            crate::ctap::min_pin_length_rp_ids(&mut env),
             Ok(min_pin_length_rp_ids.clone())
         );
 
@@ -474,9 +509,9 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(
-            storage::min_pin_length_rp_ids(&mut env),
+            crate::ctap::min_pin_length_rp_ids(&mut env),
             Ok(min_pin_length_rp_ids.clone())
         );
 
@@ -492,9 +527,9 @@ mod test {
             config_response,
             Err(Ctap2StatusCode::CTAP2_ERR_PIN_AUTH_INVALID)
         );
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(
-            storage::min_pin_length_rp_ids(&mut env),
+            crate::ctap::min_pin_length_rp_ids(&mut env),
             Ok(min_pin_length_rp_ids)
         );
     }
@@ -522,7 +557,7 @@ mod test {
         config_params.pin_uv_auth_param = pin_uv_auth_param;
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(min_pin_length));
+        assert_eq!(super::min_pin_length(&mut env), Ok(min_pin_length));
         assert_eq!(env.persist().has_force_pin_change(), Ok(true));
         assert!(!client_pin.has_token(&mut env));
     }
@@ -545,7 +580,7 @@ mod test {
             0x53, 0xD7,
         ]);
         let set_min_pin_length_params = cbor_map! {
-            0x01 => storage::min_pin_length(&mut env).unwrap() as u64,
+            0x01 => super::min_pin_length(&mut env).unwrap() as u64,
             0x03 => true,
         };
         let config_params = AuthenticatorConfigParameters {
@@ -618,6 +653,14 @@ mod test {
         let config_params = AuthenticatorConfigParameters::try_from(cbor_value).unwrap();
         let config_response = process_config(&mut env, &mut client_pin, config_params);
         assert_eq!(config_response, Ok(ResponseData::AuthenticatorConfig));
-        assert_eq!(storage::min_pin_length(&mut env), Ok(6));
+        assert_eq!(super::min_pin_length(&mut env), Ok(6));
+    }
+
+    #[test]
+    fn test_serialize_deserialize_min_pin_length_rp_ids() {
+        let rp_ids = vec![String::from("example.com")];
+        let serialized = serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
+        let reconstructed = deserialize_min_pin_length_rp_ids(&serialized).unwrap();
+        assert_eq!(rp_ids, reconstructed);
     }
 }

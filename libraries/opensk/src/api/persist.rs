@@ -247,6 +247,33 @@ pub trait Persist {
         self.remove(keys::UV_RETRIES)
     }
 
+    /// Returns the number of internal UV operations since the last PIN entry.
+    #[cfg(feature = "fingerprint")]
+    fn uv_count_since_last_pin_entry(&self) -> CtapResult<u32> {
+        match self.find(keys::UV_COUNT_SINCE_LAST_PIN_ENTRY)? {
+            None => Ok(0),
+            Some(value) if value.len() == 4 => Ok(u32::from_be_bytes(*array_ref![value, 0, 4])),
+            _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
+        }
+    }
+
+    /// Increments the number of internal UV operations since the last PIN entry.
+    #[cfg(feature = "fingerprint")]
+    fn incr_uv_count_since_last_pin_entry(&mut self) -> CtapResult<()> {
+        let old_value = self.uv_count_since_last_pin_entry()?;
+        let new_value = old_value.saturating_add(1);
+        self.insert(
+            keys::UV_COUNT_SINCE_LAST_PIN_ENTRY,
+            &new_value.to_be_bytes(),
+        )
+    }
+
+    /// Resets the number of internal UV operations since the last PIN entry.
+    #[cfg(feature = "fingerprint")]
+    fn reset_uv_count_since_last_pin_entry(&mut self) -> CtapResult<()> {
+        self.remove(keys::UV_COUNT_SINCE_LAST_PIN_ENTRY)
+    }
+
     /// Returns the minimum PIN length, if stored.
     fn min_pin_length(&self) -> CtapResult<Option<u8>> {
         match self.find(keys::MIN_PIN_LENGTH)? {
@@ -810,6 +837,19 @@ mod test {
         assert_eq!(persist.uv_fails().unwrap(), 0);
         assert_eq!(persist.decr_uv_fails(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 0);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_uv_count_since_last_pin_entry() {
+        let mut env = TestEnv::default();
+        let persist = env.persist();
+
+        assert_eq!(persist.uv_count_since_last_pin_entry(), Ok(0));
+        assert_eq!(persist.incr_uv_count_since_last_pin_entry(), Ok(()));
+        assert_eq!(persist.uv_count_since_last_pin_entry(), Ok(1));
+        assert_eq!(persist.reset_uv_count_since_last_pin_entry(), Ok(()));
+        assert_eq!(persist.uv_count_since_last_pin_entry(), Ok(0));
     }
 
     #[test]

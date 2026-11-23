@@ -232,7 +232,10 @@ impl<E: Env> ClientPin<E> {
         }
         storage::reset_pin_retries(env)?;
         #[cfg(feature = "fingerprint")]
-        storage::reset_uv_retries(env)?;
+        {
+            storage::reset_uv_retries(env)?;
+            env.persist().reset_uv_count_since_last_pin_entry()?;
+        }
         self.consecutive_pin_mismatches = 0;
         Ok(())
     }
@@ -978,6 +981,54 @@ mod test {
     #[test]
     fn test_verify_pin_hash_enc_v2() {
         test_helper_verify_pin_hash_enc(PinUvAuthProtocol::V2);
+    }
+
+    #[test]
+    #[cfg(feature = "fingerprint")]
+    fn test_verify_pin_hash_enc_resets_uv_count() {
+        let mut env = TestEnv::default();
+        let mut client_pin = ClientPin::<TestEnv>::new(&mut env);
+        let pin_protocol = client_pin.get_pin_protocol(PinUvAuthProtocol::V2);
+        let shared_secret = pin_protocol
+            .decapsulate(pin_protocol.get_public_key(), PinUvAuthProtocol::V2)
+            .unwrap();
+        let pin_hash = [0x11; PIN_AUTH_LENGTH];
+
+        env.persist().incr_uv_count_since_last_pin_entry().unwrap();
+        env.persist().set_pin(&pin_hash, 4).unwrap();
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(1));
+
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(
+                &mut env,
+                PinUvAuthProtocol::V2,
+                &shared_secret,
+                vec![0xEE; 16]
+            ),
+            Err(Ctap2StatusCode::CTAP2_ERR_PIN_INVALID)
+        );
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(1));
+
+        let shared_secret = client_pin
+            .get_pin_protocol(PinUvAuthProtocol::V2)
+            .decapsulate(
+                client_pin
+                    .get_pin_protocol(PinUvAuthProtocol::V2)
+                    .get_public_key(),
+                PinUvAuthProtocol::V2,
+            )
+            .unwrap();
+        let pin_hash_enc = shared_secret.encrypt(&mut env, &pin_hash).unwrap();
+        assert_eq!(
+            client_pin.verify_pin_hash_enc(
+                &mut env,
+                PinUvAuthProtocol::V2,
+                &shared_secret,
+                pin_hash_enc
+            ),
+            Ok(())
+        );
+        assert_eq!(env.persist().uv_count_since_last_pin_entry(), Ok(0));
     }
 
     fn test_helper_process_get_pin_retries(pin_uv_auth_protocol: PinUvAuthProtocol) {

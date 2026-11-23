@@ -98,12 +98,25 @@ pub struct TestUserPresence {
 }
 
 #[cfg(feature = "fingerprint")]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TestFingerprint {
     // TODO more complete fake
     template_ids: Vec<Vec<u8>>,
     template_counter: usize,
     progress: Option<usize>,
+    check: fn() -> Result<(), FingerprintCheckError>,
+}
+
+#[cfg(feature = "fingerprint")]
+impl Default for TestFingerprint {
+    fn default() -> Self {
+        TestFingerprint {
+            template_ids: Vec::new(),
+            template_counter: 0,
+            progress: None,
+            check: || Ok(()),
+        }
+    }
 }
 
 pub struct TestWrite;
@@ -237,6 +250,14 @@ impl TestUserPresence {
     }
 }
 
+#[cfg(feature = "fingerprint")]
+impl TestFingerprint {
+    /// Overrides the result of `check_fingerprint` when templates are enrolled.
+    pub fn set_check(&mut self, check: fn() -> Result<(), FingerprintCheckError>) {
+        self.check = check;
+    }
+}
+
 impl UserPresence for TestUserPresence {
     fn check_init(&mut self) {}
     fn wait_with_timeout(
@@ -297,7 +318,7 @@ impl Fingerprint for TestFingerprint {
         if self.template_ids.is_empty() {
             return Err(FingerprintCheckError::NoMatch);
         }
-        Ok(())
+        (self.check)()
     }
 
     fn check_fingerprint_complete(&mut self) -> CtapResult<()> {

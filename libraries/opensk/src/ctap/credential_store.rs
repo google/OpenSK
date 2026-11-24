@@ -13,25 +13,12 @@
 // limitations under the License.
 
 use crate::api::customization::Customization;
-use crate::api::key_store::KeyStore;
 use crate::api::persist::{Persist, PersistCredentialIter};
-use crate::ctap::data_formats::{
-    PublicKeyCredentialSource, PublicKeyCredentialUserEntity, extract_array, extract_text_string,
-};
+use crate::ctap::data_formats::{PublicKeyCredentialSource, PublicKeyCredentialUserEntity};
 use crate::ctap::status_code::{Ctap2StatusCode, CtapResult};
 use crate::env::Env;
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-#[cfg(feature = "config_command")]
-use sk_cbor::cbor_array_vec;
-
-/// Initializes the store by creating missing objects.
-pub fn init(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().init()?;
-    env.key_store().init()?;
-    Ok(())
-}
 
 /// Returns the credential at the given key.
 ///
@@ -186,141 +173,6 @@ pub fn new_creation_order(env: &mut impl Env) -> CtapResult<u64> {
     Ok(max.unwrap_or(0).wrapping_add(1))
 }
 
-/// Returns the number of remaining PIN retries.
-pub fn pin_retries(env: &mut impl Env) -> CtapResult<u8> {
-    Ok(env
-        .customization()
-        .max_pin_retries()
-        .saturating_sub(env.persist().pin_fails()?))
-}
-
-/// Decrements the number of remaining PIN retries.
-pub fn decr_pin_retries(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().incr_pin_fails()
-}
-
-/// Resets the number of remaining PIN retries.
-pub fn reset_pin_retries(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().reset_pin_retries()
-}
-
-/// Returns the number of remaining UV retries.
-#[cfg(feature = "fingerprint")]
-pub fn uv_retries(env: &mut impl Env) -> CtapResult<u8> {
-    Ok(env
-        .customization()
-        .max_uv_retries()
-        .saturating_sub(env.persist().uv_fails()?))
-}
-
-/// Decrements the number of remaining UV retries.
-#[cfg(feature = "fingerprint")]
-pub fn decr_uv_retries(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().incr_uv_fails()
-}
-
-/// Resets the number of remaining UV retries.
-#[cfg(feature = "fingerprint")]
-pub fn reset_uv_retries(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().reset_uv_retries()
-}
-
-/// Returns the minimum PIN length.
-pub fn min_pin_length(env: &mut impl Env) -> CtapResult<u8> {
-    Ok(env
-        .persist()
-        .min_pin_length()?
-        .unwrap_or(env.customization().default_min_pin_length()))
-}
-
-/// Sets the minimum PIN length.
-#[cfg(feature = "config_command")]
-pub fn set_min_pin_length(env: &mut impl Env, min_pin_length: u8) -> CtapResult<()> {
-    env.persist().set_min_pin_length(min_pin_length)
-}
-
-/// Returns the list of RP IDs that are used to check if reading the minimum PIN length is
-/// allowed.
-pub fn min_pin_length_rp_ids(env: &mut impl Env) -> CtapResult<Vec<String>> {
-    let rp_ids_bytes = env.persist().min_pin_length_rp_ids_bytes()?;
-    let rp_ids = if rp_ids_bytes.is_empty() {
-        Some(env.customization().default_min_pin_length_rp_ids())
-    } else {
-        deserialize_min_pin_length_rp_ids(&rp_ids_bytes)
-    };
-    debug_assert!(rp_ids.is_some());
-    Ok(rp_ids.unwrap_or_default())
-}
-
-/// Sets the list of RP IDs that are used to check if reading the minimum PIN length is allowed.
-#[cfg(feature = "config_command")]
-pub fn set_min_pin_length_rp_ids(
-    env: &mut impl Env,
-    mut min_pin_length_rp_ids: Vec<String>,
-) -> CtapResult<()> {
-    for rp_id in env.customization().default_min_pin_length_rp_ids() {
-        if !min_pin_length_rp_ids.contains(&rp_id) {
-            min_pin_length_rp_ids.push(rp_id);
-        }
-    }
-    if min_pin_length_rp_ids.len() > env.customization().max_rp_ids_length() {
-        return Err(Ctap2StatusCode::CTAP2_ERR_KEY_STORE_FULL);
-    }
-    env.persist()
-        .set_min_pin_length_rp_ids(&serialize_min_pin_length_rp_ids(min_pin_length_rp_ids)?)
-}
-
-/// Returns whether enterprise attestation is enabled.
-///
-/// Without the AuthenticatorConfig command, customization determines the result.
-#[cfg(not(feature = "config_command"))]
-pub fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
-    Ok(env.customization().enterprise_attestation_mode().is_some())
-}
-
-/// Returns whether enterprise attestation is enabled.
-///
-/// Use the AuthenticatorConfig command to turn it on.
-#[cfg(feature = "config_command")]
-pub fn enterprise_attestation(env: &mut impl Env) -> CtapResult<bool> {
-    env.persist().enterprise_attestation()
-}
-
-/// Marks enterprise attestation as enabled.
-#[cfg(feature = "config_command")]
-pub fn enable_enterprise_attestation(env: &mut impl Env) -> CtapResult<()> {
-    env.persist().enable_enterprise_attestation()
-}
-
-/// Returns whether the authenticator is protected by some form of user verification.
-///
-/// That is the case if a PIN is set, or a built-in user verification method is enrolled. Both
-/// can provide a pinUvAuthToken, which OpenSK always supports.
-pub fn has_user_verification(env: &mut impl Env) -> CtapResult<bool> {
-    #[cfg(feature = "fingerprint")]
-    if !env.persist().template_infos()?.is_empty() {
-        return Ok(true);
-    }
-    env.key_store().has_pin()
-}
-
-/// Returns whether alwaysUv is enabled.
-pub fn has_always_uv(env: &mut impl Env) -> CtapResult<bool> {
-    if env.customization().enforce_always_uv() {
-        return Ok(true);
-    }
-    env.persist().has_always_uv()
-}
-
-/// Enables alwaysUv, when disabled, and vice versa.
-#[cfg(feature = "config_command")]
-pub fn toggle_always_uv(env: &mut impl Env) -> CtapResult<()> {
-    if env.customization().enforce_always_uv() {
-        return Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED);
-    }
-    env.persist().toggle_always_uv()
-}
-
 /// Iterator for credentials.
 pub struct IterCredentials<'a> {
     /// The store iterator.
@@ -381,36 +233,17 @@ fn serialize_credential(credential: PublicKeyCredentialSource) -> CtapResult<Vec
     Ok(data)
 }
 
-/// Deserializes a list of RP IDs from storage representation.
-fn deserialize_min_pin_length_rp_ids(data: &[u8]) -> Option<Vec<String>> {
-    let cbor = super::cbor_read(data).ok()?;
-    extract_array(cbor)
-        .ok()?
-        .into_iter()
-        .map(extract_text_string)
-        .collect::<CtapResult<Vec<String>>>()
-        .ok()
-}
-
-/// Serializes a list of RP IDs to storage representation.
-#[cfg(feature = "config_command")]
-fn serialize_min_pin_length_rp_ids(rp_ids: Vec<String>) -> CtapResult<Vec<u8>> {
-    let mut data = Vec::new();
-    super::cbor_write(cbor_array_vec!(rp_ids), &mut data)?;
-    Ok(data)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::persist::{Attestation, AttestationId, Persist};
     use crate::api::private_key::PrivateKey;
     use crate::api::rng::Rng;
     use crate::ctap::data_formats::{
         CredentialProtectionPolicy, PublicKeyCredentialSource, PublicKeyCredentialType,
     };
-    use crate::ctap::reset;
+    use crate::ctap::{init, reset};
     use crate::env::test::TestEnv;
+    use alloc::string::String;
 
     fn create_credential_source(
         env: &mut TestEnv,
@@ -640,177 +473,6 @@ mod test {
     }
 
     #[test]
-    fn test_pin_retries() {
-        let mut env = TestEnv::default();
-
-        // The pin retries is initially at the maximum.
-        assert_eq!(
-            pin_retries(&mut env),
-            Ok(env.customization().max_pin_retries())
-        );
-
-        // Decrementing the pin retries decrements the pin retries.
-        for retries in (0..env.customization().max_pin_retries()).rev() {
-            decr_pin_retries(&mut env).unwrap();
-            assert_eq!(pin_retries(&mut env), Ok(retries));
-        }
-
-        // Decrementing the pin retries after zero does not modify the pin retries.
-        decr_pin_retries(&mut env).unwrap();
-        assert_eq!(pin_retries(&mut env), Ok(0));
-
-        // Resetting the pin retries resets the pin retries.
-        reset_pin_retries(&mut env).unwrap();
-        assert_eq!(
-            pin_retries(&mut env),
-            Ok(env.customization().max_pin_retries())
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "fingerprint")]
-    fn test_uv_retries() {
-        let mut env = TestEnv::default();
-
-        // The uv retries is initially at the maximum.
-        assert_eq!(
-            uv_retries(&mut env),
-            Ok(env.customization().max_uv_retries())
-        );
-
-        // Decrementing the uv retries decrements the uv retries.
-        for retries in (0..env.customization().max_uv_retries()).rev() {
-            decr_uv_retries(&mut env).unwrap();
-            assert_eq!(uv_retries(&mut env), Ok(retries));
-        }
-
-        // Decrementing the uv retries after zero does not modify the uv retries.
-        decr_uv_retries(&mut env).unwrap();
-        assert_eq!(uv_retries(&mut env), Ok(0));
-
-        // Resetting the uv retries resets the uv retries.
-        reset_uv_retries(&mut env).unwrap();
-        assert_eq!(
-            uv_retries(&mut env),
-            Ok(env.customization().max_uv_retries())
-        );
-    }
-
-    #[test]
-    fn test_persistent_keys() {
-        let mut env = TestEnv::default();
-        init(&mut env).unwrap();
-
-        // Make sure the attestation are absent. There is no batch attestation in tests.
-        assert_eq!(
-            env.persist().get_attestation(AttestationId::Batch),
-            Ok(None)
-        );
-
-        // Make sure the persistent keys are initialized to dummy values.
-        let dummy_attestation = Attestation {
-            wrapped_private_key: vec![0x41; 32],
-            certificate: vec![0xdd; 20],
-        };
-        env.persist()
-            .set_attestation(AttestationId::Batch, Some(&dummy_attestation))
-            .unwrap();
-
-        // The persistent keys stay initialized and preserve their value after a reset.
-        reset(&mut env).unwrap();
-        assert_eq!(
-            env.persist().get_attestation(AttestationId::Batch),
-            Ok(Some(dummy_attestation))
-        );
-    }
-
-    #[test]
-    fn test_min_pin_length() {
-        let mut env = TestEnv::default();
-
-        // The minimum PIN length is initially at the default.
-        assert_eq!(
-            min_pin_length(&mut env).unwrap(),
-            env.customization().default_min_pin_length()
-        );
-
-        // Changes by the setter are reflected by the getter..
-        #[cfg(feature = "config_command")]
-        {
-            let new_min_pin_length = 8;
-            set_min_pin_length(&mut env, new_min_pin_length).unwrap();
-            assert_eq!(min_pin_length(&mut env).unwrap(), new_min_pin_length);
-        }
-    }
-
-    #[test]
-    fn test_min_pin_length_rp_ids() {
-        let mut env = TestEnv::default();
-
-        // The minimum PIN length RP IDs are initially at the default.
-        assert_eq!(
-            min_pin_length_rp_ids(&mut env).unwrap(),
-            env.customization().default_min_pin_length_rp_ids()
-        );
-
-        // Changes by the setter are reflected by the getter.
-        #[cfg(feature = "config_command")]
-        {
-            let mut rp_ids = vec![String::from("example.com")];
-            assert_eq!(set_min_pin_length_rp_ids(&mut env, rp_ids.clone()), Ok(()));
-            for rp_id in env.customization().default_min_pin_length_rp_ids() {
-                if !rp_ids.contains(&rp_id) {
-                    rp_ids.push(rp_id);
-                }
-            }
-            assert_eq!(min_pin_length_rp_ids(&mut env).unwrap(), rp_ids);
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "config_command")]
-    fn test_enterprise_attestation() {
-        let mut env = TestEnv::default();
-
-        let dummy_attestation = Attestation {
-            wrapped_private_key: vec![0x41; 32],
-            certificate: vec![0xdd; 20],
-        };
-        env.persist()
-            .set_attestation(AttestationId::Enterprise, Some(&dummy_attestation))
-            .unwrap();
-
-        assert!(!enterprise_attestation(&mut env).unwrap());
-        assert_eq!(enable_enterprise_attestation(&mut env), Ok(()));
-        assert!(enterprise_attestation(&mut env).unwrap());
-        reset(&mut env).unwrap();
-        assert!(!enterprise_attestation(&mut env).unwrap());
-    }
-
-    #[test]
-    fn test_always_uv() {
-        let mut env = TestEnv::default();
-
-        if env.customization().enforce_always_uv() {
-            assert!(has_always_uv(&mut env).unwrap());
-            #[cfg(feature = "config_command")]
-            assert_eq!(
-                toggle_always_uv(&mut env),
-                Err(Ctap2StatusCode::CTAP2_ERR_OPERATION_DENIED)
-            );
-        } else {
-            assert!(!has_always_uv(&mut env).unwrap());
-            #[cfg(feature = "config_command")]
-            {
-                assert_eq!(toggle_always_uv(&mut env), Ok(()));
-                assert!(has_always_uv(&mut env).unwrap());
-                assert_eq!(toggle_always_uv(&mut env), Ok(()));
-                assert!(!has_always_uv(&mut env).unwrap());
-            }
-        }
-    }
-
-    #[test]
     fn test_serialize_deserialize_credential() {
         let mut env = TestEnv::default();
         let private_key = PrivateKey::new_ecdsa(&mut env).unwrap();
@@ -831,14 +493,5 @@ mod test {
         let serialized = serialize_credential(credential.clone()).unwrap();
         let reconstructed = deserialize_credential(&serialized).unwrap();
         assert_eq!(credential, reconstructed);
-    }
-
-    #[test]
-    #[cfg(feature = "config_command")]
-    fn test_serialize_deserialize_min_pin_length_rp_ids() {
-        let rp_ids = vec![String::from("example.com")];
-        let serialized = serialize_min_pin_length_rp_ids(rp_ids.clone()).unwrap();
-        let reconstructed = deserialize_min_pin_length_rp_ids(&serialized).unwrap();
-        assert_eq!(rp_ids, reconstructed);
     }
 }

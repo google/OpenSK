@@ -70,11 +70,11 @@ make_partition! {
     /// Certificate used during attestation.
     ATTESTATION_CERTIFICATE = 2;
 
-    /// Type of attestation used.
-    ATTESTATION_ID = 4;
-
     /// Authenticator Attestation Global Unique Identifier.
     AAGUID = 3;
+
+    /// Type of attestation used.
+    ATTESTATION_ID = 4;
 
     // This is the persistent key limit:
     // - When adding a (persistent) key above this message, make sure its value is smaller than
@@ -109,15 +109,15 @@ make_partition! {
     #[cfg(feature = "fingerprint")]
     UV_COUNT_SINCE_LAST_PIN_ENTRY = 2029;
 
-    /// Stored friendly names for enrolled fingerprints.
+    /// Stored template information (ID and optional friendly name) for enrolled fingerprints.
     #[cfg(feature = "fingerprint")]
-    FRIENDLY_NAMES = 2031..2037;
+    TEMPLATE_INFOS = 2031..2037;
 
-    /// Stores UV retry counter information.
+    /// Number of failed UV attempts since the last success or reset.
     ///
-    /// If the entry is absent, the number of UV retries is `Customization::max_uv_retries()`.
+    /// If the entry is absent, the count is 0.
     #[cfg(feature = "fingerprint")]
-    UV_RETRIES = 2037;
+    UV_FAILS = 2037;
 
     /// If this entry exists and is empty, alwaysUv is enabled.
     ALWAYS_UV = 2038;
@@ -140,10 +140,10 @@ make_partition! {
     /// If the entry is absent, the minimum PIN length is `Customization::default_min_pin_length()`.
     MIN_PIN_LENGTH = 2043;
 
-    /// The number of PIN retries.
+    /// Number of failed PIN attempts since the last success or reset.
     ///
-    /// If the entry is absent, the number of PIN retries is `Customization::max_pin_retries()`.
-    PIN_RETRIES = 2044;
+    /// If the entry is absent, the count is 0.
+    PIN_FAILS = 2044;
 
     /// The PIN hash and length.
     ///

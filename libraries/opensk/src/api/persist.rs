@@ -195,7 +195,7 @@ pub trait Persist {
 
     /// Returns the number of failed PIN attempts.
     fn pin_fails(&self) -> CtapResult<u8> {
-        match self.find(keys::PIN_RETRIES)? {
+        match self.find(keys::PIN_FAILS)? {
             None => Ok(0),
             Some(value) if value.len() == 1 => Ok(value[0]),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
@@ -203,21 +203,21 @@ pub trait Persist {
     }
 
     /// Decrements the number of remaining PIN retries.
-    fn incr_pin_fails(&mut self) -> CtapResult<()> {
+    fn decr_pin_retries(&mut self) -> CtapResult<()> {
         let old_value = self.pin_fails()?;
         let new_value = old_value.saturating_add(1);
-        self.insert(keys::PIN_RETRIES, &[new_value])
+        self.insert(keys::PIN_FAILS, &[new_value])
     }
 
     /// Resets the number of remaining PIN retries.
     fn reset_pin_retries(&mut self) -> CtapResult<()> {
-        self.remove(keys::PIN_RETRIES)
+        self.remove(keys::PIN_FAILS)
     }
 
     /// Returns the number of failed UV attempts.
     #[cfg(feature = "fingerprint")]
     fn uv_fails(&self) -> CtapResult<u8> {
-        match self.find(keys::UV_RETRIES)? {
+        match self.find(keys::UV_FAILS)? {
             None => Ok(0),
             Some(value) if value.len() == 1 => Ok(value[0]),
             _ => Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR),
@@ -226,25 +226,25 @@ pub trait Persist {
 
     /// Decrements the number of remaining UV retries.
     #[cfg(feature = "fingerprint")]
-    fn incr_uv_fails(&mut self) -> CtapResult<()> {
+    fn decr_uv_retries(&mut self) -> CtapResult<()> {
         let old_value = self.uv_fails()?;
         let new_value = old_value.saturating_add(1);
-        self.insert(keys::UV_RETRIES, &[new_value])
+        self.insert(keys::UV_FAILS, &[new_value])
     }
 
     /// Increments the number of remaining UV retries.
     #[cfg(feature = "fingerprint")]
-    fn decr_uv_fails(&mut self) -> CtapResult<()> {
+    fn incr_uv_retries(&mut self) -> CtapResult<()> {
         match self.uv_fails()? {
             0 | 1 => self.reset_uv_retries(),
-            old_value => self.insert(keys::UV_RETRIES, &[old_value - 1]),
+            old_value => self.insert(keys::UV_FAILS, &[old_value - 1]),
         }
     }
 
     /// Resets the number of remaining UV retries.
     #[cfg(feature = "fingerprint")]
     fn reset_uv_retries(&mut self) -> CtapResult<()> {
-        self.remove(keys::UV_RETRIES)
+        self.remove(keys::UV_FAILS)
     }
 
     /// Returns the number of internal UV operations since the last PIN entry.
@@ -459,7 +459,7 @@ pub trait Persist {
     #[cfg(feature = "fingerprint")]
     fn template_infos(&self) -> CtapResult<Vec<TemplateInfo>> {
         let mut id_list = Vec::new();
-        for key in keys::FRIENDLY_NAMES {
+        for key in keys::TEMPLATE_INFOS {
             if let Some(data) = self.find(key)? {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
@@ -479,7 +479,7 @@ pub trait Persist {
     #[cfg(feature = "fingerprint")]
     fn store_template_id(&mut self, template_id: Vec<u8>) -> CtapResult<()> {
         let mut new_key = None;
-        for key in keys::FRIENDLY_NAMES {
+        for key in keys::TEMPLATE_INFOS {
             if let Some(data) = self.find(key)? {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
@@ -510,7 +510,7 @@ pub trait Persist {
     /// Returns `Err(CTAP2_ERR_INVALID_OPTION)` if the template was not found.
     #[cfg(feature = "fingerprint")]
     fn remove_template_id(&mut self, template_id: &[u8]) -> CtapResult<()> {
-        for key in keys::FRIENDLY_NAMES {
+        for key in keys::TEMPLATE_INFOS {
             if let Some(data) = self.find(key)? {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
@@ -530,7 +530,7 @@ pub trait Persist {
     #[cfg(test)]
     #[cfg(feature = "fingerprint")]
     fn get_friendly_name(&self, template_id: &[u8]) -> CtapResult<Option<String>> {
-        for key in keys::FRIENDLY_NAMES {
+        for key in keys::TEMPLATE_INFOS {
             if let Some(data) = self.find(key)? {
                 let cbor_value = cbor_read(&data)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
@@ -548,7 +548,7 @@ pub trait Persist {
     /// Returns `Err(CTAP2_ERR_INVALID_OPTION)` if the template was not found.
     #[cfg(feature = "fingerprint")]
     fn store_friendly_name(&mut self, template_id: &[u8], friendly_name: String) -> CtapResult<()> {
-        for key in keys::FRIENDLY_NAMES {
+        for key in keys::TEMPLATE_INFOS {
             if let Some(bytes) = self.find(key)? {
                 let cbor_value = cbor_read(&bytes)
                     .map_err(|_| Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)?;
@@ -812,7 +812,7 @@ mod test {
         let persist = env.persist();
 
         assert_eq!(persist.pin_fails().unwrap(), 0);
-        assert_eq!(persist.incr_pin_fails(), Ok(()));
+        assert_eq!(persist.decr_pin_retries(), Ok(()));
         assert_eq!(persist.pin_fails().unwrap(), 1);
         assert_eq!(persist.reset_pin_retries(), Ok(()));
         assert_eq!(persist.pin_fails().unwrap(), 0);
@@ -825,17 +825,17 @@ mod test {
         let persist = env.persist();
 
         assert_eq!(persist.uv_fails().unwrap(), 0);
-        assert_eq!(persist.incr_uv_fails(), Ok(()));
+        assert_eq!(persist.decr_uv_retries(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 1);
         assert_eq!(persist.reset_uv_retries(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 0);
-        assert_eq!(persist.incr_uv_fails(), Ok(()));
-        assert_eq!(persist.incr_uv_fails(), Ok(()));
-        assert_eq!(persist.decr_uv_fails(), Ok(()));
+        assert_eq!(persist.decr_uv_retries(), Ok(()));
+        assert_eq!(persist.decr_uv_retries(), Ok(()));
+        assert_eq!(persist.incr_uv_retries(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 1);
-        assert_eq!(persist.decr_uv_fails(), Ok(()));
+        assert_eq!(persist.incr_uv_retries(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 0);
-        assert_eq!(persist.decr_uv_fails(), Ok(()));
+        assert_eq!(persist.incr_uv_retries(), Ok(()));
         assert_eq!(persist.uv_fails().unwrap(), 0);
     }
 

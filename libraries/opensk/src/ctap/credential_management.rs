@@ -25,9 +25,9 @@ use super::{Channel, StatefulCommand, StatefulPermission, truncate_to_char_bound
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::private_key::PrivateKey;
+use crate::ctap::credential_store;
 use crate::ctap::data_formats::CredentialProtectionPolicy;
 use crate::ctap::status_code::CtapResult;
-use crate::ctap::storage;
 use crate::env::{Env, Sha};
 use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
@@ -38,7 +38,7 @@ use alloc::vec::Vec;
 fn get_stored_rp_ids(env: &mut impl Env) -> CtapResult<BTreeSet<String>> {
     let mut rp_set = BTreeSet::new();
     let mut iter_result = Ok(());
-    for (_, credential) in storage::iter_credentials(env, &mut iter_result)? {
+    for (_, credential) in credential_store::iter_credentials(env, &mut iter_result)? {
         rp_set.insert(credential.rp_id);
     }
     iter_result?;
@@ -123,7 +123,7 @@ fn check_rp_id_permissions<E: Env>(
     if client_pin.has_no_rp_id_permission().is_ok() {
         return Ok(());
     }
-    let (_, credential) = storage::find_credential_item(env, credential_id)?;
+    let (_, credential) = credential_store::find_credential_item(env, credential_id)?;
     client_pin.has_no_or_rp_id_permission(&credential.rp_id)
 }
 
@@ -132,9 +132,9 @@ fn process_get_creds_metadata(
     env: &mut impl Env,
 ) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     Ok(AuthenticatorCredentialManagementResponse {
-        existing_resident_credentials_count: Some(storage::count_credentials(env)? as u64),
+        existing_resident_credentials_count: Some(credential_store::count_credentials(env)? as u64),
         max_possible_remaining_resident_credentials_count: Some(
-            storage::remaining_credentials(env)? as u64,
+            credential_store::remaining_credentials(env)? as u64,
         ),
         ..Default::default()
     })
@@ -186,7 +186,7 @@ fn process_enumerate_credentials_begin<E: Env>(
         .ok_or(Ctap2StatusCode::CTAP2_ERR_MISSING_PARAMETER)?;
     client_pin.has_no_or_rp_id_hash_permission(&rp_id_hash[..])?;
     let mut iter_result = Ok(());
-    let iter = storage::iter_credentials(env, &mut iter_result)?;
+    let iter = credential_store::iter_credentials(env, &mut iter_result)?;
     let mut rp_credentials: Vec<usize> = iter
         .filter_map(|(key, credential)| {
             let cred_rp_id_hash = Sha::<E>::digest(credential.rp_id.as_bytes());
@@ -202,7 +202,7 @@ fn process_enumerate_credentials_begin<E: Env>(
     let current_key = rp_credentials
         .pop()
         .ok_or(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS)?;
-    let credential = storage::get_credential(env, current_key)?;
+    let credential = credential_store::get_credential(env, current_key)?;
     if total_credentials > 1 {
         stateful_command_permission.set_command(
             env,
@@ -219,7 +219,7 @@ fn process_enumerate_credentials_get_next_credential<E: Env>(
     stateful_command_permission: &mut StatefulPermission<E>,
 ) -> CtapResult<AuthenticatorCredentialManagementResponse> {
     let credential_key = stateful_command_permission.next_enumerate_credential(env)?;
-    let credential = storage::get_credential(env, credential_key)?;
+    let credential = credential_store::get_credential(env, credential_key)?;
     enumerate_credentials_response(env, credential, None)
 }
 
@@ -236,7 +236,7 @@ fn process_delete_credential<E: Env>(
         return Err(Ctap2StatusCode::CTAP2_ERR_NO_CREDENTIALS);
     }
     check_rp_id_permissions(env, client_pin, &credential_id.key_id)?;
-    storage::delete_credential(env, &credential_id.key_id)
+    credential_store::delete_credential(env, &credential_id.key_id)
 }
 
 /// Processes the subcommand updateUserInformation for CredentialManagement.
@@ -267,7 +267,7 @@ fn process_update_user_information<E: Env>(
     user.user_icon = user
         .user_icon
         .map(|s| truncate_to_char_boundary(&s, 64).to_string());
-    storage::update_credential(env, &credential_id.key_id, user)
+    credential_store::update_credential(env, &credential_id.key_id, user)
 }
 
 /// Processes the CredentialManagement command and all its subcommands.
@@ -455,7 +455,7 @@ mod test {
             _ => panic!("Invalid response type"),
         };
 
-        storage::store_credential(&mut env, credential_source).unwrap();
+        credential_store::store_credential(&mut env, credential_source).unwrap();
 
         let cred_management_params = AuthenticatorCredentialManagementParameters {
             sub_command: CredentialManagementSubCommand::GetCredsMetadata,
@@ -510,8 +510,8 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source1).unwrap();
-        storage::store_credential(&mut env, credential_source2).unwrap();
+        credential_store::store_credential(&mut env, credential_source1).unwrap();
+        credential_store::store_credential(&mut env, credential_source2).unwrap();
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -607,7 +607,7 @@ mod test {
         for i in 0..NUM_CREDENTIALS {
             let mut credential = credential_source.clone();
             credential.rp_id = i.to_string();
-            storage::store_credential(&mut env, credential).unwrap();
+            credential_store::store_credential(&mut env, credential).unwrap();
         }
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
@@ -691,8 +691,8 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source1).unwrap();
-        storage::store_credential(&mut env, credential_source2).unwrap();
+        credential_store::store_credential(&mut env, credential_source1).unwrap();
+        credential_store::store_credential(&mut env, credential_source2).unwrap();
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -788,7 +788,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source).unwrap();
+        credential_store::store_credential(&mut env, credential_source).unwrap();
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -862,7 +862,7 @@ mod test {
             let mut ctap_state = CtapState::new(&mut env);
             ctap_state.client_pin = client_pin;
 
-            storage::store_credential(&mut env, credential_source).unwrap();
+            credential_store::store_credential(&mut env, credential_source).unwrap();
             env.persist().set_pin(&[0u8; 16], 4).unwrap();
 
             let sub_command_params = cbor_map! {
@@ -900,7 +900,7 @@ mod test {
                 "transports: {case}"
             );
             assert_eq!(
-                storage::find_credential(&mut env, "example.com", &[0x1D; 32]),
+                credential_store::find_credential(&mut env, "example.com", &[0x1D; 32]),
                 Ok(None),
                 "transports: {case}"
             );
@@ -924,7 +924,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source).unwrap();
+        credential_store::store_credential(&mut env, credential_source).unwrap();
 
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
         let pin_uv_auth_param = Some(vec![
@@ -1000,9 +1000,10 @@ mod test {
             Ok(ResponseData::AuthenticatorCredentialManagement(None))
         );
 
-        let updated_credential = storage::find_credential(&mut env, "example.com", &[0x1D; 32])
-            .unwrap()
-            .unwrap();
+        let updated_credential =
+            credential_store::find_credential(&mut env, "example.com", &[0x1D; 32])
+                .unwrap()
+                .unwrap();
         assert_eq!(updated_credential.user_handle, vec![0x01]);
         assert_eq!(&updated_credential.user_name.unwrap(), "new_name");
         assert_eq!(
@@ -1029,7 +1030,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source).unwrap();
+        credential_store::store_credential(&mut env, credential_source).unwrap();
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
 
         let credential_id = PublicKeyCredentialDescriptor {
@@ -1075,9 +1076,10 @@ mod test {
             Ok(ResponseData::AuthenticatorCredentialManagement(None))
         );
 
-        let updated_credential = storage::find_credential(&mut env, "example.com", &[0x1D; 32])
-            .unwrap()
-            .unwrap();
+        let updated_credential =
+            credential_store::find_credential(&mut env, "example.com", &[0x1D; 32])
+                .unwrap()
+                .unwrap();
         assert_eq!(updated_credential.user_name.unwrap().len(), 64);
         // The 64-byte cut is moved before the incomplete 2-byte character.
         assert_eq!(updated_credential.user_display_name.unwrap().len(), 63);
@@ -1129,7 +1131,7 @@ mod test {
         let mut ctap_state = CtapState::new(&mut env);
         ctap_state.client_pin = client_pin;
 
-        storage::store_credential(&mut env, credential_source).unwrap();
+        credential_store::store_credential(&mut env, credential_source).unwrap();
         env.persist().set_pin(&[0u8; 16], 4).unwrap();
 
         let mut management_data = vec![CredentialManagementSubCommand::DeleteCredential as u8];
@@ -1149,7 +1151,7 @@ mod test {
         let mut command = vec![0x0A];
         super::super::cbor_write(cbor_value, &mut command).unwrap();
         let response = ctap_state.process_command(&mut env, &command, DUMMY_CHANNEL);
-        let exists = storage::find_credential(&mut env, "example.com", &[0x1D; 32])
+        let exists = credential_store::find_credential(&mut env, "example.com", &[0x1D; 32])
             .unwrap()
             .is_some();
         (response, exists)

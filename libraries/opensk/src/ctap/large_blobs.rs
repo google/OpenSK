@@ -16,11 +16,11 @@ use super::client_pin::{ClientPin, PinPermission};
 use super::command::AuthenticatorLargeBlobsParameters;
 use super::response::{AuthenticatorLargeBlobsResponse, ResponseData};
 use super::status_code::{Ctap2StatusCode, CtapResult};
+use super::{has_always_uv, has_user_verification};
 use crate::api::crypto::sha256::Sha256;
 use crate::api::customization::Customization;
 use crate::api::persist::MAX_LARGE_BLOB_ARRAY_SIZE;
 use crate::api::persist::Persist;
-use crate::ctap::storage;
 use crate::env::{Env, Sha};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -89,7 +89,7 @@ impl LargeBlobState {
                 }
                 self.expected_length
             };
-            if storage::has_user_verification(env)? || storage::has_always_uv(env)? {
+            if has_user_verification(env)? || has_always_uv(env)? {
                 let pin_uv_auth_param =
                     pin_uv_auth_param.ok_or(Ctap2StatusCode::CTAP2_ERR_PUAT_REQUIRED)?;
                 let pin_uv_auth_protocol =

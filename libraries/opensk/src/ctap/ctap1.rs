@@ -369,7 +369,8 @@ mod test {
     use crate::api::crypto::sha256::Sha256;
     use crate::api::customization::Customization;
     use crate::api::key_store::CBOR_CREDENTIAL_ID_SIZE;
-    use crate::ctap::storage;
+    #[cfg(feature = "config_command")]
+    use crate::ctap::config_command;
     use crate::env::Sha;
     use crate::env::test::TestEnv;
 
@@ -482,12 +483,13 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "config_command")]
     fn test_process_allowed() {
         let mut env = TestEnv::default();
         env.user_presence()
             .set(|| panic!("Unexpected user presence check in CTAP1"));
         let mut ctap_state = CtapState::new(&mut env);
-        storage::toggle_always_uv(&mut env).unwrap();
+        config_command::toggle_always_uv(&mut env).unwrap();
 
         let application = [0x0A; 32];
         let message = create_register_message(&application);

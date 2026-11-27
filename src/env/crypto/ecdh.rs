@@ -42,8 +42,8 @@ impl ecdh::SecretKey for SecretKey {
         PublicKey(self.0.public().unwrap())
     }
 
-    fn diffie_hellman(&self, public: &Self::PublicKey) -> Self::SharedSecret {
-        SharedSecret(Shared::new(&self.0, &public.0).unwrap())
+    fn diffie_hellman(&self, public: &Self::PublicKey) -> Option<Self::SharedSecret> {
+        Shared::new(&self.0, &public.0).ok().map(SharedSecret)
     }
 }
 

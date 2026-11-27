@@ -43,6 +43,7 @@ use std::sync::{Mutex, MutexGuard};
 static BUSY: Mutex<()> = Mutex::new(());
 #[cfg(test)]
 thread_local! {
+    pub(crate) static FAIL_DIFFIE_HELLMAN: Cell<bool> = const { Cell::new(false) };
     pub(crate) static FAIL_KEY_GENERATION: Cell<bool> = const { Cell::new(false) };
     pub(crate) static FAIL_SIGNING: Cell<bool> = const { Cell::new(false) };
     static BUSY_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = const { RefCell::new(None) };
@@ -89,9 +90,13 @@ impl ecdh::SecretKey for SoftwareEcdhSecretKey {
         SoftwareEcdhPublicKey { public_key }
     }
 
-    fn diffie_hellman(&self, public_key: &SoftwareEcdhPublicKey) -> Self::SharedSecret {
+    fn diffie_hellman(&self, public_key: &SoftwareEcdhPublicKey) -> Option<Self::SharedSecret> {
+        #[cfg(test)]
+        if FAIL_DIFFIE_HELLMAN.get() {
+            return None;
+        }
         let shared_secret = self.ephemeral_secret.diffie_hellman(&public_key.public_key);
-        SoftwareEcdhSharedSecret { shared_secret }
+        Some(SoftwareEcdhSharedSecret { shared_secret })
     }
 }
 

@@ -71,10 +71,12 @@ impl<E: Env> PinProtocol<E> {
         pin_uv_auth_protocol: PinUvAuthProtocol,
     ) -> CtapResult<SharedSecret<E>> {
         let pk = peer_cose_key.try_into_ecdh_public_key::<E>()?;
-        let mut handshake = Secret::default();
-        self.key_agreement_key
+        let shared_secret = self
+            .key_agreement_key
             .diffie_hellman(&pk)
-            .raw_secret_bytes(&mut handshake);
+            .ok_or(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)?;
+        let mut handshake = Secret::default();
+        shared_secret.raw_secret_bytes(&mut handshake);
         Ok(SharedSecret::new(pin_uv_auth_protocol, handshake))
     }
 
@@ -276,6 +278,7 @@ impl<E: Env> SharedSecretV2<E> {
 mod test {
     use super::*;
     use crate::env::test::TestEnv;
+    use sk_cbor::cbor_map;
 
     #[test]
     fn test_pin_protocol_public_key() {
@@ -389,6 +392,45 @@ mod test {
             let ciphertext = shared_secret1.encrypt(&mut env, &plaintext).unwrap();
             assert_eq!(plaintext, shared_secret2.decrypt(&ciphertext).unwrap());
         }
+    }
+
+    #[test]
+    fn test_decapsulate_invalid_peer_key() {
+        let mut env = TestEnv::default();
+        let pin_protocol = PinProtocol::<TestEnv>::new(&mut env);
+        let invalid_key = CoseKey::try_from(cbor_map! {
+            1 => 2,
+            3 => -25,
+            -1 => 1,
+            -2 => [0u8; 32],
+            -3 => [0u8; 32],
+        })
+        .unwrap();
+        for protocol in [PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
+            assert_eq!(
+                pin_protocol
+                    .decapsulate(invalid_key.clone(), protocol)
+                    .err(),
+                Some(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+            );
+        }
+    }
+
+    #[test]
+    fn test_decapsulate_diffie_hellman_failure() {
+        let mut env = TestEnv::default();
+        let pin_protocol1 = PinProtocol::<TestEnv>::new(&mut env);
+        let pin_protocol2 = PinProtocol::<TestEnv>::new(&mut env);
+        env.fail_diffie_hellman(true);
+        for protocol in [PinUvAuthProtocol::V1, PinUvAuthProtocol::V2] {
+            assert_eq!(
+                pin_protocol1
+                    .decapsulate(pin_protocol2.get_public_key(), protocol)
+                    .err(),
+                Some(Ctap2StatusCode::CTAP1_ERR_INVALID_PARAMETER)
+            );
+        }
+        env.fail_diffie_hellman(false);
     }
 
     #[test]

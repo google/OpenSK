@@ -34,12 +34,17 @@ pub trait SecretKey {
     fn public_key(&self) -> Self::PublicKey;
 
     /// Computes the shared secret when using Elliptic-curve Diffie–Hellman.
-    fn diffie_hellman(&self, public_key: &Self::PublicKey) -> Self::SharedSecret;
+    ///
+    /// Returns `None` if the peer's public key is invalid or key agreement fails.
+    fn diffie_hellman(&self, public_key: &Self::PublicKey) -> Option<Self::SharedSecret>;
 }
 
 /// ECDH public key.
 pub trait PublicKey: Sized {
     /// Creates a public key from its coordinates.
+    ///
+    /// Returns `None` if the coordinates are invalid. Implementations may defer curve validation
+    /// to [`SecretKey::diffie_hellman`].
     fn from_coordinates(x: &[u8; EC_FIELD_SIZE], y: &[u8; EC_FIELD_SIZE]) -> Option<Self>;
 
     /// Writes the public key coordinates into the passed in parameters.

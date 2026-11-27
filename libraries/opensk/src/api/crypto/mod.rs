@@ -83,8 +83,8 @@ mod test {
         let private2 = SoftwareEcdhSecretKey::random(env.rng());
         let pub1 = private1.public_key();
         let pub2 = private2.public_key();
-        let shared1 = private1.diffie_hellman(&pub2);
-        let shared2 = private2.diffie_hellman(&pub1);
+        let shared1 = private1.diffie_hellman(&pub2).unwrap();
+        let shared2 = private2.diffie_hellman(&pub1).unwrap();
         let mut secret_bytes1 = [0; EC_FIELD_SIZE];
         let mut secret_bytes2 = [0; EC_FIELD_SIZE];
         shared1.raw_secret_bytes(&mut secret_bytes1);

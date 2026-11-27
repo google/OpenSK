@@ -215,6 +215,13 @@ impl TestEnv {
         crate::api::crypto::software_crypto::FAIL_SIGNING.set(fail);
     }
 
+    /// Makes software ECDH key agreement fail on the current thread, across all
+    /// environments. Other threads are unaffected. Call with false to reset.
+    #[cfg(test)]
+    pub(crate) fn fail_diffie_hellman(&mut self, fail: bool) {
+        crate::api::crypto::software_crypto::FAIL_DIFFIE_HELLMAN.set(fail);
+    }
+
     pub fn customization_mut(&mut self) -> &mut TestCustomization {
         &mut self.customization
     }

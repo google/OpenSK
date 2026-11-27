@@ -342,9 +342,14 @@ fn remove_enrollment<E: Env>(
     sub_command_params: BioEnrollmentSubCommandParams,
 ) -> CtapResult<ResponseData> {
     let template_id = ok_or_missing(sub_command_params.template_id)?;
-    // Will return an error if the template_id is unknown.
-    env.persist().remove_template_id(&template_id)?;
+    let template_infos = env.persist().template_infos()?;
+    if !template_infos.iter().any(|t| t.template_id == template_id) {
+        return Err(Ctap2StatusCode::CTAP2_ERR_INVALID_OPTION);
+    }
+    // Remove the template from the sensor first. If that fails, it stays in persistent storage,
+    // where it is listed and can be removed again, instead of passing built-in UV untracked.
     env.fingerprint().remove_enrollment(&template_id)?;
+    env.persist().remove_template_id(&template_id)?;
     Ok(ResponseData::AuthenticatorBioEnrollment(None))
 }
 
@@ -783,6 +788,59 @@ mod test {
         );
         assert!(response.is_ok());
         assert_eq!(enrollment_status, EnrollmentStatus::default());
+    }
+
+    #[test]
+    fn test_remove_enrollment_sensor_busy() {
+        let mut env = TestEnv::default();
+        let template_id = env.create_fingerprint().unwrap();
+        // An unfinished enrollment keeps the sensor busy, so it can't delete templates.
+        let mut enrollment_status = EnrollmentStatus::default();
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::EnrollBegin,
+            None,
+            true,
+            &mut enrollment_status,
+        );
+        assert!(response.is_ok());
+        let sub_command_params = cbor_map! {
+            0x01 => template_id,
+        };
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::RemoveEnrollment,
+            Some(sub_command_params.clone()),
+            true,
+        );
+        assert_eq!(
+            response,
+            Err(Ctap2StatusCode::CTAP2_ERR_VENDOR_INTERNAL_ERROR)
+        );
+
+        // The template is still known, so it can be removed once the sensor is free.
+        let response = call_subcommand_with_status(
+            &mut env,
+            BioEnrollmentSubCommand::CancelCurrentEnrollment,
+            None,
+            false,
+            &mut enrollment_status,
+        );
+        assert!(response.is_ok());
+        let response = call_subcommand(
+            &mut env,
+            BioEnrollmentSubCommand::RemoveEnrollment,
+            Some(sub_command_params),
+            true,
+        );
+        assert_eq!(response, Ok(ResponseData::AuthenticatorBioEnrollment(None)));
+
+        // The sensor must not keep the template, or it would still pass built-in UV.
+        env.persist().store_template_id(vec![0x00]).unwrap();
+        assert_eq!(
+            perform_built_in_uv(&mut env, DUMMY_CHANNEL, false),
+            Err(Ctap2StatusCode::CTAP2_ERR_UV_INVALID)
+        );
     }
 
     #[test]
